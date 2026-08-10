@@ -15,7 +15,7 @@ import { replaceControlledAxisValues } from "../compileContext.js";
 import {
   SEMANTIC_MOTION_TRANSFORM_VERSION,
   type MotionAxisSamplingTrace,
-} from "../contracts.js";
+} from "../../../types/compiledSemanticMotion.js";
 
 const ALLOWED_LLM_ROLES = new Set(["primary", "hint"]);
 

@@ -2,11 +2,14 @@ import { compileParameterMotionIntent } from "../compiler/compileParameterMotion
 import { createModelEngineStageRegistry } from "../compiler/registry.js";
 import { resolveCatalogResource } from "../compiler/resourceCatalog.js";
 import { buildBaseCompileDiagnostics } from "../compiler/diagnostics.js";
-import { SEMANTIC_MOTION_TRANSFORM_VERSION } from "../compiler/contracts.js";
 import { normalizeModelEngineSettings } from "../settings.js";
 import { MOTION_MIN_REMAINING_AUDIO_MS } from "../constants.js";
 import type { NormalizedMotionPayload } from "../contracts.js";
-import type { CompileDiagnostics, CompiledSemanticMotion } from "../compiler/contracts.js";
+import {
+  SEMANTIC_MOTION_TRANSFORM_VERSION,
+  type CompileDiagnostics,
+  type CompiledSemanticMotion,
+} from "../../types/compiledSemanticMotion.js";
 import type {
   CatalogMotionPayload,
   ModelSummary,

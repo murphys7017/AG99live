@@ -65,16 +65,7 @@ export class CubismMotionQueueManager {
     }
 
     let motionQueueEntry: CubismMotionQueueEntry = null;
-
-    // 既にモーションがあれば終了フラグを立てる
-    for (let i = 0; i < this._motions.getSize(); ++i) {
-      motionQueueEntry = this._motions.at(i);
-      if (motionQueueEntry == null) {
-        continue;
-      }
-
-      motionQueueEntry.setFadeOut(motionQueueEntry._motion.getFadeOutTime()); // フェードアウト設定
-    }
+    this.fadeOutAllMotions();
 
     motionQueueEntry = new CubismMotionQueueEntry(); // 終了時に破棄する
     motionQueueEntry._autoDelete = autoDelete;
@@ -83,6 +74,19 @@ export class CubismMotionQueueManager {
     this._motions.pushBack(motionQueueEntry);
 
     return motionQueueEntry._motionQueueEntryHandle;
+  }
+
+  /**
+   * 全てのモーションを、それぞれの設定時間でフェードアウトさせる。
+   */
+  public fadeOutAllMotions(): void {
+    for (let i = 0; i < this._motions.getSize(); ++i) {
+      const motionQueueEntry = this._motions.at(i);
+      if (motionQueueEntry == null) {
+        continue;
+      }
+      motionQueueEntry.setFadeOut(motionQueueEntry._motion.getFadeOutTime());
+    }
   }
 
   /**

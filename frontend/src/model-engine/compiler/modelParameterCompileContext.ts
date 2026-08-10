@@ -4,9 +4,9 @@ import type {
   SemanticAxisProfile,
 } from "../../types/semantic-axis-profile.js";
 import type { ModelEngineSettings } from "../settings.js";
+import type { CompiledSemanticMotion } from "../../types/compiledSemanticMotion.js";
 import type {
   CompileOptions,
-  CompiledSemanticMotion,
 } from "./contracts.js";
 
 export interface ModelParameterCompileState {

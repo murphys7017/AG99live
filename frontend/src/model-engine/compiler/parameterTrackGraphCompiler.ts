@@ -7,7 +7,7 @@ import type {
   SemanticAxisDefinition,
   SemanticAxisProfile,
 } from "../../types/semantic-axis-profile.js";
-import type { CompiledSemanticMotion } from "./contracts.js";
+import type { CompiledSemanticMotion } from "../../types/compiledSemanticMotion.js";
 
 interface ParameterTrackTimingPolicy {
   transitionOffsetMs: number;

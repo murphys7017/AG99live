@@ -10,7 +10,7 @@ import type {
 import type {
   SystemSemanticAxisProfileSavePayload,
 } from "../types/protocol.js";
-import type { CompiledSemanticMotion } from "../model-engine/compiler/contracts.js";
+import type { CompiledSemanticMotion } from "../types/compiledSemanticMotion.js";
 import { cloneJson } from "../utils/cloneJson.js";
 import {
   applyModelEngineSettings,

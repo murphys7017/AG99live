@@ -7,12 +7,14 @@ import type {
 } from "../../types/semantic-axis-profile.js";
 import type {
   CompileDiagnostics,
-  CompileOptions,
   MotionAxisSamplingTrace,
   MotionAxisRelationAdjustment,
   MotionAxisRelationEvaluation,
-  MotionAxisValueSource,
   MotionTimingResolution,
+} from "../../types/compiledSemanticMotion.js";
+import type {
+  CompileOptions,
+  MotionAxisValueSource,
 } from "./contracts.js";
 import type { ModelEngineSettings } from "../settings.js";
 

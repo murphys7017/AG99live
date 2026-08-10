@@ -3,9 +3,11 @@ import type {
 } from "../../types/protocol.js";
 import { SCHEMA_PARAMETER_PLAN_V3 } from "../../types/protocol.js";
 import type {
+  CompiledSemanticMotion,
+} from "../../types/compiledSemanticMotion.js";
+import type {
   CompileOptions,
   CompileResult,
-  CompiledSemanticMotion,
 } from "./contracts.js";
 import { runCompilePipeline } from "./pipeline.js";
 import {

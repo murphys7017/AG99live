@@ -16,7 +16,7 @@ import {
   cloneLive2dPresentationSettings,
 } from "../../live2d-renderer/settings.js";
 import { cloneSemanticParameterPlan } from "../../model-engine/planParser.js";
-import { cloneCompiledSemanticMotion } from "../../model-engine/compiler/compiledSemanticMotionParser.js";
+import { cloneCompiledSemanticMotion } from "../../types/compiledSemanticMotion.js";
 import { DEFAULT_ADAPTER_ADDRESS } from "../../adapter-connection/core/address.js";
 import {
   DEFAULT_PTT_KEY_BINDING,

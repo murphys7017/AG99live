@@ -1,12 +1,159 @@
-import { cloneJson } from "../../utils/cloneJson.js";
-import { SCHEMA_PERFORMANCE_CURVE_HINT_V1 } from "../../types/protocol.js";
-import type {
-  CompileDiagnostics,
-  CompiledSemanticAxis,
-  CompiledSemanticMotion,
-  CompiledSemanticMotionStep,
-  MotionTimingResolution,
-} from "./contracts.js";
+import { cloneJson } from "../utils/cloneJson.js";
+import {
+  SCHEMA_PERFORMANCE_CURVE_HINT_V1,
+  type DirectParameterPlanTiming,
+  type MotionAxisLevelMap,
+  type MotionAxisLevelStep,
+  type PerformanceCurveHint,
+} from "./protocol.js";
+
+export const SEMANTIC_MOTION_TRANSFORM_VERSION = "semantic_motion_transform.v5";
+
+export type CompiledSemanticAxisSource = "semantic_axis" | "relation_graph";
+
+export interface MotionTimingResolution {
+  timing: DirectParameterPlanTiming;
+  resolvedDurationMs: number;
+  timingSource: "hint" | "audio_sync" | "default";
+  performanceCurveFamily?: string;
+  performanceCurvePreset?: string;
+}
+
+export interface CompileDiagnostics {
+  usedActionLibrary: boolean;
+  compiledParameterCount: number;
+  timingSource: "hint" | "audio_sync" | "default";
+  resolvedMode: "idle" | "expressive";
+  speechActive?: boolean;
+  source?: string;
+  warnings?: string[];
+  primaryAxes?: string[];
+  hintAxes?: string[];
+  derivedAxes?: string[];
+  availableDerivedAxes?: string[];
+  appliedDerivedAxes?: string[];
+  runtimeAxes?: string[];
+  missingAxes?: string[];
+  forbiddenAxes?: string[];
+  invalidAxes?: string[];
+  axisErrorCount?: number;
+  axisErrorLimit?: number;
+  compiledParameters?: string[];
+  intensityApplied: boolean;
+  motionIntensityScale: number;
+  activeGroups?: string[];
+  skeletonGroups?: string[];
+  missingSkeletonGroups?: string[];
+  maxDeltaFromNeutral?: number;
+  neutralishAxisCount?: number;
+  expressiveAxisCount?: number;
+  semanticAxisCount?: number;
+  failureStage?: string;
+  relationSkippedExplicitTargets?: string[];
+  relationAdjustments?: MotionAxisRelationAdjustment[];
+  relationEvaluations?: MotionAxisRelationEvaluation[];
+  transformTrace?: MotionTransformTrace;
+}
+
+export interface MotionAxisRelationAdjustment {
+  ruleId: string;
+  sourceAxisId?: string;
+  targetAxisId: string;
+  before: number;
+  after: number;
+  reason: string;
+}
+
+export interface MotionAxisRelationEvaluation {
+  ruleId: string;
+  kind: "axis_range" | "derive" | "bounded_ratio";
+  status: "within_limit" | "derived" | "constrained" | "skipped";
+  sourceAxisId?: string;
+  targetAxisId: string;
+  sourceValue?: number;
+  candidateValue?: number;
+  targetBefore?: number;
+  targetAfter?: number;
+  limit?: number;
+  constraintReasons?: string[];
+  reason: string;
+}
+
+export interface MotionTransformTrace {
+  transformVersion: typeof SEMANTIC_MOTION_TRANSFORM_VERSION;
+  profileRevision: number;
+  profileHash: string;
+  rawAxes: Record<string, number>;
+  rawAxisLevels?: MotionAxisLevelMap;
+  rawMotionSteps?: MotionAxisLevelStep[];
+  axisSampling?: MotionAxisSamplingTrace;
+  expressionResourceId?: string;
+  motionResourceId?: string;
+  resolvedResource?: {
+    resourceId: string;
+    resourceType: "expression" | "motion";
+    parameterIds: string[];
+  };
+  resolvedAxes: Record<string, number>;
+  derivedAxes: Record<string, number>;
+  constrainedAxes: Record<string, number>;
+  relationAdjustments: MotionAxisRelationAdjustment[];
+  relationEvaluations: MotionAxisRelationEvaluation[];
+  compiledParameters: string[];
+  sequenceSteps?: Array<{
+    index: number;
+    durationWeight: number;
+    resolvedAxes: Record<string, number>;
+    constrainedAxes: Record<string, number>;
+    axisSampling?: MotionAxisSamplingTrace;
+  }>;
+}
+
+export interface MotionAxisSamplingTrace {
+  seed: string;
+  sharedRandom: number;
+  perAxisRandom: Record<string, number>;
+  sampledValues: Record<string, number>;
+  sampleBounds: Record<string, { min: number; max: number }>;
+}
+
+export interface CompiledSemanticAxis {
+  axisId: string;
+  value: number;
+  neutralValue: number;
+  source: CompiledSemanticAxisSource;
+}
+
+export interface CompiledSemanticMotionStep {
+  durationWeight: number;
+  axes: CompiledSemanticAxis[];
+  diagnostics: CompileDiagnostics;
+}
+
+interface CompiledSemanticMotionBase {
+  schemaVersion: "engine.compiled_semantic_motion.v1";
+  profileId: string;
+  profileRevision: number;
+  modelId: string;
+  mode: "idle" | "expressive";
+  emotionLabel: string;
+  intentTags: string[];
+  performanceCurveHint?: PerformanceCurveHint;
+  expressionResourceId?: string;
+  timing: MotionTimingResolution;
+  diagnostics: CompileDiagnostics;
+}
+
+export type CompiledSemanticMotion = CompiledSemanticMotionBase & (
+  | {
+      kind: "pose";
+      axes: CompiledSemanticAxis[];
+    }
+  | {
+      kind: "sequence";
+      steps: CompiledSemanticMotionStep[];
+    }
+);
 
 export function cloneCompiledSemanticMotion(value: unknown): CompiledSemanticMotion | null {
   if (!isObject(value)

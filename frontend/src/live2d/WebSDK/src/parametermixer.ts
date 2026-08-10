@@ -1,4 +1,13 @@
 import type { CubismIdHandle } from "@framework/id/cubismid";
+import type { CubismModel } from "@framework/model/cubismmodel";
+import type { csmVector } from "@framework/type/csmvector";
+import type { DirectParameterExecutionPlan } from "./directparameterplan";
+import {
+  resolveParameterPresentationFrame,
+  resolveParameterPresentationTrack,
+  type ParameterPresentationNode,
+  type ParameterPresentationTrackPoint,
+} from "./parameterpresentation";
 
 export const PARAMETER_MIX_PRIORITY = {
   directPlan: 100,
@@ -7,6 +16,43 @@ export const PARAMETER_MIX_PRIORITY = {
 
 export type ParameterContributionOwner = "direct_plan" | "lip_sync";
 export type ParameterFrameOwner = ParameterContributionOwner | "mixed";
+
+export interface DirectSemanticParameterBinding {
+  axisId: string;
+  parameterIdRaw: string;
+  targetValue: number;
+  neutralTargetValue: number;
+  weight: number;
+  keyframes: ParameterPresentationTrackPoint[];
+  modulationAmplitude: number;
+  modulationDirection: number;
+  modulationDelayMs: number;
+  modulationPoints: ParameterPresentationTrackPoint[];
+  modulation: {
+    kind: string;
+    preset: string;
+    amplitude: number | null;
+    direction: number | null;
+    delayMs: number | null;
+    points: Array<{
+      atMs: number;
+      transitionMs: number;
+      value: number;
+    }>;
+  } | null;
+  maxSpeechOffset: number;
+  parameterIndex: number;
+  presentation: ParameterPresentationNode;
+}
+
+export interface ActiveDirectParameterFrameState {
+  mode: "expressive" | "idle";
+  emotionLabel: string;
+  timing: DirectParameterExecutionPlan["timing"];
+  semanticBindings: DirectSemanticParameterBinding[];
+  playbackClockReader: { getElapsedMs: () => number | null };
+  diagnosticFrameCount: number;
+}
 
 export interface ParameterContribution {
   parameterIdRaw: string;
@@ -63,12 +109,94 @@ export type ActiveParameterMixerResolution =
       owner: ParameterFrameOwner;
     };
 
+export interface DirectPlanContributionCollection {
+  contributions: ParameterContribution[];
+  failure: string | null;
+  shouldLogFrame: boolean;
+  released: boolean;
+}
+
+export interface ActiveParameterFrameInput {
+  model: CubismModel | null;
+  directPlan: ActiveDirectParameterFrameState | null;
+  lipSyncEnabled: boolean;
+  lipSyncActive: boolean;
+  lipSyncIntensity: number;
+  lipSyncParameterIds: csmVector<CubismIdHandle>;
+  getSpeechAudioGain: (axisId: string) => number;
+}
+
+export type ActiveParameterFrameExecution =
+  | {
+      ok: true;
+      parameters: ResolvedParameterFrameEntry[];
+      directPlan: DirectPlanContributionCollection;
+      lipSyncContributionCount: number;
+    }
+  | {
+      ok: false;
+      reason: string;
+      owner: ParameterFrameOwner;
+    };
+
 /**
- * Resolves one frozen Cubism base snapshot with already-produced active
- * parameter contributions. It never reads or writes Cubism state, interprets
- * semantic levels, or owns source lifecycle.
+ * Owns active contribution collection, one frozen Cubism base snapshot,
+ * deterministic mixing, and the final pre-Physics parameter write.
  */
 export class ActiveParameterMixer {
+  public resolveActiveFrame(
+    input: ActiveParameterFrameInput,
+  ): ActiveParameterFrameExecution {
+    const model = input.model;
+    if (!model) {
+      return { ok: false, owner: "mixed", reason: "parameter_mixer_model_unavailable" };
+    }
+
+    const directPlan = this.collectDirectPlanContributions(
+      input.directPlan,
+      input.getSpeechAudioGain,
+    );
+    if (directPlan.failure) {
+      return { ok: false, owner: "direct_plan", reason: directPlan.failure };
+    }
+    const lipSyncContributions = this.collectLipSyncContributions(input, model);
+    if (typeof lipSyncContributions === "string") {
+      return { ok: false, owner: "lip_sync", reason: lipSyncContributions };
+    }
+
+    const contributions = [...directPlan.contributions, ...lipSyncContributions];
+    const resolution = this.resolveFrame(
+      contributions,
+      this.captureParameterBaseSnapshots(model, contributions),
+    );
+    if (resolution.ok === false) {
+      return {
+        ok: false,
+        owner: resolution.owner,
+        reason: resolution.reason,
+      };
+    }
+
+    for (const parameter of resolution.parameters) {
+      model.setParameterValueById(parameter.parameterId, parameter.value);
+      const readbackValue = model.getParameterValueByIndex(parameter.parameterIndex);
+      if (Math.abs(readbackValue - parameter.value) > 0.001) {
+        return {
+          ok: false,
+          owner: parameter.owner,
+          reason: `parameter_mixer_write_mismatch:${parameter.parameterIdRaw}`,
+        };
+      }
+    }
+
+    return {
+      ok: true,
+      parameters: resolution.parameters,
+      directPlan,
+      lipSyncContributionCount: lipSyncContributions.length,
+    };
+  }
+
   public resolveFrame(
     contributions: readonly ParameterContribution[],
     baseSnapshots: ReadonlyMap<number, ParameterBaseSnapshot>,
@@ -194,6 +322,169 @@ export class ActiveParameterMixer {
 
     return { ok: true, parameters };
   }
+
+  private collectDirectPlanContributions(
+    planState: ActiveDirectParameterFrameState | null,
+    getSpeechAudioGain: (axisId: string) => number,
+  ): DirectPlanContributionCollection {
+    if (!planState) {
+      return {
+        contributions: [],
+        failure: null,
+        shouldLogFrame: false,
+        released: false,
+      };
+    }
+
+    const elapsedMs = planState.playbackClockReader.getElapsedMs();
+    if (elapsedMs === null || !Number.isFinite(elapsedMs)) {
+      return {
+        contributions: [],
+        failure: "parameter_plan_clock_unavailable",
+        shouldLogFrame: false,
+        released: false,
+      };
+    }
+
+    const shouldLogFrame = planState.diagnosticFrameCount < 2;
+    let presentationReleased = true;
+    const contributions: ParameterContribution[] = [];
+    for (const item of planState.semanticBindings) {
+      const rawFrameTargetValue = resolveDirectBindingTargetValue(
+        item,
+        elapsedMs,
+        item.targetValue,
+        getSpeechAudioGain,
+      );
+      const presentationFrame = resolveParameterPresentationFrame(
+        item.presentation,
+        rawFrameTargetValue,
+        elapsedMs,
+        planState.timing,
+      );
+      presentationReleased = presentationReleased && presentationFrame.released;
+      contributions.push({
+        parameterIdRaw: item.parameterIdRaw,
+        parameterIndex: item.parameterIndex,
+        owner: "direct_plan",
+        source: `direct_plan:${item.axisId}`,
+        value: presentationFrame.drivenValue,
+        weight: item.weight * presentationFrame.ownershipWeight,
+        priority: PARAMETER_MIX_PRIORITY.directPlan,
+      });
+    }
+
+    return {
+      contributions,
+      failure: null,
+      shouldLogFrame,
+      released: elapsedMs >= planState.timing.totalMs && presentationReleased,
+    };
+  }
+
+  private collectLipSyncContributions(
+    input: ActiveParameterFrameInput,
+    model: CubismModel,
+  ): ParameterContribution[] | string {
+    if (
+      !Number.isFinite(input.lipSyncIntensity)
+      || input.lipSyncIntensity < 0
+      || input.lipSyncIntensity > 1
+    ) {
+      return "parameter_mixer_lip_sync_intensity_invalid";
+    }
+    if (!input.lipSyncEnabled || !input.lipSyncActive) {
+      return [];
+    }
+
+    const contributions: ParameterContribution[] = [];
+    for (let index = 0; index < input.lipSyncParameterIds.getSize(); index += 1) {
+      const parameterId = input.lipSyncParameterIds.at(index);
+      const parameterIndex = model.getParameterIndex(parameterId);
+      if (!isParameterIndexWritable(model, parameterIndex)) {
+        return `parameter_mixer_lip_sync_parameter_not_writable:${index}`;
+      }
+      const minValue = model.getParameterMinimumValue(parameterIndex);
+      const defaultValue = model.getParameterDefaultValue(parameterIndex);
+      const maxValue = model.getParameterMaximumValue(parameterIndex);
+      if (
+        !Number.isFinite(minValue)
+        || !Number.isFinite(defaultValue)
+        || !Number.isFinite(maxValue)
+        || minValue > defaultValue
+        || defaultValue >= maxValue
+      ) {
+        return `parameter_mixer_lip_sync_invalid_runtime_range:${parameterId.getString().s}`;
+      }
+      contributions.push({
+        parameterIdRaw: parameterId.getString().s,
+        parameterIndex,
+        owner: "lip_sync",
+        source: "lip_sync",
+        value: defaultValue + (maxValue - defaultValue) * input.lipSyncIntensity,
+        weight: 1,
+        priority: PARAMETER_MIX_PRIORITY.lipSync,
+      });
+    }
+    return contributions;
+  }
+
+  private captureParameterBaseSnapshots(
+    model: CubismModel,
+    contributions: readonly ParameterContribution[],
+  ): ReadonlyMap<number, ParameterBaseSnapshot> {
+    const snapshots = new Map<number, ParameterBaseSnapshot>();
+    for (const { parameterIndex } of contributions) {
+      if (snapshots.has(parameterIndex)) {
+        continue;
+      }
+      if (!isParameterIndexWritable(model, parameterIndex)) {
+        snapshots.set(parameterIndex, { writable: false });
+        continue;
+      }
+      const parameterId = model.getParameterId(parameterIndex);
+      snapshots.set(parameterIndex, {
+        parameterId,
+        parameterIdRaw: parameterId.getString().s,
+        writable: true,
+        baseValue: model.getParameterValueByIndex(parameterIndex),
+        minimumValue: model.getParameterMinimumValue(parameterIndex),
+        maximumValue: model.getParameterMaximumValue(parameterIndex),
+      });
+    }
+    return snapshots;
+  }
+}
+
+function resolveDirectBindingTargetValue(
+  item: DirectSemanticParameterBinding,
+  elapsedMs: number,
+  fallbackTargetValue: number,
+  getSpeechAudioGain: (axisId: string) => number,
+): number {
+  const sequenceTargetValue = resolveParameterPresentationTrack(
+    item.keyframes,
+    elapsedMs,
+    fallbackTargetValue,
+  );
+  if (item.modulationAmplitude <= 0) {
+    return sequenceTargetValue;
+  }
+
+  const gestureValue = resolveParameterPresentationTrack(
+    item.modulationPoints,
+    Math.max(0, elapsedMs - item.modulationDelayMs),
+    0,
+  );
+  return sequenceTargetValue
+    + gestureValue
+      * item.modulationAmplitude
+      * item.modulationDirection
+      * getSpeechAudioGain(item.axisId);
+}
+
+function isParameterIndexWritable(model: CubismModel, parameterIndex: number): boolean {
+  return parameterIndex >= 0 && parameterIndex < model.getParameterCount();
 }
 
 function resolveContributionOwner(

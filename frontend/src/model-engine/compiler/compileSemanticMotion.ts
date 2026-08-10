@@ -10,9 +10,11 @@ import {
 } from "./compileContext.js";
 import type {
   CompileDiagnostics,
-  CompileOptions,
   CompiledSemanticAxis,
   CompiledSemanticMotion,
+} from "../../types/compiledSemanticMotion.js";
+import type {
+  CompileOptions,
   CompileSemanticMotionResult,
 } from "./contracts.js";
 import {

@@ -18,7 +18,7 @@ import {
   SCHEMA_MOTION_TUNING_SAMPLE_V2,
   SCHEMA_PARAMETER_PLAN_V3,
 } from "../types/protocol";
-import type { CompiledSemanticMotion } from "../model-engine/compiler/contracts";
+import type { CompiledSemanticMotion } from "../types/compiledSemanticMotion";
 import type {
   SemanticAxisDefinition,
   SemanticAxisProfile,

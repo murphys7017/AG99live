@@ -12,7 +12,7 @@ import type {
 import type {
   MotionAxisRelationAdjustment,
   MotionAxisRelationEvaluation,
-} from "../contracts.js";
+} from "../../../types/compiledSemanticMotion.js";
 import { refreshAllAxisValues } from "../compileContext.js";
 
 // This is the sole owner of semantic-axis derivation and constraints. It

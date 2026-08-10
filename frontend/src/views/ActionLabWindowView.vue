@@ -9,7 +9,7 @@ import type {
   DesktopMotionPlaybackRecord,
   DesktopMotionTuningSample,
 } from "../types/desktop";
-import type { CompiledSemanticMotion } from "../model-engine/compiler/contracts";
+import type { CompiledSemanticMotion } from "../types/compiledSemanticMotion";
 import type { SemanticAxisProfile } from "../types/semantic-axis-profile";
 
 const bridge = useDesktopBridge();

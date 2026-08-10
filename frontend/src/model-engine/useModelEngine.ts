@@ -15,7 +15,10 @@ import type {
 import type {
   MotionPlanPayload,
 } from "../types/protocol.js";
-import type { CompileDiagnostics, CompiledSemanticMotion } from "./compiler/contracts.js";
+import type {
+  CompileDiagnostics,
+  CompiledSemanticMotion,
+} from "../types/compiledSemanticMotion.js";
 import { compileModelParameterPlan } from "./compiler/compileModelParameterPlan.js";
 import type {
   ModelEngineDependencies,

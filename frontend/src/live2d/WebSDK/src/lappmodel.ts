@@ -42,12 +42,6 @@ import { frameBuffer, LAppDelegate } from "./lappdelegate";
 import { canvas, gl } from "./lappglmanager";
 import { LAppPal } from "./lapppal";
 import {
-  resolveParameterPresentationFrame,
-  resolveParameterPresentationTrack,
-  type ParameterPresentationNode,
-  type ParameterPresentationTrackPoint,
-} from "./parameterpresentation";
-import {
   prepareDirectParameterExecution,
   type DirectParameterExecutionPlan,
   type DirectParameterPlanInput,
@@ -56,10 +50,9 @@ import {
   type DirectParameterPlanTerminalStatus,
 } from "./directparameterplan";
 import {
-  PARAMETER_MIX_PRIORITY,
   ActiveParameterMixer,
-  type ParameterBaseSnapshot,
-  type ParameterContribution,
+  type ActiveDirectParameterFrameState,
+  type DirectSemanticParameterBinding,
   type ParameterFrameOwner,
 } from "./parametermixer";
 import {
@@ -115,41 +108,8 @@ enum LoadStep {
 
 const DIRECT_MAX_MISSING_AXIS_BINDINGS = 3;
 const DIRECT_MAX_SUPPLEMENTARY_BINDING_FAILURES = 3;
-interface DirectSemanticParameterBinding {
-  axisId: string;
-  parameterIdRaw: string;
-  targetValue: number;
-  neutralTargetValue: number;
-  weight: number;
-  keyframes: ParameterPresentationTrackPoint[];
-  modulationAmplitude: number;
-  modulationDirection: number;
-  modulationDelayMs: number;
-  modulationPoints: ParameterPresentationTrackPoint[];
-  modulation: {
-    kind: string;
-    preset: string;
-    amplitude: number | null;
-    direction: number | null;
-    delayMs: number | null;
-    points: Array<{
-      atMs: number;
-      transitionMs: number;
-      value: number;
-    }>;
-  } | null;
-  maxSpeechOffset: number;
-  parameterIndex: number;
-  presentation: ParameterPresentationNode;
-}
 
-interface DirectParameterPlanState {
-  mode: "expressive" | "idle";
-  emotionLabel: string;
-  timing: DirectParameterExecutionPlan["timing"];
-  semanticBindings: DirectSemanticParameterBinding[];
-  playbackClockReader: { getElapsedMs: () => number | null };
-  diagnosticFrameCount: number;
+interface DirectParameterPlanState extends ActiveDirectParameterFrameState {
   /** 本次参数计划的唯一标识符。由 startDirectParameterPlan 生成并回传。 */
   runId: string;
   /** 参数计划完成时的回调。 */
@@ -163,13 +123,6 @@ interface DirectParameterPlanState {
 type DirectParameterPlanCandidate =
   | { ok: true; state: DirectParameterPlanState }
   | { ok: false; reason: string };
-
-interface DirectPlanContributionCollection {
-  contributions: ParameterContribution[];
-  failure: string | null;
-  shouldLogFrame: boolean;
-  released: boolean;
-}
 
 interface ActiveParameterFrameFailure {
   owner: ParameterFrameOwner;
@@ -1123,7 +1076,7 @@ export class LAppModel extends CubismUserModel {
   }
 
   public stopExpression(): void {
-    this._expressionManager.stopAllMotions();
+    this._expressionManager.fadeOutAllMotions();
   }
 
   public getExpressionStartError(): string {
@@ -1753,7 +1706,7 @@ export class LAppModel extends CubismUserModel {
     }
 
     if (semanticBindings.length === 0) {
-      return { ok: false, reason: "v2_parameters_empty_after_runtime_filter" };
+      return { ok: false, reason: "parameter_plan_parameters_empty_after_runtime_filter" };
     }
 
     for (const item of semanticBindings) {
@@ -1773,7 +1726,7 @@ export class LAppModel extends CubismUserModel {
       return { ok: false, reason: `expression_not_found:${expressionId}` };
     }
 
-    console.info("[LAppModel] Semantic parameter bindings ready. Activating v2 plan.", {
+    console.info("[LAppModel] Semantic parameter bindings ready. Activating parameter plan.", {
       parameterCount: semanticBindings.length,
       profileId: parsed.plan.profile_id,
       profileRevision: parsed.plan.profile_revision,
@@ -1862,54 +1815,32 @@ export class LAppModel extends CubismUserModel {
     lipSyncIntensity: number,
     lipSyncActive: boolean,
   ): ActiveParameterFrameFailure | null {
-    if (!this._model) {
-      return { owner: "mixed", reason: "parameter_mixer_model_unavailable" };
-    }
-
-    const directPlan = this.collectDirectPlanContributions();
-    if (directPlan.failure) {
-      return { owner: "direct_plan", reason: directPlan.failure };
-    }
-    const lipSyncContributions = this.collectLipSyncContributions(
-      lipSyncIntensity,
+    const execution = this._parameterMixer.resolveActiveFrame({
+      model: this._model,
+      directPlan: this._directParameterPlanState,
+      lipSyncEnabled: this._lipsync === true,
       lipSyncActive,
-    );
-    if (typeof lipSyncContributions === "string") {
-      return { owner: "lip_sync", reason: lipSyncContributions };
-    }
-    const contributions = [...directPlan.contributions, ...lipSyncContributions];
-    const resolution = this._parameterMixer.resolveFrame(
-      contributions,
-      this.captureParameterBaseSnapshots(contributions),
-    );
-    if (!resolution.ok) {
+      lipSyncIntensity,
+      lipSyncParameterIds: this._lipSyncIds,
+      getSpeechAudioGain: (axisId) => this._speechSignalRuntime.getSpeechAudioGain(axisId),
+    });
+    if (!execution.ok) {
       return {
-        owner: resolution.owner,
-        reason: resolution.reason,
+        owner: execution.owner,
+        reason: execution.reason,
       };
     }
 
-    for (const parameter of resolution.parameters) {
-      this._model.setParameterValueById(parameter.parameterId, parameter.value);
-      const readbackValue = this._model.getParameterValueByIndex(parameter.parameterIndex);
-      if (Math.abs(readbackValue - parameter.value) > 0.001) {
-        return {
-          owner: parameter.owner,
-          reason: `parameter_mixer_write_mismatch:${parameter.parameterIdRaw}`,
-        };
-      }
-    }
-
     const planState = this._directParameterPlanState;
-    const lipSyncDiagnosticSourceId = directPlan.contributions.length === 0
-      && lipSyncContributions.length > 0
+    const lipSyncDiagnosticSourceId = execution.directPlan.contributions.length === 0
+      && execution.lipSyncContributionCount > 0
       ? this._speechSignalRuntime.getLipSyncDiagnosticSourceId()
       : null;
-    if (directPlan.shouldLogFrame && planState) {
+    if (execution.directPlan.shouldLogFrame && planState) {
       console.info("[LAppModel] Active parameter frame resolved.", {
         mode: planState.mode,
         emotion: planState.emotionLabel,
-        parameters: resolution.parameters.map((parameter) => ({
+        parameters: execution.parameters.map((parameter) => ({
           parameterId: parameter.parameterIdRaw,
           baseValue: parameter.baseValue,
           unclampedValue: parameter.unclampedValue,
@@ -1923,7 +1854,7 @@ export class LAppModel extends CubismUserModel {
       console.info("[LAppModel] Active parameter frame resolved.", {
         mode: "lip_sync",
         audioSourceId: lipSyncDiagnosticSourceId,
-        parameters: resolution.parameters.map((parameter) => ({
+        parameters: execution.parameters.map((parameter) => ({
           parameterId: parameter.parameterIdRaw,
           baseValue: parameter.baseValue,
           unclampedValue: parameter.unclampedValue,
@@ -1934,166 +1865,11 @@ export class LAppModel extends CubismUserModel {
       });
       this._speechSignalRuntime.markLipSyncDiagnosticFrameLogged(lipSyncDiagnosticSourceId);
     }
-    if (directPlan.released && planState) {
+    if (execution.directPlan.released && planState) {
       console.info("[LAppModel] Direct parameter plan released after parameter mixing.");
       this.stopDirectParameterPlan("", "completed");
     }
     return null;
-  }
-
-  private captureParameterBaseSnapshots(
-    contributions: readonly ParameterContribution[],
-  ): ReadonlyMap<number, ParameterBaseSnapshot> {
-    const snapshots = new Map<number, ParameterBaseSnapshot>();
-    for (const { parameterIndex } of contributions) {
-      if (snapshots.has(parameterIndex)) {
-        continue;
-      }
-      if (!this.isParameterIndexWritable(parameterIndex)) {
-        snapshots.set(parameterIndex, {
-          writable: false,
-        });
-        continue;
-      }
-      const parameterId = this._model.getParameterId(parameterIndex);
-      snapshots.set(parameterIndex, {
-        parameterId,
-        parameterIdRaw: parameterId.getString().s,
-        writable: true,
-        baseValue: this._model.getParameterValueByIndex(parameterIndex),
-        minimumValue: this._model.getParameterMinimumValue(parameterIndex),
-        maximumValue: this._model.getParameterMaximumValue(parameterIndex),
-      });
-    }
-    return snapshots;
-  }
-
-  private collectDirectPlanContributions(): DirectPlanContributionCollection {
-    if (!this._directParameterPlanState || !this._model) {
-      return {
-        contributions: [],
-        failure: null,
-        shouldLogFrame: false,
-        released: false,
-      };
-    }
-
-    const planState = this._directParameterPlanState;
-    const elapsedMs = planState.playbackClockReader.getElapsedMs();
-    if (elapsedMs === null || !Number.isFinite(elapsedMs)) {
-      return {
-        contributions: [],
-        failure: "parameter_plan_clock_unavailable",
-        shouldLogFrame: false,
-        released: false,
-      };
-    }
-
-    const shouldLogFrame = planState.diagnosticFrameCount < 2;
-    let presentationReleased = true;
-    const contributions: ParameterContribution[] = [];
-    for (const item of planState.semanticBindings) {
-      const rawFrameTargetValue = this.resolveDirectBindingTargetValue(
-        item,
-        elapsedMs,
-        item.targetValue,
-      );
-      const presentationFrame = resolveParameterPresentationFrame(
-        item.presentation,
-        rawFrameTargetValue,
-        elapsedMs,
-        planState.timing,
-      );
-      presentationReleased = presentationReleased && presentationFrame.released;
-      contributions.push({
-        parameterIdRaw: item.parameterIdRaw,
-        parameterIndex: item.parameterIndex,
-        owner: "direct_plan",
-        source: `direct_plan:${item.axisId}`,
-        value: presentationFrame.drivenValue,
-        weight: item.weight * presentationFrame.ownershipWeight,
-        priority: PARAMETER_MIX_PRIORITY.directPlan,
-      });
-    }
-
-    return {
-      contributions,
-      failure: null,
-      shouldLogFrame,
-      released: elapsedMs >= planState.timing.totalMs && presentationReleased,
-    };
-  }
-
-  private collectLipSyncContributions(
-    lipSyncIntensity: number,
-    lipSyncActive: boolean,
-  ): ParameterContribution[] | string {
-    if (!Number.isFinite(lipSyncIntensity) || lipSyncIntensity < 0 || lipSyncIntensity > 1) {
-      return "parameter_mixer_lip_sync_intensity_invalid";
-    }
-    if (!this._lipsync || !lipSyncActive || !this._model) {
-      return [];
-    }
-
-    const contributions: ParameterContribution[] = [];
-    for (let index = 0; index < this._lipSyncIds.getSize(); index += 1) {
-      const parameterId = this._lipSyncIds.at(index);
-      const parameterIndex = this._model.getParameterIndex(parameterId);
-      if (!this.isParameterIndexWritable(parameterIndex)) {
-        return `parameter_mixer_lip_sync_parameter_not_writable:${index}`;
-      }
-      const minValue = this._model.getParameterMinimumValue(parameterIndex);
-      const defaultValue = this._model.getParameterDefaultValue(parameterIndex);
-      const maxValue = this._model.getParameterMaximumValue(parameterIndex);
-      if (
-        !Number.isFinite(minValue)
-        || !Number.isFinite(defaultValue)
-        || !Number.isFinite(maxValue)
-        || minValue > defaultValue
-        || defaultValue >= maxValue
-      ) {
-        return `parameter_mixer_lip_sync_invalid_runtime_range:${parameterId.getString().s}`;
-      }
-      contributions.push({
-        parameterIdRaw: parameterId.getString().s,
-        parameterIndex,
-        owner: "lip_sync",
-        source: "lip_sync",
-        value: defaultValue + (maxValue - defaultValue) * lipSyncIntensity,
-        weight: 1,
-        priority: PARAMETER_MIX_PRIORITY.lipSync,
-      });
-    }
-    return contributions;
-  }
-
-  private resolveDirectBindingTargetValue(
-    item: DirectSemanticParameterBinding,
-    elapsedMs: number,
-    fallbackTargetValue: number,
-  ): number {
-    const sequenceTargetValue = resolveParameterPresentationTrack(
-      item.keyframes,
-      elapsedMs,
-      fallbackTargetValue,
-    );
-    if (item.modulationAmplitude <= 0) {
-      return sequenceTargetValue;
-    }
-
-    const gestureValue = resolveParameterPresentationTrack(
-      item.modulationPoints,
-      Math.max(0, elapsedMs - item.modulationDelayMs),
-      0,
-    );
-    const audioGain = this._speechSignalRuntime.getSpeechAudioGain(item.axisId);
-    const modulatedValue =
-      sequenceTargetValue
-      + gestureValue
-        * item.modulationAmplitude
-        * item.modulationDirection
-        * audioGain;
-    return modulatedValue;
   }
 
   private resolveSpeechPoseModulation(

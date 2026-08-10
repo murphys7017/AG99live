@@ -9,7 +9,7 @@ import {
   MAX_MOTION_DURATION_MS,
   MIN_MOTION_DURATION_MS,
 } from "./constants.js";
-import type { MotionTimingResolution } from "./compiler/contracts.js";
+import type { MotionTimingResolution } from "../types/compiledSemanticMotion.js";
 
 interface ResolveMotionTimingOptions {
   mode: "idle" | "expressive";

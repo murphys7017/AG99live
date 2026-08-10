@@ -4,7 +4,7 @@ import type {
 } from "./protocol";
 import { SCHEMA_MOTION_TUNING_SAMPLE_V2 } from "./protocol";
 import type { SemanticAxisProfile } from "./semantic-axis-profile";
-import type { CompiledSemanticMotion } from "../model-engine/compiler/contracts";
+import type { CompiledSemanticMotion } from "./compiledSemanticMotion";
 import type {
   BilibiliLiveSettings,
   BilibiliLiveStatus,

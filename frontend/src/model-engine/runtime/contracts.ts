@@ -14,8 +14,8 @@ import type {
 import type {
   CompileDiagnostics,
   CompiledSemanticMotion,
-  MotionFeedback,
-} from "../compiler/contracts.js";
+} from "../../types/compiledSemanticMotion.js";
+import type { MotionFeedback } from "../compiler/contracts.js";
 import type { ModelEngineSettings } from "../settings.js";
 import type { ModelEngineStageRegistry } from "../compiler/registry.js";
 import type { SpeechOnlyMotionRequest } from "./speechOnlyMotion.js";

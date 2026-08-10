@@ -3,7 +3,7 @@ import type {
   DesktopMotionTuningSample,
   DesktopMotionTuningSamplesStatus,
 } from "../../types/desktop.js";
-import { cloneCompiledSemanticMotion } from "../../model-engine/compiler/compiledSemanticMotionParser.js";
+import { cloneCompiledSemanticMotion } from "../../types/compiledSemanticMotion.js";
 import {
   cloneNumericRecord,
   isObject,

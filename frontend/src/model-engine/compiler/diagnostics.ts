@@ -1,9 +1,10 @@
-import type { CompileDiagnostics, CompileOptions } from "./contracts.js";
+import type { CompileOptions } from "./contracts.js";
 import { SCHEMA_MOTION_INTENT_V4 } from "../../types/protocol.js";
 import {
   SEMANTIC_MOTION_TRANSFORM_VERSION,
+  type CompileDiagnostics,
   type MotionTransformTrace,
-} from "./contracts.js";
+} from "../../types/compiledSemanticMotion.js";
 import type { MotionCompileContext } from "./compileContext.js";
 import type { ModelEngineSettings } from "../settings.js";
 
