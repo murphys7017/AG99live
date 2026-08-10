@@ -30,7 +30,7 @@ export interface InboundRuntimeDispatchDeps {
   state: InboundRuntimeDispatchState;
   sessionStore: {
     setActiveSession: (turnId: string | null) => void;
-    markTurnStarted: (turnId: string | null) => void;
+    markTurnStarted: (turnId: string) => void;
     markSynthFinished: (turnId: string | null) => void;
     markTurnFinished: (turnId: string | null, success: boolean, reason?: string) => void;
     markInterrupt: (turnId: string | null) => void;
@@ -91,8 +91,8 @@ function applyTurnStarted(
 ): void {
   const s = deps.state;
   s.currentTurnId = event.turnId;
-  deps.sessionStore?.setActiveSession(s.currentTurnId);
-  deps.sessionStore?.markTurnStarted(s.currentTurnId);
+  deps.sessionStore?.setActiveSession(event.turnId);
+  deps.sessionStore?.markTurnStarted(event.turnId);
   s.turnFinishedTurnId = null;
   s.turnFinishedSuccess = true;
   s.turnFinishedReason = "";

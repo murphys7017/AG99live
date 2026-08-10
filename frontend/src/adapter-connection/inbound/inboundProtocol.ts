@@ -1,6 +1,8 @@
 import type { ProtocolEnvelope } from "../../types/protocol.js";
 import { PROTOCOL_VERSION } from "../core/envelope.js";
 
+const SOURCE_ADAPTER = "adapter";
+
 export type ParsedInboundEnvelope =
   | { ok: true; envelope: ProtocolEnvelope<unknown> }
   | {
@@ -80,6 +82,9 @@ function parseEnvelopeRecord(
   const source = readNonEmptyString(record.source);
   if (!source) {
     return invalidEnvelope("source 必须是非空字符串");
+  }
+  if (source !== SOURCE_ADAPTER) {
+    return invalidEnvelope(`source 必须是 ${SOURCE_ADAPTER}`);
   }
 
   const turnId = record.turn_id === null

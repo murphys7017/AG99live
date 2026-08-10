@@ -89,7 +89,7 @@ function requireSegmentMessageId(
   };
 }
 
-function requireSegmentTurnId(
+function requireTurnId(
   envelope: ProtocolEnvelope<unknown>,
 ): { ok: true; turnId: string } | { ok: false; event: InboundAdapterEvent } {
   const turnId = normalizeTurnId(envelope.turn_id);
@@ -148,7 +148,7 @@ export type InboundAdapterEvent =
   }
   | {
     kind: "turn_started";
-    turnId: string | null;
+    turnId: string;
     envelope: ProtocolEnvelope<unknown>;
   }
   | {
@@ -287,7 +287,7 @@ export function mapInboundEnvelopeToEvent(
       if (!parsed.ok) {
         return protocolPayloadError(envelope, parsed.error);
       }
-      const turnId = requireSegmentTurnId(envelope);
+      const turnId = requireTurnId(envelope);
       if (!turnId.ok) {
         return turnId.event;
       }
@@ -313,19 +313,24 @@ export function mapInboundEnvelopeToEvent(
         envelope: withPayload(envelope, parsed.payload),
       };
     }
-    case INBOUND_MESSAGE_TYPES.CONTROL_TURN_STARTED:
+    case INBOUND_MESSAGE_TYPES.CONTROL_TURN_STARTED: {
+      const turnId = requireTurnId(envelope);
+      if (!turnId.ok) {
+        return turnId.event;
+      }
       return {
         kind: "turn_started",
-        turnId: normalizeTurnId(envelope.turn_id),
+        turnId: turnId.turnId,
         envelope,
       };
+    }
     case INBOUND_MESSAGE_TYPES.CONTROL_TURN_FINISHED: {
       const parsed = parseControlTurnFinishedPayload(envelope);
       if (!parsed.ok) {
         return protocolPayloadError(envelope, parsed.error);
       }
       const payload = parsed.payload;
-      const turnId = requireSegmentTurnId(envelope);
+      const turnId = requireTurnId(envelope);
       if (!turnId.ok) {
         return turnId.event;
       }
@@ -339,7 +344,7 @@ export function mapInboundEnvelopeToEvent(
     }
     case INBOUND_MESSAGE_TYPES.CONTROL_INTERRUPT:
       {
-        const turnId = requireSegmentTurnId(envelope);
+        const turnId = requireTurnId(envelope);
         if (!turnId.ok) {
           return turnId.event;
         }
@@ -356,7 +361,7 @@ export function mapInboundEnvelopeToEvent(
       };
     case INBOUND_MESSAGE_TYPES.CONTROL_SYNTH_FINISHED:
       {
-        const turnId = requireSegmentTurnId(envelope);
+        const turnId = requireTurnId(envelope);
         if (!turnId.ok) {
           return turnId.event;
         }

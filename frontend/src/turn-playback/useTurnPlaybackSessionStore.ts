@@ -550,7 +550,7 @@ export function useTurnPlaybackSessionStore() {
   // ── backend ─────────────────────────────────────────────────────
 
   function markTurnStarted(
-    turnId: string | null,
+    turnId: string,
   ): void {
     const session = ensureSession(turnId);
     session.backend.turnStarted = true;

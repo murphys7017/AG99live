@@ -788,11 +788,45 @@ class TurnCoordinator:
                     frontend_turn_id=normalized_turn_id,
                     backend_turn_id=backend_turn_id,
                 )
-            current_turn_id = self.session_state.begin_turn(
-                message_obj.message_str,
-                turn_id=normalized_turn_id,
+            sent = await self._send_json(
+                build_control_turn_started(
+                    turn_id=normalized_turn_id,
+                )
             )
-            self._begin_turn_timing(current_turn_id, message_obj.message_str)
+            if not sent:
+                if turn_identity_map is not None:
+                    turn_identity_map.clear_frontend_turn(normalized_turn_id)
+                raise RuntimeError(f"turn_started_send_failed:{normalized_turn_id}")
+
+            current_turn_id = normalized_turn_id
+            try:
+                current_turn_id = self.session_state.begin_turn(
+                    message_obj.message_str,
+                    turn_id=normalized_turn_id,
+                )
+                self._begin_turn_timing(current_turn_id, message_obj.message_str)
+                await self._emit_image_input_diagnostics(
+                    message_obj,
+                    turn_id=current_turn_id,
+                )
+
+                event = self._build_platform_event(message_obj)
+                set_extra = getattr(event, "set_extra", None)
+                if callable(set_extra):
+                    set_extra("enable_streaming", False)
+                    set_extra("output_correlation_id", current_turn_id)
+                self._apply_raw_message_metadata_to_event(event, message_obj)
+                self._events_by_turn_id[current_turn_id] = event
+                self._commit_event(event)
+            except Exception:
+                self._events_by_turn_id.pop(current_turn_id, None)
+                await self._finish_turn(
+                    turn_id=current_turn_id,
+                    success=False,
+                    reason="event_commit_failed",
+                )
+                self._turn_timings.pop(current_turn_id, None)
+                raise
             self.chat_buffer.add("user", message_obj.message_str)
             self._record_motion_lab_raw_event(
                 event_type="turn.input_received",
@@ -810,28 +844,6 @@ class TurnCoordinator:
                     "chat_context": self._motion_lab_chat_context(),
                 },
             )
-            await self._send_json(
-                build_control_turn_started(
-                    turn_id=current_turn_id,
-                )
-            )
-            await self._emit_image_input_diagnostics(
-                message_obj,
-                turn_id=current_turn_id,
-            )
-
-            event = self._build_platform_event(message_obj)
-            set_extra = getattr(event, "set_extra", None)
-            if callable(set_extra):
-                set_extra("enable_streaming", False)
-                set_extra("output_correlation_id", current_turn_id)
-            self._apply_raw_message_metadata_to_event(event, message_obj)
-            self._events_by_turn_id[current_turn_id] = event
-            try:
-                self._commit_event(event)
-            except Exception:
-                self._events_by_turn_id.pop(current_turn_id, None)
-                raise
             self._mark_turn_timing(current_turn_id, "event_committed_at")
             logger.debug(
                 "Turn timing start: turn=%s text_len=%d turn_id=%s",

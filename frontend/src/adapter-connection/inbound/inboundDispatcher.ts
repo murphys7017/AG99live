@@ -64,7 +64,7 @@ export interface InboundDispatchDeps {
   state: InboundDispatchState;
   sessionStore: {
     setActiveSession: (turnId: string | null) => void;
-    markTurnStarted: (turnId: string | null) => void;
+    markTurnStarted: (turnId: string) => void;
     markSynthFinished: (turnId: string | null) => void;
     markTurnFinished: (turnId: string | null, success: boolean, reason?: string) => void;
     markInterrupt: (turnId: string | null) => void;

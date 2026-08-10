@@ -69,7 +69,7 @@ def parse_inbound_message(
 
     payload = dict(payload_raw)
     turn_id = _normalize_optional_string(raw.get("turn_id"))
-    source = _normalize_source(raw.get("source"), SOURCE_FRONTEND)
+    source = _require_source(raw.get("source"), SOURCE_FRONTEND)
     version = _require_protocol_version(raw.get("version"))
     message_id = _require_message_id(raw.get("message_id"))
     timestamp = _normalize_optional_string(raw.get("timestamp")) or _utc_now_iso()
@@ -321,9 +321,15 @@ def _require_message_id(value: Any) -> str:
     return normalized
 
 
-def _normalize_source(value: Any, default: str) -> str:
+def _require_source(value: Any, expected: str) -> str:
     normalized = _normalize_optional_string(value)
-    return normalized or default
+    if not normalized:
+        raise ProtocolError("`source` is required.")
+    if normalized != expected:
+        raise ProtocolError(
+            f"Invalid protocol source: expected={expected}, actual={normalized}"
+        )
+    return normalized
 
 
 def _normalize_optional_string(value: Any) -> str | None:
