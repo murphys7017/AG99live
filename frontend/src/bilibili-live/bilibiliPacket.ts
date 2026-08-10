@@ -214,10 +214,3 @@ async function readStreamToBytes(stream: ReadableStream<Uint8Array>): Promise<Ui
   }
   return result;
 }
-
-export const BILIBILI_PACKET_TEST_ONLY = {
-  HEADER_SIZE,
-  OP_SEND_MSG_REPLY,
-  OP_AUTH_REPLY,
-  PROTO_NORMAL,
-};

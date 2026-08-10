@@ -84,7 +84,3 @@ export interface PlaybackTimelineSegmentStartPort<
     reason: string,
   ): void;
 }
-
-export interface PlaybackTimelineSegmentRunnerPort<
-  TMotionPayload = unknown,
-> extends PlaybackTimelineSegmentStartPort<TMotionPayload> {}

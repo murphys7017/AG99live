@@ -477,13 +477,3 @@ function extractNumericCookie(cookie: string, name: string): number | null {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : null;
 }
-
-export const BILIBILI_LIVE_CLIENT_TEST_ONLY = {
-  extractCookie,
-  extractNumericCookie,
-  filterWbiValue,
-  buildAuthPayload,
-  getLastCommandName,
-  md5Hex,
-  resolvePreferredProtover,
-};

@@ -36,9 +36,3 @@ export const OUTBOUND_MESSAGE_TYPES = {
   ENGINE_MOTION_INTENT: "engine.motion_intent",
   ENGINE_CATALOG_MOTION: "engine.catalog_motion",
 } as const;
-
-export type InboundMessageType =
-  (typeof INBOUND_MESSAGE_TYPES)[keyof typeof INBOUND_MESSAGE_TYPES];
-
-export type OutboundMessageType =
-  (typeof OUTBOUND_MESSAGE_TYPES)[keyof typeof OUTBOUND_MESSAGE_TYPES];

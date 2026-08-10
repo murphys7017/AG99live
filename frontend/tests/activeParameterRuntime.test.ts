@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import {
   PARAMETER_MIX_PRIORITY,
-  ParameterMixer,
+  ActiveParameterMixer,
   type ParameterBaseSnapshot,
   type ParameterContribution,
 } from "../src/live2d/WebSDK/src/parametermixer.js";
@@ -18,7 +18,7 @@ type WritableParameterBaseSnapshot = Extract<
 const parameterId = {} as WritableParameterBaseSnapshot["parameterId"];
 
 function testParameterContributionOrderingAndFinalClamp(): void {
-  const mixer = new ParameterMixer();
+  const mixer = new ActiveParameterMixer();
   const contributions: ParameterContribution[] = [
     {
       parameterIdRaw: "ParamMouthOpenY",
@@ -68,7 +68,7 @@ function testParameterContributionOrderingAndFinalClamp(): void {
 }
 
 function testInvalidWeightIsRejected(): void {
-  const mixer = new ParameterMixer();
+  const mixer = new ActiveParameterMixer();
   const baseSnapshots: ReadonlyMap<number, ParameterBaseSnapshot> = new Map([
     [0, {
       parameterId,

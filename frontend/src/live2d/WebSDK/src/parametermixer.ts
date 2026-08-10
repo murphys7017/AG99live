@@ -52,7 +52,7 @@ export interface ResolvedParameterFrameEntry {
   contributions: ResolvedParameterContribution[];
 }
 
-export type ParameterMixerResolution =
+export type ActiveParameterMixerResolution =
   | {
       ok: true;
       parameters: ResolvedParameterFrameEntry[];
@@ -68,11 +68,11 @@ export type ParameterMixerResolution =
  * parameter contributions. It never reads or writes Cubism state, interprets
  * semantic levels, or owns source lifecycle.
  */
-export class ParameterMixer {
+export class ActiveParameterMixer {
   public resolveFrame(
     contributions: readonly ParameterContribution[],
     baseSnapshots: ReadonlyMap<number, ParameterBaseSnapshot>,
-  ): ParameterMixerResolution {
+  ): ActiveParameterMixerResolution {
     const grouped = new Map<number, {
       parameterIdRaw: string;
       contributions: Array<ParameterContribution & { sequence: number }>;

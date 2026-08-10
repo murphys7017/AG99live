@@ -57,7 +57,7 @@ import {
 } from "./directparameterplan";
 import {
   PARAMETER_MIX_PRIORITY,
-  ParameterMixer,
+  ActiveParameterMixer,
   type ParameterBaseSnapshot,
   type ParameterContribution,
   type ParameterFrameOwner,
@@ -1591,7 +1591,7 @@ export class LAppModel extends CubismUserModel {
       : undefined;
     const playbackClockReader = options.playbackClockReader;
     if (!playbackClockReader || typeof playbackClockReader.getElapsedMs !== "function") {
-      this._directParameterPlanError = "v2_parameter_clock_missing";
+      this._directParameterPlanError = "parameter_plan_clock_missing";
       return false;
     }
 
@@ -1672,27 +1672,27 @@ export class LAppModel extends CubismUserModel {
       if (parameterIndex === null) {
         return {
           ok: false,
-          reason: `v2_parameter_missing_runtime_parameter:${axisId}:${parameterIdRaw || index}`,
+          reason: `parameter_plan_missing_runtime_parameter:${axisId}:${parameterIdRaw || index}`,
         };
       }
       if (seenParameterIndices.has(parameterIndex)) {
         return {
           ok: false,
-          reason: `v2_parameter_duplicate_runtime_parameter:${axisId}:${parameterIdRaw}`,
+          reason: `parameter_plan_duplicate_runtime_parameter:${axisId}:${parameterIdRaw}`,
         };
       }
       const minValue = this._model.getParameterMinimumValue(parameterIndex);
       const maxValue = this._model.getParameterMaximumValue(parameterIndex);
       if (!Number.isFinite(minValue) || !Number.isFinite(maxValue) || minValue > maxValue) {
-        return { ok: false, reason: `v2_parameter_invalid_runtime_range:${parameterIdRaw}` };
+        return { ok: false, reason: `parameter_plan_invalid_runtime_range:${parameterIdRaw}` };
       }
       const targetValue = Number(item.target_value);
       if (targetValue < minValue || targetValue > maxValue) {
-        return { ok: false, reason: `v2_parameter_target_out_of_runtime_range:${parameterIdRaw}` };
+        return { ok: false, reason: `parameter_plan_target_out_of_runtime_range:${parameterIdRaw}` };
       }
       const neutralTargetValue = Number(item.neutral_target_value);
       if (neutralTargetValue < minValue || neutralTargetValue > maxValue) {
-        return { ok: false, reason: `v2_parameter_neutral_out_of_runtime_range:${parameterIdRaw}` };
+        return { ok: false, reason: `parameter_plan_neutral_out_of_runtime_range:${parameterIdRaw}` };
       }
       const keyframes = Array.isArray(item.keyframes)
         ? item.keyframes.map((keyframe) => ({
@@ -1702,7 +1702,7 @@ export class LAppModel extends CubismUserModel {
           }))
         : [];
       if (keyframes.some((keyframe) => keyframe.value < minValue || keyframe.value > maxValue)) {
-        return { ok: false, reason: `v2_parameter_keyframe_out_of_runtime_range:${parameterIdRaw}` };
+        return { ok: false, reason: `parameter_plan_keyframe_out_of_runtime_range:${parameterIdRaw}` };
       }
       seenParameterIndices.add(parameterIndex);
       semanticBindings.push({
@@ -1983,7 +1983,7 @@ export class LAppModel extends CubismUserModel {
     if (elapsedMs === null || !Number.isFinite(elapsedMs)) {
       return {
         contributions: [],
-        failure: "v2_parameter_clock_unavailable",
+        failure: "parameter_plan_clock_unavailable",
         shouldLogFrame: false,
         released: false,
       };
@@ -2241,7 +2241,7 @@ export class LAppModel extends CubismUserModel {
     this._directParameterPlanState = null;
     this._directParameterPlanError = "";
     this._motionStartError = "";
-    this._parameterMixer = new ParameterMixer();
+    this._parameterMixer = new ActiveParameterMixer();
     this._speechSignalRuntime = new SpeechSignalRuntime();
   }
 
@@ -2275,6 +2275,6 @@ export class LAppModel extends CubismUserModel {
   _directParameterPlanState: DirectParameterPlanState | null;
   _directParameterPlanError: string;
   _motionStartError: string;
-  private _parameterMixer: ParameterMixer;
+  private _parameterMixer: ActiveParameterMixer;
   private _speechSignalRuntime: SpeechSignalRuntime;
 }

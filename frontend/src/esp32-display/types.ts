@@ -16,13 +16,6 @@ export interface Esp32DisplayConfig {
   scaleMode: Esp32DisplayScaleMode;
 }
 
-export type Esp32DisplayStatus =
-  | { kind: "idle" }
-  | { kind: "connecting"; host: string; port: number }
-  | { kind: "connected"; host: string; port: number }
-  | { kind: "disconnected"; reason: string }
-  | { kind: "error"; message: string };
-
 export const ESP32_DISPLAY_DEFAULT_CROP: Esp32DisplayCrop = {
   x: 0,
   y: 0,

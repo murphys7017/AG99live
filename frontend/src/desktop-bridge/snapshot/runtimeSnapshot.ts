@@ -29,7 +29,6 @@ import {
 import { SCHEMA_CATALOG_MOTION_V1 } from "../../types/protocol.js";
 import { cloneJson } from "../../utils/cloneJson.js";
 import {
-  cloneNumericRecord,
   isFiniteNumber,
   isObject,
   isPresent,

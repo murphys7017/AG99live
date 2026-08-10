@@ -99,11 +99,6 @@ export interface ControlTurnFinishedPayload {
   reason?: string;
 }
 
-export interface ControlPlaybackFinishedPayload {
-  success: boolean;
-  reason?: string;
-}
-
 export interface ControlErrorPayload {
   message: string;
 }
@@ -530,7 +525,6 @@ export interface SemanticExpressionPlanResource {
 export type SemanticPlanResource = SemanticExpressionPlanResource;
 
 export type SemanticMotionIntent = NormalizedSemanticMotionIntent;
-export type MotionIntentPayload = NormalizedSemanticMotionIntent;
 export type MotionPlanPayload = SemanticParameterPlan;
 
 export interface CatalogMotionPayload {
