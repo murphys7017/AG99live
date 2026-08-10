@@ -375,7 +375,8 @@ def select_relevant_user_examples(
             str(candidate.get("created_at") or "").strip(),
             str(candidate.get("sample_id") or "").strip(),
         )
-        ranked.append((rank, candidate))
+        if any(rank[:3]):
+            ranked.append((rank, candidate))
     ranked.sort(key=lambda item: item[0], reverse=True)
     return [candidate for _rank, candidate in ranked[:count]]
 

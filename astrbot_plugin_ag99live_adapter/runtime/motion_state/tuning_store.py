@@ -12,6 +12,8 @@ from ...protocol.schema_versions import (
 )
 
 MOTION_TUNING_STORE_SCHEMA_VERSION = "ag99.motion_tuning_store.v1"
+REFERENCE_USER_TEXT_MAX_CHARS = 240
+REFERENCE_ASSISTANT_TEXT_MAX_CHARS = 360
 
 
 class MotionTuningStore:
@@ -196,15 +198,28 @@ class MotionTuningStore:
                 continue
             if not projected_output:
                 continue
+            user_text = self._truncate_reference_text(
+                sample.get("user_text"),
+                REFERENCE_USER_TEXT_MAX_CHARS,
+            )
+            assistant_text = self._truncate_reference_text(
+                sample.get("assistant_text"),
+                REFERENCE_ASSISTANT_TEXT_MAX_CHARS,
+            )
             normalized_examples.append(
                 {
                     "sample_id": str(sample.get("id") or "").strip(),
                     "created_at": str(sample.get("created_at") or "").strip(),
                     "category": str(sample.get("emotion_label") or "custom").strip()
                     or "custom",
-                    "user_text": str(sample.get("user_text") or "").strip(),
-                    "assistant_text": str(sample.get("assistant_text") or "").strip(),
-                    "input": self._build_sample_input_text(sample),
+                    "user_text": user_text,
+                    "assistant_text": assistant_text,
+                    "input": self._build_sample_input_text(
+                        {
+                            "user_text": user_text,
+                            "assistant_text": assistant_text,
+                        }
+                    ),
                     "output": projected_output,
                     "source": "desktop_motion_tuning_sample_store",
                     "feedback": str(sample.get("feedback") or "").strip(),
@@ -839,6 +854,13 @@ class MotionTuningStore:
         if assistant_text:
             lines.append(f"Assistant: {assistant_text}")
         return "\n".join(lines)
+
+    @staticmethod
+    def _truncate_reference_text(value: Any, max_chars: int) -> str:
+        normalized = " ".join(str(value or "").split())
+        if len(normalized) <= max_chars:
+            return normalized
+        return normalized[: max_chars - 3].rstrip() + "..."
 
 
 def _coerce_finite_number(value: Any) -> float | None:
