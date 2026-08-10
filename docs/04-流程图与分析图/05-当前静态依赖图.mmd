@@ -47,7 +47,7 @@ flowchart LR
         FENGINE[model-engine]:::hotspot
         FLIVE[live2d / renderer]:::hotspot
         FSDK[Live2D WebSDK]:::shared
-        FTYPES[types/protocol]:::shared
+        FTYPES[types/protocol<br/>compiled motion DTO]:::shared
         FSCHEMA[protocolSchema.generated.ts]:::shared
         FLAB[motion-lab/action-lab]:::frontend
         FDESKTOP[desktop-bridge/settings]:::frontend
@@ -71,10 +71,10 @@ flowchart LR
 
         FADAPTER --> FTURN
         FADAPTER --> FTL
-        FADAPTER --> FENGINE
+        FADAPTER --> FINT
         FADAPTER --> FTYPES
         FADAPTER --> FSCHEMA
-        FTURN --> FENGINE
+        FTURN --> FINT
         FTURN --> FTL
         FTURN --> FTYPES
         FTL --> FTYPES
@@ -85,6 +85,8 @@ flowchart LR
         FLIVE --> FENGINE
         FLIVE --> FSDK
         FLAB --> FTYPES
+        FDESKTOP --> FTYPES
+        FDESKTOP --> FENGINE
         FFEATURE --> FADAPTER
     end
 

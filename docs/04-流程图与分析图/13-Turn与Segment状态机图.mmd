@@ -33,9 +33,9 @@ flowchart TB
         COL -->|用户显式中断| INTERRUPT
         READY -->|用户显式中断| INTERRUPT
         PLAY -->|用户显式中断| INTERRUPT
-        COL -->|WebSocket 断开| INTERRUPT
-        READY -->|WebSocket 断开| INTERRUPT
-        PLAY -->|WebSocket 断开| INTERRUPT
+        COL -->|WebSocket 断开| FAIL
+        READY -->|WebSocket 断开| FAIL
+        PLAY -->|WebSocket 断开| FAIL
     end
 
     subgraph SEG[每个 output.segment.v3 的槽位事实]

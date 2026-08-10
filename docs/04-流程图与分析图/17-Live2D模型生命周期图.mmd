@@ -39,12 +39,15 @@ stateDiagram-v2
     state Running {
         [*] --> FrameScheduled
         FrameScheduled --> ValidateOwnership: requestAnimationFrame tick
-        ValidateOwnership --> BuildBaseSnapshot: generation/model still current
+        ValidateOwnership --> RestoreParameters: generation/model still current
         ValidateOwnership --> FrameStopped: stale/released
-        BuildBaseSnapshot --> ResolveDirectSource: catalog motion / expression / drag / breath
-        ResolveDirectSource --> ApplyMixer: direct plan / gesture track / lip-sync
-        ApplyMixer --> ApplyPhysics: one active parameter frame before Physics
-        ApplyPhysics --> Render: Cubism physics/pose/renderer
+        RestoreParameters --> ApplyNativeMotion: load saved Cubism parameters
+        ApplyNativeMotion --> ApplyNativeEffects: catalog/idle motion then save
+        ApplyNativeEffects --> ApplyMixer: blink / expression / drag / breath
+        ApplyMixer --> ApplyPhysics: snapshot Cubism base + resolve direct plan / speech modulation / lip-sync
+        ApplyPhysics --> ApplyPose: Cubism Physics
+        ApplyPose --> UpdateModel: Cubism Pose
+        UpdateModel --> Render: model update / renderer
         Render --> FrameScheduled: next frame
         FrameStopped --> [*]
     }

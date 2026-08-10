@@ -1,9 +1,9 @@
 task:
-  class: refactor
+  class: bugfix
   risk: high
   phase: review
-  status: complete
-  scope: "Remove mixed persistence and duplicated runtime ownership across Adapter storage, frontend audio lifecycle, Motion Tuning prompt state, and active parameter mixing without adding fallback layers."
+  status: ready_for_live_validation
+  scope: "Repair Turn/protocol invariants, expression release, parameter mixing ownership, Prompt reference selection, dependency boundaries, and runtime diagrams without adding fallback layers."
 
 context:
   confidence: high
@@ -59,14 +59,12 @@ verification:
     - Automated tests are low-confidence boundary smoke checks and are not end-to-end evidence.
     - Live Electron, AstrBot, TTS, and Live2D observation is user-led acceptance, not unfinished implementation work.
   current_checks:
-    - Python source compilation completed with python -m compileall astrbot_plugin_ag99live_adapter.
-    - Renderer and WebSDK TypeScript checks completed successfully.
-    - Minimal AI runtime validation and git diff whitespace validation completed successfully.
-    - Source call paths were reviewed from Adapter persistence and Prompt selection through PlaybackTimeline, ModelEngine, ActiveParameterMixer, Cubism Physics, and rendering.
-    - Obsolete Live2D runtime cache schemas now invalidate and rebuild instead of activating a permanent write-blocking root error.
-    - Motion reference selection diagnostics are recorded by Motion Lab without entering the model Prompt.
-    - Audio duration changes are emitted once per value, and playback teardown closes Timeline ownership before releasing the bound ModelEngine runtime.
-    - Live AstrBot, Electron, TTS, audio playback, lip sync, and Live2D observation were not executed in this change set.
+    - Python syntax compilation passed for the four touched Adapter modules.
+    - Renderer and WebSDK TypeScript checks passed after the shared compiled-motion DTO migration.
+    - git diff --check passed; no compatibility re-export or duplicate compiled-motion parser remains.
+    - Source paths were reviewed for Turn start/commit failure closure, protocol source identity, Prompt reference selection, expression fade-out, active parameter mixing, and Cubism frame order.
+    - Mermaid dependency, Turn state, action conversion, and Live2D lifecycle diagrams were aligned with the current source.
+    - Live AstrBot, Electron, TTS, audio playback, lip sync, expression fade, ParameterMixer output, and Live2D observation were not executed in this change set.
 
 backlog:
   phase_two:
