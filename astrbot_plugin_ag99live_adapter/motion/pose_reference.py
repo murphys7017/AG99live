@@ -86,8 +86,7 @@ def _build_user_tuning_candidates(
     runtime_state: Any,
     semantic_profile: dict[str, Any],
 ) -> list[dict[str, Any]]:
-    list_samples = getattr(runtime_state, "list_motion_tuning_samples", None)
-    samples = list_samples() if callable(list_samples) else getattr(runtime_state, "motion_tuning_samples", [])
+    samples = runtime_state.list_motion_tuning_samples()
     if not isinstance(samples, list):
         return []
 

@@ -36,6 +36,7 @@ def _record_motion_prompt_reference_observation(
     event: Any,
     capability_payload: dict[str, Any],
     runtime_payload: dict[str, Any],
+    reference_diagnostics: list[str],
     source_route: str = "persona_effect",
 ) -> None:
     semantic_profile = capability_payload.get("semantic_profile")
@@ -63,6 +64,7 @@ def _record_motion_prompt_reference_observation(
             "reference_examples": reference_examples
             if isinstance(reference_examples, list)
             else [],
+            "reference_example_diagnostics": list(reference_diagnostics),
         },
     )
 
@@ -71,7 +73,7 @@ def _build_motion_runtime_reference_examples(
     event: Any,
     runtime_state: Any,
     capability_payload: dict[str, Any],
-) -> list[dict[str, Any]]:
+) -> dict[str, Any]:
     semantic_profile = capability_payload.get("semantic_profile")
     prompt_axes = (
         semantic_profile.get("prompt_axes")
@@ -92,15 +94,18 @@ def _build_motion_runtime_reference_examples(
     }
     if not allowed_axis_ids:
         raise RuntimeError("semantic_motion_prompt_axes_empty")
-    examples = resolve_motion_reference_examples(
+    resolution = resolve_motion_reference_examples(
         runtime_state=runtime_state,
         request_text=_extract_motion_prompt_input_text(event),
     )
-    return _project_reference_examples_for_prompt(
-        examples,
-        allowed_axis_ids=allowed_axis_ids,
-        available_levels_by_axis=available_levels_by_axis,
-    )
+    return {
+        "examples": _project_reference_examples_for_prompt(
+            resolution["examples"],
+            allowed_axis_ids=allowed_axis_ids,
+            available_levels_by_axis=available_levels_by_axis,
+        ),
+        "diagnostics": list(resolution["diagnostics"]),
+    }
 
 def _extract_motion_prompt_input_text(event: Any) -> str:
     original_text = _normalize_optional_string(
@@ -185,12 +190,7 @@ def _build_previous_motion_variation_payload(
     }
 
 def _resolve_previous_motion_prompt_snapshot(turn_coordinator: Any) -> dict[str, Any] | None:
-    getter = getattr(turn_coordinator, "get_last_prompt_motion_snapshot", None)
-    snapshot = None
-    if callable(getter):
-        snapshot = getter()
-    if snapshot is None:
-        snapshot = getattr(turn_coordinator, "_last_prompt_motion_snapshot", None)
+    snapshot = turn_coordinator.get_last_prompt_motion_snapshot()
     if not isinstance(snapshot, dict):
         return None
     return snapshot

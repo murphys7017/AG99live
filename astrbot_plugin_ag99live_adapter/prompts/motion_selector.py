@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from .motion_selector_examples import (
+    MotionReferenceExamplesResolution,
     create_default_motion_reference_examples,
     resolve_motion_reference_examples as _resolve_motion_reference_examples,
 )
@@ -39,14 +40,12 @@ def resolve_motion_reference_examples(
     *,
     runtime_state: Any,
     request_text: str = "",
-    update_runtime_state: bool = True,
-) -> list[dict[str, Any]]:
+) -> MotionReferenceExamplesResolution:
     return _resolve_motion_reference_examples(
         runtime_state=runtime_state,
         default_examples=DEFAULT_MOTION_REFERENCE_EXAMPLES,
         normalize_emotion_key=_normalize_emotion_key,
         request_text=request_text,
-        update_runtime_state=update_runtime_state,
     )
 
 

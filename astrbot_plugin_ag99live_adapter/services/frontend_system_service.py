@@ -213,7 +213,7 @@ class FrontendSystemCommandHandler:
                 build_system_motion_tuning_samples_state(
                     turn_id=message.turn_id,
                     samples=self._runtime_state.list_motion_tuning_samples(),
-                    root_error=self._runtime_state.get_runtime_cache_root_error(),
+                    root_error=self._runtime_state.get_motion_tuning_store_root_error(),
                     load_error=self._runtime_state.get_motion_tuning_samples_load_error(),
                     diagnostics=self._runtime_state.list_motion_tuning_fewshot_diagnostics(),
                     effective_examples=self._runtime_state.list_effective_motion_tuning_examples(),
@@ -235,7 +235,7 @@ class FrontendSystemCommandHandler:
                 build_system_motion_tuning_samples_state(
                     turn_id=message.turn_id,
                     samples=self._runtime_state.list_motion_tuning_samples(),
-                    root_error=self._runtime_state.get_runtime_cache_root_error(),
+                    root_error=self._runtime_state.get_motion_tuning_store_root_error(),
                     load_error=self._runtime_state.get_motion_tuning_samples_load_error(),
                     diagnostics=self._runtime_state.list_motion_tuning_fewshot_diagnostics(),
                     effective_examples=self._runtime_state.list_effective_motion_tuning_examples(),

@@ -252,20 +252,22 @@ def _build_motion_runtime_payload(
     *,
     capability_payload: dict[str, Any],
     view: Any,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], list[str]]:
     del view
     payload: dict[str, Any] = {}
-    reference_examples = _build_motion_runtime_reference_examples(
+    reference_resolution = _build_motion_runtime_reference_examples(
         event=event,
         runtime_state=runtime_state,
         capability_payload=capability_payload,
     )
+    reference_examples = reference_resolution["examples"]
     if reference_examples:
         payload["reference_examples"] = reference_examples
+    reference_diagnostics = reference_resolution["diagnostics"]
     previous_motion_payload = _build_previous_motion_variation_payload(
         turn_coordinator,
         runtime_state=runtime_state,
     )
     if previous_motion_payload:
         payload.update(previous_motion_payload)
-    return payload
+    return payload, reference_diagnostics

@@ -7,7 +7,7 @@ from typing import Any
 
 from astrbot.api import logger
 
-LIVE2D_RUNTIME_CACHE_SCHEMA_VERSION = "live2d_runtime_cache.v1"
+LIVE2D_RUNTIME_CACHE_SCHEMA_VERSION = "live2d_runtime_cache.v2"
 LIVE2D_MODEL_METADATA_DIRNAME = "ag99"
 
 
@@ -56,33 +56,30 @@ def load_live2d_runtime_cache(cache_path: Path) -> tuple[dict[str, Any], dict[st
         return _build_empty_cache_payload(), {
             "root": "live2d_runtime_cache_invalid_payload"
         }
-    if str(payload.get("schema_version") or "") != LIVE2D_RUNTIME_CACHE_SCHEMA_VERSION:
-        return _build_empty_cache_payload(), {
-            "root": "live2d_runtime_cache_schema_version_mismatch"
-        }
+    schema_version = str(payload.get("schema_version") or "")
+    if schema_version != LIVE2D_RUNTIME_CACHE_SCHEMA_VERSION:
+        logger.info(
+            "Discard obsolete Live2D runtime cache `%s` (schema=%s, expected=%s).",
+            cache_path,
+            schema_version or "<missing>",
+            LIVE2D_RUNTIME_CACHE_SCHEMA_VERSION,
+        )
+        return _build_empty_cache_payload(), {}
 
     scan_cache = payload.get("scan_cache")
     action_filter_cache = payload.get("action_filter_cache")
-    motion_tuning_samples = payload.get("motion_tuning_samples")
-
     errors: dict[str, str] = {}
     normalized_scan_cache = scan_cache if isinstance(scan_cache, dict) else {}
     normalized_action_filter_cache = action_filter_cache if isinstance(action_filter_cache, dict) else {}
-    normalized_motion_tuning_samples = (
-        motion_tuning_samples if isinstance(motion_tuning_samples, list) else []
-    )
     if not isinstance(scan_cache, dict):
         errors["scan_cache"] = "live2d_runtime_cache_scan_cache_invalid"
     if not isinstance(action_filter_cache, dict):
         errors["action_filter_cache"] = "live2d_runtime_cache_action_filter_cache_invalid"
-    if "motion_tuning_samples" in payload and not isinstance(motion_tuning_samples, list):
-        errors["motion_tuning_samples"] = "live2d_runtime_cache_motion_tuning_samples_invalid"
     return (
         {
             "schema_version": LIVE2D_RUNTIME_CACHE_SCHEMA_VERSION,
             "scan_cache": normalized_scan_cache,
             "action_filter_cache": normalized_action_filter_cache,
-            "motion_tuning_samples": normalized_motion_tuning_samples,
         },
         errors,
     )
@@ -97,11 +94,6 @@ def save_live2d_runtime_cache(cache_path: Path, payload: dict[str, Any]) -> None
             payload.get("action_filter_cache")
             if isinstance(payload.get("action_filter_cache"), dict)
             else {}
-        ),
-        "motion_tuning_samples": (
-            payload.get("motion_tuning_samples")
-            if isinstance(payload.get("motion_tuning_samples"), list)
-            else []
         ),
     }
     temp_path = cache_path.with_suffix(f"{cache_path.suffix}.tmp")
@@ -122,5 +114,4 @@ def _build_empty_cache_payload() -> dict[str, Any]:
         "schema_version": LIVE2D_RUNTIME_CACHE_SCHEMA_VERSION,
         "scan_cache": {},
         "action_filter_cache": {},
-        "motion_tuning_samples": [],
     }

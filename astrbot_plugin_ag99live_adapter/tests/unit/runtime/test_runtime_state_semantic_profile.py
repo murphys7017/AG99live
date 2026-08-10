@@ -82,7 +82,7 @@ def test_runtime_state_exposes_runtime_cache_segment_errors_in_model_sync(
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
     (cache_dir / "live2d_runtime_cache.json").write_text(
-        '{"schema_version":"live2d_runtime_cache.v1","scan_cache":[],"action_filter_cache":[],"motion_tuning_samples":[]}',
+        '{"schema_version":"live2d_runtime_cache.v2","scan_cache":[],"action_filter_cache":[]}',
         encoding="utf-8",
     )
 
@@ -139,7 +139,7 @@ def test_runtime_state_invalidates_old_scan_cache_version(
     cache_path.write_text(
         json.dumps(
             {
-                "schema_version": "live2d_runtime_cache.v1",
+                "schema_version": "live2d_runtime_cache.v2",
                 "scan_cache": {
                     # This was the cache marker used while model snapshots still
                     # contained ag99.voice_following_profile.v1.
@@ -149,7 +149,6 @@ def test_runtime_state_invalidates_old_scan_cache_version(
                     "model_info": {"selected_model": "CachedOnly", "models": []},
                 },
                 "action_filter_cache": {"keep": True},
-                "motion_tuning_samples": [],
             },
             ensure_ascii=False,
         ),

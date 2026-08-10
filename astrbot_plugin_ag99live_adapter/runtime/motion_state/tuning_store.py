@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from copy import deepcopy
+from pathlib import Path
 from typing import Any, Callable
 
 from ...prompts.semantic_axis_prompt import profile_prompt_axes
@@ -9,47 +11,68 @@ from ...protocol.schema_versions import (
     PERFORMANCE_CURVE_HINT_SCHEMA_VERSION,
 )
 
+MOTION_TUNING_STORE_SCHEMA_VERSION = "ag99.motion_tuning_store.v1"
+
+
 class MotionTuningStore:
     """Owns persisted motion-tuning samples and their prompt projections."""
 
     def __init__(
         self,
         *,
-        runtime_state: Any,
+        storage_path: Path | None,
         get_selected_profile: Callable[[], dict[str, Any] | None],
         get_turn_context: Callable[[str, str], dict[str, str] | None],
-        ensure_cache_writable: Callable[[], None],
-        persist_cache: Callable[[], None],
     ) -> None:
-        self._runtime_state = runtime_state
+        self._storage_path = Path(storage_path) if storage_path is not None else None
         self._get_selected_profile = get_selected_profile
         self._get_turn_context = get_turn_context
-        self._ensure_cache_writable = ensure_cache_writable
-        self._persist_cache = persist_cache
 
         self.samples: list[dict[str, Any]] = []
         self.samples_load_error = ""
         self.reference_examples: list[dict[str, Any]] = []
         self.fewshot_diagnostics: list[str] = []
-        self.effective_examples: list[dict[str, Any]] = []
 
-    def load_from_payload(self, payload: dict[str, Any]) -> None:
-        raw_samples = payload.get("motion_tuning_samples")
+    def load(self) -> None:
+        self.samples = []
+        self.samples_load_error = ""
+        if self._storage_path is None or not self._storage_path.exists():
+            return
+
+        try:
+            payload = json.loads(self._storage_path.read_text(encoding="utf-8-sig"))
+        except Exception as exc:
+            self.samples_load_error = f"motion_tuning_store_load_failed:{exc}"
+            return
+        if not isinstance(payload, dict):
+            self.samples_load_error = "motion_tuning_store_payload_not_object"
+            return
+        if payload.get("schema_version") != MOTION_TUNING_STORE_SCHEMA_VERSION:
+            self.samples_load_error = "motion_tuning_store_schema_version_mismatch"
+            return
+
+        raw_samples = payload.get("samples")
         if not isinstance(raw_samples, list):
+            self.samples_load_error = "motion_tuning_store_samples_not_array"
             self.samples = []
             return
 
         normalized_samples: list[dict[str, Any]] = []
-        discarded_count = 0
-        for sample in raw_samples:
+        for index, sample in enumerate(raw_samples):
             try:
                 normalized_samples.append(self.normalize_sample(sample))
-            except ValueError:
-                discarded_count += 1
+            except ValueError as exc:
+                sample_id = (
+                    str(sample.get("id") or "").strip()
+                    if isinstance(sample, dict)
+                    else ""
+                )
+                self.samples_load_error = (
+                    "motion_tuning_store_sample_invalid:"
+                    f"index={index}:id={sample_id or '<empty>'}:reason={exc}"
+                )
+                return
         self.samples = normalized_samples
-        self.samples_load_error = ""
-        if discarded_count:
-            self._persist_cache()
 
     def list_samples(self) -> list[dict[str, Any]]:
         return deepcopy(self.samples)
@@ -57,11 +80,11 @@ class MotionTuningStore:
     def list_fewshot_diagnostics(self) -> list[str]:
         return list(self.fewshot_diagnostics)
 
-    def list_effective_examples(self) -> list[dict[str, Any]]:
-        return deepcopy(self.effective_examples)
+    def list_reference_examples(self) -> list[dict[str, Any]]:
+        return deepcopy(self.reference_examples)
 
     def save_sample(self, sample_payload: Any) -> dict[str, Any]:
-        self._ensure_cache_writable()
+        self._ensure_writable()
         incoming_sample = self.normalize_sample(
             sample_payload,
             require_recorded_context=False,
@@ -82,8 +105,7 @@ class MotionTuningStore:
             recorded_context.get("assistant_text") or ""
         ).strip()
         normalized_sample = self.normalize_sample(incoming_sample)
-        self.samples_load_error = ""
-        self.samples = [
+        next_samples = [
             deepcopy(normalized_sample),
             *[
                 deepcopy(item)
@@ -91,12 +113,13 @@ class MotionTuningStore:
                 if str(item.get("id") or "").strip() != normalized_sample["id"]
             ],
         ]
-        self._persist_cache()
+        self._persist_samples(next_samples)
+        self.samples = next_samples
         self.refresh_reference_examples()
         return deepcopy(normalized_sample)
 
     def delete_sample(self, sample_id: Any) -> bool:
-        self._ensure_cache_writable()
+        self._ensure_writable()
         normalized_sample_id = str(sample_id or "").strip()
         if not normalized_sample_id:
             raise ValueError("`sample_id` is required.")
@@ -107,26 +130,22 @@ class MotionTuningStore:
         ]
         if len(remaining_samples) == len(self.samples):
             raise ValueError(f"motion_tuning_sample_not_found: {normalized_sample_id}")
-        self.samples_load_error = ""
+        self._persist_samples(remaining_samples)
         self.samples = remaining_samples
-        self._persist_cache()
         self.refresh_reference_examples()
         return True
 
     def refresh_reference_examples(self) -> None:
         self.fewshot_diagnostics = []
-        self.effective_examples = []
         profile = self._get_selected_profile()
         if not isinstance(profile, dict):
             self.reference_examples = []
-            self._refresh_effective_examples()
             return
 
         profile_id = str(profile.get("profile_id") or "").strip()
         profile_revision = profile.get("revision")
         if not profile_id or not isinstance(profile_revision, int) or profile_revision <= 0:
             self.reference_examples = []
-            self._refresh_effective_examples()
             return
         try:
             prompt_axes = profile_prompt_axes(profile)
@@ -140,13 +159,14 @@ class MotionTuningStore:
                 for axis in prompt_axes
                 if str(axis.get("id") or "").strip()
             }
-        except Exception:
+        except Exception as exc:
             self.reference_examples = []
-            self._refresh_effective_examples()
+            self.fewshot_diagnostics = [
+                f"motion_tuning_reference_profile_invalid:{exc}"
+            ]
             return
         if not prompt_axis_ids:
             self.reference_examples = []
-            self._refresh_effective_examples()
             return
 
         normalized_examples: list[dict[str, Any]] = []
@@ -198,7 +218,6 @@ class MotionTuningStore:
                 }
             )
         self.reference_examples = normalized_examples
-        self._refresh_effective_examples()
         self.fewshot_diagnostics.extend(projection_diagnostics)
 
     @staticmethod
@@ -351,8 +370,36 @@ class MotionTuningStore:
             )
         return projected_steps, ""
 
-    def _refresh_effective_examples(self) -> None:
-        self.effective_examples = []
+    def _ensure_writable(self) -> None:
+        if self._storage_path is None:
+            raise ValueError("motion_tuning_store_path_unavailable")
+        if self.samples_load_error:
+            raise ValueError(
+                "motion_tuning_store_load_error_active:"
+                f"{self.samples_load_error}"
+            )
+
+    def _persist_samples(self, samples: list[dict[str, Any]]) -> None:
+        if self._storage_path is None:
+            raise ValueError("motion_tuning_store_path_unavailable")
+        self._storage_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "schema_version": MOTION_TUNING_STORE_SCHEMA_VERSION,
+            "samples": deepcopy(samples),
+        }
+        temp_path = self._storage_path.with_suffix(
+            f"{self._storage_path.suffix}.tmp"
+        )
+        temp_path.write_text(
+            json.dumps(
+                payload,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            encoding="utf-8",
+        )
+        temp_path.replace(self._storage_path)
 
     @staticmethod
     def _filter_example_axes(

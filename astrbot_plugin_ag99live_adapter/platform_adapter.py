@@ -43,8 +43,10 @@ ASSETS_DIR = PLUGIN_DIR / "assets"
 LIVE2DS_DIR = PLUGIN_DIR / "live2ds"
 PLUGIN_DATA_DIR = Path(get_astrbot_plugin_data_path()) / PLUGIN_DIR.name
 RUNTIME_CACHE_DIR = PLUGIN_DATA_DIR / "cache"
-AUDIO_CACHE_DIR = RUNTIME_CACHE_DIR / "audio"
-IMAGE_CACHE_DIR = RUNTIME_CACHE_DIR / "images"
+PUBLIC_CACHE_DIR = PLUGIN_DATA_DIR / "public_cache"
+AUDIO_CACHE_DIR = PUBLIC_CACHE_DIR / "audio"
+IMAGE_CACHE_DIR = PUBLIC_CACHE_DIR / "images"
+STATE_DIR = PLUGIN_DATA_DIR / "state"
 SUPPORTED_LOOPBACK_BIND_HOSTS = frozenset({"127.0.0.1", "localhost"})
 
 
@@ -127,6 +129,7 @@ class OLVPetPlatformAdapter(Platform):
             client_uid=self.client_uid,
             live2ds_dir=LIVE2DS_DIR,
             runtime_cache_dir=RUNTIME_CACHE_DIR,
+            state_dir=STATE_DIR,
         )
         self.session_state = SessionState(client_uid=self.client_uid)
         self.turn_identity_map = TurnIdentityMap()
@@ -137,7 +140,8 @@ class OLVPetPlatformAdapter(Platform):
             routes=build_static_routes(
                 live2ds_dir=LIVE2DS_DIR,
                 assets_dir=ASSETS_DIR,
-                runtime_cache_dir=RUNTIME_CACHE_DIR,
+                audio_cache_dir=AUDIO_CACHE_DIR,
+                image_cache_dir=IMAGE_CACHE_DIR,
             ),
         )
         self._debug_server = StaticResourceServer(
@@ -408,7 +412,7 @@ class OLVPetPlatformAdapter(Platform):
     async def _send_motion_tuning_samples_state(self) -> None:
         payload = build_system_motion_tuning_samples_state(
             samples=self.runtime_state.list_motion_tuning_samples(),
-            root_error=self.runtime_state.get_runtime_cache_root_error(),
+            root_error=self.runtime_state.get_motion_tuning_store_root_error(),
             load_error=self.runtime_state.get_motion_tuning_samples_load_error(),
             diagnostics=self.runtime_state.list_motion_tuning_fewshot_diagnostics(),
             effective_examples=self.runtime_state.list_effective_motion_tuning_examples(),

@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
-from typing import Any
+from typing import Any, TypedDict
+
+
+class MotionReferenceExamplesResolution(TypedDict):
+    examples: list[dict[str, Any]]
+    diagnostics: list[str]
 
 
 def build_example_axis_levels(axis_names: list[str], **overrides: int) -> dict[str, int]:
@@ -244,30 +249,15 @@ def resolve_motion_reference_examples(
     default_examples: list[dict[str, Any]],
     normalize_emotion_key: Callable[[str], str],
     request_text: str = "",
-    update_runtime_state: bool = True,
-) -> list[dict[str, Any]]:
-    enabled = bool(getattr(runtime_state, "motion_tuning_fewshot_enabled", True))
+) -> MotionReferenceExamplesResolution:
+    enabled = bool(runtime_state.motion_tuning_fewshot_enabled)
     if not enabled:
-        if update_runtime_state and hasattr(runtime_state, "motion_tuning_fewshot_diagnostics"):
-            runtime_state.motion_tuning_fewshot_diagnostics = []
-        if update_runtime_state and hasattr(runtime_state, "motion_tuning_effective_examples"):
-            runtime_state.motion_tuning_effective_examples = []
-        return []
+        return {"examples": [], "diagnostics": []}
 
-    count = int(
-        getattr(
-            runtime_state,
-            "motion_tuning_fewshot_count",
-            len(REQUIRED_STRUCTURE_EXAMPLE_CATEGORIES),
-        )
-    )
+    count = int(runtime_state.motion_tuning_fewshot_count)
     count = max(0, count)
     if count == 0:
-        if update_runtime_state and hasattr(runtime_state, "motion_tuning_fewshot_diagnostics"):
-            runtime_state.motion_tuning_fewshot_diagnostics = []
-        if update_runtime_state and hasattr(runtime_state, "motion_tuning_effective_examples"):
-            runtime_state.motion_tuning_effective_examples = []
-        return []
+        return {"examples": [], "diagnostics": []}
     if count < len(REQUIRED_STRUCTURE_EXAMPLE_CATEGORIES):
         raise ValueError(
             "motion_reference_example_budget_below_required:"
@@ -276,7 +266,7 @@ def resolve_motion_reference_examples(
 
     raw_user_examples = [
         item
-        for item in getattr(runtime_state, "motion_tuning_reference_examples", [])
+        for item in runtime_state.list_motion_tuning_reference_examples()
         if isinstance(item, dict)
     ]
     required_examples = select_required_structure_examples(
@@ -285,7 +275,7 @@ def resolve_motion_reference_examples(
         normalize_emotion_key=normalize_emotion_key,
     )
     user_capacity = max(0, count - len(required_examples))
-    user_example_count = int(getattr(runtime_state, "motion_tuning_user_fewshot_count", 0))
+    user_example_count = int(runtime_state.motion_tuning_user_fewshot_count)
     user_example_count = max(0, min(3, user_capacity, user_example_count))
     selected_user_examples = select_relevant_user_examples(
         candidates=raw_user_examples,
@@ -336,11 +326,10 @@ def resolve_motion_reference_examples(
             "motion_tuning_fewshot_final_shortage:"
             f"requested={count}:final_count={len(resolved_examples)}"
         )
-    if update_runtime_state and hasattr(runtime_state, "motion_tuning_fewshot_diagnostics"):
-        runtime_state.motion_tuning_fewshot_diagnostics = diagnostics
-    if update_runtime_state and hasattr(runtime_state, "motion_tuning_effective_examples"):
-        runtime_state.motion_tuning_effective_examples = list(resolved_examples)
-    return resolved_examples
+    return {
+        "examples": resolved_examples,
+        "diagnostics": diagnostics,
+    }
 
 
 def select_relevant_user_examples(

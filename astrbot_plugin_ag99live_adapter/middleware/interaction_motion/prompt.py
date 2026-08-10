@@ -35,7 +35,7 @@ class AG99liveMotionPromptContributor:
         static_capability_payload = _build_motion_static_capability_payload(
             bundle.runtime_state
         )
-        runtime_payload = _build_motion_runtime_payload(
+        runtime_payload, reference_diagnostics = _build_motion_runtime_payload(
             event,
             bundle.turn_coordinator,
             bundle.runtime_state,
@@ -47,6 +47,7 @@ class AG99liveMotionPromptContributor:
             event=event,
             capability_payload=static_capability_payload,
             runtime_payload=runtime_payload,
+            reference_diagnostics=reference_diagnostics,
         )
 
         extensions = [
@@ -101,7 +102,7 @@ def append_official_inline_motion_prompt(event: Any, request: Any) -> bool:
 
     bundle.runtime_state.ag99live_motion_persona_effect_available = False
     capability_payload = _build_motion_static_capability_payload(bundle.runtime_state)
-    runtime_payload = _build_motion_runtime_payload(
+    runtime_payload, reference_diagnostics = _build_motion_runtime_payload(
         event,
         bundle.turn_coordinator,
         bundle.runtime_state,
@@ -113,6 +114,7 @@ def append_official_inline_motion_prompt(event: Any, request: Any) -> bool:
         event=event,
         capability_payload=capability_payload,
         runtime_payload=runtime_payload,
+        reference_diagnostics=reference_diagnostics,
         source_route="official_inline_anim_compat",
     )
 

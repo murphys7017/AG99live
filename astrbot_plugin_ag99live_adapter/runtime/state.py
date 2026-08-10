@@ -27,6 +27,10 @@ from ..motion.action_llm_filter import (
     parse_action_filter_decision,
 )
 from ..motion.performance_curve import PerformanceCurveRuntime
+from ..prompts.motion_selector import (
+    MotionReferenceExamplesResolution,
+    resolve_motion_reference_examples,
+)
 from ..live2d.cache.runtime_cache import (
     build_live2d_directory_md5,
     load_live2d_runtime_cache,
@@ -65,12 +69,14 @@ class RuntimeState:
         client_uid: str,
         live2ds_dir: Any,
         runtime_cache_dir: Path | None = None,
+        state_dir: Path | None = None,
     ) -> None:
         self.platform_config = platform_config
         self.host = host
         self.http_port = http_port
         self.live2ds_dir = live2ds_dir
         self.runtime_cache_dir = Path(runtime_cache_dir) if runtime_cache_dir is not None else None
+        self.state_dir = Path(state_dir) if state_dir is not None else None
         self.client_uid = normalize_client_uid(client_uid, DEFAULT_CLIENT_UID)
         self.client_nickname = DEFAULT_CLIENT_NICKNAME
 
@@ -97,11 +103,13 @@ class RuntimeState:
         self.runtime_cache_root_error = ""
         self.runtime_cache_segment_errors: dict[str, str] = {}
         self._motion_tuning_store = MotionTuningStore(
-            runtime_state=self,
+            storage_path=(
+                self.state_dir / "motion_tuning_samples.json"
+                if self.state_dir is not None
+                else None
+            ),
             get_selected_profile=self._get_selected_semantic_axis_profile,
             get_turn_context=self._get_motion_lab_turn_context,
-            ensure_cache_writable=self._raise_if_runtime_cache_error_active,
-            persist_cache=self._persist_runtime_cache_payload,
         )
         self.motion_lab_recorder = self._build_motion_lab_recorder()
         self.vad_model = "silero_vad"
@@ -122,14 +130,14 @@ class RuntimeState:
         self._base_action_filter_cache = self._load_action_filter_cache_from_payload(
             self._runtime_cache_payload
         )
-        self._motion_tuning_store.load_from_payload(self._runtime_cache_payload)
+        self._motion_tuning_store.load()
         self.last_sent_model_signature: str | None = None
 
     def _build_motion_lab_recorder(self) -> MotionLabRecorder | None:
-        if self.runtime_cache_dir is None:
+        if self.state_dir is None:
             return None
         return MotionLabRecorder(
-            store=MotionLabRawEventStore(self.runtime_cache_dir / "motion_lab.sqlite3"),
+            store=MotionLabRawEventStore(self.state_dir / "motion_lab.sqlite3"),
             batch_size=20,
         )
 
@@ -145,46 +153,6 @@ class RuntimeState:
             turn_id=turn_id,
             message_id=message_id,
         )
-
-    @property
-    def motion_tuning_samples(self) -> list[dict[str, Any]]:
-        return self._motion_tuning_store.samples
-
-    @motion_tuning_samples.setter
-    def motion_tuning_samples(self, value: list[dict[str, Any]]) -> None:
-        self._motion_tuning_store.samples = value
-
-    @property
-    def motion_tuning_samples_load_error(self) -> str:
-        return self._motion_tuning_store.samples_load_error
-
-    @motion_tuning_samples_load_error.setter
-    def motion_tuning_samples_load_error(self, value: str) -> None:
-        self._motion_tuning_store.samples_load_error = str(value or "")
-
-    @property
-    def motion_tuning_reference_examples(self) -> list[dict[str, Any]]:
-        return self._motion_tuning_store.reference_examples
-
-    @motion_tuning_reference_examples.setter
-    def motion_tuning_reference_examples(self, value: list[dict[str, Any]]) -> None:
-        self._motion_tuning_store.reference_examples = value
-
-    @property
-    def motion_tuning_fewshot_diagnostics(self) -> list[str]:
-        return self._motion_tuning_store.fewshot_diagnostics
-
-    @motion_tuning_fewshot_diagnostics.setter
-    def motion_tuning_fewshot_diagnostics(self, value: list[str]) -> None:
-        self._motion_tuning_store.fewshot_diagnostics = value
-
-    @property
-    def motion_tuning_effective_examples(self) -> list[dict[str, Any]]:
-        return self._motion_tuning_store.effective_examples
-
-    @motion_tuning_effective_examples.setter
-    def motion_tuning_effective_examples(self, value: list[dict[str, Any]]) -> None:
-        self._motion_tuning_store.effective_examples = value
 
     async def load_default_persona(self) -> None:
         if self.plugin_context is None:
@@ -538,7 +506,10 @@ class RuntimeState:
         return self._motion_tuning_store.list_samples()
 
     def get_motion_tuning_samples_load_error(self) -> str:
-        return self.motion_tuning_samples_load_error
+        return self._motion_tuning_store.samples_load_error
+
+    def get_motion_tuning_store_root_error(self) -> str:
+        return "" if self.state_dir is not None else "motion_tuning_store_path_unavailable"
 
     def get_runtime_cache_root_error(self) -> str:
         return self.runtime_cache_root_error
@@ -547,10 +518,17 @@ class RuntimeState:
         return dict(self.runtime_cache_segment_errors)
 
     def list_motion_tuning_fewshot_diagnostics(self) -> list[str]:
-        return self._motion_tuning_store.list_fewshot_diagnostics()
+        resolution = self._resolve_motion_reference_examples()
+        return [
+            *self._motion_tuning_store.list_fewshot_diagnostics(),
+            *resolution["diagnostics"],
+        ]
 
     def list_effective_motion_tuning_examples(self) -> list[dict[str, Any]]:
-        return self._motion_tuning_store.list_effective_examples()
+        return self._resolve_motion_reference_examples()["examples"]
+
+    def list_motion_tuning_reference_examples(self) -> list[dict[str, Any]]:
+        return self._motion_tuning_store.list_reference_examples()
 
     def save_motion_tuning_sample(self, sample_payload: Any) -> dict[str, Any]:
         return self._motion_tuning_store.save_sample(sample_payload)
@@ -560,6 +538,15 @@ class RuntimeState:
 
     def _refresh_motion_tuning_reference_examples_from_samples(self) -> None:
         self._motion_tuning_store.refresh_reference_examples()
+
+    def _resolve_motion_reference_examples(
+        self,
+        request_text: str = "",
+    ) -> MotionReferenceExamplesResolution:
+        return resolve_motion_reference_examples(
+            runtime_state=self,
+            request_text=request_text,
+        )
 
     def should_send_model_payload(self, signature: str, *, force: bool = False) -> bool:
         if force:
@@ -1040,9 +1027,6 @@ class RuntimeState:
             for key, value in load_errors.items()
             if key != "root" and str(value).strip()
         }
-        self.motion_tuning_samples_load_error = str(
-            load_errors.get("motion_tuning_samples") or ""
-        ).strip()
         return payload
 
     @staticmethod
@@ -1213,9 +1197,6 @@ class RuntimeState:
             )
             return
         self._runtime_cache_payload["action_filter_cache"] = deepcopy(self._base_action_filter_cache)
-        self._runtime_cache_payload["motion_tuning_samples"] = deepcopy(
-            self.motion_tuning_samples
-        )
         if self._live2d_runtime_cache_path is None:
             return
         save_live2d_runtime_cache(self._live2d_runtime_cache_path, self._runtime_cache_payload)
@@ -1228,8 +1209,6 @@ class RuntimeState:
         }
         if self.runtime_cache_root_error:
             payload["root"] = self.runtime_cache_root_error
-        if self.motion_tuning_samples_load_error:
-            payload["motion_tuning_samples"] = self.motion_tuning_samples_load_error
         return payload
 
     def _get_runtime_cache_blocking_error(self) -> str:
@@ -1242,23 +1221,6 @@ class RuntimeState:
                 if str(key).strip() and str(value).strip()
             )
         return ""
-
-    def _raise_if_runtime_cache_error_active(self) -> None:
-        if self.runtime_cache_root_error:
-            raise ValueError(
-                "runtime_cache_root_error_active: "
-                f"{self.runtime_cache_root_error}"
-            )
-        if self.runtime_cache_segment_errors:
-            joined_errors = "; ".join(
-                f"{key}={value}"
-                for key, value in sorted(self.runtime_cache_segment_errors.items())
-                if str(key).strip() and str(value).strip()
-            )
-            raise ValueError(
-                "runtime_cache_segment_error_active: "
-                f"{joined_errors}"
-            )
 
     @staticmethod
     def _clone_plugin_config(config: Any) -> Any:
