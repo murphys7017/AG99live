@@ -83,7 +83,7 @@ sequenceDiagram
             Clock-->>Engine: 可用的 segment-scoped 时间上下文
             SDK->>SDK: 采样 plan / speech gesture / dynamics
             Lip->>SDK: 同一音频 source 的 active state + RMS mouth value
-            SDK->>SDK: ParameterMixer 统一写入口型；零值保持闭嘴 ownership
+            SDK->>SDK: ActiveParameterMixer 统一写入口型；零值保持闭嘴 ownership
         end
 
         alt Audio ended

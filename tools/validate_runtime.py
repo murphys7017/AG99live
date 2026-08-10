@@ -40,8 +40,6 @@ STATE_TERMS = [
     "assumptions:",
     "architecture:",
     "verification:",
-    "checks_run:",
-    "validation_gap:",
 ]
 
 

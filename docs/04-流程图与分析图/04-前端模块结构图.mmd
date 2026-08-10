@@ -14,7 +14,7 @@ flowchart TB
         CONN[useAdapterConnection.ts<br/>连接 facade]:::boundary
         TRANS[core/transport<br/>WebSocket 生命周期]:::boundary
         INBOUND[inbound/**<br/>manifest 握手 / 严格解析 / 原子提交]:::boundary
-        ARUN[runtime/**<br/>audio queues / settlement / UI bridge]:::boundary
+        ARUN[runtime/**<br/>audio execution adapter / settlement / UI projection]:::boundary
         MSYNC[model-sync/**<br/>live2d_scan.v3 能力与缓存诊断状态]:::boundary
         CONN --> TRANS
         CONN --> INBOUND
@@ -69,7 +69,7 @@ flowchart TB
         PREVIEW[usePreviewMotionPlayer<br/>run ownership / watchdog]:::sdk
         ADAPTER[Live2D adapter<br/>start plan / catalog motion]:::sdk
         LIPLIVE[lipSyncTimelineSink<br/>WebAudio RMS / mouth write]:::sdk
-        WEBSDK[WebSDK/lappmodel.ts<br/>base snapshot / direct source / Parameter Mixer]:::sdk
+        WEBSDK[WebSDK/lappmodel.ts<br/>base snapshot / direct source / ActiveParameterMixer]:::sdk
         CUBISM[Cubism Model / Physics / Renderer]:::sdk
         PREVIEW --> ADAPTER --> WEBSDK --> CUBISM
         LIPLIVE --> WEBSDK

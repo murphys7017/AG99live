@@ -1,9 +1,9 @@
 task:
-  class: feature
+  class: refactor
   risk: high
-  phase: completion
+  phase: review
   status: complete
-  scope: "Move semantic sequence timing and speech-gesture composition into one ModelEngine parameter track graph compiler while preserving engine.parameter_plan.v3 and existing runtime ownership."
+  scope: "Remove mixed persistence and duplicated runtime ownership across Adapter storage, frontend audio lifecycle, Motion Tuning prompt state, and active parameter mixing without adding fallback layers."
 
 context:
   confidence: high
@@ -12,9 +12,12 @@ context:
     - Manual observation, model tuning, and live runtime acceptance are not implementation backlog.
     - The first parameter track graph is a compile-time ModelEngine structure, not a second runtime graph engine or player.
     - The graph emits the existing engine.parameter_plan.v3 keyframes and modulation fields; no protocol migration is required.
-    - ParameterMixer remains a per-frame contribution mixer and does not acquire semantic timing ownership.
+    - ActiveParameterMixer remains a per-frame contribution mixer and does not acquire semantic timing ownership.
     - Deeper dynamics and Physics work, Motion Lab editing, small-model training, VTS semantic export, remote-operator separation, cross-host deployment, and release packaging belong to phase two or later.
     - Obsolete documents, code, tests, protocol versions, and migration history are deleted rather than retained as compatibility guidance.
+    - Public media, disposable caches, and durable Motion Lab or Motion Tuning data must use separate directories and failure domains.
+    - PlaybackTimeline remains the authoritative frontend execution lifecycle; SessionStore stores its settled projection and AdapterConnection does not own a parallel audio terminal state machine.
+    - Cubism native motion, expression, drag, blink, and breath remain the base layer; ActiveParameterMixer owns AG99 active overlays before Cubism Physics.
 
 architecture:
   phase_boundary:
@@ -26,7 +29,7 @@ architecture:
     - The Adapter projects Live2D capabilities, validates motion intent, binds identities, and emits one atomic output.segment.v3.
     - SessionStore owns settled protocol facts; PlaybackTimeline owns the segment clock and required sink lifecycle.
     - ModelEngine compiles engine.motion_intent.v4 into CompiledSemanticMotion and engine.parameter_plan.v3.
-    - ParameterPresentation and ParameterMixer produce one active parameter frame before Cubism Physics.
+    - ParameterPresentation and ActiveParameterMixer produce one active parameter frame before Cubism Physics.
     - Live2D WebSDK owns final parameter writes, lip sync, Physics, model update, and rendering.
   identity:
     turn_id: Conversation turn identity shared across AstrBot, Adapter, frontend, and Motion Lab.
@@ -46,7 +49,7 @@ architecture:
   ownership_rules:
     - The main model is the only source of semantic motion direction and level.
     - Optional performance curves never block TTS, segment release, or base motion playback.
-    - ParameterMixer combines resolved active contributions and does not interpret semantic levels or own Timeline state.
+    - ActiveParameterMixer combines resolved active contributions and does not interpret semantic levels or own Timeline state.
     - Cubism Physics output parameters are never directly driven by semantic motion or active-parameter smoothing.
     - Invalid identity, schema, timing, binding, or lifecycle state fails visibly instead of activating a fallback path.
 
@@ -56,14 +59,14 @@ verification:
     - Automated tests are low-confidence boundary smoke checks and are not end-to-end evidence.
     - Live Electron, AstrBot, TTS, and Live2D observation is user-led acceptance, not unfinished implementation work.
   current_checks:
-    - `npm run typecheck:renderer` passed.
-    - A focused coordinated parameter-track input/output probe passed during implementation; its large fixture was deliberately not retained.
-    - The existing minimal `npm run test:model-engine` boundary smoke passed after test cleanup.
-    - Audio completion detaches the HTMLAudioElement clock into Timeline audio-tail continuation, so residual motion retains a monotonic segment clock after speech ends.
-    - Source review confirms sequence graph ownership moved out of compileModelParameterPlan and speech modulation ownership moved out of ModelParameterBindingStage.
-    - The semantic schedule retains its existing duration; short per-parameter windows compress locally, and only the terminal transition/residual/blend-out tail can extend the plan.
-    - Changed documentation links resolve and stale unfinished-track-graph wording is absent.
-    - git diff --check reports no whitespace errors.
+    - Python source compilation completed with python -m compileall astrbot_plugin_ag99live_adapter.
+    - Renderer and WebSDK TypeScript checks completed successfully.
+    - Minimal AI runtime validation and git diff whitespace validation completed successfully.
+    - Source call paths were reviewed from Adapter persistence and Prompt selection through PlaybackTimeline, ModelEngine, ActiveParameterMixer, Cubism Physics, and rendering.
+    - Obsolete Live2D runtime cache schemas now invalidate and rebuild instead of activating a permanent write-blocking root error.
+    - Motion reference selection diagnostics are recorded by Motion Lab without entering the model Prompt.
+    - Audio duration changes are emitted once per value, and playback teardown closes Timeline ownership before releasing the bound ModelEngine runtime.
+    - Live AstrBot, Electron, TTS, audio playback, lip sync, and Live2D observation were not executed in this change set.
 
 backlog:
   phase_two:

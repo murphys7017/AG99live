@@ -42,7 +42,7 @@ flowchart TB
     ADAPTER --> AUDIOSTATE
     ADAPTER --> ATC
     PLAYBACK -->|创建并绑定| BROWSERAUDIO
-    ADAPTER -->|提供 text/audio sinks 与 UI ports| TL
+    ADAPTER -->|提供 text/audio execution ports| TL
     TL -->|启动 segment audio sink| ATC
     ATC --> BROWSERAUDIO
     ATC --> LIPRUNTIME
@@ -65,6 +65,7 @@ flowchart TB
     PROJ -->|project execution facts| STORE
     STORE -.完整 segment 唯一素材源.-> TL
     TL -->|motion sink start| ENGINE
+    TL -->|duration ready / audio started<br/>经应用组合层直达| ENGINE
     MODELSYNC -->|selected model / profile| ENGINE
     ENGINE -->|parameter plan| PLAYER
     PLAYER -->|Live2D adapter| MODEL[当前 Live2D Model Instance]:::resource

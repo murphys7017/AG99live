@@ -188,7 +188,7 @@ sequenceDiagram
             opt audio.state = present
                 Audio->>Lip: 实时 RMS / 口型值与 source 活跃状态
                 Lip->>SDK: 提交 source-scoped 口型信号
-                SDK->>SDK: SpeechSignalRuntime -> ParameterMixer<br/>统一解析并写入口型参数
+                SDK->>SDK: SpeechSignalRuntime -> ActiveParameterMixer<br/>统一解析并写入口型参数
                 Audio-->>Timeline: completed / failed / interrupted
                 Lip-->>Timeline: completed / failed / interrupted<br/>可选 sink 终态
             end

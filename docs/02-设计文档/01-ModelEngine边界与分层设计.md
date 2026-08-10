@@ -150,9 +150,9 @@ ModelEngine 先把 `-4..4` 等级确定性采样为轴值，再由关系图计�
 
 `SpeechPoseStage` 是 compile extension。它根据 `ag99.voice_following_profile.v3`、segment identity 和音频时长生成按语义轴登记的确定性 `speech_gesture_track`。V3 只提供 semantic axis、相对 `max_speech_offset` 的有效幅度比例和跟随延迟；参数绑定、范围和动力学由 `ModelParameterBindingStage` 统一处理。
 
-当前实现仍从 `calm_explain / lively_chat / gentle_support / emphatic` 四套固定控制点中选择，
-再按整段时长拉伸。canonical assistant text 尚未进入 motion compile context，因此
-分句、停顿和重音事件不是当前已实现能力。后续替换方案见
+当前实现读取 canonical assistant text、标点、短语长度和真实音频时长，生成确定性的非周期 phrase 轨道；
+它已经不再从四套整段固定控制点中选择。当前仍没有 TTS phoneme 或声学停顿的显式时间戳，因此 phrase
+只是在统一音频时长内进行文本驱动的相对编排，不应描述成逐字或逐音素同步。后续优化见
 [动作表现优化实施方案](./15-动作表现优化实施方案.md)。
 
 职责边界：
