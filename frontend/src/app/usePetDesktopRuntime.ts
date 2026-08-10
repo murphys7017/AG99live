@@ -5,7 +5,6 @@ import {
   onMounted,
   provide,
   reactive,
-  ref,
   watch,
   type ComputedRef,
   type InjectionKey,
@@ -277,8 +276,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       adapter.pushHistory("error", message);
     });
   });
-  const motionTimelineSink = playbackTimelineMotionRuntime.motionTimelineSink;
-  conversationPlayback.bindMotionTimelineSink(motionTimelineSink);
+  conversationPlayback.bindMotionTimelineRuntime(playbackTimelineMotionRuntime);
 
   const turnPlaybackOrchestrator = useTurnPlaybackOrchestrator({
     sessionStore,
@@ -428,7 +426,6 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     stopMotionLabReconnectWatch();
     adapter.setMotionLabRawEventRecordedHandler(null);
     motionLabOutboundQueue.dispose();
-    playbackTimelineMotionRuntime.dispose();
     pushToTalk.dispose();
     bilibiliLive.dispose();
     playbackCoordinator.resetPlaybackCoordination();

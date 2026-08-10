@@ -17,27 +17,8 @@ import {
   projectMotionPlaybackClockReader,
   type MotionTimelineRunTracker,
 } from "../playback-integrations/modelEngineMotionSink.js";
-import {
-  createAudioMotionTimelineBridge,
-  type AudioMotionTimelineBridge,
-} from "../playback-timeline/audioMotionStartBridge.js";
 
-export type PlaybackTimelineWiringPort = PlaybackTimelineRuntime<NormalizedMotionPayload> & {
-  setAudioTimelineDurationReadyHandler: (
-    handler: ((
-      turnId: string | null,
-      messageId: string,
-      playbackTimeline: PlaybackTimelineSnapshot,
-    ) => void) | null,
-  ) => void;
-  setAudioTimelineStartedHandler: (
-    handler: ((
-      turnId: string | null,
-      messageId: string,
-      playbackTimeline: PlaybackTimelineSnapshot | null,
-    ) => void) | null,
-  ) => void;
-};
+export type PlaybackTimelineWiringPort = PlaybackTimelineRuntime<NormalizedMotionPayload>;
 export interface PlaybackTimelineMotionEnginePort {
   ingestNormalizedPayload: PlaybackTimelineMotionSink["start"];
   interruptPlaybackSegment(turnId: string | null, messageId: string, reason: string): void;
@@ -62,6 +43,16 @@ export function createAppPlaybackTimelineRuntime(options: {
     "start" | "interrupt"
   >;
   audioSink: PlaybackTimelineAudioSink;
+  onAudioTimelineStarted: (
+    turnId: string | null,
+    messageId: string,
+    playbackTimeline: PlaybackTimelineSnapshot,
+  ) => void;
+  onAudioTimelineDurationReady: (
+    turnId: string | null,
+    messageId: string,
+    playbackTimeline: PlaybackTimelineSnapshot,
+  ) => void;
 }): PlaybackTimelineWiringPort {
   const { sessionStore, adapterPlayback } = options;
   const runtime = createPlaybackTimelineRuntime<NormalizedMotionPayload>({
@@ -95,20 +86,13 @@ export function createAppPlaybackTimelineRuntime(options: {
       markMotionCompleted: sessionStore.markMotionCompleted,
       markMotionFailed: sessionStore.markMotionFailed,
     },
-    onAudioTimelineStarted: adapterPlayback.notifyAudioTimelineStarted,
-    onAudioTimelineDurationReady:
-      adapterPlayback.notifyAudioTimelineDurationReady,
+    onAudioTimelineStarted: options.onAudioTimelineStarted,
+    onAudioTimelineDurationReady: options.onAudioTimelineDurationReady,
   });
 
   adapterPlayback.initializeAudioRuntime(runtime, options.audioSink);
 
-  return {
-    ...runtime,
-    setAudioTimelineDurationReadyHandler:
-      adapterPlayback.setAudioTimelineDurationReadyHandler,
-    setAudioTimelineStartedHandler:
-      adapterPlayback.setAudioTimelineStartedHandler,
-  };
+  return runtime;
 }
 
 export function createPlaybackTimelineMotionRunTracker(
@@ -133,7 +117,16 @@ export function configurePlaybackTimelineMotionRuntime(options: {
   ) => string;
 }): {
   motionTimelineSink: PlaybackTimelineMotionSink;
-  dispose: () => void;
+  handleAudioTimelineStarted: (
+    turnId: string | null,
+    messageId: string,
+    playbackTimeline: PlaybackTimelineSnapshot,
+  ) => void;
+  handleAudioTimelineDurationReady: (
+    turnId: string | null,
+    messageId: string,
+    playbackTimeline: PlaybackTimelineSnapshot,
+  ) => void;
 } {
   const {
     playbackTimeline,
@@ -142,70 +135,85 @@ export function configurePlaybackTimelineMotionRuntime(options: {
     getCanonicalAssistantText,
   } = options;
 
-  const audioMotionBridge: AudioMotionTimelineBridge =
-    createAudioMotionTimelineBridge({
-      getPlaybackTimelineSnapshotForSegment: playbackTimeline.getTimelineSnapshotForSegment,
-      onMissingPlaybackTimeline,
-      handlePlaybackTimelineStarted: (turnId, messageId, preparedTimeline) => {
-        const timelineClockReader = playbackTimeline.getTimelineClockReaderForSegment(
-          turnId,
-          messageId,
-        );
-        if (!timelineClockReader) {
-          throw new Error("Audio-backed motion requires its segment Timeline clock reader.");
-        }
-        return motionEngine.handlePlaybackTimelineStarted(
-          projectMotionPlaybackClock(preparedTimeline),
-          projectMotionPlaybackClockReader(timelineClockReader),
-          getCanonicalAssistantText(turnId, messageId),
-        );
-      },
-    });
+  function handleAudioTimelineStarted(
+    turnId: string | null,
+    messageId: string,
+    preparedTimeline: PlaybackTimelineSnapshot,
+  ): void {
+    const normalizedTurnId = turnId?.trim() ?? "";
+    const normalizedMessageId = messageId.trim();
+    if (!normalizedTurnId || !normalizedMessageId) {
+      throw new Error("Audio-backed motion requires turnId and messageId.");
+    }
+    const currentTimeline = playbackTimeline.getTimelineSnapshotForSegment(
+      normalizedTurnId,
+      normalizedMessageId,
+    );
+    if (!currentTimeline || currentTimeline.timelineId !== preparedTimeline.timelineId) {
+      onMissingPlaybackTimeline?.(normalizedTurnId, normalizedMessageId);
+      return;
+    }
+    const motionSink = currentTimeline.sinks.find((sink) => sink.id === "motion");
+    if (!motionSink || motionSink.terminal !== "idle") {
+      return;
+    }
+    const timelineClockReader = playbackTimeline.getTimelineClockReaderForSegment(
+      normalizedTurnId,
+      normalizedMessageId,
+    );
+    if (!timelineClockReader) {
+      throw new Error("Audio-backed motion requires its segment Timeline clock reader.");
+    }
+    motionEngine.handlePlaybackTimelineStarted(
+      projectMotionPlaybackClock(currentTimeline),
+      projectMotionPlaybackClockReader(timelineClockReader),
+      getCanonicalAssistantText(normalizedTurnId, normalizedMessageId),
+    );
+  }
 
-  playbackTimeline.setAudioTimelineStartedHandler((turnId, messageId) => {
-    audioMotionBridge.handleAudioTimelineStarted(turnId, messageId);
-  });
-  playbackTimeline.setAudioTimelineDurationReadyHandler(
-    (turnId, messageId, preparedTimeline) => {
-      console.info("[ModelEngine] audio timeline duration ready for motion preparation.", {
+  function handleAudioTimelineDurationReady(
+    turnId: string | null,
+    messageId: string,
+    preparedTimeline: PlaybackTimelineSnapshot,
+  ): void {
+    console.info("[ModelEngine] audio timeline duration ready for motion preparation.", {
+      turnId,
+      messageId,
+      timelineId: preparedTimeline.timelineId,
+      phase: preparedTimeline.phase,
+      clockSource: preparedTimeline.clockSource,
+      durationMs: preparedTimeline.durationMs,
+      sinks: preparedTimeline.sinks,
+    });
+    const result = motionEngine.preparePlaybackTimeline(
+      projectMotionPlaybackClock(preparedTimeline),
+      getCanonicalAssistantText(turnId, messageId),
+    );
+    if (result.status === "not_applicable") {
+      return;
+    }
+    if (result.status === "failed") {
+      console.error("[ModelEngine] motion preparation failed.", {
         turnId,
         messageId,
-        timelineId: preparedTimeline.timelineId,
-        phase: preparedTimeline.phase,
-        clockSource: preparedTimeline.clockSource,
-        durationMs: preparedTimeline.durationMs,
-        sinks: preparedTimeline.sinks,
+        source: result.source ?? "unknown",
+        reason: result.reason,
       });
-      const result = motionEngine.preparePlaybackTimeline(
-        projectMotionPlaybackClock(preparedTimeline),
-        getCanonicalAssistantText(turnId, messageId),
-      );
-      if (result.status === "not_applicable") {
-        return;
-      }
-      if (result.status === "failed") {
-        console.error("[ModelEngine] motion preparation failed.", {
-          turnId,
-          messageId,
-          source: result.source ?? "unknown",
-          reason: result.reason,
-        });
-        return;
-      }
-      const registered = playbackTimeline.ensureMotionTimelineSinkForSegment(
+      return;
+    }
+    const registered = playbackTimeline.ensureMotionTimelineSinkForSegment(
+      turnId,
+      messageId,
+      (reason) => motionEngine.interruptPlaybackSegment(
         turnId,
         messageId,
-        (reason) => motionEngine.interruptPlaybackSegment(
-          turnId,
-          messageId,
-          reason,
-        ),
-      );
-      if (!registered) {
-        throw new Error("Prepared motion could not register its timeline sink.");
-      }
-    },
-  );
+        reason,
+      ),
+    );
+    if (!registered) {
+      throw new Error("Prepared motion could not register its timeline sink.");
+    }
+  }
 
   const motionTimelineSink = createModelEngineMotionTimelineSink({
     motionEngine,
@@ -217,9 +225,7 @@ export function configurePlaybackTimelineMotionRuntime(options: {
 
   return {
     motionTimelineSink,
-    dispose() {
-      playbackTimeline.setAudioTimelineDurationReadyHandler(null);
-      playbackTimeline.setAudioTimelineStartedHandler(null);
-    },
+    handleAudioTimelineStarted,
+    handleAudioTimelineDurationReady,
   };
 }

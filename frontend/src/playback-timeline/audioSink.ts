@@ -122,8 +122,11 @@ async function startBrowserAudioPlayback(
   const syncDurationFromElement = (): boolean => {
     const durationSeconds = Number(audio.duration);
     if (Number.isFinite(durationSeconds) && durationSeconds > 0) {
-      resolvedDurationMs = Math.round(durationSeconds * 1000);
-      callbacks.onDurationChanged?.(resolvedDurationMs);
+      const nextDurationMs = Math.round(durationSeconds * 1000);
+      if (resolvedDurationMs !== nextDurationMs) {
+        resolvedDurationMs = nextDurationMs;
+        callbacks.onDurationChanged?.(resolvedDurationMs);
+      }
       resolveDurationReady();
       return true;
     }

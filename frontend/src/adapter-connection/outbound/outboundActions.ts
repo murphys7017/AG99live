@@ -40,7 +40,6 @@ export interface MotionLabRawEventPayload {
  */
 export interface OutboundActionState {
   currentTurnId: string | null;
-  audioPlaybackTerminalTurnId: string | null;
   desktopScreenshotOnSendEnabled: boolean;
   lastError: string;
   statusMessage: string;
@@ -58,7 +57,6 @@ export interface OutboundActionContext {
   outboundClient: AdapterOutboundClient;
   pushHistory: (role: string, text: string) => void;
   stopAudioAndSettleTurn: (turnId: string | null, reason: string) => void;
-  resetAudioPlaybackTerminal: () => void;
   findOpenAudioSegment: () => { turnId: string | null; messageId: string } | null;
   findOpenExecutionSegment: () => { turnId: string | null; messageId: string } | null;
   markTurnInterrupted: (turnId: string | null) => void;
@@ -111,7 +109,6 @@ export async function sendText(ctx: OutboundActionContext, text: string): Promis
     return false;
   }
   ctx.state.currentTurnId = turnId;
-  ctx.resetAudioPlaybackTerminal();
   ctx.state.lastError = "";
   ctx.state.statusMessage = desktopCapture
     ? "文本和实时桌面截图已发送，等待后端回复。"
@@ -198,7 +195,6 @@ export function interruptCurrentTurn(ctx: OutboundActionContext): boolean {
   }
 
   ctx.stopAudioAndSettleTurn(interruptTurnId, "audio_playback_interrupted");
-  ctx.resetAudioPlaybackTerminal();
 
   if (!ctx.outboundClient.send("control.interrupt", {}, interruptTurnId)) {
     ctx.state.lastError = "当前还没有连上适配器，无法发送中断。";
@@ -276,7 +272,7 @@ export function sendMotionLabRawEvent(
  * 收到 turn_finished 之后清理与该 turn 关联的播放组上下文。
  *
  * 三件事：若该 turn 仍是活跃音频归属，调用 stopAudioAndSettleTurn 写回段终态并停播；
- * 若该 turn 还是 currentTurnId，置空；若任一终态/活跃/活跃组与该 turn 匹配，重置音频终态记录。
+ * 若该 turn 还是 currentTurnId，置空。音频与动作终态由 Timeline/Session 持有。
  * 不发协议消息，纯本地状态清理。
  */
 export function clearPlaybackGroupContext(
@@ -302,9 +298,4 @@ export function clearPlaybackGroupContext(
     ctx.state.currentTurnId = null;
   }
 
-  const matchesTerminalAudio =
-    normalizeTurnIdForComparison(ctx.state.audioPlaybackTerminalTurnId) === normalizedTurnId;
-  if (matchesTerminalAudio || matchesOpenAudio || matchesActiveGroup) {
-    ctx.resetAudioPlaybackTerminal();
-  }
 }

@@ -30,9 +30,6 @@ import {
 } from "./runtime/microphoneRuntime.js";
 import type { PlaybackTimelineAudioSink } from "../playback-timeline/audioSink.js";
 import type {
-  PlaybackTimelineSnapshot,
-} from "../playback-timeline/contracts.js";
-import type {
   PlaybackTimelineRuntime,
 } from "../playback-timeline/playbackTimelineRuntime.js";
 import {
@@ -73,16 +70,6 @@ import { createAdapterInboundRuntime } from "./inbound/adapterInboundRuntime.js"
 type SessionStore = ReturnType<typeof useTurnPlaybackSessionStore>;
 type AdapterHistory = ReturnType<typeof useAdapterHistory>;
 type AdapterMotionTuning = ReturnType<typeof useAdapterMotionTuning>;
-type AudioTimelineStartedHandler = (
-  turnId: string | null,
-  messageId: string,
-  playbackTimeline: PlaybackTimelineSnapshot | null,
-) => void;
-type AudioTimelineDurationReadyHandler = (
-  turnId: string | null,
-  messageId: string,
-  playbackTimeline: PlaybackTimelineSnapshot,
-) => void;
 
 export interface AdapterConnectionInstance {
   readonly state: DeepReadonly<ReturnType<typeof createAdapterConnectionState>>;
@@ -150,14 +137,6 @@ export interface AdapterPlaybackCompositionPort {
     runtime: PlaybackTimelineRuntime<NormalizedMotionPayload>,
     audioSink: PlaybackTimelineAudioSink,
   ) => void;
-  notifyAudioTimelineDurationReady: AudioTimelineDurationReadyHandler;
-  notifyAudioTimelineStarted: AudioTimelineStartedHandler;
-  setAudioTimelineDurationReadyHandler: (
-    handler: AudioTimelineDurationReadyHandler | null,
-  ) => void;
-  setAudioTimelineStartedHandler: (
-    handler: AudioTimelineStartedHandler | null,
-  ) => void;
 }
 
 interface CreateAdapterConnectionOptions {
@@ -184,8 +163,6 @@ export function createAdapterConnection(
   let historyAdapter: AdapterHistory | null = null;
   let motionTuningAdapter: AdapterMotionTuning | null = null;
   let motionLabRawEventRecordedHandler: ((eventId: string) => void) | null = null;
-  let audioTimelineStartedHandler: AudioTimelineStartedHandler | null = null;
-  let audioTimelineDurationReadyHandler: AudioTimelineDurationReadyHandler | null = null;
   let detachPttHookStatusListener: (() => void) | null = null;
   let audioRuntime: AdapterAudioRuntime | null = null;
 
@@ -275,10 +252,6 @@ export function createAdapterConnection(
     });
   }
 
-  function resetAudioPlaybackTerminal(): void {
-    requireAudioRuntime().resetAudioPlaybackTerminal();
-  }
-
   function stopAudioAndSettleTurn(turnId: string | null, reason: string): void {
     requireAudioRuntime().stopAudioAndSettleTurn(turnId, reason);
   }
@@ -304,7 +277,6 @@ export function createAdapterConnection(
     pushHistory: pushHistory as (role: string, text: string) => void,
     stopAudioAndSettleTurn: (turnId, reason) =>
       stopAudioAndSettleTurn(turnId, reason),
-    resetAudioPlaybackTerminal: () => resetAudioPlaybackTerminal(),
     findActiveAudioSegment: () => findActiveAudioSegment(),
     acknowledgeMotionLabRawEventPersisted: (eventId) =>
       motionLabRawEventRecordedHandler?.(eventId),
@@ -325,7 +297,6 @@ export function createAdapterConnection(
     pushHistory: pushHistory as (role: string, text: string) => void,
     stopAudioAndSettleTurn: (turnId: string | null, reason: string) =>
       stopAudioAndSettleTurn(turnId, reason),
-    resetAudioPlaybackTerminal,
     findOpenAudioSegment: () => findOpenAudioSegment(),
     findOpenExecutionSegment: () => requireAudioRuntime().findOpenExecutionSegment(),
     markTurnInterrupted: (turnId: string | null) => {
@@ -541,7 +512,6 @@ export function createAdapterConnection(
       stopAudioAndSettleAll,
       historyAdapter,
       modelSyncAdapter: modelSync,
-      resetAudioPlaybackTerminal,
     });
   }
 
@@ -677,34 +647,6 @@ export function createAdapterConnection(
     motionLabRawEventRecordedHandler = handler;
   }
 
-  function setAudioTimelineStartedHandler(
-    handler: typeof audioTimelineStartedHandler,
-  ): void {
-    audioTimelineStartedHandler = handler;
-  }
-
-  function setAudioTimelineDurationReadyHandler(
-    handler: typeof audioTimelineDurationReadyHandler,
-  ): void {
-    audioTimelineDurationReadyHandler = handler;
-  }
-
-  function notifyAudioTimelineStarted(
-    turnId: string | null,
-    messageId: string,
-    playbackTimeline: PlaybackTimelineSnapshot | null,
-  ): void {
-    audioTimelineStartedHandler?.(turnId, messageId, playbackTimeline);
-  }
-
-  function notifyAudioTimelineDurationReady(
-    turnId: string | null,
-    messageId: string,
-    playbackTimeline: PlaybackTimelineSnapshot,
-  ): void {
-    audioTimelineDurationReadyHandler?.(turnId, messageId, playbackTimeline);
-  }
-
   async function sendPlaybackFinished(
     turnId: string | null,
     success: boolean,
@@ -787,10 +729,6 @@ export function createAdapterConnection(
       failAssistantTextForPlayback,
       releaseAudioForTimelinePlayback,
       initializeAudioRuntime,
-      notifyAudioTimelineDurationReady,
-      notifyAudioTimelineStarted,
-      setAudioTimelineDurationReadyHandler,
-      setAudioTimelineStartedHandler,
     },
   };
 }

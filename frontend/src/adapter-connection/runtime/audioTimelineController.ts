@@ -22,11 +22,9 @@ import type {
 } from "../../playback-timeline/playbackTimelineRuntime.js";
 import {
   startAudioSegmentAndBridgeState,
-  stopAudioSegmentAndBridgeState,
   stopAudioSegmentAndBridgeStateForSegment,
   type AudioPlaybackStateBridgeContext,
   type AudioPlaybackState,
-  type AudioPlaybackTerminalState,
 } from "./audioPlaybackStateBridge.js";
 
 export interface AdapterAudioTimelineControllerDeps<TMotionPayload = unknown> {
@@ -37,13 +35,6 @@ export interface AdapterAudioTimelineControllerDeps<TMotionPayload = unknown> {
   createLipSyncRuntime?: (
     callbacks: PlaybackTimelineLipSyncRuntimeCallbacks,
   ) => PlaybackTimelineLipSyncRuntime;
-  markTerminal: (
-    terminalState: Exclude<AudioPlaybackTerminalState, "idle">,
-    turnId: string | null,
-    reason?: string,
-    messageId?: string | null,
-  ) => void;
-  resetTerminal: () => void;
 }
 
 export function createAdapterAudioTimelineController<TMotionPayload = unknown>(
@@ -94,8 +85,6 @@ export function createAdapterAudioTimelineController<TMotionPayload = unknown>(
     },
     audioSegmentRunner,
     pushHistory: deps.pushHistory,
-    markTerminal: deps.markTerminal,
-    resetTerminal: deps.resetTerminal,
   };
 
   return {
@@ -110,9 +99,6 @@ export function createAdapterAudioTimelineController<TMotionPayload = unknown>(
       turnId,
       messageId,
     ),
-    stopAudioPlayback: () => {
-      stopAudioSegmentAndBridgeState(audioPlaybackStateBridgeCtx);
-    },
     stopAudioPlaybackForSegment: (
       turnId: string | null,
       messageId: string | null,

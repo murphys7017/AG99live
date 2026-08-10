@@ -14,16 +14,20 @@ import type {
 import type { useTurnPlaybackSessionStore } from "../turn-playback/useTurnPlaybackSessionStore.js";
 import {
   createAppPlaybackTimelineRuntime,
+  type configurePlaybackTimelineMotionRuntime,
   type PlaybackTimelineWiringPort,
 } from "./playbackTimelineWiring.js";
 
 type SessionStore = ReturnType<typeof useTurnPlaybackSessionStore>;
+type PlaybackTimelineMotionRuntime = ReturnType<
+  typeof configurePlaybackTimelineMotionRuntime
+>;
 
 export interface ConversationPlaybackRuntime {
   adapter: AdapterConnectionInstance;
   playbackTimeline: PlaybackTimelineWiringPort;
-  bindMotionTimelineSink: (
-    motionSink: PlaybackTimelineSegmentMotionSink<NormalizedMotionPayload>,
+  bindMotionTimelineRuntime: (
+    motionRuntime: PlaybackTimelineMotionRuntime,
   ) => void;
 }
 
@@ -32,19 +36,19 @@ export function createConversationPlaybackRuntime(options: {
   modelSync: ModelSyncInstance;
   normalizeMotionPayload: MotionPayloadNormalizer;
 }): ConversationPlaybackRuntime {
-  let motionTimelineSink: PlaybackTimelineSegmentMotionSink<NormalizedMotionPayload> | null = null;
+  let motionRuntime: PlaybackTimelineMotionRuntime | null = null;
+  function requireMotionRuntime(): PlaybackTimelineMotionRuntime {
+    if (!motionRuntime) {
+      throw new Error("ModelEngine motion runtime is not initialized.");
+    }
+    return motionRuntime;
+  }
   const requiredMotionTimelineSink: PlaybackTimelineSegmentMotionSink<NormalizedMotionPayload> = {
     start(payload, context) {
-      if (!motionTimelineSink) {
-        throw new Error("ModelEngine motion timeline sink is not initialized.");
-      }
-      return motionTimelineSink.start(payload, context);
+      return requireMotionRuntime().motionTimelineSink.start(payload, context);
     },
     interrupt(turnId, messageId, reason) {
-      if (!motionTimelineSink) {
-        throw new Error("ModelEngine motion timeline sink is not initialized.");
-      }
-      motionTimelineSink.interrupt(turnId, messageId, reason);
+      requireMotionRuntime().motionTimelineSink.interrupt(turnId, messageId, reason);
     },
   };
   const adapter: AdapterConnectionCompositionInstance = createAdapterConnection({
@@ -57,21 +61,31 @@ export function createConversationPlaybackRuntime(options: {
     adapterPlayback: adapter.playback,
     motionSink: requiredMotionTimelineSink,
     audioSink: createBrowserAudioTimelineSink(),
+    onAudioTimelineStarted: (turnId, messageId, timeline) => {
+      requireMotionRuntime().handleAudioTimelineStarted(turnId, messageId, timeline);
+    },
+    onAudioTimelineDurationReady: (turnId, messageId, timeline) => {
+      requireMotionRuntime().handleAudioTimelineDurationReady(
+        turnId,
+        messageId,
+        timeline,
+      );
+    },
   });
 
   onScopeDispose(() => {
-    motionTimelineSink = null;
     adapter.dispose();
+    motionRuntime = null;
   });
 
   return {
     adapter,
     playbackTimeline,
-    bindMotionTimelineSink(nextSink) {
-      if (motionTimelineSink) {
-        throw new Error("ModelEngine motion timeline sink may only be bound once.");
+    bindMotionTimelineRuntime(nextRuntime) {
+      if (motionRuntime) {
+        throw new Error("ModelEngine motion runtime may only be bound once.");
       }
-      motionTimelineSink = nextSink;
+      motionRuntime = nextRuntime;
     },
   };
 }

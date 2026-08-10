@@ -29,7 +29,6 @@ export interface AdapterInboundRuntimeDeps {
   getModelSyncAdapter: () => ModelSyncInstance | null;
   pushHistory: (role: string, text: string) => void;
   stopAudioAndSettleTurn: (turnId: string | null, reason: string) => void;
-  resetAudioPlaybackTerminal: () => void;
   findActiveAudioSegment: () => { turnId: string | null; messageId: string } | null;
   acknowledgeMotionLabRawEventPersisted: (eventId: string) => void;
   startMicrophoneCapture: (origin?: "manual" | "ptt" | "auto") => Promise<boolean>;
@@ -156,7 +155,6 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
       rewriteHttpUrl: (url) => rewriteHttpUrl(url),
       stopAudioAndSettleTurn: (turnId, reason) =>
         deps.stopAudioAndSettleTurn(turnId, reason),
-      resetAudioPlaybackTerminal: () => deps.resetAudioPlaybackTerminal(),
       reportRuntimeProtocolViolation,
       findActiveAudioSegment: () => deps.findActiveAudioSegment(),
       normalizeMotionPayload: deps.normalizeMotionPayload,

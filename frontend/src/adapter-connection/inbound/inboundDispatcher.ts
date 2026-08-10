@@ -93,7 +93,6 @@ export interface InboundDispatchDeps {
   rewriteHttpUrl: (rawUrl: string | null) => string;
   // audio
   stopAudioAndSettleTurn: (turnId: string | null, reason: string) => void;
-  resetAudioPlaybackTerminal: () => void;
   findActiveAudioSegment: () => { turnId: string | null; messageId: string } | null;
   reportRuntimeProtocolViolation: (message: string) => void;
   normalizeMotionPayload: (payload: unknown) => { ok: true; payload: NormalizedMotionPayload } | { ok: false };

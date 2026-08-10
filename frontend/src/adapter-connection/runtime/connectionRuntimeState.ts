@@ -5,10 +5,6 @@ export interface ConnectionRuntimeState {
   activeWsAddress: string;
   micRequested: boolean;
   micCapturing: boolean;
-  audioPlaybackStartedTurnId: string | null;
-  audioPlaybackStartedMessageId: string | null;
-  audioPlaybackStartedAtMs: number;
-  audioPlaybackDurationMs: number | null;
   assistantTextDeliveryTurnId: string | null;
   turnFinishedTurnId: string | null;
   turnFinishedSuccess: boolean;
@@ -22,7 +18,6 @@ export interface ConnectionRuntimeDeps {
   stopAudioAndSettleAll: (reason: string) => void;
   historyAdapter: { resetHistoryState: () => void } | null;
   modelSyncAdapter: { resetModelSyncState: () => void } | null;
-  resetAudioPlaybackTerminal: () => void;
 }
 
 export function resetConnectionRuntimeState(deps: ConnectionRuntimeDeps): void {
@@ -36,11 +31,6 @@ export function resetConnectionRuntimeState(deps: ConnectionRuntimeDeps): void {
   s.activeWsAddress = "";
   s.micRequested = false;
   s.micCapturing = false;
-  s.audioPlaybackStartedTurnId = null;
-  s.audioPlaybackStartedMessageId = null;
-  s.audioPlaybackStartedAtMs = 0;
-  s.audioPlaybackDurationMs = null;
-  deps.resetAudioPlaybackTerminal();
   s.assistantTextDeliveryTurnId = null;
   s.turnFinishedTurnId = null;
   s.turnFinishedSuccess = true;

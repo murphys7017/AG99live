@@ -70,7 +70,7 @@ export interface PlaybackTimelineRuntimeDeps<TMotionPayload = unknown> {
   onAudioTimelineStarted?: (
     turnId: string | null,
     messageId: string,
-    playbackTimeline: PlaybackTimelineSnapshot | null,
+    playbackTimeline: PlaybackTimelineSnapshot,
   ) => void;
   onAudioTimelineDurationReady?: (
     turnId: string | null,
@@ -598,11 +598,11 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
       );
       return false;
     }
-    deps.onAudioTimelineStarted?.(
-      turnId,
-      messageId,
-      engine.getSnapshot(),
-    );
+    const snapshot = engine.getSnapshot();
+    if (!snapshot) {
+      throw new Error("Playback timeline snapshot missing after audio start.");
+    }
+    deps.onAudioTimelineStarted?.(turnId, messageId, snapshot);
     return true;
   }
 

@@ -38,7 +38,6 @@ export interface InboundRuntimeDispatchDeps {
   } | undefined;
   pushHistory: (role: string, text: string) => void;
   stopAudioAndSettleTurn: (turnId: string | null, reason: string) => void;
-  resetAudioPlaybackTerminal: () => void;
   findActiveAudioSegment: () => { turnId: string | null; messageId: string } | null;
   startMicrophoneCapture: (origin?: "manual" | "ptt" | "auto") => Promise<boolean>;
   reportRuntimeProtocolViolation: (message: string) => void;
@@ -94,7 +93,6 @@ function applyTurnStarted(
   s.currentTurnId = event.turnId;
   deps.sessionStore?.setActiveSession(s.currentTurnId);
   deps.sessionStore?.markTurnStarted(s.currentTurnId);
-  deps.resetAudioPlaybackTerminal();
   s.turnFinishedTurnId = null;
   s.turnFinishedSuccess = true;
   s.turnFinishedReason = "";
@@ -151,7 +149,6 @@ function applyInterrupt(
     return;
   }
   deps.stopAudioAndSettleTurn(interruptedTurnId, "audio_playback_interrupted");
-  deps.resetAudioPlaybackTerminal();
   if (s.currentTurnId === interruptedTurnId) {
     s.currentTurnId = null;
   }

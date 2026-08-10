@@ -4,17 +4,9 @@ import type {
 
 export interface AudioPlaybackState {
   isPlayingAudio: boolean;
-  audioPlaybackStartedTurnId: string | null;
-  audioPlaybackStartedMessageId: string | null;
-  audioPlaybackStartedAtMs: number;
-  audioPlaybackDurationMs: number | null;
-  audioPlaybackTerminalState: AudioPlaybackTerminalState;
-  audioPlaybackTerminalReason: string;
   statusMessage: string;
   lastError: string;
 }
-
-export type AudioPlaybackTerminalState = "idle" | "completed" | "failed" | "absent";
 
 function resolveAudioBridgeFailureReason(error: unknown): string {
   const name = error instanceof Error
@@ -38,13 +30,6 @@ export interface AudioPlaybackStateBridgeContext {
   state: AudioPlaybackState;
   audioSegmentRunner: PlaybackTimelineAudioSegmentRunner;
   pushHistory: (role: string, text: string) => void;
-  markTerminal: (
-    terminalState: "completed" | "failed" | "absent",
-    turnId: string | null,
-    reason?: string,
-    messageId?: string | null,
-  ) => void;
-  resetTerminal: () => void;
 }
 
 export async function startAudioSegmentAndBridgeState(
@@ -53,100 +38,44 @@ export async function startAudioSegmentAndBridgeState(
   turnId: string | null,
   messageId: string,
 ): Promise<void> {
-  stopAudioSegmentAndBridgeState(ctx);
-  ctx.resetTerminal();
-  ctx.state.isPlayingAudio = true;
-  ctx.state.audioPlaybackStartedTurnId = turnId;
-  ctx.state.audioPlaybackStartedMessageId = messageId;
-  ctx.state.audioPlaybackStartedAtMs = 0;
-  ctx.state.audioPlaybackDurationMs = null;
-  ctx.state.statusMessage = "收到语音回复，正在播放。";
+  ctx.state.isPlayingAudio = false;
+  ctx.state.statusMessage = "收到语音回复，正在准备播放。";
   ctx.pushHistory("system", ctx.state.statusMessage);
 
   try {
     await ctx.audioSegmentRunner.start(audioUrl, turnId, messageId, {
-      onDurationChanged: (durationMs) => {
-        ctx.state.audioPlaybackDurationMs = durationMs;
-      },
       onPlaybackStarted: (event) => {
-        ctx.state.audioPlaybackStartedTurnId = turnId;
-        ctx.state.audioPlaybackStartedMessageId = messageId;
-        ctx.state.audioPlaybackStartedAtMs = event.startedAtMs;
+        ctx.state.isPlayingAudio = true;
+        ctx.state.statusMessage = "收到语音回复，正在播放。";
         console.info(
           "[Connection] audio playback started. turn_id=",
           turnId,
           "duration_ms=",
-          ctx.state.audioPlaybackDurationMs,
+          event.durationMs,
         );
       },
       onEnded: () => {
-        const completedTurnId = ctx.state.audioPlaybackStartedTurnId ?? turnId;
-        const completedMessageId = ctx.state.audioPlaybackStartedMessageId ?? messageId;
         ctx.state.isPlayingAudio = false;
-        ctx.state.audioPlaybackStartedTurnId = null;
-        ctx.state.audioPlaybackStartedMessageId = null;
-        ctx.state.audioPlaybackStartedAtMs = 0;
-        ctx.state.audioPlaybackDurationMs = null;
-        ctx.markTerminal(
-          "completed",
-          completedTurnId,
-          "audio_playback_completed",
-          completedMessageId,
-        );
       },
       onError: (reason) => {
-        const failedTurnId = ctx.state.audioPlaybackStartedTurnId ?? turnId;
-        const failedMessageId = ctx.state.audioPlaybackStartedMessageId ?? messageId;
         ctx.state.isPlayingAudio = false;
-        ctx.state.audioPlaybackStartedTurnId = null;
-        ctx.state.audioPlaybackStartedMessageId = null;
-        ctx.state.audioPlaybackStartedAtMs = 0;
-        ctx.state.audioPlaybackDurationMs = null;
         ctx.state.lastError = reason === "audio_autoplay_blocked"
           ? "浏览器拒绝自动播放语音。"
           : "音频播放失败。";
         ctx.state.statusMessage = "语音播放失败，已回传结束状态。";
         ctx.pushHistory("error", "音频播放失败。");
-        ctx.markTerminal(
-          "failed",
-          failedTurnId,
-          reason,
-          failedMessageId,
-        );
       },
     });
   } catch (error) {
     console.error("[Connection] audio playback start failed.", error);
     ctx.state.isPlayingAudio = false;
-    ctx.state.audioPlaybackStartedTurnId = null;
-    ctx.state.audioPlaybackStartedMessageId = null;
-    ctx.state.audioPlaybackStartedAtMs = 0;
-    ctx.state.audioPlaybackDurationMs = null;
     const reason = resolveAudioBridgeFailureReason(error);
     ctx.state.lastError = reason === "audio_autoplay_blocked"
       ? "浏览器拒绝自动播放语音。"
       : "音频播放失败。";
     ctx.state.statusMessage = "语音播放失败，已回传结束状态。";
     ctx.pushHistory("error", ctx.state.lastError);
-    ctx.markTerminal(
-      "failed",
-      turnId,
-      reason,
-      messageId,
-    );
   }
-}
-
-export function stopAudioSegmentAndBridgeState(
-  ctx: AudioPlaybackStateBridgeContext,
-  reason = "audio_playback_stopped",
-): void {
-  stopAudioSegmentAndBridgeStateForSegment(
-    ctx,
-    ctx.state.audioPlaybackStartedTurnId,
-    ctx.state.audioPlaybackStartedMessageId,
-    reason,
-  );
 }
 
 export function stopAudioSegmentAndBridgeStateForSegment(
@@ -155,35 +84,19 @@ export function stopAudioSegmentAndBridgeStateForSegment(
   messageId: string | null,
   reason = "audio_playback_stopped",
 ): void {
-  const interruptedTurnId = turnId;
-  const interruptedMessageId = messageId;
-  const wasPlayingAudio = ctx.state.isPlayingAudio;
-  const shouldMarkInterruptedTerminal =
-    ctx.state.audioPlaybackTerminalState === "idle";
   ctx.audioSegmentRunner.stop(
-    interruptedTurnId,
-    interruptedMessageId,
+    turnId,
+    messageId,
     reason,
   );
-  if (interruptedMessageId && shouldMarkInterruptedTerminal) {
-    ctx.markTerminal(
-      "failed",
-      interruptedTurnId,
-      reason,
-      interruptedMessageId,
-    );
-  } else if (!interruptedMessageId && wasPlayingAudio) {
+  if (!messageId && ctx.state.isPlayingAudio) {
     console.error(
       "[Connection] audio playback stopped without segment identity; timeline was not interrupted.",
       {
-        turnId: interruptedTurnId,
-        messageId: interruptedMessageId,
+        turnId,
+        messageId,
       },
     );
   }
   ctx.state.isPlayingAudio = false;
-  ctx.state.audioPlaybackStartedTurnId = null;
-  ctx.state.audioPlaybackStartedMessageId = null;
-  ctx.state.audioPlaybackStartedAtMs = 0;
-  ctx.state.audioPlaybackDurationMs = null;
 }

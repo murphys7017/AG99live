@@ -10,7 +10,6 @@ import type {
 } from "../../types/desktop.js";
 import type { SystemServerInfoPayload } from "../../types/protocol.js";
 import type { MicrophoneDeviceInfo } from "../runtime/microphoneDevices.js";
-import type { AudioPlaybackTerminalState } from "../runtime/audioPlaybackStateBridge.js";
 import {
   loadDesktopScreenshotOnSendEnabled,
   loadStoredAdapterAddress,
@@ -58,13 +57,6 @@ export function createAdapterConnectionState() {
     activeBackendHistoryUid: "",
     backendHistoryLoading: false,
     backendHistoryStatusMessage: "等待历史窗口请求后端历史。",
-    audioPlaybackStartedTurnId: null as string | null,
-    audioPlaybackStartedMessageId: null as string | null,
-    audioPlaybackStartedAtMs: 0,
-    audioPlaybackDurationMs: null as number | null,
-    audioPlaybackTerminalState: "idle" as AudioPlaybackTerminalState,
-    audioPlaybackTerminalTurnId: null as string | null,
-    audioPlaybackTerminalReason: "",
     assistantTextDeliveryTurnId: null as string | null,
     turnFinishedTurnId: null as string | null,
     turnFinishedSuccess: true,

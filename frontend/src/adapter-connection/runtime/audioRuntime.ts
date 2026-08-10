@@ -10,7 +10,6 @@ import type { PlaybackTimelineSnapshot } from "../../playback-timeline/contracts
 import {
   createAdapterAudioTimelineController,
 } from "./audioTimelineController.js";
-import type { AudioPlaybackTerminalState } from "./audioPlaybackStateBridge.js";
 import {
   createAdapterAudioSettlementController,
 } from "./audioSettlementController.js";
@@ -18,16 +17,8 @@ import type { NormalizedMotionPayload } from "../../playback-integrations/motion
 
 export interface AdapterAudioRuntimeState {
   isPlayingAudio: boolean;
-  currentTurnId: string | null;
   statusMessage: string;
   lastError: string;
-  audioPlaybackStartedTurnId: string | null;
-  audioPlaybackStartedMessageId: string | null;
-  audioPlaybackStartedAtMs: number;
-  audioPlaybackDurationMs: number | null;
-  audioPlaybackTerminalState: AudioPlaybackTerminalState;
-  audioPlaybackTerminalTurnId: string | null;
-  audioPlaybackTerminalReason: string;
 }
 
 export interface AdapterAudioRuntimeDeps {
@@ -54,7 +45,6 @@ export interface AdapterAudioRuntime {
   startSegmentJob: PlaybackTimelineRuntime<NormalizedMotionPayload>["startSegmentJob"];
   rejectAudioBeforeStart: PlaybackTimelineRuntime<NormalizedMotionPayload>["rejectAudioBeforeStart"];
   rejectMotionBeforeStart: PlaybackTimelineRuntime<NormalizedMotionPayload>["rejectMotionBeforeStart"];
-  resetAudioPlaybackTerminal: () => void;
   stopAudioAndSettleTurn: (turnId: string | null, reason: string) => void;
   stopAudioAndSettleAll: (reason: string) => void;
   findActiveAudioSegment: () => ActiveAudioSegment | null;
@@ -90,8 +80,6 @@ export function createAdapterAudioRuntime(
     playbackTimelineRuntime: deps.playbackTimelineRuntime,
     pushHistory: deps.pushHistory,
     createLipSyncRuntime: deps.createLipSyncRuntime,
-    markTerminal: markAudioPlaybackTerminalState,
-    resetTerminal: resetAudioPlaybackTerminal,
   });
   const { playbackTimelineRuntime } = timelineController;
   const {
@@ -106,23 +94,6 @@ export function createAdapterAudioRuntime(
     findOpenExecutionTimelineSegments,
     getTimelineSnapshotForSegment: getPlaybackTimelineSnapshotForSegment,
   } = playbackTimelineRuntime;
-
-  function markAudioPlaybackTerminalState(
-    terminalState: Exclude<AudioPlaybackTerminalState, "idle">,
-    turnId: string | null,
-    reason = "",
-    _messageId: string | null = null,
-  ): void {
-    deps.state.audioPlaybackTerminalState = terminalState;
-    deps.state.audioPlaybackTerminalTurnId = turnId;
-    deps.state.audioPlaybackTerminalReason = reason;
-  }
-
-  function resetAudioPlaybackTerminal(): void {
-    deps.state.audioPlaybackTerminalState = "idle";
-    deps.state.audioPlaybackTerminalTurnId = null;
-    deps.state.audioPlaybackTerminalReason = "";
-  }
 
   async function startAudioSegmentPlayback(
     audioUrl: string,
@@ -180,7 +151,6 @@ export function createAdapterAudioRuntime(
     startSegmentJob,
     rejectAudioBeforeStart,
     rejectMotionBeforeStart,
-    resetAudioPlaybackTerminal,
     stopAudioAndSettleTurn: audioSettlementController.stopAudioAndSettleTurn,
     stopAudioAndSettleAll: audioSettlementController.stopAudioAndSettleAll,
     findActiveAudioSegment,
