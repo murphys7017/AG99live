@@ -1,15 +1,31 @@
-# frontend
+# AG99live Frontend
 
-AG99live 的 Electron + Vue 客户端。
+AG99live 的 Electron + Vue 桌面客户端。前端负责桌面窗口、协议接收、统一播放生命周期、动作编译、
+Live2D 参数执行和创作工具，不负责对话模型、TTS 生成或后端 Turn 队列。
 
-## 能力概览
+## 主要边界
 
-- 桌宠窗口（Pet）
-- 设置窗口
-- 历史窗口
-- Action Lab（动作计划预览与测试）
-- 与 Adapter 的 V2 协议通信
-- 前端 ModelEngine：将 `engine.motion_intent.v4` 编译为 `CompiledSemanticMotion`，再编译为携带参数响应策略的 `engine.parameter_plan.v3`
+```text
+Adapter WebSocket v2
+-> output.segment.v3 严格校验
+-> TurnPlaybackSessionStore 原子提交协议事实
+-> PlaybackTimeline 管理字幕、音频、动作和口型生命周期
+-> ModelEngine 编译 engine.motion_intent.v4
+-> engine.parameter_plan.v3
+-> Live2D WebSDK 逐帧参数融合、Physics 和绘制
+```
+
+- `adapter-connection/`：握手、协议校验、入站分发和连接生命周期。
+- `turn-playback/`：Turn 与 Segment 的稳定协议事实和释放策略。
+- `playback-timeline/`：统一时钟、required sink 状态和执行终态。
+- `model-engine/`：语义动作与模型参数计划的两阶段编译。
+- `live2d/`、`live2d-renderer/`：模型加载、参数执行、口型、Cubism Physics 和渲染。
+- `motion-lab/`、`action-lab/`：动作观察、历史、预览和调校工具。
+- `desktop-bridge/`、`views/`：Electron 多窗口状态投影和用户界面。
+
+SessionStore 不播放媒体，PlaybackTimeline 不解释动作语义，ModelEngine 不创建播放时钟，WebSDK
+不读取 Turn 业务状态。非法协议、缺失时钟、编译失败或播放器拒绝都应形成明确失败，不使用默认动作
+或旧协议掩盖问题。
 
 ## 开发命令
 
@@ -19,24 +35,20 @@ npm install
 npm run dev
 ```
 
-常用：
+常用静态命令：
 
-- `npm run typecheck`
-- `npm run build`
-- `npm run build:web`
+```powershell
+npm run typecheck
+npm run build
+npm run build:web
+```
 
-## 当前动作播放特性
+自动测试只用于最基础的输入输出边界，不代表 AstrBot、TTS、Electron、音频和 Live2D 的端到端行为
+正确。真实播放效果仍需在完整运行环境中观察。
 
-- `TurnPlaybackSession` 作为前端播放轮次真源
-- 基于 `turn_id + message_id` 的文本 / 音频 / 动作软同步起播
-- 协议事件先写入 session，再由 `useTurnPlaybackOrchestrator` 统一释放
-- 音频 `playing` 仍会通知 `ModelEngine` 贴近音频起播动作；无音频和动作晚到场景有超时兜底
-- `synth_finished` 后同一 segment 的晚到音频可在最终结算前补齐；同段重复音频、已释放或已终态音频不会重复播放
-- `output.audio.audio_url` 会按当前适配器连接重写 host，再交给浏览器音频和 lip sync fetch；如果浏览器无声，应同时检查 WebSocket 和 Adapter HTTP 静态资源可达性
-- 本地播放完成与后端 `turn_finished` 已分离：先 `playback_finished`，再等后端收口
-- 计划软衔接（soft handoff）
-- 高频重复计划去重与重启节流
-- 设置窗口支持 ModelEngine 表现倍率：全局强度倍率参与语义 intent 编译
-- 动作实验室保存最近 5 次真实播放的 `CompiledSemanticMotion`，主轴调参和手动预览都从该第一阶段结果进入参数编译
-- Action Lab 参数动作原子池只用于查看参数参考，不再构造旧动作协议预览
-- 自动动作链路不直接播放 motion3 / exp3 / catalog motion；这些旧资源只作为分析、实验室、预览或 fallback pose 抽取来源
+## 相关文档
+
+- [项目总览与模块职责](../docs/01-架构与结构/01-项目总览与模块职责.md)
+- [播放同步编排设计](../docs/01-架构与结构/04-播放同步编排设计.md)
+- [ModelEngine 边界与分层设计](../docs/02-设计文档/01-ModelEngine边界与分层设计.md)
+- [流程图与分析图集](../docs/04-流程图与分析图/README.md)

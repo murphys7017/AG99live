@@ -25,6 +25,9 @@ flowchart TB
         FORCH[Release Policy<br/>TurnPlaybackOrchestrator]:::core
         FTL[Execution Lifecycle<br/>PlaybackTimeline]:::core
         FME[Motion Compiler<br/>ModelEngine]:::allowed
+        FDIR[Performance Director<br/>compile-time orchestration]:::allowed
+        FSCHEDULE[PerformanceSchedule<br/>internal DTO]:::allowed
+        FTRACK[Parameter Track Compiler<br/>schedule projection]:::allowed
         FLIVE[Presentation Adapter<br/>Live2D boundary]:::boundary
         FSDK[Cubism WebSDK]:::boundary
         FPORT[Pure Contracts / DTO<br/>protocol + compiled semantic motion]:::allowed
@@ -44,6 +47,10 @@ flowchart TB
         FTL --> FME
         FTL --> FLIVE
         FME --> FPORT
+        FME --> FDIR
+        FDIR --> FSCHEDULE
+        FSCHEDULE --> FTRACK
+        FTRACK --> FPORT
         FLIVE --> FSDK
     end
 
@@ -58,6 +65,7 @@ flowchart TB
         N6[Domain -> AstrBot/WebSocket/Electron<br/>领域规则不依赖框架]:::forbidden
         N7[CompletionCoordinator -> media player<br/>只负责 ACK]:::forbidden
         N8[多个模块 -> 同一 Session fact<br/>禁止第二写入者]:::forbidden
+        N9[Performance Director -> Timeline/WebSDK<br/>禁止创建第二时钟或播放器]:::forbidden
     end
 
     FME -.禁止.-> N1
@@ -68,5 +76,6 @@ flowchart TB
     BDOMAIN -.禁止.-> N6
     FORCH -.禁止.-> N7
     FFACT -.禁止.-> N8
+    FDIR -.禁止.-> N9
 
     RULE[判定方法<br/>跨层调用必须通过窄 port<br/>状态变化必须能指出唯一 owner<br/>适配器可以依赖 core port，core 不依赖适配器实现]:::allowed

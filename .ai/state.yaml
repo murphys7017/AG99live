@@ -1,14 +1,18 @@
 task:
-  class: bugfix
+  class: documentation
   risk: high
-  phase: review
-  status: ready_for_live_validation
-  scope: "Repair Turn/protocol invariants, expression release, parameter mixing ownership, Prompt reference selection, dependency boundaries, and runtime diagrams without adding fallback layers."
+  phase: documentation_cleanup
+  status: ready_for_review
+  scope: "Keep one current documentation truth for phase-one architecture, phase-two performance orchestration, and the independent VTS recorder; delete superseded plans and migration history."
 
 context:
   confidence: high
   assumptions:
     - Product phase one implementation is complete.
+    - Phase two optimizes complete character performance rather than treating gaze, face, Physics, Prompt, or motion range as independent product directions.
+    - Performance Director is a ModelEngine compile-time orchestration responsibility, not a second player, Timeline, parameter mixer, or backend motion service.
+    - The current structural gap is independent phrase and semantic-sequence scheduling; no broken duplicate playback or final parameter write path was found in this review.
+    - Phase A introduces one internal PerformanceSchedule while preserving motion intent v4, parameter plan v3, PlaybackTimeline, ParameterPresentation, ActiveParameterMixer, SpeechSignalRuntime, and Cubism Physics boundaries.
     - Manual observation, model tuning, and live runtime acceptance are not implementation backlog.
     - The first parameter track graph is a compile-time ModelEngine structure, not a second runtime graph engine or player.
     - The graph emits the existing engine.parameter_plan.v3 keyframes and modulation fields; no protocol migration is required.
@@ -55,16 +59,15 @@ architecture:
 
 verification:
   policy:
-    - Use focused source inspection, the narrow renderer typecheck, the existing ModelEngine boundary smoke, documentation link checks, and git diff review for this task.
+    - Use focused source inspection, documentation link checks, protocol-manifest validation, Mermaid source checks, and git diff review for documentation work.
     - Automated tests are low-confidence boundary smoke checks and are not end-to-end evidence.
     - Live Electron, AstrBot, TTS, and Live2D observation is user-led acceptance, not unfinished implementation work.
   current_checks:
-    - Python syntax compilation passed for the four touched Adapter modules.
-    - Renderer and WebSDK TypeScript checks passed after the shared compiled-motion DTO migration.
-    - git diff --check passed; no compatibility re-export or duplicate compiled-motion parser remains.
-    - Source paths were reviewed for Turn start/commit failure closure, protocol source identity, Prompt reference selection, expression fade-out, active parameter mixing, and Cubism frame order.
-    - Mermaid dependency, Turn state, action conversion, and Live2D lifecycle diagrams were aligned with the current source.
-    - Live AstrBot, Electron, TTS, audio playback, lip sync, expression fade, ParameterMixer output, and Live2D observation were not executed in this change set.
+    - The current AstrBot-to-Adapter-to-Timeline-to-ModelEngine-to-Cubism source path was re-traced for the phase-two performance orchestration review.
+    - Superseded action backlogs, implementation histories, ParameterMixer migration notes, duplicate architecture summaries, and the premature small-model target draft were removed.
+    - Documentation indexes, public READMEs, target dependency rules, and VTS recorder boundaries were aligned with the retained authority documents.
+    - Relative Markdown links, protocol schema manifest, Markdown fences, Mermaid file inventory, deleted-document references, and git diff whitespace were checked.
+    - No runtime code or live AstrBot, Electron, TTS, VTube Studio, or Live2D execution was changed or exercised in this documentation-only task.
 
 backlog:
   phase_two:

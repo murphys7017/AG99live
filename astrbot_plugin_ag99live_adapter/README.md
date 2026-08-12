@@ -1,6 +1,7 @@
 # astrbot_plugin_ag99live_adapter
 
-AG99live V2 的 AstrBot 插件侧实现。该目录负责协议桥接、turn 生命周期、媒体处理、Live2D 扫描，以及把中间件/主回复产生的动作载荷广播给前端。
+AG99live 的 AstrBot 插件侧实现。该目录负责协议桥接、Turn 生命周期、媒体处理、Live2D 扫描，
+以及把 Persona 回复产生的文本、TTS 和动作意图聚合为前端可消费的原子输出段。
 
 ## 核心职责
 
@@ -55,7 +56,8 @@ astrbot_plugin_ag99live_adapter/
 
 ### 统一主路径（middleware-first）
 
-- 主聊天模型只负责正常回复文本，不输出动作标签。
+- 主模型在同一次 Persona 回复中生成 `spoken_reply` 与唯一 `ag99live.motion` effect；动作不由第二个
+  对话模型或 TTS 阶段重新推断。
 - 交互中间件在 prompt contributor 中注入动作能力/运行态上下文，并注册 `ag99live.motion` Persona Effect；该 effect 只对具备 AG99live motion runtime 的直接前端会话开放，不进入其他平台或 Remote Operator 回灌事件的 Persona 契约。result contributor 从 `view.effect_calls` 消费该 effect 并返回 `client_objects`。
 - `ag99live.motion` 只属于 Persona 输出契约，不进入 Router；Router 不注册该 effect，也不把它当作 Agent Tool。
 - 后端从 `platform_extras` / `client_objects` 中读取动作载荷，并与文本、音频一起广播到前端。
