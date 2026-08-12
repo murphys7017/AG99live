@@ -11,6 +11,7 @@ from typing import Any, Callable
 from astrbot.api import logger
 from astrbot.api.provider import Provider, STTProvider
 
+from ..core_compatibility import supports_interaction_contributors
 from .client_profile import (
     DEFAULT_CLIENT_NICKNAME,
     DEFAULT_CLIENT_UID,
@@ -88,7 +89,7 @@ class RuntimeState:
         self.motion_analysis_provider_id = ""
         self.performance_curve_provider_id = ""
         self.enable_performance_curve = False
-        self.ag99live_motion_persona_effect_available = _supports_persona_effects(
+        self.ag99live_motion_persona_effect_available = supports_interaction_contributors(
             plugin_context
         )
         self.enable_action_llm_filter = True
@@ -1372,14 +1373,3 @@ def _plugin_config_get(config: Any, key: str, default: Any) -> Any:
         value = config.get(key, default)
         return default if value is None else value
     return default
-
-
-def _supports_persona_effects(plugin_context: Any) -> bool:
-    try:
-        from astrbot.core import interaction as interaction_module
-    except ImportError:
-        return False
-    return (
-        getattr(interaction_module, "PersonaEffectSpec", None) is not None
-        and callable(getattr(plugin_context, "register_persona_effect", None))
-    )

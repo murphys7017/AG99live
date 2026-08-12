@@ -100,7 +100,6 @@ def append_official_inline_motion_prompt(event: Any, request: Any) -> bool:
     if bundle is None:
         return False
 
-    bundle.runtime_state.ag99live_motion_persona_effect_available = False
     capability_payload = _build_motion_static_capability_payload(bundle.runtime_state)
     runtime_payload, reference_diagnostics = _build_motion_runtime_payload(
         event,

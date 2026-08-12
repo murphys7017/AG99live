@@ -1,8 +1,10 @@
 from typing import Any
 
+from ..core_compatibility import supports_interaction_contributors
+
 
 def register_ag99live_interaction_contributors(context: Any) -> bool:
-    if not _supports_interaction_contributors(context):
+    if not supports_interaction_contributors(context):
         return False
 
     from .interaction_motion import (
@@ -14,29 +16,6 @@ def register_ag99live_interaction_contributors(context: Any) -> bool:
     _register_motion_contributors(context)
     register_remote_operator_interaction_contributors(context)
     return True
-
-
-def _supports_interaction_contributors(context: Any) -> bool:
-    if not all(
-        callable(getattr(context, name, None))
-        for name in (
-            "register_interaction_prompt_contributor",
-            "register_interaction_result_contributor",
-            "register_persona_effect",
-        )
-    ):
-        return False
-
-    from . import interaction_motion
-
-    return (
-        interaction_motion.InteractionResultContribution is not None
-        and interaction_motion.PromptExtension is not None
-        and interaction_motion.PersonaEffectSpec is not None
-        and callable(interaction_motion.get_interaction_reply_plan)
-    )
-
-
 def _remove_existing_ag99live_interaction_contributors(context: Any) -> None:
     module_prefixes = _registration_module_prefixes()
     remover_names = (

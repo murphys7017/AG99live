@@ -20,24 +20,11 @@ from .scheduling import (
 
 
 def register_ag99live_interaction_contributors(context: Any) -> None:
-    if (
-        InteractionResultContribution is None
-        or PromptExtension is None
-        or PersonaEffectSpec is None
-        or not callable(get_interaction_reply_plan)
-        or not callable(getattr(context, "register_persona_effect", None))
-    ):
-        raise RuntimeError("astrbot_interaction_contributors_unavailable")
-
     _register_ag99live_motion_persona_effect(context)
-
-    register_prompt = getattr(context, "register_interaction_prompt_contributor", None)
-    if callable(register_prompt):
-        register_prompt(AG99liveMotionPromptContributor())
-
-    register_result = getattr(context, "register_interaction_result_contributor", None)
-    if callable(register_result):
-        register_result(AG99liveMotionResultContributor())
+    register_prompt = context.register_interaction_prompt_contributor
+    register_result = context.register_interaction_result_contributor
+    register_prompt(AG99liveMotionPromptContributor())
+    register_result(AG99liveMotionResultContributor())
 
 
 __all__ = [
