@@ -1,9 +1,9 @@
 task:
   class: documentation
   risk: high
-  phase: documentation_cleanup
-  status: ready_for_review
-  scope: "Keep one current documentation truth for phase-one architecture, phase-two performance orchestration, and the independent VTS recorder; delete superseded plans and migration history."
+  phase: phase_two_planning
+  status: implementation_ready
+  scope: "Implement phase-two performance orchestration in dependency order: shared schedule and phrase/sequence alignment first, body-part strategies second, Motion Lab evaluation third, and independent Physics setting diagnostics afterward."
 
 context:
   confidence: high
@@ -13,6 +13,9 @@ context:
     - Performance Director is a ModelEngine compile-time orchestration responsibility, not a second player, Timeline, parameter mixer, or backend motion service.
     - The current structural gap is independent phrase and semantic-sequence scheduling; no broken duplicate playback or final parameter write path was found in this review.
     - Phase A introduces one internal PerformanceSchedule while preserving motion intent v4, parameter plan v3, PlaybackTimeline, ParameterPresentation, ActiveParameterMixer, SpeechSignalRuntime, and Cubism Physics boundaries.
+    - Phase A first records estimated phrase-to-sequence alignment; motion intent v4 is not extended unless real runtime samples prove internal alignment insufficient.
+    - Gaze, face, hesitation, release, and residual are Schedule-consuming body-part strategies, not independent clocks or parallel dynamics systems.
+    - Physics setting diagnostics remain a separate model-level tuning phase and do not become Performance Director or ParameterMixer control logic.
     - Manual observation, model tuning, and live runtime acceptance are not implementation backlog.
     - The first parameter track graph is a compile-time ModelEngine structure, not a second runtime graph engine or player.
     - The graph emits the existing engine.parameter_plan.v3 keyframes and modulation fields; no protocol migration is required.
@@ -68,12 +71,16 @@ verification:
     - Documentation indexes, public READMEs, target dependency rules, and VTS recorder boundaries were aligned with the retained authority documents.
     - Relative Markdown links, protocol schema manifest, Markdown fences, Mermaid file inventory, deleted-document references, and git diff whitespace were checked.
     - No runtime code or live AstrBot, Electron, TTS, VTube Studio, or Live2D execution was changed or exercised in this documentation-only task.
+    - Current source was re-checked: SpeechPose owns phrase segmentation, Parameter Track Graph owns duration-weight step timing, body-part timing is currently fixed by semantic group, and Physics exposure is limited to file/count scanning plus a global terminal response scale.
 
 backlog:
   phase_two:
-    - Gaze, face, hesitation, and residual response policies beyond the completed head/body V3 dynamics.
-    - Explicit sequence-step to phrase identity after real data proves the required protocol shape.
-    - Cubism Physics setting diagnostics and model-level presentation profiles.
+    - Phase A1: internal PerformanceSchedule plus shared phrase analysis.
+    - Phase A2: sequence-step scheduling plus observable estimated phrase alignment.
+    - Phase A3: shared body-part timing events and Director/Motion Lab source diagnostics.
+    - Phase B: gaze, face, hesitation, release, and dynamic residual strategies consuming the shared Schedule.
+    - Consider explicit sequence-step phrase identity only after real data proves the internal alignment insufficient.
+    - Phase D: Cubism Physics setting diagnostics and model-level presentation profiles, independent from active parameter planning.
     - Motion Lab sequence editing, diversity summaries, and training-data workbench.
     - Small motion-model training and VTube Studio semantic labeling/export.
     - Remote-operator plugin separation, authenticated cross-host deployment, and release packaging.

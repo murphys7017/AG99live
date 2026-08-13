@@ -125,11 +125,11 @@ Adapter 使用 `turn_id + message_id` 聚合文本、TTS、动作和其他输出
 
 ### 4. ModelEngine 编译参数
 
-ModelEngine 读取当前模型的 `SemanticAxisProfile`，完成校验、九级采样、轴关系计算、说话随动轨道、参数绑定与响应策略编译，输出 `engine.parameter_plan.v3`。
+ModelEngine 读取当前模型的 `SemanticAxisProfile`，完成校验、九级采样、轴关系计算、说话随动轨道、参数绑定与响应策略编译，输出 `engine.parameter_plan.v3`；显式选择完整 motion resource 时，则输出受控的资源执行计划。
 
 ### 5. PlaybackTimeline 统一释放
 
-有音频时，动作和口型使用同一个 HTMLAudioElement 的真实时钟；音频失败、动作失败或口型失败都会留下明确终态。可选的 performance curve 只影响表现提示，不会阻塞文本、TTS 或基础动作播放。
+有音频时，动作和口型使用同一个 HTMLAudioElement 的真实时钟；增强版 AstrBot 链路会保留音频、动作和口型的明确终态。官方兼容模式没有 TTS 失败通知，只能根据最终是否存在 `Record` 投影音频为 `present / absent`。可选的 performance curve 只影响表现提示，不会阻塞文本、TTS 或基础动作播放。
 
 ### 6. Live2D runtime 逐帧执行
 

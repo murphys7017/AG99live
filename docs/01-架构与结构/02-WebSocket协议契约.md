@@ -232,8 +232,8 @@ Motion Lab 事件采用 at-least-once 交付：前端必须先把事件写入 In
 
 约束：
 
-- `intent_tags` 和 `axis_levels` 是主语义输入。
-- `axis_levels` 唯一合法形态是 `Record<string, -4|-3|-2|-1|0|1|2|3|4>`。
+- `intent_tags` 是必需语义输入；`axis_levels`、`motion_steps` 和 `motion_resource_id` 是三选一的执行形态。
+- `axis_levels` 唯一合法形态是 `Record<string, -4|-3|-2|-1|0|1|2|3|4>`；`motion_steps` 由 2–4 个同轴集合的等级步骤组成。
 - 省略轴表示本轮不控制，`0` 表示明确回到中性。
 - v4 出现 `axes`、非法等级、未知轴或缺失 profile 锚点时直接失败，不降级为 v3。
 - ModelEngine 使用 `SemanticAxisProfile.level_anchors` 转换等级，再进入关系图约束。
@@ -254,7 +254,6 @@ Motion Lab 事件采用 at-least-once 交付：前端必须先把事件写入 In
   "intent_tags": ["开心", "轻快", "看向用户"],
   "duration_hint_ms": 1000,
   "expression_resource_id": "expression.smile",
-  "motion_resource_id": "",
   "axis_levels": {
     "head_yaw": 1,
     "head_pitch": 1,
@@ -266,10 +265,12 @@ Motion Lab 事件采用 at-least-once 交付：前端必须先把事件写入 In
 }
 ```
 
-`expression_resource_id` 与 `motion_resource_id` 都是可选字段，但不能同时为非空值：
+未使用的 resource 字段必须省略，不能发送空字符串。`expression_resource_id` 与
+`motion_resource_id` 不能同时出现：
 
 - expression 资源可与不冲突的参数计划叠加。
-- motion 资源是完整动作主层，播放时替代普通参数计划。
+- motion 资源是完整动作主层，必须替代 `axis_levels` / `motion_steps` 和普通参数计划。
+- motion resource 不允许同时携带 expression resource、`duration_hint_ms` 或 performance curve hint。
 - 字段存在但资源不存在、类型不匹配、缺少参数所有权或运行时定位信息时，整个 motion segment 失败。
 - v4 不接受旧的单一 `resource_id`；官方 `<@anim>` 兼容运输同样使用 typed resource 字段。
 
