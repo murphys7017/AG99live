@@ -20,21 +20,31 @@ import {
 } from "./modelParameterCompileContext.js";
 import { normalizeModelEngineSettings } from "../settings.js";
 import { compileParameterSequenceTrackGraph } from "./parameterTrackGraphCompiler.js";
+import {
+  compilePerformanceSchedule,
+  type PerformanceSchedule,
+} from "./performanceSchedule.js";
 
 export function compileModelParameterPlan(
   semanticMotion: CompiledSemanticMotion,
   options: CompileOptions,
   stageRegistry: ModelEngineStageRegistry = createModelEngineStageRegistry(),
 ): CompileResult {
+  const performanceSchedule = compilePerformanceSchedule({
+    assistantText: options.assistantText,
+    durationMs: semanticMotion.timing.timing.duration_ms,
+  });
   if (semanticMotion.kind === "sequence") {
     return compileMotionSequenceIntent(
       semanticMotion,
+      performanceSchedule,
       options,
       stageRegistry,
     );
   }
   return compileModelParameterPose(
     semanticMotion,
+    performanceSchedule,
     options,
     stageRegistry,
   );
@@ -42,6 +52,7 @@ export function compileModelParameterPlan(
 
 function compileModelParameterPose(
   semanticMotion: Extract<CompiledSemanticMotion, { kind: "pose" }>,
+  performanceSchedule: PerformanceSchedule,
   options: CompileOptions,
   stageRegistry: ModelEngineStageRegistry,
 ): CompileResult {
@@ -49,6 +60,7 @@ function compileModelParameterPose(
   try {
     context = createModelParameterCompileContext(
       semanticMotion,
+      performanceSchedule,
       options,
       normalizeModelEngineSettings(options.settings),
     );
@@ -74,6 +86,7 @@ function compileModelParameterPose(
 
 function compileMotionSequenceIntent(
   semanticMotion: Extract<CompiledSemanticMotion, { kind: "sequence" }>,
+  performanceSchedule: PerformanceSchedule,
   options: CompileOptions,
   stageRegistry: ModelEngineStageRegistry,
 ): CompileResult {
@@ -85,6 +98,7 @@ function compileMotionSequenceIntent(
         axes: step.axes,
         diagnostics: step.diagnostics,
       },
+      performanceSchedule,
       {
         ...options,
         allowNeutralAxisPose: true,

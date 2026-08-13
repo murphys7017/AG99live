@@ -8,6 +8,7 @@ import type { CompiledSemanticMotion } from "../../types/compiledSemanticMotion.
 import type {
   CompileOptions,
 } from "./contracts.js";
+import type { PerformanceSchedule } from "./performanceSchedule.js";
 
 export interface ModelParameterCompileState {
   profile: SemanticAxisProfile;
@@ -29,6 +30,7 @@ export interface ModelParameterCompileState {
 
 export interface ModelParameterCompileContext {
   semanticMotion: Extract<CompiledSemanticMotion, { kind: "pose" }>;
+  performanceSchedule: PerformanceSchedule;
   options: CompileOptions;
   settings: ModelEngineSettings;
   state: ModelParameterCompileState;
@@ -45,6 +47,7 @@ export interface ModelParameterCompileStage {
 
 export function createModelParameterCompileContext(
   semanticMotion: Extract<CompiledSemanticMotion, { kind: "pose" }>,
+  performanceSchedule: PerformanceSchedule,
   options: CompileOptions,
   settings: ModelEngineSettings,
 ): ModelParameterCompileContext {
@@ -59,6 +62,7 @@ export function createModelParameterCompileContext(
   }
   return {
     semanticMotion,
+    performanceSchedule,
     options,
     settings,
     state: {

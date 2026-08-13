@@ -9,23 +9,21 @@ import type {
   ModelParameterCompileStage,
   ModelParameterStageResult,
 } from "../modelParameterCompileContext.js";
+import type { PerformancePhraseSlot } from "../performanceSchedule.js";
 
 type SpeechGesturePreset = NonNullable<
   SemanticParameterPlan["parameters"][number]["modulation"]
 >["preset"];
 
-type SpeechPhraseBoundary = "strong" | "soft" | "none";
-
-interface SpeechPhrase {
+interface SpeechGesturePhraseWindow {
   text: string;
-  boundary: SpeechPhraseBoundary;
-  weight: number;
   emphasis: number;
+  startRatio: number;
+  endRatio: number;
 }
 
 const MAX_TRACK_POINT_COUNT = 8;
 const MAX_GESTURE_PHRASE_COUNT = MAX_TRACK_POINT_COUNT - 2;
-const MAX_EFFECTIVE_PHRASE_LENGTH = 18;
 
 const PRESET_MAGNITUDE_RANGE: Record<
   SpeechGesturePreset,
@@ -86,11 +84,11 @@ export function runSpeechPoseStage(
   }
 
   const preset = resolveSpeechGesturePreset(context);
-  const durationMs = resolveGestureDurationMs(context);
-  if (durationMs === null) {
+  const durationMs = context.performanceSchedule.durationMs;
+  if (!Number.isFinite(durationMs) || durationMs <= 0) {
     return { ok: false, reason: "speech_gesture_timing_missing" };
   }
-  const speechPhrases = segmentAssistantText(context.options.assistantText ?? "");
+  const speechPhrases = context.performanceSchedule.phrases;
   const selectedChannels = selectGestureChannels(
     voiceProfile,
     preset,
@@ -116,7 +114,7 @@ export function runSpeechPoseStage(
     ...context.state.warnings,
     `speech_gesture_preset:${preset}`,
     `speech_gesture_phrase_count:${speechPhrases.length}`,
-    `speech_gesture_text_source:${context.options.assistantText?.trim() ? "assistant_text" : "duration_only"}`,
+    `speech_gesture_text_source:${context.performanceSchedule.textSource}`,
     ...selectedChannels.map((channel) => `speech_gesture_axis_pending:${channel.semantic_axis_id}`),
   ];
   return { ok: true };
@@ -126,7 +124,7 @@ function buildGestureTrack(
   channel: VoiceFollowingChannelProfile,
   preset: SpeechGesturePreset,
   durationMs: number,
-  sourcePhrases: SpeechPhrase[],
+  sourcePhrases: readonly PerformancePhraseSlot[],
   identity: { turnId: string; messageId: string } | undefined,
 ): ModelParameterCompileContext["state"]["pendingSpeechGestures"][string] {
   const activeDurationMs = durationMs - channel.follow_delay_ms;
@@ -179,7 +177,7 @@ function buildPhraseGesturePoints(options: {
   activeDurationMs: number;
   introMs: number;
   settleAtMs: number;
-  phrases: SpeechPhrase[];
+  phrases: SpeechGesturePhraseWindow[];
   identity: { turnId: string; messageId: string } | undefined;
 }): Array<{ at_ms: number; transition_ms: number; value: number }> {
   const {
@@ -193,17 +191,14 @@ function buildPhraseGesturePoints(options: {
   } = options;
   const bodyLayer = channel.layer === "body";
   const availableMs = Math.max(1, settleAtMs - introMs);
-  const totalWeight = phrases.reduce((sum, phrase) => sum + phrase.weight, 0);
   const points: Array<{ at_ms: number; transition_ms: number; value: number }> = [];
-  let elapsedWeight = 0;
   let previousAtMs = 0;
   let previousDirection = 0;
 
   for (let index = 0; index < phrases.length; index += 1) {
     const phrase = phrases[index];
-    const windowStartMs = introMs + Math.round((elapsedWeight / totalWeight) * availableMs);
-    elapsedWeight += phrase.weight;
-    const windowEndMs = introMs + Math.round((elapsedWeight / totalWeight) * availableMs);
+    const windowStartMs = introMs + Math.round(phrase.startRatio * availableMs);
+    const windowEndMs = introMs + Math.round(phrase.endRatio * availableMs);
     const seed = stableHash([
       identity?.turnId ?? "",
       identity?.messageId ?? "",
@@ -268,7 +263,7 @@ function buildPhraseGesturePoints(options: {
 function resolveGestureValue(
   channel: VoiceFollowingChannelProfile,
   preset: SpeechGesturePreset,
-  phrase: SpeechPhrase,
+  phrase: SpeechGesturePhraseWindow,
   seed: number,
   previousDirection: number,
 ): { value: number; direction: number } {
@@ -292,130 +287,39 @@ function resolveGestureValue(
   };
 }
 
-function segmentAssistantText(assistantText: string): SpeechPhrase[] {
-  const text = typeof assistantText === "string" ? assistantText.trim() : "";
-  if (!text) {
-    return [createSpeechPhrase("", "none")];
-  }
-
-  const rawPhrases: SpeechPhrase[] = [];
-  let buffer = "";
-  for (const character of Array.from(text)) {
-    buffer += character;
-    const boundary = resolvePhraseBoundary(character);
-    if (boundary === "none") {
-      continue;
-    }
-    appendSplitPhrase(rawPhrases, buffer, boundary);
-    buffer = "";
-  }
-  appendSplitPhrase(rawPhrases, buffer, "none");
-  return rawPhrases.length > 0
-    ? rawPhrases
-    : [createSpeechPhrase("", "none")];
-}
-
-function appendSplitPhrase(
-  target: SpeechPhrase[],
-  text: string,
-  boundary: SpeechPhraseBoundary,
-): void {
-  const normalizedText = text.trim();
-  if (!normalizedText) {
-    return;
-  }
-  const characters = Array.from(normalizedText);
-  if (!characters.some(isEffectiveSpeechCharacter)) {
-    appendSpeechPhrase(target, normalizedText, boundary);
-    return;
-  }
-  let chunk = "";
-  let effectiveLength = 0;
-  for (let index = 0; index < characters.length; index += 1) {
-    const character = characters[index];
-    chunk += character;
-    if (isEffectiveSpeechCharacter(character)) {
-      effectiveLength += 1;
-    }
-    const hasMore = index < characters.length - 1;
-    if (effectiveLength < MAX_EFFECTIVE_PHRASE_LENGTH || !hasMore) {
-      continue;
-    }
-    appendSpeechPhrase(target, chunk, "none");
-    chunk = "";
-    effectiveLength = 0;
-  }
-  appendSpeechPhrase(target, chunk, boundary);
-}
-
-function appendSpeechPhrase(
-  target: SpeechPhrase[],
-  text: string,
-  boundary: SpeechPhraseBoundary,
-): void {
-  const normalizedText = text.trim();
-  if (!normalizedText) {
-    return;
-  }
-  if (!Array.from(normalizedText).some(isEffectiveSpeechCharacter)) {
-    const previous = target[target.length - 1];
-    if (!previous) {
-      return;
-    }
-    const merged = createSpeechPhrase(previous.text + normalizedText, boundary);
-    previous.text = merged.text;
-    previous.boundary = merged.boundary;
-    previous.weight = merged.weight;
-    previous.emphasis = merged.emphasis;
-    return;
-  }
-  target.push(createSpeechPhrase(normalizedText, boundary));
-}
-
-function createSpeechPhrase(
-  text: string,
-  boundary: SpeechPhraseBoundary,
-): SpeechPhrase {
-  const effectiveLength = Math.max(
-    1,
-    Array.from(text).filter(isEffectiveSpeechCharacter).length,
-  );
-  const pauseWeight = boundary === "strong" ? 4 : boundary === "soft" ? 2 : 0;
-  let emphasis = boundary === "strong" ? 1.05 : 1;
-  if (/[！!]/u.test(text)) {
-    emphasis = 1.14;
-  } else if (/[？?]/u.test(text)) {
-    emphasis = 1.08;
-  }
-  return {
-    text,
-    boundary,
-    weight: effectiveLength + pauseWeight,
-    emphasis,
-  };
-}
-
 function coalesceSpeechPhrases(
-  phrases: SpeechPhrase[],
+  phrases: readonly PerformancePhraseSlot[],
   maximumCount: number,
-): SpeechPhrase[] {
+): SpeechGesturePhraseWindow[] {
   if (phrases.length <= maximumCount) {
-    return phrases;
+    return phrases.map(toSpeechGesturePhraseWindow);
   }
-  const result: SpeechPhrase[] = [];
+  const result: SpeechGesturePhraseWindow[] = [];
   for (let index = 0; index < maximumCount; index += 1) {
     const start = Math.floor((index * phrases.length) / maximumCount);
     const end = Math.floor(((index + 1) * phrases.length) / maximumCount);
     const group = phrases.slice(start, Math.max(start + 1, end));
     const finalPhrase = group[group.length - 1];
+    const firstPhrase = group[0];
     result.push({
       text: group.map((phrase) => phrase.text).join(""),
-      boundary: finalPhrase.boundary,
-      weight: group.reduce((sum, phrase) => sum + phrase.weight, 0),
       emphasis: Math.max(...group.map((phrase) => phrase.emphasis)),
+      startRatio: firstPhrase.startRatio,
+      endRatio: finalPhrase.endRatio,
     });
   }
   return result;
+}
+
+function toSpeechGesturePhraseWindow(
+  phrase: PerformancePhraseSlot,
+): SpeechGesturePhraseWindow {
+  return {
+    text: phrase.text,
+    emphasis: phrase.emphasis,
+    startRatio: phrase.startRatio,
+    endRatio: phrase.endRatio,
+  };
 }
 
 function resolveGesturePhraseLimit(
@@ -428,20 +332,6 @@ function resolveGesturePhraseLimit(
     1,
     MAX_GESTURE_PHRASE_COUNT,
   );
-}
-
-function resolvePhraseBoundary(character: string): SpeechPhraseBoundary {
-  if (/[。！？!?；;\n]/u.test(character)) {
-    return "strong";
-  }
-  if (/[，、,:：]/u.test(character)) {
-    return "soft";
-  }
-  return "none";
-}
-
-function isEffectiveSpeechCharacter(character: string): boolean {
-  return !/\s/u.test(character) && resolvePhraseBoundary(character) === "none";
 }
 
 function resolveSpeechGesturePreset(context: ModelParameterCompileContext): SpeechGesturePreset {
@@ -501,14 +391,6 @@ function selectGestureChannels(
     headCount += 1;
   }
   return selected;
-}
-
-function resolveGestureDurationMs(context: ModelParameterCompileContext): number | null {
-  const durationMs = context.semanticMotion.timing.timing.duration_ms;
-  if (!Number.isFinite(durationMs) || !durationMs || durationMs <= 0) {
-    return null;
-  }
-  return durationMs;
 }
 
 function isUsableVoiceFollowingChannel(channel: VoiceFollowingChannelProfile): boolean {

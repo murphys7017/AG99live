@@ -1,9 +1,9 @@
 task:
-  class: documentation
+  class: refactor
   risk: high
-  phase: phase_two_planning
-  status: implementation_ready
-  scope: "Implement phase-two performance orchestration in dependency order: shared schedule and phrase/sequence alignment first, body-part strategies second, Motion Lab evaluation third, and independent Physics setting diagnostics afterward."
+  phase: phase_two_a1
+  status: implementation_complete
+  scope: "Introduce one internal PerformanceSchedule at the complete ModelEngine parameter-plan compilation boundary, migrate canonical phrase analysis into it, and make SpeechPose consume shared phrase slots without changing external protocols or presentation behavior."
 
 context:
   confidence: high
@@ -66,6 +66,11 @@ verification:
     - Automated tests are low-confidence boundary smoke checks and are not end-to-end evidence.
     - Live Electron, AstrBot, TTS, and Live2D observation is user-led acceptance, not unfinished implementation work.
   current_checks:
+    - Phase A1 now creates one internal PerformanceSchedule for each complete pose or sequence compilation and shares it with every pose compile context.
+    - Canonical phrase segmentation, boundary classification, weighting, emphasis, and normalized phrase windows were removed from SpeechPoseStage and moved into the shared Schedule compiler.
+    - SpeechPose still owns channel selection, per-layer phrase coalescing, gesture value generation, delays, transition timing, and settling, so the refactor does not expand into phase A2 or change presentation policy.
+    - SpeechPose consumer projections use a private phrase-window type and do not impersonate canonical PerformanceSchedule phrase identities.
+    - Renderer TypeScript validation passed after the A1 migration; no live Electron, TTS, or Live2D execution has yet exercised the refactored path.
     - The current AstrBot-to-Adapter-to-Timeline-to-ModelEngine-to-Cubism source path was re-traced for the phase-two performance orchestration review.
     - Superseded action backlogs, implementation histories, ParameterMixer migration notes, duplicate architecture summaries, and the premature small-model target draft were removed.
     - Documentation indexes, public READMEs, target dependency rules, and VTS recorder boundaries were aligned with the retained authority documents.
