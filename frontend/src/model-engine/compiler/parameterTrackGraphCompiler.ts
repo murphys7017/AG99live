@@ -7,7 +7,7 @@ import type {
   SemanticAxisDefinition,
   SemanticAxisProfile,
 } from "../../types/semantic-axis-profile.js";
-import type { CompiledSemanticMotion } from "../../types/compiledSemanticMotion.js";
+import type { PerformanceSchedule } from "./performanceSchedule.js";
 
 interface ParameterTrackTimingPolicy {
   transitionOffsetMs: number;
@@ -17,7 +17,7 @@ interface ParameterTrackTimingPolicy {
 }
 
 interface ParameterTrackGraphInput {
-  semanticMotion: Extract<CompiledSemanticMotion, { kind: "sequence" }>;
+  schedule: PerformanceSchedule;
   stepPlans: SemanticParameterPlan[];
   profile: SemanticAxisProfile;
 }
@@ -46,30 +46,29 @@ export type ParameterTrackGraphCompileResult =
 export function compileParameterSequenceTrackGraph(
   input: ParameterTrackGraphInput,
 ): ParameterTrackGraphCompileResult {
-  const { semanticMotion, stepPlans, profile } = input;
-  const durationWeights = semanticMotion.steps.map((step) => step.durationWeight);
-  const totalWeight = durationWeights.reduce((sum, weight) => sum + weight, 0);
-  if (
-    stepPlans.length !== semanticMotion.steps.length
-    || durationWeights.length < 2
-    || totalWeight <= 0
-    || durationWeights.some((weight) => !Number.isInteger(weight) || weight <= 0)
-  ) {
+  const { schedule, stepPlans, profile } = input;
+  if (stepPlans.length !== schedule.semanticSteps.length) {
     return {
       ok: false,
-      reason: "parameter_track_graph_sequence_shape_invalid",
-      code: "parameter_track_graph_sequence_shape_invalid",
+      reason: `parameter_track_graph_schedule_step_count_mismatch:${stepPlans.length}:${schedule.semanticSteps.length}`,
+      code: "parameter_track_graph_schedule_step_count_mismatch",
       stepIndex: 0,
     };
   }
-
   const firstPlan = stepPlans[0];
-  const scheduleDurationMs = firstPlan.timing.duration_ms;
-  const stepStartTimes = resolveStepStartTimes(
-    durationWeights,
-    totalWeight,
-    scheduleDurationMs,
+  const mismatchedTimingIndex = stepPlans.findIndex(
+    (plan) => plan.timing.duration_ms !== schedule.durationMs,
   );
+  if (!firstPlan || mismatchedTimingIndex >= 0) {
+    return {
+      ok: false,
+      reason: `parameter_track_graph_schedule_timing_mismatch:${Math.max(0, mismatchedTimingIndex)}`,
+      code: "parameter_track_graph_schedule_timing_mismatch",
+      stepIndex: Math.max(0, mismatchedTimingIndex),
+    };
+  }
+  const scheduleDurationMs = schedule.durationMs;
+  const stepStartTimes = schedule.semanticSteps.map((step) => step.startMs);
   const axisById = new Map(profile.axes.map((axis) => [axis.id, axis]));
   const parameterStepsResult = resolveParameterSteps(stepPlans, axisById);
   if (!parameterStepsResult.ok) {
@@ -142,26 +141,6 @@ export function compileParameterSequenceTrackGraph(
     parameters,
     warnings,
   };
-}
-
-function resolveStepStartTimes(
-  durationWeights: number[],
-  totalWeight: number,
-  durationMs: number,
-): number[] {
-  const startTimes = [0];
-  let elapsedWeight = durationWeights[0];
-  for (let index = 1; index < durationWeights.length; index += 1) {
-    const desiredAtMs = Math.round((elapsedWeight / totalWeight) * durationMs);
-    const earliestAtMs = startTimes[index - 1] + 1;
-    const latestAtMs = durationMs - (durationWeights.length - index);
-    startTimes.push(Math.min(
-      Math.max(desiredAtMs, earliestAtMs),
-      Math.max(earliestAtMs, latestAtMs),
-    ));
-    elapsedWeight += durationWeights[index];
-  }
-  return startTimes;
 }
 
 function resolveParameterSteps(

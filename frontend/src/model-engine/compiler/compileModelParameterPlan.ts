@@ -21,6 +21,7 @@ import {
 import { normalizeModelEngineSettings } from "../settings.js";
 import { compileParameterSequenceTrackGraph } from "./parameterTrackGraphCompiler.js";
 import {
+  buildPerformanceScheduleTrace,
   compilePerformanceSchedule,
   type PerformanceSchedule,
 } from "./performanceSchedule.js";
@@ -30,10 +31,22 @@ export function compileModelParameterPlan(
   options: CompileOptions,
   stageRegistry: ModelEngineStageRegistry = createModelEngineStageRegistry(),
 ): CompileResult {
-  const performanceSchedule = compilePerformanceSchedule({
+  const performanceScheduleResult = compilePerformanceSchedule({
     assistantText: options.assistantText,
     durationMs: semanticMotion.timing.timing.duration_ms,
+    sequenceDurationWeights: semanticMotion.kind === "sequence"
+      ? semanticMotion.steps.map((step) => step.durationWeight)
+      : undefined,
   });
+  if (!performanceScheduleResult.ok) {
+    return failCompile(
+      performanceScheduleResult.reason,
+      semanticMotion,
+      undefined,
+      "performance_schedule",
+    );
+  }
+  const performanceSchedule = performanceScheduleResult.schedule;
   if (semanticMotion.kind === "sequence") {
     return compileMotionSequenceIntent(
       semanticMotion,
@@ -138,7 +151,7 @@ function compileMotionSequenceIntent(
     };
   }
   const trackGraph = compileParameterSequenceTrackGraph({
-    semanticMotion,
+    schedule: performanceSchedule,
     stepPlans: plans,
     profile,
   });
@@ -171,9 +184,10 @@ function compileMotionSequenceIntent(
           rawAxisLevels: undefined,
           compiledParameters: trackGraph.parameters.map((item) => item.parameter_id),
           rawMotionSteps: undefined,
+          performanceSchedule: buildPerformanceScheduleTrace(performanceSchedule),
           sequenceSteps: stepResults.map((result, index) => ({
             index,
-            durationWeight: semanticMotion.steps[index].durationWeight,
+            durationWeight: performanceSchedule.semanticSteps[index].durationWeight,
             resolvedAxes: { ...(result.diagnostics.transformTrace?.resolvedAxes ?? {}) },
             constrainedAxes: { ...(result.diagnostics.transformTrace?.constrainedAxes ?? {}) },
             axisSampling: result.diagnostics.transformTrace?.axisSampling
@@ -312,6 +326,9 @@ function buildModelParameterDiagnostics(
               }
             : undefined,
           compiledParameters: parameters.map((item) => item.parameter_id),
+          performanceSchedule: context
+            ? buildPerformanceScheduleTrace(context.performanceSchedule)
+            : undefined,
         }
       : undefined,
   };

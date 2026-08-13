@@ -8,6 +8,7 @@ import {
 } from "./protocol.js";
 
 export const SEMANTIC_MOTION_TRANSFORM_VERSION = "semantic_motion_transform.v5";
+export const PERFORMANCE_SCHEDULE_TRACE_VERSION = "performance_schedule_trace.v1";
 
 export type CompiledSemanticAxisSource = "semantic_axis" | "relation_graph";
 
@@ -100,12 +101,45 @@ export interface MotionTransformTrace {
   relationAdjustments: MotionAxisRelationAdjustment[];
   relationEvaluations: MotionAxisRelationEvaluation[];
   compiledParameters: string[];
+  performanceSchedule?: PerformanceScheduleTrace;
   sequenceSteps?: Array<{
     index: number;
     durationWeight: number;
     resolvedAxes: Record<string, number>;
     constrainedAxes: Record<string, number>;
     axisSampling?: MotionAxisSamplingTrace;
+  }>;
+}
+
+export interface PerformanceScheduleTrace {
+  version: typeof PERFORMANCE_SCHEDULE_TRACE_VERSION;
+  durationMs: number;
+  textSource: "assistant_text" | "duration_only";
+  phrases: Array<{
+    index: number;
+    text: string;
+    boundary: "strong" | "soft" | "none";
+    weight: number;
+    emphasis: number;
+    startRatio: number;
+    endRatio: number;
+  }>;
+  semanticSteps: Array<{
+    index: number;
+    durationWeight: number;
+    startMs: number;
+    endMs: number;
+    startRatio: number;
+    endRatio: number;
+  }>;
+  estimatedAlignments: Array<{
+    kind: "estimated_time_overlap";
+    phraseIndex: number;
+    stepIndex: number;
+    overlapRatio: number;
+    phraseCoverageRatio: number;
+    stepCoverageRatio: number;
+    primaryForPhrase: boolean;
   }>;
 }
 

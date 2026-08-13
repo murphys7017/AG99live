@@ -4,7 +4,10 @@ import type {
 } from "./protocol";
 import { SCHEMA_MOTION_TUNING_SAMPLE_V2 } from "./protocol";
 import type { SemanticAxisProfile } from "./semantic-axis-profile";
-import type { CompiledSemanticMotion } from "./compiledSemanticMotion";
+import type {
+  CompiledSemanticMotion,
+  PerformanceScheduleTrace,
+} from "./compiledSemanticMotion";
 import type {
   BilibiliLiveSettings,
   BilibiliLiveStatus,
@@ -202,6 +205,7 @@ export interface DesktopMotionCompileDiagnostics {
     resolvedAxes: Record<string, number>;
     derivedAxes: Record<string, number>;
     constrainedAxes: Record<string, number>;
+    performanceSchedule?: PerformanceScheduleTrace;
     sequenceSteps?: Array<{
       index: number;
       durationWeight: number;

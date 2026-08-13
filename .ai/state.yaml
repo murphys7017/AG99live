@@ -1,9 +1,9 @@
 task:
   class: refactor
   risk: high
-  phase: phase_two_a1
+  phase: phase_two_a2
   status: implementation_complete
-  scope: "Introduce one internal PerformanceSchedule at the complete ModelEngine parameter-plan compilation boundary, migrate canonical phrase analysis into it, and make SpeechPose consume shared phrase slots without changing external protocols or presentation behavior."
+  scope: "Move semantic sequence scheduling into the shared PerformanceSchedule, make Parameter Track Graph consume its step windows, and record observable estimated phrase/step alignment without changing public protocols or body-part presentation policy."
 
 context:
   confidence: high
@@ -11,7 +11,7 @@ context:
     - Product phase one implementation is complete.
     - Phase two optimizes complete character performance rather than treating gaze, face, Physics, Prompt, or motion range as independent product directions.
     - Performance Director is a ModelEngine compile-time orchestration responsibility, not a second player, Timeline, parameter mixer, or backend motion service.
-    - The current structural gap is independent phrase and semantic-sequence scheduling; no broken duplicate playback or final parameter write path was found in this review.
+    - Phrase and semantic-sequence scheduling now share one PerformanceSchedule; the next structural gap is shared body-part timing events and source diagnostics.
     - Phase A introduces one internal PerformanceSchedule while preserving motion intent v4, parameter plan v3, PlaybackTimeline, ParameterPresentation, ActiveParameterMixer, SpeechSignalRuntime, and Cubism Physics boundaries.
     - Phase A first records estimated phrase-to-sequence alignment; motion intent v4 is not extended unless real runtime samples prove internal alignment insufficient.
     - Gaze, face, hesitation, release, and residual are Schedule-consuming body-part strategies, not independent clocks or parallel dynamics systems.
@@ -68,20 +68,26 @@ verification:
   current_checks:
     - Phase A1 now creates one internal PerformanceSchedule for each complete pose or sequence compilation and shares it with every pose compile context.
     - Canonical phrase segmentation, boundary classification, weighting, emphasis, and normalized phrase windows were removed from SpeechPoseStage and moved into the shared Schedule compiler.
-    - SpeechPose still owns channel selection, per-layer phrase coalescing, gesture value generation, delays, transition timing, and settling, so the refactor does not expand into phase A2 or change presentation policy.
+    - Phase A2 now validates semantic sequence shape, computes duration-weighted step windows, and estimates phrase/step overlap inside the same PerformanceSchedule.
+    - Parameter Track Graph consumes Schedule step starts; its duplicate duration-weight calculation and local step-start algorithm were removed.
+    - Schedule failures are explicit; no equal-weight, legacy, or silent-repair branch was added.
+    - Duration-only schedules preserve the placeholder phrase used by SpeechPose but record no estimated phrase/step alignment.
+    - Schedule duration remains the audio/semantic body duration; Track Graph transition and residual tail extension does not stretch phrase or step windows.
+    - SpeechPose still owns channel selection, per-layer phrase coalescing, gesture value generation, delays, transition timing, and settling, so A2 does not change body-part presentation policy.
     - SpeechPose consumer projections use a private phrase-window type and do not impersonate canonical PerformanceSchedule phrase identities.
-    - Renderer TypeScript validation passed after the A1 migration; no live Electron, TTS, or Live2D execution has yet exercised the refactored path.
+    - Performance Schedule diagnostics use independent performance_schedule_trace.v1 versioning; semantic_motion_transform.v5 remains unchanged so deterministic nine-level sampling identities do not shift.
+    - Renderer TypeScript validation passed after the A2 migration; no live Electron, TTS, or Live2D sequence playback has yet exercised the refactored path.
     - The current AstrBot-to-Adapter-to-Timeline-to-ModelEngine-to-Cubism source path was re-traced for the phase-two performance orchestration review.
     - Superseded action backlogs, implementation histories, ParameterMixer migration notes, duplicate architecture summaries, and the premature small-model target draft were removed.
     - Documentation indexes, public READMEs, target dependency rules, and VTS recorder boundaries were aligned with the retained authority documents.
     - Relative Markdown links, protocol schema manifest, Markdown fences, Mermaid file inventory, deleted-document references, and git diff whitespace were checked.
-    - No runtime code or live AstrBot, Electron, TTS, VTube Studio, or Live2D execution was changed or exercised in this documentation-only task.
-    - Current source was re-checked: SpeechPose owns phrase segmentation, Parameter Track Graph owns duration-weight step timing, body-part timing is currently fixed by semantic group, and Physics exposure is limited to file/count scanning plus a global terminal response scale.
+    - A2 changed only the ModelEngine compile-time scheduling path and diagnostics; no live AstrBot, Electron, TTS, VTube Studio, or Live2D execution was exercised.
+    - Current source was re-checked: PerformanceSchedule owns phrase and duration-weight step timing, body-part timing is still fixed by semantic group, and Physics exposure is limited to file/count scanning plus a global terminal response scale.
 
 backlog:
   phase_two:
-    - Phase A1: internal PerformanceSchedule plus shared phrase analysis.
-    - Phase A2: sequence-step scheduling plus observable estimated phrase alignment.
+    - Phase A1 complete: internal PerformanceSchedule plus shared phrase analysis.
+    - Phase A2 complete: sequence-step scheduling plus observable estimated phrase alignment.
     - Phase A3: shared body-part timing events and Director/Motion Lab source diagnostics.
     - Phase B: gaze, face, hesitation, release, and dynamic residual strategies consuming the shared Schedule.
     - Consider explicit sequence-step phrase identity only after real data proves the internal alignment insufficient.
