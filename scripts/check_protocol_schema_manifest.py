@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 
 
@@ -32,20 +31,44 @@ EXPORT_NAMES = {
 
 def main() -> None:
     manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
-    values = {"protocol_version": manifest["protocol_version"], **manifest["schemas"]}
-    typescript = TYPESCRIPT_PATH.read_text(encoding="utf-8")
-    exported = dict(
-        re.findall(
-            r'^export const ([A-Z0-9_]+) = "([^"]+)" as const;$',
-            typescript,
-            flags=re.MULTILINE,
-        )
-    )
-    expected = {EXPORT_NAMES[key]: value for key, value in values.items()}
-    if exported != expected:
+    expected = render_typescript(manifest)
+    actual = TYPESCRIPT_PATH.read_text(encoding="utf-8")
+    if actual != expected:
         raise SystemExit(
-            "Generated TypeScript protocol constants do not match schema_manifest.json."
+            "Generated TypeScript protocol manifest does not match schema_manifest.json."
         )
+
+
+def render_typescript(manifest: dict) -> str:
+    schemas = manifest["schemas"]
+    lines = [
+        "// Generated from astrbot_plugin_ag99live_adapter/protocol/schema_manifest.json.",
+        (
+            f'export const PROTOCOL_VERSION = '
+            f'{json.dumps(manifest["protocol_version"])} as const;'
+        ),
+    ]
+    lines.extend(
+        f"export const {EXPORT_NAMES[key]} = {json.dumps(value)} as const;"
+        for key, value in schemas.items()
+    )
+    lines.extend(["", "export const PROTOCOL_SCHEMAS = {"])
+    lines.extend(
+        f"  {key}: {EXPORT_NAMES[key]},"
+        for key in schemas
+    )
+    lines.extend(
+        [
+            "} as const;",
+            "",
+            "export const PROTOCOL_SCHEMA_MANIFEST = {",
+            "  protocol_version: PROTOCOL_VERSION,",
+            "  schemas: PROTOCOL_SCHEMAS,",
+            "} as const;",
+            "",
+        ]
+    )
+    return "\n".join(lines)
 
 
 if __name__ == "__main__":

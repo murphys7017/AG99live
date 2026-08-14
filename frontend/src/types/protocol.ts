@@ -1,6 +1,8 @@
 import type { SemanticAxisProfile } from "./semantic-axis-profile";
 
 export {
+  PROTOCOL_SCHEMA_MANIFEST,
+  PROTOCOL_SCHEMAS,
   SCHEMA_CATALOG_MOTION_V1,
   SCHEMA_MODEL_INFO_V3,
   SCHEMA_MOTION_INTENT_V4,
@@ -14,6 +16,7 @@ export {
   SCHEMA_VOICE_FOLLOWING_PROFILE_V3,
 } from "./protocolSchema.generated.js";
 import {
+  PROTOCOL_SCHEMA_MANIFEST,
   PROTOCOL_VERSION,
   SCHEMA_CATALOG_MOTION_V1,
   SCHEMA_MODEL_INFO_V3,
@@ -45,21 +48,7 @@ export interface SystemServerInfoPayload {
   schema_manifest: ProtocolSchemaManifest;
 }
 
-export interface ProtocolSchemaManifest {
-  protocol_version: typeof PROTOCOL_VERSION;
-  schemas: {
-    catalog_motion: typeof SCHEMA_CATALOG_MOTION_V1;
-    model_info: typeof SCHEMA_MODEL_INFO_V3;
-    motion_intent: typeof SCHEMA_MOTION_INTENT_V4;
-    motion_tuning_sample: typeof SCHEMA_MOTION_TUNING_SAMPLE_V2;
-    output_segment: typeof SCHEMA_OUTPUT_SEGMENT_V3;
-    parameter_plan: typeof SCHEMA_PARAMETER_PLAN_V3;
-    performance_curve_hint: typeof SCHEMA_PERFORMANCE_CURVE_HINT_V1;
-    semantic_axis_profile: typeof SCHEMA_SEMANTIC_AXIS_PROFILE_V3;
-    semantic_axis_relation_graph: typeof SCHEMA_SEMANTIC_AXIS_RELATION_GRAPH_V1;
-    voice_following_profile: typeof SCHEMA_VOICE_FOLLOWING_PROFILE_V3;
-  };
-}
+export type ProtocolSchemaManifest = typeof PROTOCOL_SCHEMA_MANIFEST;
 
 export type OutputSegmentTextSlot =
   | { state: "present"; content: string }

@@ -15,17 +15,11 @@ import type {
   SystemServerInfoPayload,
 } from "../../types/protocol.js";
 import {
+  PROTOCOL_SCHEMA_MANIFEST,
   PROTOCOL_VERSION,
   SCHEMA_CATALOG_MOTION_V1,
-  SCHEMA_MODEL_INFO_V3,
   SCHEMA_MOTION_INTENT_V4,
-  SCHEMA_MOTION_TUNING_SAMPLE_V2,
   SCHEMA_OUTPUT_SEGMENT_V3,
-  SCHEMA_PARAMETER_PLAN_V3,
-  SCHEMA_PERFORMANCE_CURVE_HINT_V1,
-  SCHEMA_SEMANTIC_AXIS_PROFILE_V3,
-  SCHEMA_SEMANTIC_AXIS_RELATION_GRAPH_V1,
-  SCHEMA_VOICE_FOLLOWING_PROFILE_V3,
 } from "../../types/protocolSchema.generated.js";
 import {
   asRecord,
@@ -290,18 +284,7 @@ function parseSchemaManifest(
   }
   const schemas = asRecord(manifest.schemas);
   if (!schemas) return invalidPayload(type, "payload.schema_manifest.schemas", "object");
-  const expected = {
-    catalog_motion: SCHEMA_CATALOG_MOTION_V1,
-    model_info: SCHEMA_MODEL_INFO_V3,
-    motion_intent: SCHEMA_MOTION_INTENT_V4,
-    motion_tuning_sample: SCHEMA_MOTION_TUNING_SAMPLE_V2,
-    output_segment: SCHEMA_OUTPUT_SEGMENT_V3,
-    parameter_plan: SCHEMA_PARAMETER_PLAN_V3,
-    performance_curve_hint: SCHEMA_PERFORMANCE_CURVE_HINT_V1,
-    semantic_axis_profile: SCHEMA_SEMANTIC_AXIS_PROFILE_V3,
-    semantic_axis_relation_graph: SCHEMA_SEMANTIC_AXIS_RELATION_GRAPH_V1,
-    voice_following_profile: SCHEMA_VOICE_FOLLOWING_PROFILE_V3,
-  } as const;
+  const expected = PROTOCOL_SCHEMA_MANIFEST.schemas;
   const schemaKeys = validateExactKeys(
     type,
     "payload.schema_manifest.schemas",
@@ -321,8 +304,7 @@ function parseSchemaManifest(
   return {
     ok: true,
     payload: {
-      protocol_version: PROTOCOL_VERSION,
-      schemas: expected,
+      ...PROTOCOL_SCHEMA_MANIFEST,
     },
   };
 }
