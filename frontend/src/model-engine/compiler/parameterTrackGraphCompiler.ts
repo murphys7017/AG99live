@@ -8,12 +8,21 @@ import type {
   SemanticAxisProfile,
 } from "../../types/semantic-axis-profile.js";
 import {
+  MAX_PARAMETER_KEYFRAME_COUNT,
+  MIN_PARAMETER_KEYFRAME_COUNT,
+} from "../constants.js";
+import {
+  compileGazeTrackTiming,
   compileSemanticTrackTiming,
   registerPerformanceParameterNodes,
+  type PerformanceGazeTrackTiming,
   type PerformanceSchedule,
   type PerformanceScheduleMutationResult,
   type PerformanceSemanticTrackTiming,
 } from "./performanceSchedule.js";
+
+const GAZE_LEAD_TARGET_RATIO = 0.72;
+const GAZE_PHRASE_TRANSFER_TARGET_RATIO = 0.86;
 
 interface ParameterTrackGraphInput {
   schedule: PerformanceSchedule;
@@ -76,7 +85,9 @@ export function compileParameterSequenceTrackGraph(
   let staggeredTrackCount = 0;
   let residualTrackCount = 0;
   let compressedTrackCount = 0;
+  let gazeTrackCount = 0;
   const timingsByAxis = new Map<string, PerformanceSemanticTrackTiming>();
+  const gazeTimingsByAxis = new Map<string, PerformanceGazeTrackTiming>();
   const changedStepsByAxis = new Map<string, readonly number[]>();
   for (const parameterSteps of parameterStepsResult.parameterSteps.values()) {
     const baseParameter = parameterSteps[0];
@@ -105,12 +116,22 @@ export function compileParameterSequenceTrackGraph(
       };
     }
     changedStepsByAxis.set(axis.id, changedStepIndices);
-    const timing = resolveSemanticTrackTiming(
-      timingsByAxis,
-      schedule,
-      axis,
-      changedStepIndices,
-    );
+    const gazeTrack = axis.semantic_group.trim().toLowerCase() === "gaze"
+      && isGazeParameterTrackActive(parameterSteps, axis.neutral);
+    const timing = gazeTrack
+      ? resolveGazeTrackTiming(
+          gazeTimingsByAxis,
+          schedule,
+          axis,
+          changedStepIndices,
+          firstPlan.timing.blend_out_ms,
+        )
+      : resolveSemanticTrackTiming(
+          timingsByAxis,
+          schedule,
+          axis,
+          changedStepIndices,
+        );
     if (!timing.ok) {
       return {
         ok: false,
@@ -120,7 +141,16 @@ export function compileParameterSequenceTrackGraph(
         parameterId: baseParameter.parameter_id,
       };
     }
-    const keyframes = buildSemanticTrack(parameterSteps, timing.value.events);
+    const keyframes = gazeTrack
+      ? buildGazeParameterTrack(
+          parameterSteps,
+          (timing.value as PerformanceGazeTrackTiming).trackEvents,
+          axis.neutral,
+        )
+      : buildSemanticTrack(
+          parameterSteps,
+          (timing.value as PerformanceSemanticTrackTiming).events,
+        );
     if (!keyframes.ok) {
       return {
         ok: false,
@@ -139,6 +169,9 @@ export function compileParameterSequenceTrackGraph(
     if (timing.value.compressed) {
       compressedTrackCount += 1;
     }
+    if (keyframes.points && gazeTrack) {
+      gazeTrackCount += 1;
+    }
     graphDurationMs = Math.max(
       graphDurationMs,
       keyframes.points
@@ -153,7 +186,9 @@ export function compileParameterSequenceTrackGraph(
           axisId: baseParameter.axis_id,
           trackKind: "keyframe" as const,
           nodeIndex,
-          eventId: timing.value.events[nodeIndex].id,
+          eventId: gazeTrack
+            ? (timing.value as PerformanceGazeTrackTiming).trackEvents[nodeIndex].id
+            : (timing.value as PerformanceSemanticTrackTiming).events[nodeIndex].id,
           atMs: point.at_ms,
           transitionMs: point.transition_ms,
         })),
@@ -178,12 +213,16 @@ export function compileParameterSequenceTrackGraph(
     `parameter_track_graph_compiled:${parameters.length}`,
     `parameter_track_graph_staggered_tracks:${staggeredTrackCount}`,
     `parameter_track_graph_residual_tracks:${residualTrackCount}`,
+    `parameter_track_graph_gaze_tracks:${gazeTrackCount}`,
     `motion_sequence_compiled:${stepPlans.length}`,
   ];
   if (compressedTrackCount > 0) {
     warnings.push(
       `parameter_track_graph_compressed_tracks:${compressedTrackCount}`,
     );
+  }
+  if (gazeTrackCount > 0) {
+    warnings.push("parameter_track_graph_gaze_release:plan_blend");
   }
   if (graphDurationMs > scheduleDurationMs) {
     warnings.push(
@@ -271,6 +310,59 @@ function buildSemanticTrack(
   };
 }
 
+export function buildGazeParameterTrack(
+  parameterSteps: readonly SemanticParameterPlanEntry[],
+  trackEvents: PerformanceGazeTrackTiming["trackEvents"],
+  axisNeutralValue: number,
+): ParameterTrackBuildResult {
+  if (
+    trackEvents.length < MIN_PARAMETER_KEYFRAME_COUNT
+    || trackEvents.length > MAX_PARAMETER_KEYFRAME_COUNT
+  ) {
+    return {
+      ok: false,
+      reason: `parameter_track_graph_gaze_event_count_invalid:${trackEvents.length}`,
+    };
+  }
+  const points: NonNullable<SemanticParameterPlanEntry["keyframes"]> = [];
+  const hasDwellEvent = trackEvents.some((event) => event.kind === "gaze_dwell");
+  for (const event of trackEvents) {
+    const parameter = event.stepIndex === undefined
+      ? parameterSteps[parameterSteps.length - 1]
+      : parameterSteps[event.stepIndex];
+    if (!parameter) {
+      return {
+        ok: false,
+        reason: `parameter_track_graph_gaze_event_step_out_of_range:${event.id}`,
+      };
+    }
+    const targetRatio = resolveGazeTargetRatio(event, hasDwellEvent);
+    if (targetRatio === null) {
+      return {
+        ok: false,
+        reason: `parameter_track_graph_gaze_event_kind_invalid:${event.id}:${event.kind}`,
+      };
+    }
+    points.push({
+      at_ms: event.atMs,
+      transition_ms: event.transitionMs,
+      target_value: interpolateGazeValue(
+        parameter.neutral_target_value,
+        parameter.target_value,
+        targetRatio,
+      ),
+      input_value: parameter.input_value === undefined
+        ? undefined
+        : interpolateGazeValue(
+            axisNeutralValue,
+            parameter.input_value,
+            targetRatio,
+          ),
+    });
+  }
+  return { ok: true, points };
+}
+
 function areSameStepIndices(
   left: readonly number[],
   right: readonly number[],
@@ -331,6 +423,44 @@ function resolveSemanticTrackTiming(
   return timing;
 }
 
+function resolveGazeTrackTiming(
+  timingsByAxis: Map<string, PerformanceGazeTrackTiming>,
+  schedule: PerformanceSchedule,
+  axis: SemanticAxisDefinition,
+  changedStepIndices: readonly number[],
+  blendOutMs: number,
+): PerformanceScheduleMutationResult<PerformanceGazeTrackTiming> {
+  const existing = timingsByAxis.get(axis.id);
+  if (existing) {
+    return { ok: true, value: existing, reason: "" };
+  }
+  const timing = compileGazeTrackTiming({
+    schedule,
+    semanticAxisId: axis.id,
+    semanticGroup: axis.semantic_group,
+    changedStepIndices,
+    blendOutMs,
+    allowTailExtension: true,
+  });
+  if (timing.ok) {
+    timingsByAxis.set(axis.id, timing.value);
+  }
+  return timing;
+}
+
+export function isGazeParameterTrackActive(
+  parameterSteps: readonly SemanticParameterPlanEntry[],
+  axisNeutralValue: number,
+): boolean {
+  return parameterSteps.some((parameter) => (
+    Math.abs(parameter.target_value - parameter.neutral_target_value) > 0.000001
+    || (
+      parameter.input_value !== undefined
+      && Math.abs(parameter.input_value - axisNeutralValue) > 0.000001
+    )
+  ));
+}
+
 function resolveNeutralParameter(
   template: SemanticParameterPlanEntry,
   axisById: Map<string, SemanticAxisDefinition>,
@@ -383,4 +513,30 @@ function retimePlan(
 
 function roundValue(value: number): number {
   return Math.round(value * 1000000) / 1000000;
+}
+
+function interpolateGazeValue(
+  neutralValue: number,
+  targetValue: number,
+  ratio: number,
+): number {
+  return roundValue(neutralValue + (targetValue - neutralValue) * ratio);
+}
+
+function resolveGazeTargetRatio(
+  event: PerformanceGazeTrackTiming["trackEvents"][number],
+  hasDwellEvent: boolean,
+): number | null {
+  if (event.kind === "gaze_lead") {
+    return hasDwellEvent ? GAZE_LEAD_TARGET_RATIO : 1;
+  }
+  if (event.kind === "gaze_dwell") {
+    return 1;
+  }
+  if (event.kind === "gaze_transfer") {
+    return event.stepIndex === undefined
+      ? GAZE_PHRASE_TRANSFER_TARGET_RATIO
+      : 1;
+  }
+  return null;
 }

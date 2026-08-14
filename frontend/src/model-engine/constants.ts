@@ -1,6 +1,8 @@
 export const DEFAULT_MOTION_INTENT_DURATION_MS = 1000;
 export const MIN_MOTION_DURATION_MS = 320;
 export const MAX_MOTION_DURATION_MS = 15000;
+export const MIN_PARAMETER_KEYFRAME_COUNT = 2;
+export const MAX_PARAMETER_KEYFRAME_COUNT = 4;
 // Model-engine wait budget: an audio-synced motion payload must receive a
 // matching playback timeline within this window, otherwise it fails visibly.
 // This is separate from the orchestrator's wider startup aggregation window.

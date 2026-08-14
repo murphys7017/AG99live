@@ -4,6 +4,10 @@ import {
   type PerformanceScheduleTrace,
   type PerformanceTimingEventTrace,
 } from "../../types/compiledSemanticMotion.js";
+import {
+  MAX_MOTION_DURATION_MS,
+  MAX_PARAMETER_KEYFRAME_COUNT,
+} from "../constants.js";
 
 export type PerformancePhraseBoundary = "strong" | "soft" | "none";
 
@@ -85,11 +89,24 @@ export interface PerformanceSpeechTrackTiming {
   readonly phraseEvents: readonly PerformanceTimingEventTrace[];
 }
 
+export interface PerformanceGazeTrackTiming {
+  readonly trackEvents: readonly PerformanceTimingEventTrace[];
+  readonly requiredOwnedUntilMs: number;
+  readonly staggered: boolean;
+  readonly residual: boolean;
+  readonly compressed: boolean;
+}
+
 export type PerformanceScheduleMutationResult<T> =
   | { ok: true; value: T; reason: "" }
   | { ok: false; value: null; reason: string };
 
 const MAX_EFFECTIVE_PHRASE_LENGTH = 18;
+const GAZE_LEAD_OFFSET_MS = 80;
+const GAZE_DWELL_AT_MS = 60;
+const GAZE_DWELL_TRANSITION_MS = 70;
+const GAZE_TRANSFER_TRANSITION_MS = 80;
+const GAZE_MIN_DWELL_MS = 55;
 
 export function compilePerformanceSchedule(options: {
   assistantText?: string;
@@ -172,6 +189,13 @@ export function compileSemanticTrackTiming(options: {
   changedStepIndices: readonly number[];
 }): PerformanceScheduleMutationResult<PerformanceSemanticTrackTiming> {
   const { schedule, semanticAxisId, semanticGroup, changedStepIndices } = options;
+  if (semanticGroup.trim().toLowerCase() === "gaze") {
+    return {
+      ok: false,
+      value: null,
+      reason: `performance_schedule_gaze_strategy_required:${semanticAxisId || "unknown_axis"}`,
+    };
+  }
   if (
     !semanticAxisId
     || changedStepIndices.length < 2
@@ -275,6 +299,197 @@ export function compileSemanticTrackTiming(options: {
       requiredOwnedUntilMs: finalTransitionEndMs + policy.residualMs,
       staggered: policy.transitionOffsetMs !== 0,
       residual: policy.residualMs > 0,
+      compressed,
+    },
+  };
+}
+
+export function compileGazeTrackTiming(options: {
+  schedule: PerformanceSchedule;
+  semanticAxisId: string;
+  semanticGroup: string;
+  changedStepIndices: readonly number[];
+  blendOutMs: number;
+  allowTailExtension: boolean;
+}): PerformanceScheduleMutationResult<PerformanceGazeTrackTiming> {
+  const {
+    schedule,
+    semanticAxisId,
+    semanticGroup,
+    changedStepIndices,
+    blendOutMs,
+    allowTailExtension,
+  } = options;
+  const sequenceSchedule = schedule.semanticSteps.length > 0;
+  if (
+    !semanticAxisId
+    || semanticGroup.trim().toLowerCase() !== "gaze"
+    || !Number.isInteger(blendOutMs)
+    || blendOutMs < 0
+    || blendOutMs > schedule.durationMs
+    || changedStepIndices.length === 0
+    || changedStepIndices[0] !== 0
+    || changedStepIndices.length > MAX_PARAMETER_KEYFRAME_COUNT
+    || changedStepIndices.some((stepIndex, index) => (
+      !Number.isInteger(stepIndex)
+      || stepIndex < 0
+      || (sequenceSchedule && stepIndex >= schedule.semanticSteps.length)
+      || (!sequenceSchedule && stepIndex !== 0)
+      || (index > 0 && stepIndex <= changedStepIndices[index - 1])
+    ))
+  ) {
+    return {
+      ok: false,
+      value: null,
+      reason: `performance_schedule_gaze_track_invalid:${semanticAxisId || "unknown_axis"}`,
+    };
+  }
+
+  const transferDrafts = changedStepIndices.slice(1).map((stepIndex) => {
+    const step = schedule.semanticSteps[stepIndex];
+    return {
+      kind: "gaze_transfer" as const,
+      desiredAtMs: Math.max(1, step.startMs - GAZE_LEAD_OFFSET_MS),
+      preferredTransitionMs: GAZE_TRANSFER_TRANSITION_MS,
+      stepIndex,
+      phraseIndices: resolvePrimaryPhraseIndices(schedule, stepIndex),
+      transitionOffsetMs: -GAZE_LEAD_OFFSET_MS,
+    };
+  });
+  const firstTransferAtMs = transferDrafts[0]?.desiredAtMs;
+  const includeDwell = changedStepIndices.length < MAX_PARAMETER_KEYFRAME_COUNT
+    && (firstTransferAtMs === undefined
+      || firstTransferAtMs >= GAZE_DWELL_AT_MS + GAZE_DWELL_TRANSITION_MS + GAZE_MIN_DWELL_MS);
+  const trackDrafts: Array<{
+    kind: "gaze_lead" | "gaze_dwell" | "gaze_transfer";
+    desiredAtMs: number;
+    preferredTransitionMs: number;
+    stepIndex?: number;
+    phraseIndices?: readonly number[];
+    transitionOffsetMs: number;
+  }> = [{
+    kind: "gaze_lead",
+    desiredAtMs: 0,
+    preferredTransitionMs: 0,
+    stepIndex: sequenceSchedule ? 0 : undefined,
+    phraseIndices: schedule.phrases[0] ? [schedule.phrases[0].index] : undefined,
+    transitionOffsetMs: 0,
+  }];
+  if (includeDwell) {
+    trackDrafts.push({
+      kind: "gaze_dwell",
+      desiredAtMs: GAZE_DWELL_AT_MS,
+      preferredTransitionMs: GAZE_DWELL_TRANSITION_MS,
+      stepIndex: sequenceSchedule ? 0 : undefined,
+      phraseIndices: schedule.phrases[0] ? [schedule.phrases[0].index] : undefined,
+      transitionOffsetMs: GAZE_DWELL_AT_MS,
+    });
+  }
+  trackDrafts.push(...transferDrafts);
+
+  if (changedStepIndices.length === 1 && trackDrafts.length < MAX_PARAMETER_KEYFRAME_COUNT) {
+    const phraseTransfer = resolveGazePhraseTransfer(schedule);
+    if (phraseTransfer) {
+      trackDrafts.push({
+        kind: "gaze_transfer",
+        desiredAtMs: Math.round(phraseTransfer.endRatio * schedule.durationMs),
+        preferredTransitionMs: GAZE_TRANSFER_TRANSITION_MS,
+        phraseIndices: [phraseTransfer.index],
+        transitionOffsetMs: 0,
+      });
+    }
+  }
+  trackDrafts.sort((left, right) => left.desiredAtMs - right.desiredAtMs);
+
+  const baseReleaseAtMs = Math.max(1, schedule.durationMs - blendOutMs);
+  const normalizedDrafts: typeof trackDrafts = [];
+  let previousAtMs = -1;
+  for (const draft of trackDrafts) {
+    const atMs = draft.kind === "gaze_lead"
+      ? 0
+      : Math.max(previousAtMs + 1, draft.desiredAtMs);
+    if (!allowTailExtension && atMs >= baseReleaseAtMs) {
+      continue;
+    }
+    normalizedDrafts.push({ ...draft, desiredAtMs: atMs });
+    previousAtMs = atMs;
+  }
+
+  let releaseAtMs = baseReleaseAtMs;
+  const finalDraft = normalizedDrafts[normalizedDrafts.length - 1];
+  if (allowTailExtension && finalDraft) {
+    releaseAtMs = Math.min(
+      MAX_MOTION_DURATION_MS - blendOutMs,
+      Math.max(
+        releaseAtMs,
+        finalDraft.desiredAtMs + finalDraft.preferredTransitionMs + GAZE_MIN_DWELL_MS,
+      ),
+    );
+  }
+
+  const trackEvents: PerformanceTimingEventTrace[] = [];
+  let compressed = false;
+  for (let index = 0; index < normalizedDrafts.length; index += 1) {
+    const draft = normalizedDrafts[index];
+    const nextAtMs = normalizedDrafts[index + 1]?.desiredAtMs ?? releaseAtMs;
+    const availableTransitionMs = Math.max(0, nextAtMs - draft.desiredAtMs);
+    const transitionMs = Math.min(
+      draft.preferredTransitionMs,
+      availableTransitionMs,
+    );
+    compressed ||= transitionMs < draft.preferredTransitionMs;
+    const event: PerformanceTimingEventTrace = {
+      id: buildGazeEventId(semanticAxisId, draft.kind, index),
+      kind: draft.kind,
+      source: "gaze_strategy",
+      timingSource: "gaze_schedule_policy",
+      semanticAxisId,
+      semanticGroup,
+      atMs: draft.desiredAtMs,
+      transitionMs,
+      holdMs: Math.max(0, nextAtMs - draft.desiredAtMs - transitionMs),
+      residualMs: 0,
+      transitionOffsetMs: draft.transitionOffsetMs,
+      compressed: transitionMs < draft.preferredTransitionMs,
+      compressionReason: transitionMs < draft.preferredTransitionMs
+        ? "transition_window_short"
+        : undefined,
+      stepIndex: draft.stepIndex,
+      phraseIndices: draft.phraseIndices ? [...draft.phraseIndices] : undefined,
+    };
+    trackEvents.push(event);
+  }
+
+  const releaseEvent: PerformanceTimingEventTrace = {
+    id: buildGazeEventId(semanticAxisId, "gaze_release", 0),
+    kind: "gaze_release",
+    source: "gaze_strategy",
+    timingSource: "gaze_schedule_policy",
+    semanticAxisId,
+    semanticGroup,
+    atMs: releaseAtMs,
+    transitionMs: blendOutMs,
+    holdMs: 0,
+    residualMs: 0,
+    transitionOffsetMs: releaseAtMs - baseReleaseAtMs,
+    compressed: false,
+    phraseIndices: schedule.phrases.length > 0
+      ? [schedule.phrases[schedule.phrases.length - 1].index]
+      : undefined,
+  };
+  const events = [...trackEvents, releaseEvent];
+  const registerResult = registerPerformanceTimingEvents(schedule, events);
+  if (!registerResult.ok) {
+    return registerResult;
+  }
+  return {
+    ok: true,
+    reason: "",
+    value: {
+      trackEvents,
+      requiredOwnedUntilMs: releaseAtMs,
+      staggered: transferDrafts.length > 0,
+      residual: releaseAtMs > baseReleaseAtMs,
       compressed,
     },
   };
@@ -577,6 +792,14 @@ function buildSpeechEventId(
   return `speech:${channelId}:${kind}:${index}`;
 }
 
+function buildGazeEventId(
+  semanticAxisId: string,
+  kind: "gaze_lead" | "gaze_dwell" | "gaze_transfer" | "gaze_release",
+  index: number,
+): string {
+  return `gaze:${semanticAxisId}:${kind}:${index}`;
+}
+
 function buildParameterNodeKey(node: PerformanceParameterNodeTrace): string {
   return `${node.trackKind}:${node.parameterId}:${node.nodeIndex}`;
 }
@@ -604,14 +827,6 @@ function resolveTransitionWindow(
 
 function resolveTrackTimingPolicy(semanticGroup: string): PerformanceTrackTimingPolicy {
   const group = semanticGroup.trim().toLowerCase();
-  if (group === "gaze") {
-    return {
-      transitionOffsetMs: -70,
-      transitionMs: 80,
-      preferredHoldMs: 45,
-      residualMs: 20,
-    };
-  }
   if (group === "head") {
     return {
       transitionOffsetMs: 0,
@@ -642,6 +857,41 @@ function resolveTrackTimingPolicy(semanticGroup: string): PerformanceTrackTiming
     preferredHoldMs: 50,
     residualMs: 60,
   };
+}
+
+function resolvePrimaryPhraseIndices(
+  schedule: PerformanceSchedule,
+  stepIndex: number,
+): number[] | undefined {
+  const phraseIndices = schedule.estimatedAlignments
+    .filter((alignment) => alignment.stepIndex === stepIndex && alignment.primaryForPhrase)
+    .map((alignment) => alignment.phraseIndex);
+  return phraseIndices.length > 0 ? phraseIndices : undefined;
+}
+
+function resolveGazePhraseTransfer(
+  schedule: PerformanceSchedule,
+): PerformancePhraseSlot | null {
+  if (schedule.durationMs < 900 || schedule.phrases.length < 2) {
+    return null;
+  }
+  const finalText = schedule.phrases[schedule.phrases.length - 1].text;
+  if (/[?？]\s*$/.test(finalText)) {
+    return null;
+  }
+  const candidates = schedule.phrases.slice(0, -1).filter((phrase) => (
+    phrase.endRatio >= 0.34
+    && phrase.endRatio <= 0.72
+    && phrase.boundary !== "none"
+  ));
+  if (candidates.length === 0) {
+    return null;
+  }
+  return candidates.reduce((best, phrase) => (
+    Math.abs(phrase.endRatio - 0.56) < Math.abs(best.endRatio - 0.56)
+      ? phrase
+      : best
+  ));
 }
 
 function coalesceSpeechPhrases(

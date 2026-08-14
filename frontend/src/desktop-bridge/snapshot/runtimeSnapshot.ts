@@ -470,6 +470,10 @@ function isCompatiblePerformanceEvent(event: unknown): boolean {
       || event.kind === "speech_start"
       || event.kind === "speech_phrase"
       || event.kind === "speech_release"
+      || event.kind === "gaze_lead"
+      || event.kind === "gaze_dwell"
+      || event.kind === "gaze_transfer"
+      || event.kind === "gaze_release"
     )
     && typeof event.semanticAxisId === "string"
     && Boolean(event.semanticAxisId.trim())

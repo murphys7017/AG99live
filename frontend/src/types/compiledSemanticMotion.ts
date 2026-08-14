@@ -147,9 +147,25 @@ export interface PerformanceScheduleTrace {
 
 export interface PerformanceTimingEventTrace {
   id: string;
-  kind: "semantic_transition" | "speech_start" | "speech_phrase" | "speech_release";
-  source: "semantic_step" | "speech_track" | "speech_phrase" | "speech_release";
-  timingSource: "semantic_group_policy" | "voice_following_profile";
+  kind:
+    | "semantic_transition"
+    | "speech_start"
+    | "speech_phrase"
+    | "speech_release"
+    | "gaze_lead"
+    | "gaze_dwell"
+    | "gaze_transfer"
+    | "gaze_release";
+  source:
+    | "semantic_step"
+    | "speech_track"
+    | "speech_phrase"
+    | "speech_release"
+    | "gaze_strategy";
+  timingSource:
+    | "semantic_group_policy"
+    | "voice_following_profile"
+    | "gaze_schedule_policy";
   semanticAxisId: string;
   semanticGroup: string;
   atMs: number;

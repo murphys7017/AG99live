@@ -761,7 +761,10 @@ function appendPerformanceScheduleDiagnostics(
   const semanticEventCount = schedule.events.filter((event) =>
     event.kind === "semantic_transition",
   ).length;
-  const speechEventCount = schedule.events.length - semanticEventCount;
+  const gazeEventCount = schedule.events.filter((event) =>
+    event.kind.startsWith("gaze_"),
+  ).length;
+  const speechEventCount = schedule.events.length - semanticEventCount - gazeEventCount;
   const keyframeNodeCount = schedule.parameterNodes.filter((node) =>
     node.trackKind === "keyframe",
   ).length;
@@ -770,7 +773,7 @@ function appendPerformanceScheduleDiagnostics(
     `编排: ${schedule.phrases.length} phrase / ${schedule.semanticSteps.length} step / ${schedule.events.length} event / ${schedule.parameterNodes.length} node`,
   );
   lines.push(
-    `事件来源: semantic ${semanticEventCount}, speech ${speechEventCount}; 参数节点: keyframe ${keyframeNodeCount}, modulation ${speechNodeCount}`,
+    `事件来源: semantic ${semanticEventCount}, gaze ${gazeEventCount}, speech ${speechEventCount}; 参数节点: keyframe ${keyframeNodeCount}, modulation ${speechNodeCount}`,
   );
   const nodesByEventId = new Map<string, typeof schedule.parameterNodes>();
   for (const node of schedule.parameterNodes) {
@@ -794,7 +797,7 @@ function formatPerformanceEvent(event: PerformanceTimingEventTrace): string {
       : event.kind
     : `step ${event.stepIndex + 1}`;
   const localAtMs = event.localAtMs === undefined ? "" : ` local ${event.localAtMs}ms`;
-  return `${source} / ${event.semanticAxisId} @${event.atMs}ms${localAtMs} transition ${event.transitionMs}ms`;
+  return `${event.kind} (${source}) / ${event.semanticAxisId} @${event.atMs}ms${localAtMs} transition ${event.transitionMs}ms`;
 }
 
 function formatPerformanceNodes(

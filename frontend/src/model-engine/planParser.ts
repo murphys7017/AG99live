@@ -14,7 +14,11 @@ import {
   normalizeStringArray,
   normalizeText,
 } from "../utils/guards.js";
-import { MAX_MOTION_DURATION_MS } from "./constants.js";
+import {
+  MAX_MOTION_DURATION_MS,
+  MAX_PARAMETER_KEYFRAME_COUNT,
+  MIN_PARAMETER_KEYFRAME_COUNT,
+} from "./constants.js";
 
 interface ParseFailure {
   ok: false;
@@ -114,7 +118,11 @@ function normalizeParameterKeyframes(
   if (value === undefined) {
     return undefined;
   }
-  if (!Array.isArray(value) || value.length < 2 || value.length > 4) {
+  if (
+    !Array.isArray(value)
+    || value.length < MIN_PARAMETER_KEYFRAME_COUNT
+    || value.length > MAX_PARAMETER_KEYFRAME_COUNT
+  ) {
     return null;
   }
   let previousAtMs = -1;
