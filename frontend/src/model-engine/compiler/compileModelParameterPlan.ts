@@ -103,8 +103,11 @@ function compileMotionSequenceIntent(
   options: CompileOptions,
   stageRegistry: ModelEngineStageRegistry,
 ): CompileResult {
-  const stepResults = semanticMotion.steps.map((step, index) =>
-    compileModelParameterPose(
+  const stepResults = semanticMotion.steps.map((step, index) => {
+    // A sequence owns one speech modulation track for its shared Schedule;
+    // later steps contribute only semantic parameter targets.
+    const ownsSpeechPose = index === 0;
+    return compileModelParameterPose(
       {
         ...semanticMotion,
         kind: "pose",
@@ -115,11 +118,11 @@ function compileMotionSequenceIntent(
       {
         ...options,
         allowNeutralAxisPose: true,
-        speechActive: index === 0 ? options.speechActive : false,
+        speechActive: ownsSpeechPose && options.speechActive,
       },
       stageRegistry,
-    ),
-  );
+    );
+  });
   const failedStepIndex = stepResults.findIndex((result) => !result.ok || !result.plan);
   if (failedStepIndex >= 0) {
     const failed = stepResults[failedStepIndex];

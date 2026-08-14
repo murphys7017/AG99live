@@ -8,7 +8,7 @@ import {
 } from "./protocol.js";
 
 export const SEMANTIC_MOTION_TRANSFORM_VERSION = "semantic_motion_transform.v5";
-export const PERFORMANCE_SCHEDULE_TRACE_VERSION = "performance_schedule_trace.v1";
+export const PERFORMANCE_SCHEDULE_TRACE_VERSION = "performance_schedule_trace.v2";
 
 export type CompiledSemanticAxisSource = "semantic_axis" | "relation_graph";
 
@@ -141,6 +141,41 @@ export interface PerformanceScheduleTrace {
     stepCoverageRatio: number;
     primaryForPhrase: boolean;
   }>;
+  events: PerformanceTimingEventTrace[];
+  parameterNodes: PerformanceParameterNodeTrace[];
+}
+
+export interface PerformanceTimingEventTrace {
+  id: string;
+  kind: "semantic_transition" | "speech_start" | "speech_phrase" | "speech_release";
+  source: "semantic_step" | "speech_track" | "speech_phrase" | "speech_release";
+  timingSource: "semantic_group_policy" | "voice_following_profile";
+  semanticAxisId: string;
+  semanticGroup: string;
+  atMs: number;
+  localAtMs?: number;
+  windowStartMs?: number;
+  windowEndMs?: number;
+  transitionMs: number;
+  holdMs: number;
+  residualMs: number;
+  transitionOffsetMs: number;
+  compressed: boolean;
+  compressionReason?: "transition_window_short";
+  stepIndex?: number;
+  phraseIndices?: number[];
+  channelId?: string;
+  gesturePreset?: string;
+}
+
+export interface PerformanceParameterNodeTrace {
+  parameterId: string;
+  axisId: string;
+  trackKind: "keyframe" | "speech_modulation";
+  nodeIndex: number;
+  eventId: string;
+  atMs: number;
+  transitionMs: number;
 }
 
 export interface MotionAxisSamplingTrace {

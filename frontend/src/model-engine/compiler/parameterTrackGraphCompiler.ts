@@ -7,14 +7,13 @@ import type {
   SemanticAxisDefinition,
   SemanticAxisProfile,
 } from "../../types/semantic-axis-profile.js";
-import type { PerformanceSchedule } from "./performanceSchedule.js";
-
-interface ParameterTrackTimingPolicy {
-  transitionOffsetMs: number;
-  transitionMs: number;
-  preferredHoldMs: number;
-  residualMs: number;
-}
+import {
+  compileSemanticTrackTiming,
+  registerPerformanceParameterNodes,
+  type PerformanceSchedule,
+  type PerformanceScheduleMutationResult,
+  type PerformanceSemanticTrackTiming,
+} from "./performanceSchedule.js";
 
 interface ParameterTrackGraphInput {
   schedule: PerformanceSchedule;
@@ -22,11 +21,9 @@ interface ParameterTrackGraphInput {
   profile: SemanticAxisProfile;
 }
 
-interface ParameterTrackBuildResult {
-  points: SemanticParameterPlanEntry["keyframes"];
-  requiredOwnedUntilMs: number;
-  compressed: boolean;
-}
+type ParameterTrackBuildResult =
+  | { ok: true; points: SemanticParameterPlanEntry["keyframes"] }
+  | { ok: false; reason: string };
 
 export type ParameterTrackGraphCompileResult =
   | {
@@ -68,7 +65,6 @@ export function compileParameterSequenceTrackGraph(
     };
   }
   const scheduleDurationMs = schedule.durationMs;
-  const stepStartTimes = schedule.semanticSteps.map((step) => step.startMs);
   const axisById = new Map(profile.axes.map((axis) => [axis.id, axis]));
   const parameterStepsResult = resolveParameterSteps(stepPlans, axisById);
   if (!parameterStepsResult.ok) {
@@ -80,6 +76,8 @@ export function compileParameterSequenceTrackGraph(
   let staggeredTrackCount = 0;
   let residualTrackCount = 0;
   let compressedTrackCount = 0;
+  const timingsByAxis = new Map<string, PerformanceSemanticTrackTiming>();
+  const changedStepsByAxis = new Map<string, readonly number[]>();
   for (const parameterSteps of parameterStepsResult.parameterSteps.values()) {
     const baseParameter = parameterSteps[0];
     const axis = axisById.get(baseParameter.axis_id);
@@ -92,26 +90,84 @@ export function compileParameterSequenceTrackGraph(
         parameterId: baseParameter.parameter_id,
       };
     }
-    const policy = resolveTrackTimingPolicy(axis.semantic_group);
-    const keyframes = buildSemanticTrack(
-      parameterSteps,
-      stepStartTimes,
-      scheduleDurationMs,
-      policy,
+    const changedStepIndices = resolveChangedStepIndices(parameterSteps);
+    const axisChangedStepIndices = changedStepsByAxis.get(axis.id);
+    if (
+      axisChangedStepIndices
+      && !areSameStepIndices(axisChangedStepIndices, changedStepIndices)
+    ) {
+      return {
+        ok: false,
+        reason: `parameter_track_graph_axis_step_mismatch:${axis.id}:${baseParameter.parameter_id}`,
+        code: "parameter_track_graph_axis_step_mismatch",
+        stepIndex: changedStepIndices[changedStepIndices.length - 1] ?? 0,
+        parameterId: baseParameter.parameter_id,
+      };
+    }
+    changedStepsByAxis.set(axis.id, changedStepIndices);
+    const timing = resolveSemanticTrackTiming(
+      timingsByAxis,
+      schedule,
+      axis,
+      changedStepIndices,
     );
-    if (keyframes.points && policy.transitionOffsetMs !== 0) {
+    if (!timing.ok) {
+      return {
+        ok: false,
+        reason: timing.reason,
+        code: "parameter_track_graph_schedule_event_invalid",
+        stepIndex: changedStepIndices[changedStepIndices.length - 1] ?? 0,
+        parameterId: baseParameter.parameter_id,
+      };
+    }
+    const keyframes = buildSemanticTrack(parameterSteps, timing.value.events);
+    if (!keyframes.ok) {
+      return {
+        ok: false,
+        reason: keyframes.reason,
+        code: "parameter_track_graph_schedule_event_invalid",
+        stepIndex: changedStepIndices[changedStepIndices.length - 1] ?? 0,
+        parameterId: baseParameter.parameter_id,
+      };
+    }
+    if (keyframes.points && timing.value.staggered) {
       staggeredTrackCount += 1;
     }
-    if (keyframes.points && policy.residualMs > 0) {
+    if (keyframes.points && timing.value.residual) {
       residualTrackCount += 1;
     }
-    if (keyframes.compressed) {
+    if (timing.value.compressed) {
       compressedTrackCount += 1;
     }
     graphDurationMs = Math.max(
       graphDurationMs,
-      keyframes.requiredOwnedUntilMs + firstPlan.timing.blend_out_ms,
+      keyframes.points
+        ? timing.value.requiredOwnedUntilMs + firstPlan.timing.blend_out_ms
+        : scheduleDurationMs,
     );
+    if (keyframes.points) {
+      const nodeResult = registerPerformanceParameterNodes(
+        schedule,
+        keyframes.points.map((point, nodeIndex) => ({
+          parameterId: baseParameter.parameter_id,
+          axisId: baseParameter.axis_id,
+          trackKind: "keyframe" as const,
+          nodeIndex,
+          eventId: timing.value.events[nodeIndex].id,
+          atMs: point.at_ms,
+          transitionMs: point.transition_ms,
+        })),
+      );
+      if (!nodeResult.ok) {
+        return {
+          ok: false,
+          reason: nodeResult.reason,
+          code: "parameter_track_graph_parameter_node_invalid",
+          stepIndex: changedStepIndices[changedStepIndices.length - 1] ?? 0,
+          parameterId: baseParameter.parameter_id,
+        };
+      }
+    }
     parameters.push({
       ...baseParameter,
       keyframes: keyframes.points,
@@ -184,10 +240,48 @@ function resolveParameterSteps(
 
 function buildSemanticTrack(
   parameterSteps: SemanticParameterPlanEntry[],
-  stepStartTimes: number[],
-  scheduleDurationMs: number,
-  policy: ParameterTrackTimingPolicy,
+  events: PerformanceSemanticTrackTiming["events"],
 ): ParameterTrackBuildResult {
+  if (events.length === 0) {
+    return {
+      ok: true,
+      points: undefined,
+    };
+  }
+  const points: NonNullable<SemanticParameterPlanEntry["keyframes"]> = [];
+  for (const event of events) {
+    const stepIndex = event.stepIndex;
+    if (stepIndex === undefined) {
+      return { ok: false, reason: `parameter_track_graph_event_step_missing:${event.id}` };
+    }
+    const parameter = parameterSteps[stepIndex];
+    if (!parameter) {
+      return { ok: false, reason: `parameter_track_graph_event_step_out_of_range:${event.id}` };
+    }
+    points.push({
+      at_ms: event.atMs,
+      transition_ms: event.transitionMs,
+      target_value: parameter.target_value,
+      input_value: parameter.input_value,
+    });
+  }
+  return {
+    ok: true,
+    points,
+  };
+}
+
+function areSameStepIndices(
+  left: readonly number[],
+  right: readonly number[],
+): boolean {
+  return left.length === right.length
+    && left.every((stepIndex, index) => stepIndex === right[index]);
+}
+
+function resolveChangedStepIndices(
+  parameterSteps: readonly SemanticParameterPlanEntry[],
+): number[] {
   const changedStepIndices = [0];
   for (let index = 1; index < parameterSteps.length; index += 1) {
     const current = parameterSteps[index];
@@ -199,123 +293,42 @@ function buildSemanticTrack(
       changedStepIndices.push(index);
     }
   }
+  return changedStepIndices;
+}
+
+function resolveSemanticTrackTiming(
+  timingsByAxis: Map<string, PerformanceSemanticTrackTiming>,
+  schedule: PerformanceSchedule,
+  axis: SemanticAxisDefinition,
+  changedStepIndices: readonly number[],
+): PerformanceScheduleMutationResult<PerformanceSemanticTrackTiming> {
   if (changedStepIndices.length === 1) {
     return {
-      points: undefined,
-      requiredOwnedUntilMs: 0,
-      compressed: false,
+      ok: true,
+      reason: "",
+      value: {
+        events: [],
+        requiredOwnedUntilMs: 0,
+        staggered: false,
+        residual: false,
+        compressed: false,
+      },
     };
   }
-
-  const points: NonNullable<SemanticParameterPlanEntry["keyframes"]> = [{
-    at_ms: 0,
-    transition_ms: 0,
-    target_value: parameterSteps[0].target_value,
-    input_value: parameterSteps[0].input_value,
-  }];
-  const transitionStarts: number[] = [];
-  let previousAtMs = 0;
-  for (let position = 1; position < changedStepIndices.length; position += 1) {
-    const stepIndex = changedStepIndices[position];
-    const desiredAtMs = Math.max(
-      1,
-      Math.round(stepStartTimes[stepIndex] + policy.transitionOffsetMs),
-    );
-    const atMs = Math.max(desiredAtMs, previousAtMs + 1);
-    transitionStarts.push(atMs);
-    previousAtMs = atMs;
+  const existing = timingsByAxis.get(axis.id);
+  if (existing) {
+    return { ok: true, value: existing, reason: "" };
   }
-
-  let compressed = false;
-  let finalTransitionEndMs = 0;
-  for (let position = 0; position < transitionStarts.length; position += 1) {
-    const stepIndex = changedStepIndices[position + 1];
-    const atMs = transitionStarts[position];
-    const nextAtMs = transitionStarts[position + 1];
-    const availableWindowMs = nextAtMs === undefined
-      ? Math.max(0, scheduleDurationMs - atMs)
-      : nextAtMs - atMs;
-    const transition = nextAtMs === undefined && availableWindowMs === 0
-      ? { transitionMs: policy.transitionMs, compressed: false }
-      : resolveTransitionWindow(availableWindowMs, policy);
-    compressed ||= transition.compressed;
-    points.push({
-      at_ms: atMs,
-      transition_ms: transition.transitionMs,
-      target_value: parameterSteps[stepIndex].target_value,
-      input_value: parameterSteps[stepIndex].input_value,
-    });
-    finalTransitionEndMs = atMs + transition.transitionMs;
+  const timing = compileSemanticTrackTiming({
+    schedule,
+    semanticAxisId: axis.id,
+    semanticGroup: axis.semantic_group,
+    changedStepIndices,
+  });
+  if (timing.ok) {
+    timingsByAxis.set(axis.id, timing.value);
   }
-
-  return {
-    points,
-    requiredOwnedUntilMs: finalTransitionEndMs + policy.residualMs,
-    compressed,
-  };
-}
-
-function resolveTransitionWindow(
-  availableWindowMs: number,
-  policy: ParameterTrackTimingPolicy,
-): { transitionMs: number; compressed: boolean } {
-  const preferredWindowMs = policy.transitionMs + policy.preferredHoldMs;
-  if (availableWindowMs >= preferredWindowMs) {
-    return { transitionMs: policy.transitionMs, compressed: false };
-  }
-  if (availableWindowMs <= 0) {
-    return { transitionMs: 0, compressed: true };
-  }
-  const transitionRatio = policy.transitionMs / preferredWindowMs;
-  return {
-    transitionMs: Math.min(
-      policy.transitionMs,
-      Math.max(1, Math.round(availableWindowMs * transitionRatio)),
-    ),
-    compressed: true,
-  };
-}
-
-function resolveTrackTimingPolicy(semanticGroup: string): ParameterTrackTimingPolicy {
-  const group = semanticGroup.trim().toLowerCase();
-  if (group === "gaze") {
-    return {
-      transitionOffsetMs: -70,
-      transitionMs: 80,
-      preferredHoldMs: 45,
-      residualMs: 20,
-    };
-  }
-  if (group === "head") {
-    return {
-      transitionOffsetMs: 0,
-      transitionMs: 110,
-      preferredHoldMs: 55,
-      residualMs: 70,
-    };
-  }
-  if (group === "body" || group === "torso" || group === "shoulder") {
-    return {
-      transitionOffsetMs: 110,
-      transitionMs: 140,
-      preferredHoldMs: 70,
-      residualMs: 150,
-    };
-  }
-  if (group === "eye" || group === "brow" || group === "mouth" || group === "face") {
-    return {
-      transitionOffsetMs: 25,
-      transitionMs: 80,
-      preferredHoldMs: 45,
-      residualMs: 40,
-    };
-  }
-  return {
-    transitionOffsetMs: 0,
-    transitionMs: 100,
-    preferredHoldMs: 50,
-    residualMs: 60,
-  };
+  return timing;
 }
 
 function resolveNeutralParameter(

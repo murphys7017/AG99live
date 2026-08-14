@@ -16,7 +16,10 @@ import {
   cloneLive2dPresentationSettings,
 } from "../../live2d-renderer/settings.js";
 import { cloneSemanticParameterPlan } from "../../model-engine/planParser.js";
-import { cloneCompiledSemanticMotion } from "../../types/compiledSemanticMotion.js";
+import {
+  cloneCompiledSemanticMotion,
+  PERFORMANCE_SCHEDULE_TRACE_VERSION,
+} from "../../types/compiledSemanticMotion.js";
 import { DEFAULT_ADAPTER_ADDRESS } from "../../adapter-connection/core/address.js";
 import {
   DEFAULT_PTT_KEY_BINDING,
@@ -259,6 +262,12 @@ function cloneMotionPlaybackRecord(
     if (!isObject(record)) {
       return null;
     }
+    if (!hasCompatiblePerformanceScheduleTrace(record.diagnostics)) {
+      console.warn("[DesktopBridge] incompatible performance schedule trace discarded.", {
+        version: resolvePerformanceScheduleTraceVersion(record.diagnostics),
+      });
+      return null;
+    }
     const diagnostics = cloneMotionCompileDiagnostics(record.diagnostics);
     const playbackTurnId =
       normalizeOptionalText((record as Record<string, unknown>).playbackTurnId)
@@ -420,6 +429,32 @@ function cloneMotionCompileDiagnostics(
         >["transformTrace"]
       : undefined,
   };
+}
+
+function hasCompatiblePerformanceScheduleTrace(diagnostics: unknown): boolean {
+  if (!isObject(diagnostics) || !isObject(diagnostics.transformTrace)) {
+    return true;
+  }
+  const schedule = diagnostics.transformTrace.performanceSchedule;
+  if (schedule === undefined) {
+    return true;
+  }
+  if (!isObject(schedule) || schedule.version !== PERFORMANCE_SCHEDULE_TRACE_VERSION) {
+    return false;
+  }
+  return Array.isArray(schedule.phrases)
+    && Array.isArray(schedule.semanticSteps)
+    && Array.isArray(schedule.estimatedAlignments)
+    && Array.isArray(schedule.events)
+    && Array.isArray(schedule.parameterNodes);
+}
+
+function resolvePerformanceScheduleTraceVersion(diagnostics: unknown): string {
+  if (!isObject(diagnostics) || !isObject(diagnostics.transformTrace)) {
+    return "missing";
+  }
+  const schedule = diagnostics.transformTrace.performanceSchedule;
+  return isObject(schedule) ? normalizeText(schedule.version) || "missing" : "invalid";
 }
 
 function normalizeCompiledParameterCount(

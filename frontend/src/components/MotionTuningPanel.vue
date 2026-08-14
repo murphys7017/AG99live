@@ -18,7 +18,11 @@ import {
   SCHEMA_MOTION_TUNING_SAMPLE_V2,
   SCHEMA_PARAMETER_PLAN_V3,
 } from "../types/protocol";
-import type { CompiledSemanticMotion } from "../types/compiledSemanticMotion";
+import type {
+  CompiledSemanticMotion,
+  PerformanceScheduleTrace,
+  PerformanceTimingEventTrace,
+} from "../types/compiledSemanticMotion";
 import type {
   SemanticAxisDefinition,
   SemanticAxisProfile,
@@ -739,8 +743,69 @@ function buildMotionDiagnosticLines(source: MotionDraftSource | null): string[] 
   appendList(lines, "越过soft轴", pickStringList(summary.outside_soft_range_axes));
   appendList(lines, "姿态描述", pickStringList(summary.pose_descriptors));
   appendList(lines, "关系图跳过", diagnostics?.relationSkippedExplicitTargets);
+  appendPerformanceScheduleDiagnostics(
+    lines,
+    diagnostics?.transformTrace?.performanceSchedule,
+  );
   appendList(lines, "编译/计划警告", warningLines.slice(0, 8));
   return lines;
+}
+
+function appendPerformanceScheduleDiagnostics(
+  lines: string[],
+  schedule: PerformanceScheduleTrace | undefined,
+): void {
+  if (!schedule) {
+    return;
+  }
+  const semanticEventCount = schedule.events.filter((event) =>
+    event.kind === "semantic_transition",
+  ).length;
+  const speechEventCount = schedule.events.length - semanticEventCount;
+  const keyframeNodeCount = schedule.parameterNodes.filter((node) =>
+    node.trackKind === "keyframe",
+  ).length;
+  const speechNodeCount = schedule.parameterNodes.length - keyframeNodeCount;
+  lines.push(
+    `编排: ${schedule.phrases.length} phrase / ${schedule.semanticSteps.length} step / ${schedule.events.length} event / ${schedule.parameterNodes.length} node`,
+  );
+  lines.push(
+    `事件来源: semantic ${semanticEventCount}, speech ${speechEventCount}; 参数节点: keyframe ${keyframeNodeCount}, modulation ${speechNodeCount}`,
+  );
+  const nodesByEventId = new Map<string, typeof schedule.parameterNodes>();
+  for (const node of schedule.parameterNodes) {
+    const nodes = nodesByEventId.get(node.eventId) ?? [];
+    nodes.push(node);
+    nodesByEventId.set(node.eventId, nodes);
+  }
+  for (const event of schedule.events.slice(0, 10)) {
+    const nodes = nodesByEventId.get(event.id) ?? [];
+    lines.push(`${formatPerformanceEvent(event)} -> ${formatPerformanceNodes(nodes)}`);
+  }
+  if (schedule.events.length > 10) {
+    lines.push(`编排事件其余 ${schedule.events.length - 10} 条已省略`);
+  }
+}
+
+function formatPerformanceEvent(event: PerformanceTimingEventTrace): string {
+  const source = event.stepIndex === undefined
+    ? event.phraseIndices?.length
+      ? `phrase ${event.phraseIndices.map((index) => index + 1).join("/")}`
+      : event.kind
+    : `step ${event.stepIndex + 1}`;
+  const localAtMs = event.localAtMs === undefined ? "" : ` local ${event.localAtMs}ms`;
+  return `${source} / ${event.semanticAxisId} @${event.atMs}ms${localAtMs} transition ${event.transitionMs}ms`;
+}
+
+function formatPerformanceNodes(
+  nodes: readonly PerformanceScheduleTrace["parameterNodes"][number][],
+): string {
+  if (!nodes.length) {
+    return "无最终参数节点";
+  }
+  return nodes
+    .map((node) => `${node.parameterId} ${node.trackKind}#${node.nodeIndex}`)
+    .join(", ");
 }
 
 function appendMetric(

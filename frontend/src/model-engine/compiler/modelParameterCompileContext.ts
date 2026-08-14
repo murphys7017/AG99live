@@ -18,7 +18,12 @@ export interface ModelParameterCompileState {
     preset: NonNullable<SemanticParameterPlan["parameters"][number]["modulation"]>["preset"];
     amplitudeRatio: number;
     delayMs: number;
-    points: Array<{ at_ms: number; transition_ms: number; value: number }>;
+    points: Array<{
+      at_ms: number;
+      transition_ms: number;
+      value: number;
+      eventId: string;
+    }>;
   }>;
   expressionResource: {
     resourceId: string;
