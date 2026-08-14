@@ -99,14 +99,6 @@ export const defaultSnapshot: DesktopRuntimeSnapshot = {
   backendHistoryLoading: false,
   backendHistoryStatusMessage: "等待桌宠窗口同步后端历史。",
   bilibiliLiveStatus: { ...DEFAULT_BILIBILI_LIVE_STATUS },
-  activeSessionId: null,
-  activeSessionPhase: "",
-  activeSessionTextReady: false,
-  activeSessionAudioTerminal: "idle",
-  activeSessionMotionStarted: false,
-  activeSessionMotionCompleted: false,
-  activeSessionSynthFinished: false,
-  activeSessionTurnFinished: false,
 };
 
 export function safeNormalizeSnapshot(
@@ -138,6 +130,14 @@ export function normalizeSnapshot(snapshot: DesktopRuntimeSnapshot): DesktopRunt
     recommendedMode: _recommendedMode,
     runtimeSemanticAxisProfile: _runtimeSemanticAxisProfile,
     baseActionPreview: _baseActionPreview,
+    activeSessionId: _activeSessionId,
+    activeSessionPhase: _activeSessionPhase,
+    activeSessionTextReady: _activeSessionTextReady,
+    activeSessionAudioTerminal: _activeSessionAudioTerminal,
+    activeSessionMotionStarted: _activeSessionMotionStarted,
+    activeSessionMotionCompleted: _activeSessionMotionCompleted,
+    activeSessionSynthFinished: _activeSessionSynthFinished,
+    activeSessionTurnFinished: _activeSessionTurnFinished,
     ...runtimeSnapshot
   } = snapshot as DesktopRuntimeSnapshot & {
     selectedModelName?: unknown;
@@ -145,6 +145,14 @@ export function normalizeSnapshot(snapshot: DesktopRuntimeSnapshot): DesktopRunt
     recommendedMode?: unknown;
     runtimeSemanticAxisProfile?: unknown;
     baseActionPreview?: unknown;
+    activeSessionId?: unknown;
+    activeSessionPhase?: unknown;
+    activeSessionTextReady?: unknown;
+    activeSessionAudioTerminal?: unknown;
+    activeSessionMotionStarted?: unknown;
+    activeSessionMotionCompleted?: unknown;
+    activeSessionSynthFinished?: unknown;
+    activeSessionTurnFinished?: unknown;
   };
   const historyEntries = Array.isArray(snapshot.historyEntries)
     ? snapshot.historyEntries
@@ -446,7 +454,46 @@ function hasCompatiblePerformanceScheduleTrace(diagnostics: unknown): boolean {
     && Array.isArray(schedule.semanticSteps)
     && Array.isArray(schedule.estimatedAlignments)
     && Array.isArray(schedule.events)
-    && Array.isArray(schedule.parameterNodes);
+    && schedule.events.every(isCompatiblePerformanceEvent)
+    && Array.isArray(schedule.parameterNodes)
+    && schedule.parameterNodes.every(isCompatiblePerformanceNode);
+}
+
+// The producer owns full trace semantics. This boundary only rejects records
+// that cannot be safely rendered by Motion Lab.
+function isCompatiblePerformanceEvent(event: unknown): boolean {
+  return isObject(event)
+    && typeof event.id === "string"
+    && Boolean(event.id.trim())
+    && (
+      event.kind === "semantic_transition"
+      || event.kind === "speech_start"
+      || event.kind === "speech_phrase"
+      || event.kind === "speech_release"
+    )
+    && typeof event.semanticAxisId === "string"
+    && Boolean(event.semanticAxisId.trim())
+    && isFiniteNumber(event.atMs)
+    && isFiniteNumber(event.transitionMs)
+    && (event.localAtMs === undefined || isFiniteNumber(event.localAtMs))
+    && (event.stepIndex === undefined || Number.isInteger(event.stepIndex))
+    && (
+      event.phraseIndices === undefined
+      || (
+        Array.isArray(event.phraseIndices)
+        && event.phraseIndices.every((index) => Number.isInteger(index))
+      )
+    );
+}
+
+function isCompatiblePerformanceNode(node: unknown): boolean {
+  return isObject(node)
+    && typeof node.parameterId === "string"
+    && Boolean(node.parameterId.trim())
+    && (node.trackKind === "keyframe" || node.trackKind === "speech_modulation")
+    && Number.isInteger(node.nodeIndex)
+    && typeof node.eventId === "string"
+    && Boolean(node.eventId.trim());
 }
 
 function resolvePerformanceScheduleTraceVersion(diagnostics: unknown): string {

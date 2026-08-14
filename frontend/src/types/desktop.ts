@@ -66,13 +66,7 @@ export interface DesktopBackendHistoryMessage {
 export interface DesktopBaseActionPreviewAnalysis {
   status: string;
   mode: string;
-  providerId: string;
-  inputSignature: string;
-  latencyMs: number;
-  cacheHit: boolean;
-  selectedChannelCount: number;
   error: string;
-  fallbackReason: string;
 }
 
 export interface DesktopBaseActionPreviewSummary {
@@ -394,14 +388,6 @@ export interface DesktopRuntimeSnapshot {
   backendHistoryLoading: boolean;
   backendHistoryStatusMessage: string;
   bilibiliLiveStatus: BilibiliLiveStatus;
-  activeSessionId: string | null;
-  activeSessionPhase: string;
-  activeSessionTextReady: boolean;
-  activeSessionAudioTerminal: string;
-  activeSessionMotionStarted: boolean;
-  activeSessionMotionCompleted: boolean;
-  activeSessionSynthFinished: boolean;
-  activeSessionTurnFinished: boolean;
 }
 
 export interface DesktopMicrophoneDevice {

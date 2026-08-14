@@ -13,7 +13,6 @@ import {
   cloneLive2dPresentationSettings,
   type Live2dPresentationSettings,
 } from "../live2d-renderer/settings.js";
-import type { TurnPlaybackSegment } from "../turn-playback/session.js";
 import type { BilibiliLiveStatus } from "../types/bilibili-live.js";
 
 // ── Adapter runtime projection ─────────────────────────────────────
@@ -72,20 +71,8 @@ export interface AdapterRuntimeProjectionInput {
   bilibiliLiveStatus: BilibiliLiveStatus;
 }
 
-export interface SessionProjectionInput {
-  activeSessionId: string | null;
-  activeSessionPhase: string;
-  activeSessionTextReady: boolean;
-  activeSessionAudioTerminal: string;
-  activeSessionMotionStarted: boolean;
-  activeSessionMotionCompleted: boolean;
-  activeSessionSynthFinished: boolean;
-  activeSessionTurnFinished: boolean;
-}
-
 export interface DesktopRuntimeSnapshotInput {
   adapter: AdapterRuntimeProjection;
-  session: SessionProjectionInput;
   motionEngineSettings: ModelEngineSettings;
   live2dPresentationSettings: Live2dPresentationSettings;
   motionPlaybackRecords: readonly DesktopMotionPlaybackRecord[];
@@ -131,14 +118,6 @@ export interface DesktopRuntimeSnapshotOutput {
   backendHistoryLoading: boolean;
   backendHistoryStatusMessage: string;
   bilibiliLiveStatus: BilibiliLiveStatus;
-  activeSessionId: string | null;
-  activeSessionPhase: string;
-  activeSessionTextReady: boolean;
-  activeSessionAudioTerminal: string;
-  activeSessionMotionStarted: boolean;
-  activeSessionMotionCompleted: boolean;
-  activeSessionSynthFinished: boolean;
-  activeSessionTurnFinished: boolean;
 }
 
 // ── Builders ───────────────────────────────────────────────────────
@@ -176,56 +155,6 @@ export function buildAdapterRuntimeProjection(
     backendHistoryStatusMessage: input.backendHistoryStatusMessage,
     bilibiliLiveStatus: { ...input.bilibiliLiveStatus },
   };
-}
-
-export function getActiveSegmentSnapshot(
-  activeSession: {
-    segmentOrder: string[];
-    segments: Map<string, TurnPlaybackSegment>;
-  } | undefined,
-): {
-  textReady: boolean;
-  audioTerminal: string;
-  motionStarted: boolean;
-  motionCompleted: boolean;
-} | null {
-  if (!activeSession) {
-    return null;
-  }
-
-  // Find first non-settled segment
-  for (const segmentId of activeSession.segmentOrder) {
-    const segment = activeSession.segments.get(segmentId);
-    if (segment && !isLocallySettled(segment)) {
-      return {
-        textReady: segment.text.content !== null,
-        audioTerminal: segment.audio.terminal,
-        motionStarted: segment.motion.started,
-        motionCompleted: segment.motion.completed,
-      };
-    }
-  }
-
-  // fallback: first segment
-  const firstSegment = activeSession.segmentOrder
-    .map((id) => activeSession.segments.get(id))
-    .find(Boolean);
-  return firstSegment
-    ? {
-        textReady: firstSegment.text.content !== null,
-        audioTerminal: firstSegment.audio.terminal,
-        motionStarted: firstSegment.motion.started,
-        motionCompleted: firstSegment.motion.completed,
-      }
-    : null;
-}
-
-function isLocallySettled(segment: TurnPlaybackSegment): boolean {
-  if (!segment.text.delivered) return false;
-  const t = segment.audio.terminal;
-  if (t !== "completed" && t !== "failed" && t !== "absent") return false;
-  if (!segment.motion.absent && !segment.motion.completed && !segment.motion.failed) return false;
-  return true;
 }
 
 export function buildDesktopRuntimeSnapshot(
@@ -279,13 +208,5 @@ export function buildDesktopRuntimeSnapshot(
     backendHistoryLoading: p.backendHistoryLoading,
     backendHistoryStatusMessage: p.backendHistoryStatusMessage,
     bilibiliLiveStatus: { ...p.bilibiliLiveStatus },
-    activeSessionId: input.session.activeSessionId,
-    activeSessionPhase: input.session.activeSessionPhase,
-    activeSessionTextReady: input.session.activeSessionTextReady,
-    activeSessionAudioTerminal: input.session.activeSessionAudioTerminal,
-    activeSessionMotionStarted: input.session.activeSessionMotionStarted,
-    activeSessionMotionCompleted: input.session.activeSessionMotionCompleted,
-    activeSessionSynthFinished: input.session.activeSessionSynthFinished,
-    activeSessionTurnFinished: input.session.activeSessionTurnFinished,
   };
 }

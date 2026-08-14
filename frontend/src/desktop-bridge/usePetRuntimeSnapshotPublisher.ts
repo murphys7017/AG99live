@@ -22,12 +22,9 @@ import type { BilibiliLiveStatus } from "../types/bilibili-live";
 import type { ModelSummary, SystemServerInfoPayload } from "../types/protocol";
 import type { SemanticAxisProfile } from "../types/semantic-axis-profile";
 import type { ModelSyncInstance } from "../adapter-connection/model-sync/useModelSync";
-import type { useTurnPlaybackSessionStore } from "../turn-playback/useTurnPlaybackSessionStore";
 import {
   buildAdapterRuntimeProjection,
   buildDesktopRuntimeSnapshot,
-  getActiveSegmentSnapshot,
-  type SessionProjectionInput,
 } from "./projection.js";
 import {
   nextSnapshotRevision,
@@ -93,7 +90,6 @@ interface PetRuntimeSnapshotPublisherOptions {
   connectionLabel: ComputedRef<string>;
   stageMessage: ComputedRef<string>;
   aiState: ComputedRef<string>;
-  sessionStore: ReturnType<typeof useTurnPlaybackSessionStore>;
   bilibiliLiveStatus: () => BilibiliLiveStatus;
 }
 
@@ -182,22 +178,8 @@ export function createPetRuntimeSnapshotPublisher(
         bilibiliLiveStatus: options.bilibiliLiveStatus(),
       });
 
-      const activeSession = options.sessionStore.getActiveSession();
-      const segmentSnapshot = getActiveSegmentSnapshot(activeSession);
-      const sessionProjection: SessionProjectionInput = {
-        activeSessionId: options.sessionStore.state.activeSessionId,
-        activeSessionPhase: activeSession?.phase ?? "",
-        activeSessionTextReady: segmentSnapshot?.textReady ?? false,
-        activeSessionAudioTerminal: segmentSnapshot?.audioTerminal ?? "idle",
-        activeSessionMotionStarted: segmentSnapshot?.motionStarted ?? false,
-        activeSessionMotionCompleted: segmentSnapshot?.motionCompleted ?? false,
-        activeSessionSynthFinished: activeSession?.backend.synthFinished ?? false,
-        activeSessionTurnFinished: activeSession?.backend.turnFinished ?? false,
-      };
-
       return {
         adapter: adapterProjection,
-        session: sessionProjection,
         motionEngineSettings: cloneModelEngineSettings(options.motionEngineSettings),
         live2dPresentationSettings: cloneLive2dPresentationSettings(
           options.live2dPresentationSettings,

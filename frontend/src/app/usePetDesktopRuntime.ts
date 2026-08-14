@@ -390,7 +390,6 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     connectionLabel,
     stageMessage,
     aiState,
-    sessionStore,
     bilibiliLiveStatus: () => bilibiliLive.getStatus(),
   });
 
