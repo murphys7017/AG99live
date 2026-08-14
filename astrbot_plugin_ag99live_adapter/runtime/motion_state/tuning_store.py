@@ -91,21 +91,46 @@ class MotionTuningStore:
             sample_payload,
             require_recorded_context=False,
         )
-        recorded_context = self._get_turn_context(
-            incoming_sample["turn_id"],
-            incoming_sample["message_id"],
+        existing_sample = next(
+            (
+                item
+                for item in self.samples
+                if str(item.get("id") or "").strip() == incoming_sample["id"]
+            ),
+            None,
         )
-        if not isinstance(recorded_context, dict):
-            raise ValueError(
-                "motion_tuning_sample_context_not_recorded:"
-                f"{incoming_sample['turn_id']}:{incoming_sample['message_id']}"
+        if existing_sample is not None:
+            for field_name in (
+                "created_at",
+                "source_record_id",
+                "turn_id",
+                "message_id",
+                "model_name",
+                "profile_id",
+                "profile_revision",
+                "profile_hash",
+                "transform_version",
+                "user_text",
+                "assistant_text",
+            ):
+                if field_name in existing_sample:
+                    incoming_sample[field_name] = deepcopy(existing_sample[field_name])
+        else:
+            recorded_context = self._get_turn_context(
+                incoming_sample["turn_id"],
+                incoming_sample["message_id"],
             )
-        incoming_sample["user_text"] = str(
-            recorded_context.get("user_text") or ""
-        ).strip()
-        incoming_sample["assistant_text"] = str(
-            recorded_context.get("assistant_text") or ""
-        ).strip()
+            if not isinstance(recorded_context, dict):
+                raise ValueError(
+                    "motion_tuning_sample_context_not_recorded:"
+                    f"{incoming_sample['turn_id']}:{incoming_sample['message_id']}"
+                )
+            incoming_sample["user_text"] = str(
+                recorded_context.get("user_text") or ""
+            ).strip()
+            incoming_sample["assistant_text"] = str(
+                recorded_context.get("assistant_text") or ""
+            ).strip()
         normalized_sample = self.normalize_sample(incoming_sample)
         next_samples = [
             deepcopy(normalized_sample),
