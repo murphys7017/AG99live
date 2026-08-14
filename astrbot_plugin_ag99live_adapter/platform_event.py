@@ -14,7 +14,15 @@ try:
         INPUT_TEXT_ANNOTATION_KEY,
         build_message_annotation_key,
     )
-except Exception:
+except ModuleNotFoundError as exc:
+    if exc.name not in {"astrbot.core", "astrbot.core.prompt"}:
+        raise
+    INPUT_ITEM_ANNOTATIONS_EXTRA_KEY = "prompt_input_item_annotations"
+    INPUT_TEXT_ANNOTATION_KEY = "input.text"
+    build_message_annotation_key = None
+except ImportError as exc:
+    if exc.name != "astrbot.core.prompt":
+        raise
     INPUT_ITEM_ANNOTATIONS_EXTRA_KEY = "prompt_input_item_annotations"
     INPUT_TEXT_ANNOTATION_KEY = "input.text"
     build_message_annotation_key = None
