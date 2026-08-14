@@ -22,6 +22,20 @@
 `astrbot_plugin_ag99live_adapter/protocol/schema_manifest.json`。协议文档、前端生成类型和
 `system.server_info.schema_manifest` 必须同时与它一致。
 
+## 当前项目进度
+
+- 一期代码范围已完成：从输入、主模型文本与动作、TTS、原子输出段、统一 Timeline、参数计划到
+  Live2D 逐帧表现的正式链路已经建立。
+- 二期阶段 A 已完成：ModelEngine 以一份共享 `PerformanceSchedule` 统一 phrase、sequence step、
+  semantic-group timing、SpeechPose/部位事件和来源诊断；Parameter Track Graph 只负责将编排结果
+  投影为现有 V3 keyframes/modulation。
+- 二期阶段 B 的 gaze 第一批已完成：支持 lead、dwell、phrase/step transfer 和 plan-blend release，
+  四步 sequence 保留四个主模型目标。
+- 二期下一批是 face、hesitation、方向反转和动态 residual；Physics setting 诊断仍保持独立阶段，
+  不进入 Performance Director 或主动参数融合。
+- 当前实现仍需要用户通过真实 AstrBot、Electron、TTS 和 Live2D 播放观察进行表现验收；这属于运行
+  调优，不代表一期主链路或 Schedule 编译边界未完成。
+
 播放完成需要联合判断两类事实：SessionStore 保存协议槽位和稳定投影，
 PlaybackTimeline 保存 required sink 的实时执行状态。即使 text/audio/motion 槽位已经
 settled，只要同一 Turn 仍存在开放的 required execution Timeline，就不能启动下一段，

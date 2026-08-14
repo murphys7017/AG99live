@@ -58,10 +58,12 @@ flowchart TB
         ENTRY[useModelEngine<br/>ingress / prepare / start]:::engine
         NORMAL[normalize + strict contracts]:::engine
         SEMANTIC[semantic phase<br/>validate / sample / intensity / relation graph / timing]:::engine
-        PARAMETER[model_parameter phase<br/>speech pose / binding / resource policy]:::engine
+        SCHEDULE[PerformanceSchedule<br/>phrase / step / 部位事件 / 来源诊断]:::engine
+        PARAMETER[model_parameter phase<br/>speech pose / binding / resource]:::engine
+        TRACK[Parameter Track Graph<br/>Schedule -> V3 keyframes / modulation]:::engine
         PLAN[parameter_plan.v3]:::engine
         SCHED[motionRuntimeScheduler<br/>segment pending ownership]:::engine
-        ENTRY --> NORMAL --> SEMANTIC --> PARAMETER --> PLAN
+        ENTRY --> NORMAL --> SEMANTIC --> SCHEDULE --> PARAMETER --> TRACK --> PLAN
         ENTRY --> SCHED
     end
 

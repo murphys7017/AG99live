@@ -60,8 +60,12 @@
 - SessionStore 是协议槽位和稳定生命周期投影事实源，PlaybackTimeline 是 required sink
   实时执行与完成门禁事实源；Orchestrator 和 CompletionCoordinator 必须联合读取两者。
 - ModelEngine 编译动作，Live2D WebSDK 逐帧执行参数计划。
-- ModelEngine 分为 semantic 与 model_parameter 两个编译阶段；关系图在 semantic 阶段收口，SpeechPoseStage 在 model_parameter 阶段生成语义轴手势轨道。
-- `Performance Director / PerformanceSchedule` 只出现在目标依赖图中，表示二期计划；当前运行链路仍以源码事实图为准。
+- ModelEngine 分为 semantic 与 model_parameter 两个编译阶段；每个完整 pose/sequence 由
+  `PerformanceSchedule` 统一生成 phrase、step、部位事件和来源诊断，SpeechPoseStage 只选择说话表现，
+  Parameter Track Graph 再把 Schedule 投影为 V3 keyframes/modulation。
+- `PerformanceSchedule` 已属于当前运行链路的 ModelEngine 编译事实；gaze 第一批已消费该 Schedule，
+  face、hesitation 和动态 residual 仍属于二期后续实现。目标依赖图继续描述完整 Performance Director
+  的最终边界，不把未完成部位策略写成当前能力。
 - WebSDK 先形成 Cubism Motion / EyeBlink / Expression / drag / breath 的 base snapshot，再由 Parameter Mixer 组合 direct plan 与 lip-sync；Physics 只消费最终主动参数帧，不是 Mixer 输入。
 - 每条 WebSocket 连接必须先通过 `system.server_info.schema_manifest`；ModelSync 不接受 window/devtools 旁路写入。
 - 当前桌宠 WebSocket 与 HTTP 资源只支持同机 `127.0.0.1` / `localhost`；远程执行器连接是独立边界。

@@ -1,9 +1,9 @@
 task:
-  class: feature
-  risk: high
-  phase: phase_two_b_gaze_dynamics
+  class: documentation
+  risk: medium
+  phase: phase_two_documentation_sync
   status: implementation_complete
-  scope: "Implement Schedule-owned gaze lead, dwell, transfer, and release through the existing parameter track graph without changing public protocols, playback clocks, ParameterMixer, or Cubism Physics."
+  scope: "Synchronize current phase status, ModelEngine ownership, action conversion flow, and Mermaid diagrams with the completed Schedule/A3 and gaze first-slice source implementation; remove stale future-only descriptions without changing code or protocols."
 
 context:
   confidence: high
@@ -31,12 +31,13 @@ context:
     - Gaze timing events belong to PerformanceSchedule; gaze target ratios are projected by Parameter Track Graph and do not enter Schedule, Mixer, or WebSDK ownership.
     - Gaze release lowers Direct Plan ownership through the existing plan blend and never inserts a Profile-neutral release keyframe.
     - The shared engine.parameter_plan.v3 keyframe boundary remains two to four points; a four-step semantic sequence keeps all four main-model targets and uses plan blend for gaze release.
+    - Documentation authority is `docs/01-架构与结构/06-一期完成边界与二期入口.md`; README and diagrams provide summaries and must not redefine phase status.
 
 architecture:
   phase_boundary:
     source: docs/01-架构与结构/06-一期完成边界与二期入口.md
     phase_one: complete
-    phase_two: planned
+    phase_two: in_progress
   product_flow:
     - AstrBot owns conversation, event queues, main-model calls, and TTS.
     - The Adapter projects Live2D capabilities, validates motion intent, binds identities, and emits one atomic output.segment.v3.
@@ -101,6 +102,9 @@ verification:
     - The former generic gaze semantic-group offset was removed so gaze timing has one explicit owner.
     - Motion Lab diagnostics and persisted runtime snapshot validation recognize gaze events; gaze release intentionally has no parameter node because plan ownership blend performs the release.
     - `frontend/npm run typecheck:renderer` and `git diff --check` passed after the gaze implementation; no live Electron, TTS, or Live2D playback was exercised.
+    - Documentation sync updated the phase authority, public README, project/module overview, action-chain docs, ModelEngine layering, diagram index, and current action-flow/Motion Lab diagrams.
+    - Documentation cleanup removed stale claims that PerformanceSchedule was only a future dependency target; current diagrams now show Schedule and Parameter Track Graph as compile-time ModelEngine paths.
+    - No WebSocket schema, playback clock, ParameterMixer, WebSDK, or Cubism Physics source was changed by the documentation sync.
 
 backlog:
   phase_two:
@@ -116,3 +120,4 @@ backlog:
     - Small motion-model training and VTube Studio semantic labeling/export.
     - Remote-operator plugin separation, authenticated cross-host deployment, and release packaging.
     - Perform user-led live AstrBot/Electron/Live2D acceptance for the gaze timing and tune constants only from observed model behavior.
+    - Commit the documentation synchronization as one reviewable documentation batch after link and Mermaid-source checks.

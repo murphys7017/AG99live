@@ -125,7 +125,7 @@ Adapter 使用 `turn_id + message_id` 聚合文本、TTS、动作和其他输出
 
 ### 4. ModelEngine 编译参数
 
-ModelEngine 读取当前模型的 `SemanticAxisProfile`，完成校验、九级采样、轴关系计算、说话随动轨道、参数绑定与响应策略编译，输出 `engine.parameter_plan.v3`；显式选择完整 motion resource 时，则输出受控的资源执行计划。
+ModelEngine 读取当前模型的 `SemanticAxisProfile`，完成校验、九级采样、轴关系计算、统一表演时间编排、说话随动轨道、参数绑定与响应策略编译，输出 `engine.parameter_plan.v3`；显式选择完整 motion resource 时，则输出受控的资源执行计划。
 
 ### 5. PlaybackTimeline 统一释放
 
@@ -317,14 +317,18 @@ HTTP       127.0.0.1:12397
 
 这些限制不是为了减少功能，而是为了让一期主链路保持简单：输入一条消息，AstrBot 生成一次回复，前端用同一段时间线完成一次可观察的 Live2D 表演。
 
-## 二期方向
+## 二期方向与当前进度
 
-一期完成的是“从消息到动作表现”的基础闭环。二期将把现有动作链路收口为完整的角色表演系统，
+一期完成的是“从消息到动作表现”的基础闭环。二期正在把现有动作链路收口为完整的角色表演系统，
 由 ModelEngine 内的 Performance Director 统一编排 phrase、语义步骤、部位延迟、停顿、强调、
 收势和残留，再沿现有 Timeline、参数计划、ParameterMixer 和 Cubism Physics 执行。
 
-- 统一当前独立计算的文本 phrase 与语义 sequence 时间结构。
-- 深化 gaze、face、hesitation、release 和 residual 等部位级表现。
+当前已完成二期阶段 A：`PerformanceSchedule` 已统一 phrase、sequence step、部位事件和来源诊断，
+Parameter Track Graph 负责把编排结果投影为现有 V3 参数轨道，不新增协议或第二套播放时钟。
+阶段 B 的 gaze 第一批也已完成：单姿态支持 lead/dwell/phrase transfer/release，sequence 支持在
+semantic step 前约 80ms 的 gaze transfer，并保留四步 sequence 的四个主模型目标。
+
+- 继续深化 face、hesitation、方向反转和动态 residual 等部位级表现。
 - 建立 Motion Lab 评价闭环和最近动作多样性反馈。
 - 按 Physics setting 调校头发、衣服和饰品，而不是只使用全局倍率。
 - 在职责与评价稳定后，再确定动作小模型的唯一训练目标。

@@ -17,6 +17,8 @@ sequenceDiagram
     participant Audio as HTMLAudioElement
     participant Lip as Lip-sync Sink
     participant Engine as ModelEngine
+    participant Schedule as PerformanceSchedule
+    participant Track as Parameter Track Graph
     participant SDK as Live2D WebSDK
     participant Completion as CompletionCoordinator
     participant ModelSync as ModelSync State
@@ -163,10 +165,15 @@ sequenceDiagram
                 end
             end
 
-            opt Audio metadata 阶段准备语义动作 / speech-only 动作
+            opt ModelEngine 编译动作 / speech-only 动作
                 Engine->>Engine: 协议 / profile / resource 校验
                 Engine->>Engine: 语义阶段：九级采样 + intensity + relation graph + timing
-                Engine->>Engine: 模型参数阶段：speech gesture + binding + resource policy
+                Engine->>Schedule: 生成共享 phrase / sequence step / 部位事件时间结构
+                Schedule-->>Engine: PerformanceSchedule + 来源诊断
+                Engine->>Engine: 模型参数阶段：speech channel + binding
+                Engine->>Track: 将 Schedule 事件投影为 V3 keyframes / modulation
+                Track-->>Engine: pose 轨道或 sequence 一次性最终轨道
+                Engine->>Engine: resource policy 校验与执行仲裁
                 Engine->>Engine: 输出 parameter_plan.v3
             end
 

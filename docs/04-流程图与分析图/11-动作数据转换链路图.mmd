@@ -87,13 +87,16 @@ flowchart TD
     end
 
     subgraph PARAMETER[6. 第二阶段：模型参数编译]
-        SPEECH[SpeechPoseStage order 60<br/>按音频条件生成非周期参数轨道]:::engine
-        BUILD[ModelParameterBindingStage order 80<br/>语义轴 -> 当前模型 parameter binding]:::engine
+        SCHEDULE[PerformanceSchedule<br/>phrase / step / 部位事件 / 来源诊断]:::engine
+        SPEECH[SpeechPoseStage order 60<br/>选择 channel / preset / 方向 / 幅度]:::engine
+        BUILD[ModelParameterBindingStage order 80<br/>语义轴与 speech track -> 当前模型参数]:::engine
+        TRACK[ParameterTrackGraphStage order 85<br/>pose 投影 / sequence final projection]:::engine
         POLICY[ResourcePolicyStage order 90<br/>资源参数冲突与执行策略]:::engine
         PLAN[engine.parameter_plan.v3]:::contract
-        COMPILED --> SPEECH --> BUILD --> POLICY --> PLAN
+        COMPILED --> SCHEDULE --> SPEECH --> BUILD --> TRACK --> POLICY --> PLAN
         SPEECH -.记录.-> TRACE
         BUILD -.记录.-> TRACE
+        TRACK -.记录.-> TRACE
         POLICY -.资源冲突/不可播放.-> CFAIL
         BUILD -.binding 无效.-> CFAIL
     end

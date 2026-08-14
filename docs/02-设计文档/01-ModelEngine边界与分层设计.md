@@ -69,6 +69,8 @@ ModelEngine 不负责：
 | `compiler/compileParameterMotionIntent.ts` | 参数动作 compiler 主入口与两阶段结果收口 |
 | `compiler/compileContext.ts` | stage 共享 state |
 | `compiler/registry.ts` | 实例级 stage registry |
+| `compiler/performanceSchedule.ts` | 整段 pose/sequence 的 phrase、step、部位事件和来源诊断 |
+| `compiler/parameterTrackGraphCompiler.ts` | 将 Schedule 事件投影为 sequence keyframe，并处理必要的计划尾部延长 |
 | `compiler/stages/` | 各阶段的唯一实现 |
 | `runtime/motionRuntimeScheduler.ts` | pending ownership 与启动条件 |
 | `runtime/motionStart.ts` | compile、player 启动和结果报告 |
@@ -88,9 +90,12 @@ IntentValidator                 10 core
 -> ModeResolverStage           45 core
 -> TimingStage                 46 core
 -> CompiledSemanticMotion
+-> PerformanceSchedule         compile-time shared schedule
 -> SpeechPoseStage             60 extension
 -> ModelParameterBindingStage 80 core
+-> ParameterTrackGraphStage    85 core
 -> ResourcePolicyStage         90 core
+-> [sequence] parameterTrackGraphCompiler final projection
 ```
 
 | Stage | 所有权 |
@@ -101,9 +106,15 @@ IntentValidator                 10 core
 | `SemanticAxisRelationGraph` | 派生、范围和有界比例约束 |
 | `ModeResolverStage` | idle/expressive 判定 |
 | `TimingStage` | duration 与时钟 timing |
-| `SpeechPoseStage` | 在语义轴结果收口后生成 `speech_gesture_track` |
+| `PerformanceSchedule` | 统一 phrase、sequence step、部位事件、hold/release/residual 和来源诊断 |
+| `SpeechPoseStage` | 消费 Schedule，只选择说话通道、preset、方向和幅度 |
 | `ModelParameterBindingStage` | 语义轴和说话轨道到 Live2D 参数映射 |
+| `ParameterTrackGraphStage` | 将 pose 的已安排事件投影为 V3 keyframes，并挂接 speech modulation |
 | `ResourcePolicyStage` | typed resource 校验与执行仲裁 |
+
+`compileModelParameterPlan()` 为每个完整 pose 或 sequence 创建一份共享 Schedule。sequence 会先让各
+step 完成同一套 model-parameter pipeline，再由 `parameterTrackGraphCompiler` 使用这份 Schedule 一次性
+合成最终参数轨道；因此 sequence gaze 不会在每个 step 中重复注册。
 
 核心阶段不能在运行时禁用或卸载。扩展阶段必须声明顺序和输入输出，不得绕过 pipeline 修改最终计划。
 
@@ -148,7 +159,10 @@ ModelEngine 先把 `-4..4` 等级确定性采样为轴值，再由关系图计�
 
 ## 9. 说话手势
 
-`SpeechPoseStage` 是 compile extension。它根据 `ag99.voice_following_profile.v3`、segment identity 和音频时长生成按语义轴登记的确定性 `speech_gesture_track`。V3 只提供 semantic axis、相对 `max_speech_offset` 的有效幅度比例和跟随延迟；参数绑定、范围和动力学由 `ModelParameterBindingStage` 统一处理。
+`SpeechPoseStage` 是 compile extension。它读取 `PerformanceSchedule` 和 `ag99.voice_following_profile.v3`，
+只负责选择有效的 speech channel、preset、方向和幅度。Schedule 负责 phrase 起点、过渡和 release 事件，
+`parameterTrackGraphStage` 负责把这些事件投影为确定性的 `speech_gesture_track`；参数绑定、范围和动力学
+由后续阶段与 Live2D WebSDK 统一处理。
 
 当前实现读取 canonical assistant text、标点、短语长度和真实音频时长，生成确定性的非周期 phrase 轨道；
 它已经不再从四套整段固定控制点中选择。当前仍没有 TTS phoneme 或声学停顿的显式时间戳，因此 phrase
@@ -166,9 +180,10 @@ ModelEngine 先把 `-4..4` 等级确定性采样为轴值，再由关系图计�
 
 有音频的动作只能使用匹配 `turn_id + message_id` 的真实 AudioElement clock。明确无音频的 motion-only segment 可以使用自己的 synthetic clock。
 
-动作计划的进入、保持和退出由 `TimingStage` 在编译时确定；sequence 的最小过渡预算与 keyframe
-时间只在 `compileModelParameterPlan.ts` 内按参数动力学计算。`runtime/playbackClock.ts` 不再改写
-已编译计划，Live2D player 也不在播放时重写 timing。
+动作计划的基础 duration 与 blend timing 由 `TimingStage` 确定；整段 phrase、sequence step、部位事件
+以及各轨道的 transition/hold/residual 由共享 `PerformanceSchedule` 确定。Parameter Track Graph 只
+投影这些结果，并在确有末段占用需求时延长计划尾部。`runtime/playbackClock.ts` 不再改写已编译计划，
+Live2D player 也不在播放时重写 timing。
 
 Performance curve 是可选 hint：
 
