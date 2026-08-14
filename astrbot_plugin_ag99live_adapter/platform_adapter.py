@@ -256,10 +256,6 @@ class OLVPetPlatformAdapter(Platform):
     def _selected_stt_provider(self):
         return self.runtime_state.selected_stt_provider
 
-    @property
-    def _selected_motion_analysis_provider(self):
-        return self.runtime_state.selected_motion_analysis_provider
-
     async def run(self):
         self._event_loop = asyncio.get_running_loop()
         try:

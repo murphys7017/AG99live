@@ -182,12 +182,6 @@
     "default": "",
     "_special": "select_provider_stt"
   },
-  "motion_analysis_provider_id": {
-    "description": "基础动作库分析和筛选使用的聊天 Provider。留空时跟随当前 AstrBot 会话聊天模型。",
-    "type": "string",
-    "default": "",
-    "_special": "select_provider"
-  },
   "enable_performance_curve": {
     "description": "是否启用表演曲线提示生成。启用后会调用表演曲线 Provider 为动作生成进入、保持、退出节奏提示；失败时不影响原动作播放。",
     "type": "bool",
@@ -198,36 +192,6 @@
     "type": "string",
     "default": "",
     "_special": "select_provider"
-  },
-  "enable_action_llm_filter": {
-    "description": "是否启用基础动作库 LLM 严格筛选。关闭后仅使用规则候选（rule seed）。",
-    "type": "bool",
-    "default": true
-  },
-  "action_llm_filter_timeout_seconds": {
-    "description": "基础动作库 LLM 筛选超时时间（秒）。",
-    "type": "float",
-    "default": 12.0
-  },
-  "action_llm_filter_min_selected_channels": {
-    "description": "LLM 筛选最少需要覆盖的通道数。低于该值将标记筛选失败。",
-    "type": "int",
-    "default": 3
-  },
-  "action_llm_filter_max_atoms_per_channel": {
-    "description": "LLM 每个通道最多保留的基础动作原子数量。",
-    "type": "int",
-    "default": 2
-  },
-  "action_llm_filter_chunk_max_channels": {
-    "description": "LLM 严格筛选分片时，每片最多包含的候选通道数。",
-    "type": "int",
-    "default": 8
-  },
-  "action_llm_filter_chunk_max_candidates": {
-    "description": "LLM 严格筛选分片时，每片最多包含的候选原子数（按通道候选累计）。",
-    "type": "int",
-    "default": 96
   },
   "vad_model": {
     "description": "前端原始音频断句使用的 VAD 模型。",

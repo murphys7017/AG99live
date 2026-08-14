@@ -143,7 +143,6 @@ AG99live 远程执行器当前走任务委托链路：
 
 ## 关键配置
 
-- `motion_analysis_provider_id`：基础动作库分析和筛选使用的 Provider。
 - `remote_operator_default_computer` / `remote_operator_computer_entries`：远程执行器路由和后端配置；支持 `codex_app_server` 与 `opencode`。
 - `remote_operator_default_profile` / `remote_operator_profiles`：远程执行器执行档位。Codex app-server 后端使用该档位选择 turn 模型与 effort；OpenCode 后端使用 entry 内固定的 `model` / `variant`。
 

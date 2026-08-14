@@ -6,6 +6,7 @@ export {
   SCHEMA_MOTION_INTENT_V4,
   SCHEMA_MOTION_TUNING_SAMPLE_V2,
   SCHEMA_OUTPUT_SEGMENT_V3,
+  SCHEMA_PARAMETER_ACTION_LIBRARY_V2,
   SCHEMA_PARAMETER_PLAN_V3,
   SCHEMA_PERFORMANCE_CURVE_HINT_V1,
   SCHEMA_SEMANTIC_AXIS_PROFILE_V3,
@@ -19,6 +20,7 @@ import {
   SCHEMA_MOTION_INTENT_V4,
   SCHEMA_MOTION_TUNING_SAMPLE_V2,
   SCHEMA_OUTPUT_SEGMENT_V3,
+  SCHEMA_PARAMETER_ACTION_LIBRARY_V2,
   SCHEMA_PARAMETER_PLAN_V3,
   SCHEMA_PERFORMANCE_CURVE_HINT_V1,
   SCHEMA_SEMANTIC_AXIS_PROFILE_V3,
@@ -257,29 +259,19 @@ export interface ParameterActionCounterEntry {
 export interface ParameterActionAnalysis {
   status: string;
   mode: string;
-  provider_id: string;
   error?: string;
 }
 
 export interface ParameterActionParameterEntry {
-  parameter_id: string;
-  parameter_name: string;
-  group_name: string;
   kind: string;
-  domain: string;
   channels: string[];
-  candidate_atom_count: number;
   selected_atom_count: number;
-  atom_ids: string[];
 }
 
 export interface ParameterActionAtom {
   id: string;
   name: string;
   label: string;
-  parameter_id: string;
-  parameter_name: string;
-  group_name: string;
   kind: string;
   domain: string;
   channels: string[];
@@ -289,7 +281,6 @@ export interface ParameterActionAtom {
   trait: string;
   strength: string;
   score: number;
-  source_component_id: string;
   source_motion: string;
   source_file: string;
   source_group: string;
@@ -299,29 +290,18 @@ export interface ParameterActionAtom {
   fps: number;
   loop: boolean;
   energy_score: number;
-  peak_abs_value: number;
-  peak_time_ratio: number;
-  active_ratio: number;
   intensity: string;
-  window_index: number;
-  window_start_ratio: number;
-  window_end_ratio: number;
-  window_duration_ratio: number;
 }
 
 export interface ParameterActionLibrary {
-  schema_version: string;
+  schema_version: typeof SCHEMA_PARAMETER_ACTION_LIBRARY_V2;
   extraction_mode: string;
   analysis: ParameterActionAnalysis;
   summary: {
     motion_count: number;
     driver_component_count: number;
-    candidate_atom_count: number;
     selected_atom_count: number;
-    candidate_parameter_count: number;
     selected_parameter_count: number;
-    domain_count: number;
-    channel_count: number;
   };
   domains: ParameterActionCounterEntry[];
   channels: ParameterActionCounterEntry[];
@@ -572,7 +552,6 @@ export interface ModelSummary {
 export interface RuntimeCacheErrorsPayload {
   root?: string;
   scan_cache?: string;
-  action_filter_cache?: string;
   motion_tuning_samples?: string;
 }
 

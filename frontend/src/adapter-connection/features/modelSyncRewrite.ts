@@ -43,9 +43,6 @@ function normalizeRuntimeCacheErrors(
   const normalized: RuntimeCacheErrorsPayload = {};
   const root = typeof value.root === "string" ? value.root.trim() : "";
   const scanCache = typeof value.scan_cache === "string" ? value.scan_cache.trim() : "";
-  const actionFilterCache = typeof value.action_filter_cache === "string"
-    ? value.action_filter_cache.trim()
-    : "";
   const motionTuningSamples = typeof value.motion_tuning_samples === "string"
     ? value.motion_tuning_samples.trim()
     : "";
@@ -54,9 +51,6 @@ function normalizeRuntimeCacheErrors(
   }
   if (scanCache) {
     normalized.scan_cache = scanCache;
-  }
-  if (actionFilterCache) {
-    normalized.action_filter_cache = actionFilterCache;
   }
   if (motionTuningSamples) {
     normalized.motion_tuning_samples = motionTuningSamples;

@@ -278,14 +278,6 @@ def build_seed_inputs(*, reinforce_primary_observations: bool = False) -> tuple[
     return parameter_scan, motions
 
 
-def build_seed_library() -> dict[str, Any]:
-    parameter_scan, motions = build_seed_inputs()
-    return live2d_scan._build_base_action_library(
-        parameter_scan=deepcopy(parameter_scan),
-        motions=deepcopy(motions),
-    )
-
-
 def build_seed_parameter_action_library() -> dict[str, Any]:
     parameter_scan, motions = build_seed_inputs()
     return live2d_scan._build_parameter_action_library(
@@ -320,10 +312,6 @@ def build_seed_model_info_with_options(
     parameter_scan, motions = build_seed_inputs(
         reinforce_primary_observations=reinforce_primary_observations,
     )
-    base_action_library = live2d_scan._build_base_action_library(
-        parameter_scan=deepcopy(parameter_scan),
-        motions=deepcopy(motions),
-    )
     parameter_action_library = live2d_scan._build_parameter_action_library(
         parameter_scan=deepcopy(parameter_scan),
         motions=deepcopy(motions),
@@ -354,7 +342,6 @@ def build_seed_model_info_with_options(
             {
                 "name": "DemoModel",
                 "parameter_scan": deepcopy(parameter_scan),
-                "base_action_library": base_action_library,
                 "parameter_action_library": parameter_action_library,
                 "adaptive_parameter_profile": adaptive_parameter_profile,
                 "calibration_profile": calibration_profile,
@@ -369,7 +356,6 @@ def build_seed_model_info_with_options(
                     parameter_scan=deepcopy(parameter_scan),
                     expressions=[],
                     motions=deepcopy(motions),
-                    base_action_library=deepcopy(base_action_library),
                     parameter_action_library=deepcopy(parameter_action_library),
                     adaptive_parameter_profile=deepcopy(adaptive_parameter_profile),
                     calibration_profile=deepcopy(calibration_profile),

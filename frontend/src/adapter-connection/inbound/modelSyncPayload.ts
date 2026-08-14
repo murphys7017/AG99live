@@ -17,6 +17,7 @@ import type {
 } from "../../types/semantic-axis-profile.js";
 import {
   SCHEMA_MODEL_INFO_V3,
+  SCHEMA_PARAMETER_ACTION_LIBRARY_V2,
   SCHEMA_SEMANTIC_AXIS_PROFILE_V3,
   SCHEMA_SEMANTIC_AXIS_RELATION_GRAPH_V1,
   SCHEMA_VOICE_FOLLOWING_PROFILE_V3,
@@ -27,8 +28,6 @@ import {
   type PayloadParseResult,
   validateExactKeys,
 } from "./payloadValidation.js";
-
-const PARAMETER_ACTION_LIBRARY_SCHEMA_VERSION = "parameter_action_library.v1";
 
 type FieldKind = "string" | "number" | "boolean" | "array" | "record";
 
@@ -213,13 +212,10 @@ function parseModelSummary(
   if (!parameterScan.ok) return parameterScan;
   const expressionScan = parseExpressionScan(type, record.expression_scan, `${path}.expression_scan`);
   if (!expressionScan.ok) return expressionScan;
-  const parameterActionLibrary = parseVersionedLibrary<ParameterActionLibrary>(
+  const parameterActionLibrary = parseParameterActionLibrary(
     type,
     record.parameter_action_library,
     `${path}.parameter_action_library`,
-    PARAMETER_ACTION_LIBRARY_SCHEMA_VERSION,
-    ["analysis", "summary"],
-    ["domains", "channels", "parameters", "atoms"],
   );
   if (!parameterActionLibrary.ok) return parameterActionLibrary;
   const constraints = parseModelConstraints(type, record.constraints, `${path}.constraints`);
@@ -372,26 +368,242 @@ function parseExpressionScan(
     : shape;
 }
 
-function parseVersionedLibrary<TLibrary>(
+function parseParameterActionLibrary(
   type: string,
   value: unknown,
   path: string,
-  schemaVersion: string,
-  recordKeys: string[],
-  arrayKeys: string[],
-): PayloadParseResult<TLibrary> {
+): PayloadParseResult<ParameterActionLibrary> {
   const record = asRecord(value);
   if (!record) return invalidPayload(type, path, "object");
-  if (record.schema_version !== schemaVersion) {
-    return invalidPayload(type, `${path}.schema_version`, schemaVersion);
+  const libraryKeys = validateExactKeys(type, path, record, [
+    "schema_version",
+    "extraction_mode",
+    "analysis",
+    "summary",
+    "domains",
+    "channels",
+    "parameters",
+    "atoms",
+  ]);
+  if (!libraryKeys.ok) return libraryKeys;
+  if (record.schema_version !== SCHEMA_PARAMETER_ACTION_LIBRARY_V2) {
+    return invalidPayload(
+      type,
+      `${path}.schema_version`,
+      SCHEMA_PARAMETER_ACTION_LIBRARY_V2,
+    );
   }
-  const fields: Record<string, FieldKind> = {
-    extraction_mode: "string",
+  const extractionMode = parseNonEmptyString(
+    type,
+    record.extraction_mode,
+    `${path}.extraction_mode`,
+  );
+  if (!extractionMode.ok) return extractionMode;
+
+  const analysisRecord = asRecord(record.analysis);
+  if (!analysisRecord) return invalidPayload(type, `${path}.analysis`, "object");
+  const status = parseNonEmptyString(
+    type,
+    analysisRecord.status,
+    `${path}.analysis.status`,
+  );
+  if (!status.ok) return status;
+  const mode = parseNonEmptyString(
+    type,
+    analysisRecord.mode,
+    `${path}.analysis.mode`,
+  );
+  if (!mode.ok) return mode;
+  let error: string | undefined;
+  if (analysisRecord.error !== undefined) {
+    const parsedError = parseString(type, analysisRecord.error, `${path}.analysis.error`);
+    if (!parsedError.ok) return parsedError;
+    error = parsedError.payload;
+  }
+
+  const summaryRecord = asRecord(record.summary);
+  if (!summaryRecord) return invalidPayload(type, `${path}.summary`, "object");
+  const summaryValues: Record<string, number> = {};
+  for (const key of [
+    "motion_count",
+    "driver_component_count",
+    "selected_atom_count",
+    "selected_parameter_count",
+  ] as const) {
+    const parsed = parseNonNegativeInteger(
+      type,
+      summaryRecord[key],
+      `${path}.summary.${key}`,
+    );
+    if (!parsed.ok) return parsed;
+    summaryValues[key] = parsed.payload;
+  }
+
+  const domains = parseParameterActionCounters(type, record.domains, `${path}.domains`);
+  if (!domains.ok) return domains;
+  const channels = parseParameterActionCounters(type, record.channels, `${path}.channels`);
+  if (!channels.ok) return channels;
+  const parameters = parseParameterActionParameters(
+    type,
+    record.parameters,
+    `${path}.parameters`,
+  );
+  if (!parameters.ok) return parameters;
+  const atoms = parseParameterActionAtoms(type, record.atoms, `${path}.atoms`);
+  if (!atoms.ok) return atoms;
+
+  return {
+    ok: true,
+    payload: {
+      schema_version: SCHEMA_PARAMETER_ACTION_LIBRARY_V2,
+      extraction_mode: extractionMode.payload,
+      analysis: {
+        status: status.payload,
+        mode: mode.payload,
+        ...(error === undefined ? {} : { error }),
+      },
+      summary: {
+        motion_count: summaryValues.motion_count,
+        driver_component_count: summaryValues.driver_component_count,
+        selected_atom_count: summaryValues.selected_atom_count,
+        selected_parameter_count: summaryValues.selected_parameter_count,
+      },
+      domains: domains.payload,
+      channels: channels.payload,
+      parameters: parameters.payload,
+      atoms: atoms.payload,
+    },
   };
-  for (const key of recordKeys) fields[key] = "record";
-  for (const key of arrayKeys) fields[key] = "array";
-  const shape = validateFields(type, record, path, fields);
-  return shape.ok ? { ok: true, payload: record as TLibrary } : shape;
+}
+
+function parseParameterActionCounters(
+  type: string,
+  value: unknown,
+  path: string,
+): PayloadParseResult<ParameterActionLibrary["domains"]> {
+  if (!Array.isArray(value)) return invalidPayload(type, path, "array");
+  const result: ParameterActionLibrary["domains"] = [];
+  for (const [index, item] of value.entries()) {
+    const itemPath = `${path}[${index}]`;
+    const record = asRecord(item);
+    if (!record) return invalidPayload(type, itemPath, "object");
+    const name = parseNonEmptyString(type, record.name, `${itemPath}.name`);
+    if (!name.ok) return name;
+    const count = parseNonNegativeInteger(type, record.count, `${itemPath}.count`);
+    if (!count.ok) return count;
+    result.push({ name: name.payload, count: count.payload });
+  }
+  return { ok: true, payload: result };
+}
+
+function parseParameterActionParameters(
+  type: string,
+  value: unknown,
+  path: string,
+): PayloadParseResult<ParameterActionLibrary["parameters"]> {
+  if (!Array.isArray(value)) return invalidPayload(type, path, "array");
+  const result: ParameterActionLibrary["parameters"] = [];
+  for (const [index, item] of value.entries()) {
+    const itemPath = `${path}[${index}]`;
+    const record = asRecord(item);
+    if (!record) return invalidPayload(type, itemPath, "object");
+    const kind = parseNonEmptyString(type, record.kind, `${itemPath}.kind`);
+    if (!kind.ok) return kind;
+    const channels = parseStringArray(type, record.channels, `${itemPath}.channels`);
+    if (!channels.ok) return channels;
+    const selectedAtomCount = parseNonNegativeInteger(
+      type,
+      record.selected_atom_count,
+      `${itemPath}.selected_atom_count`,
+    );
+    if (!selectedAtomCount.ok) return selectedAtomCount;
+    result.push({
+      kind: kind.payload,
+      channels: channels.payload,
+      selected_atom_count: selectedAtomCount.payload,
+    });
+  }
+  return { ok: true, payload: result };
+}
+
+function parseParameterActionAtoms(
+  type: string,
+  value: unknown,
+  path: string,
+): PayloadParseResult<ParameterActionLibrary["atoms"]> {
+  if (!Array.isArray(value)) return invalidPayload(type, path, "array");
+  const result: ParameterActionLibrary["atoms"] = [];
+  for (const [index, item] of value.entries()) {
+    const itemPath = `${path}[${index}]`;
+    const record = asRecord(item);
+    if (!record) return invalidPayload(type, itemPath, "object");
+    const strings: Record<string, string> = {};
+    for (const key of [
+      "id",
+      "name",
+      "label",
+      "kind",
+      "domain",
+      "primary_channel",
+      "polarity",
+      "semantic_polarity",
+      "trait",
+      "strength",
+      "source_motion",
+      "source_file",
+      "source_group",
+      "source_category",
+      "intensity",
+    ] as const) {
+      const parsed = parseString(type, record[key], `${itemPath}.${key}`);
+      if (!parsed.ok) return parsed;
+      strings[key] = parsed.payload;
+    }
+    if (!strings.id.trim()) return invalidPayload(type, `${itemPath}.id`, "non-empty string");
+    if (!strings.name.trim()) return invalidPayload(type, `${itemPath}.name`, "non-empty string");
+    if (!strings.label.trim()) return invalidPayload(type, `${itemPath}.label`, "non-empty string");
+    const channels = parseStringArray(type, record.channels, `${itemPath}.channels`);
+    if (!channels.ok) return channels;
+    const sourceTags = parseStringArray(type, record.source_tags, `${itemPath}.source_tags`);
+    if (!sourceTags.ok) return sourceTags;
+    const score = parseFiniteNumber(type, record.score, `${itemPath}.score`);
+    if (!score.ok) return score;
+    const duration = parseNonNegativeNumber(type, record.duration, `${itemPath}.duration`);
+    if (!duration.ok) return duration;
+    const fps = parseNonNegativeNumber(type, record.fps, `${itemPath}.fps`);
+    if (!fps.ok) return fps;
+    const loop = typeof record.loop === "boolean"
+      ? { ok: true as const, payload: record.loop }
+      : invalidPayload(type, `${itemPath}.loop`, "boolean");
+    if (!loop.ok) return loop;
+    const energyScore = parseFiniteNumber(type, record.energy_score, `${itemPath}.energy_score`);
+    if (!energyScore.ok) return energyScore;
+    result.push({
+      id: strings.id,
+      name: strings.name,
+      label: strings.label,
+      kind: strings.kind,
+      domain: strings.domain,
+      channels: channels.payload,
+      primary_channel: strings.primary_channel,
+      polarity: strings.polarity,
+      semantic_polarity: strings.semantic_polarity,
+      trait: strings.trait,
+      strength: strings.strength,
+      score: score.payload,
+      source_motion: strings.source_motion,
+      source_file: strings.source_file,
+      source_group: strings.source_group,
+      source_category: strings.source_category,
+      source_tags: sourceTags.payload,
+      duration: duration.payload,
+      fps: fps.payload,
+      loop: loop.payload,
+      energy_score: energyScore.payload,
+      intensity: strings.intensity,
+    });
+  }
+  return { ok: true, payload: result };
 }
 
 function parseModelConstraints(
@@ -822,7 +1034,7 @@ function parseRuntimeCacheErrors(
 ): PayloadParseResult<RuntimeCacheErrorsPayload> {
   const record = asRecord(value);
   if (!record) return invalidPayload(type, path, "object");
-  const allowedKeys = new Set(["root", "scan_cache", "action_filter_cache", "motion_tuning_samples"]);
+  const allowedKeys = new Set(["root", "scan_cache", "motion_tuning_samples"]);
   const result: RuntimeCacheErrorsPayload = {};
   for (const [key, item] of Object.entries(record)) {
     if (!allowedKeys.has(key)) {
@@ -887,6 +1099,40 @@ function parseStringArray(
     return invalidPayload(type, path, "string[]");
   }
   return { ok: true, payload: [...value] as string[] };
+}
+
+function parseFiniteNumber(
+  type: string,
+  value: unknown,
+  path: string,
+): PayloadParseResult<number> {
+  return isFiniteNumber(value)
+    ? { ok: true, payload: value }
+    : invalidPayload(type, path, "finite number");
+}
+
+function parseNonNegativeNumber(
+  type: string,
+  value: unknown,
+  path: string,
+): PayloadParseResult<number> {
+  const parsed = parseFiniteNumber(type, value, path);
+  if (!parsed.ok) return parsed;
+  return parsed.payload >= 0
+    ? parsed
+    : invalidPayload(type, path, "non-negative finite number");
+}
+
+function parseNonNegativeInteger(
+  type: string,
+  value: unknown,
+  path: string,
+): PayloadParseResult<number> {
+  const parsed = parseFiniteNumber(type, value, path);
+  if (!parsed.ok) return parsed;
+  return Number.isInteger(parsed.payload) && parsed.payload >= 0
+    ? parsed
+    : invalidPayload(type, path, "non-negative integer");
 }
 
 function parseFiniteRange(

@@ -86,13 +86,7 @@ export function buildParameterActionPreview(
     analysis: {
       status: library.analysis.status,
       mode: library.analysis.mode,
-      providerId: library.analysis.provider_id,
-      inputSignature: "",
-      latencyMs: 0,
-      cacheHit: false,
-      selectedChannelCount,
       error: [library.analysis.error ?? "", runtimeCacheDiagnostics].filter(Boolean).join(" | "),
-      fallbackReason: "",
     },
     families,
     channels,
@@ -187,9 +181,6 @@ function buildRuntimeCacheDiagnostics(
   return [
     runtimeCacheErrors?.scan_cache
       ? `runtime cache scan_cache 异常：${runtimeCacheErrors.scan_cache}`
-      : "",
-    runtimeCacheErrors?.action_filter_cache
-      ? `runtime cache action_filter_cache 异常：${runtimeCacheErrors.action_filter_cache}`
       : "",
   ].filter(Boolean).join(" | ");
 }

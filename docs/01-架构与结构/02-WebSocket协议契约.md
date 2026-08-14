@@ -200,9 +200,9 @@ performance curve 和 ID 映射。迟到的 AstrBot 输出在 `OLVPetPlatformEve
 
 `astrbot_plugin_ag99live_adapter/protocol/schema_manifest.json` 是版本唯一事实源：Adapter 生产代码通过 `schema_versions.py` 读取，Electron 生产代码只使用 `protocolSchema.generated.ts` 的对应常量。协议变更必须原子更新 Adapter 与 Electron；`live2d_scan.v3` 升级还会使旧扫描缓存失效并触发重新扫描，禁止通过兼容分支继续消费旧缓存。
 
-`system.model_sync` 不是后端扫描缓存的镜像。它只携带 renderer 加载模型、ModelEngine 编译、资源冲突检查和动作实验室展示所需字段。`base_action_library`、`adaptive_parameter_profile`、`calibration_profile` 和完整 `motion_resource_pool` 仅属于 Adapter 内部扫描与 Prompt 分析，不跨 WebSocket 传输。
+`system.model_sync` 不是后端扫描缓存的镜像。它只携带 renderer 加载模型、ModelEngine 编译、资源冲突检查和动作实验室展示所需字段。参数动作库以 `parameter_action_library.v2` 投影给前端；扫描器的其它中间结果仍属于 Adapter 内部，不跨 WebSocket 传输。
 
-`runtime_cache_errors` 只存在于 `system.model_sync.payload` 根部，与 `model_info` 并列。它描述 Adapter 扫描缓存、动作筛选缓存和样本缓存的运行诊断，不是 `live2d_scan.v3` 模型能力的一部分；前端分别写入 ModelSync state，禁止在 `model_info` 内复制第二份。
+`runtime_cache_errors` 只存在于 `system.model_sync.payload` 根部，与 `model_info` 并列。它描述 Adapter 扫描缓存和样本缓存的运行诊断，不是 `live2d_scan.v3` 模型能力的一部分；前端分别写入 ModelSync state，禁止在 `model_info` 内复制第二份。
 
 Motion Lab 事件采用 at-least-once 交付：前端必须先把事件写入 IndexedDB，再通过 WebSocket 发送；WebSocket `send()` 成功不代表记录成功。后端以 `event_id` 作为 SQLite 主键幂等写入，只有插入事务完成后才发送 `system.motion_lab_raw_event_recorded`。前端收到匹配回执后才能删除 IndexedDB 记录；断线重连时使用相同 `event_id` 重发。
 

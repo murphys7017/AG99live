@@ -82,7 +82,7 @@ def test_runtime_state_exposes_runtime_cache_segment_errors_in_model_sync(
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
     (cache_dir / "live2d_runtime_cache.json").write_text(
-        '{"schema_version":"live2d_runtime_cache.v2","scan_cache":[],"action_filter_cache":[]}',
+        '{"schema_version":"live2d_runtime_cache.v3","scan_cache":[]}',
         encoding="utf-8",
     )
 
@@ -106,7 +106,6 @@ def test_runtime_state_exposes_runtime_cache_segment_errors_in_model_sync(
     )
     assert payload["payload"]["runtime_cache_errors"] == {
         "scan_cache": "live2d_runtime_cache_scan_cache_invalid",
-        "action_filter_cache": "live2d_runtime_cache_action_filter_cache_invalid",
     }
     assert "runtime_cache_errors" not in payload["payload"]["model_info"]
 
@@ -139,7 +138,7 @@ def test_runtime_state_invalidates_old_scan_cache_version(
     cache_path.write_text(
         json.dumps(
             {
-                "schema_version": "live2d_runtime_cache.v2",
+                "schema_version": "live2d_runtime_cache.v3",
                 "scan_cache": {
                     # This was the cache marker used while model snapshots still
                     # contained ag99.voice_following_profile.v1.
@@ -148,7 +147,6 @@ def test_runtime_state_invalidates_old_scan_cache_version(
                     "base_url": "http://127.0.0.1:12397",
                     "model_info": {"selected_model": "CachedOnly", "models": []},
                 },
-                "action_filter_cache": {"keep": True},
             },
             ensure_ascii=False,
         ),

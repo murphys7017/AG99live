@@ -420,9 +420,8 @@ function buildSemanticAxisValuesFromAtoms(
       </dl>
 
       <div class="action-preview__analysis">
-        <span>Provider: {{ preview.analysis.providerId || "rule-seed only" }}</span>
-        <span>Latency: {{ preview.analysis.latencyMs }}ms</span>
-        <span>Cache: {{ preview.analysis.cacheHit ? "hit" : "miss" }}</span>
+        <span>状态: {{ preview.analysis.status }}</span>
+        <span>提取方式: {{ preview.analysis.mode }}</span>
       </div>
       <p v-if="preview.analysis.error" class="action-preview__error">
         {{ preview.analysis.error }}

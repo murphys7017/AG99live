@@ -7,7 +7,7 @@ from typing import Any
 
 from astrbot.api import logger
 
-LIVE2D_RUNTIME_CACHE_SCHEMA_VERSION = "live2d_runtime_cache.v2"
+LIVE2D_RUNTIME_CACHE_SCHEMA_VERSION = "live2d_runtime_cache.v3"
 LIVE2D_MODEL_METADATA_DIRNAME = "ag99"
 
 
@@ -67,19 +67,14 @@ def load_live2d_runtime_cache(cache_path: Path) -> tuple[dict[str, Any], dict[st
         return _build_empty_cache_payload(), {}
 
     scan_cache = payload.get("scan_cache")
-    action_filter_cache = payload.get("action_filter_cache")
     errors: dict[str, str] = {}
     normalized_scan_cache = scan_cache if isinstance(scan_cache, dict) else {}
-    normalized_action_filter_cache = action_filter_cache if isinstance(action_filter_cache, dict) else {}
     if not isinstance(scan_cache, dict):
         errors["scan_cache"] = "live2d_runtime_cache_scan_cache_invalid"
-    if not isinstance(action_filter_cache, dict):
-        errors["action_filter_cache"] = "live2d_runtime_cache_action_filter_cache_invalid"
     return (
         {
             "schema_version": LIVE2D_RUNTIME_CACHE_SCHEMA_VERSION,
             "scan_cache": normalized_scan_cache,
-            "action_filter_cache": normalized_action_filter_cache,
         },
         errors,
     )
@@ -90,11 +85,6 @@ def save_live2d_runtime_cache(cache_path: Path, payload: dict[str, Any]) -> None
     normalized_payload = {
         "schema_version": LIVE2D_RUNTIME_CACHE_SCHEMA_VERSION,
         "scan_cache": payload.get("scan_cache") if isinstance(payload.get("scan_cache"), dict) else {},
-        "action_filter_cache": (
-            payload.get("action_filter_cache")
-            if isinstance(payload.get("action_filter_cache"), dict)
-            else {}
-        ),
     }
     temp_path = cache_path.with_suffix(f"{cache_path.suffix}.tmp")
     temp_path.write_text(
@@ -113,5 +103,4 @@ def _build_empty_cache_payload() -> dict[str, Any]:
     return {
         "schema_version": LIVE2D_RUNTIME_CACHE_SCHEMA_VERSION,
         "scan_cache": {},
-        "action_filter_cache": {},
     }
