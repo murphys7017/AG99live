@@ -64,8 +64,13 @@ function applyOutputSegment(
   if (payload.motion.state === "present") {
     const normalized = deps.normalizeMotionPayload(payload.motion.payload);
     if (!normalized.ok) {
+      const reason = `output_segment_motion_invalid:${event.messageId}:${normalized.reason}`;
+      deps.sessionStore.commitOutputSegment(event.turnId, event.messageId, {
+        state: "rejected",
+        reason,
+      });
       deps.reportOutputSegmentRejected(
-        `output_segment_motion_invalid:${event.messageId}:${normalized.reason}`,
+        reason,
         event.envelope,
       );
       return;
@@ -80,14 +85,20 @@ function applyOutputSegment(
     payload.audio.state === "present"
     && (!resolvedAudioUrl || !resolvedAudioUrl.trim())
   ) {
+    const reason = `output_segment_audio_url_invalid:${event.messageId}`;
+    deps.sessionStore.commitOutputSegment(event.turnId, event.messageId, {
+      state: "rejected",
+      reason,
+    });
     deps.reportOutputSegmentRejected(
-      `output_segment_audio_url_invalid:${event.messageId}`,
+      reason,
       event.envelope,
     );
     return;
   }
 
   const material: OutputSegmentMaterial = {
+    state: "accepted",
     text: payload.text,
     audio: payload.audio.state === "present"
       ? {

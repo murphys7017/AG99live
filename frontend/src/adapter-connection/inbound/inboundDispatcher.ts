@@ -66,8 +66,8 @@ export interface InboundDispatchDeps {
     setActiveSession: (turnId: string | null) => void;
     markTurnStarted: (turnId: string) => void;
     markSynthFinished: (turnId: string | null) => void;
-    markTurnFinished: (turnId: string | null, success: boolean, reason?: string) => void;
-    markInterrupt: (turnId: string | null) => void;
+    markTurnFinished: (turnId: string | null, success: boolean, reason?: string) => boolean;
+    markInterrupt: (turnId: string | null) => boolean;
     assertOutputSegmentsResolved: (turnId: string | null) => void;
     commitOutputSegment: (
       turnId: string | null,

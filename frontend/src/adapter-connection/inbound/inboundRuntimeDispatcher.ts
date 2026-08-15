@@ -32,8 +32,8 @@ export interface InboundRuntimeDispatchDeps {
     setActiveSession: (turnId: string | null) => void;
     markTurnStarted: (turnId: string) => void;
     markSynthFinished: (turnId: string | null) => void;
-    markTurnFinished: (turnId: string | null, success: boolean, reason?: string) => void;
-    markInterrupt: (turnId: string | null) => void;
+    markTurnFinished: (turnId: string | null, success: boolean, reason?: string) => boolean;
+    markInterrupt: (turnId: string | null) => boolean;
     assertOutputSegmentsResolved: (turnId: string | null) => void;
   } | undefined;
   pushHistory: (role: string, text: string) => void;
@@ -105,21 +105,25 @@ function applyTurnFinished(
   event: Extract<InboundAdapterEvent, { kind: "turn_finished" }>,
 ): void {
   const s = deps.state;
-  s.turnFinishedTurnId = event.turnId;
-  s.turnFinishedSuccess = event.success;
-  s.turnFinishedReason = event.reason;
+  let accepted = true;
   try {
-    deps.sessionStore?.markTurnFinished(
-      s.turnFinishedTurnId,
-      s.turnFinishedSuccess,
-      s.turnFinishedReason,
-    );
+    accepted = deps.sessionStore?.markTurnFinished(
+      event.turnId,
+      event.success,
+      event.reason,
+    ) ?? true;
   } catch (error) {
     deps.reportRuntimeProtocolViolation(
       error instanceof Error ? error.message : "turn_finished arrived for unknown session.",
     );
     return;
   }
+  if (!accepted) {
+    return;
+  }
+  s.turnFinishedTurnId = event.turnId;
+  s.turnFinishedSuccess = event.success;
+  s.turnFinishedReason = event.reason;
 
   if (event.success) {
     s.statusMessage = "本轮对话已完成。";
@@ -140,8 +144,9 @@ function applyInterrupt(
 ): void {
   const s = deps.state;
   const interruptedTurnId = event.turnId;
+  let accepted = true;
   try {
-    deps.sessionStore?.markInterrupt(interruptedTurnId);
+    accepted = deps.sessionStore?.markInterrupt(interruptedTurnId) ?? true;
   } catch (error) {
     deps.reportRuntimeProtocolViolation(
       error instanceof Error ? error.message : "interrupt arrived for unknown session.",
@@ -149,6 +154,9 @@ function applyInterrupt(
     return;
   }
   deps.stopAudioAndSettleTurn(interruptedTurnId, "audio_playback_interrupted");
+  if (!accepted) {
+    return;
+  }
   if (s.currentTurnId === interruptedTurnId) {
     s.currentTurnId = null;
   }

@@ -96,6 +96,9 @@ from ..motion.observation import record_motion_observation
 from .output_segment import PendingOutputSegment
 
 
+MAX_REMEMBERED_TERMINAL_TURNS = 256
+
+
 class TurnCoordinator:
     """后端单连接的协议+轮次编排器。
 
@@ -782,6 +785,16 @@ class TurnCoordinator:
             raise ValueError("playback_finished_turn_id_missing")
 
         self._mark_turn_timing(resolved_turn_id, "playback_completed_at")
+        playback_ms = self._elapsed_ms(
+            resolved_turn_id,
+            "audio_payload_sent_at",
+            "playback_completed_at",
+        )
+        total_ms = self._elapsed_ms(
+            resolved_turn_id,
+            "received_at",
+            "playback_completed_at",
+        )
         await self._finish_turn(
             turn_id=resolved_turn_id,
             success=success,
@@ -790,20 +803,11 @@ class TurnCoordinator:
         logger.debug(
             "Turn timing playback: turn_id=%s playback_ms=%.1f total_ms=%.1f success=%s reason=%s",
             resolved_turn_id,
-            self._elapsed_ms(
-                resolved_turn_id,
-                "audio_payload_sent_at",
-                "playback_completed_at",
-            ),
-            self._elapsed_ms(
-                resolved_turn_id,
-                "received_at",
-                "playback_completed_at",
-            ),
+            playback_ms,
+            total_ms,
             success,
             reason or "",
         )
-        self._turn_timings.pop(resolved_turn_id, None)
 
     async def _commit_inbound_message(self, message_obj, *, turn_id: str | None = None) -> None:
         async with self._turn_lock:
@@ -852,7 +856,6 @@ class TurnCoordinator:
                     success=False,
                     reason="event_commit_failed",
                 )
-                self._turn_timings.pop(current_turn_id, None)
                 raise
             self.chat_buffer.add("user", message_obj.message_str)
             self._record_motion_lab_raw_event(
@@ -967,7 +970,6 @@ class TurnCoordinator:
             success=False,
             reason="interrupted",
         )
-        self._turn_timings.pop(resolved_turn_id, None)
 
         logger.info(
             "Processed control.interrupt for turn_id=%s stopped_events=%s",
@@ -1335,6 +1337,7 @@ class TurnCoordinator:
                     existing_result,
                     terminal_result,
                 )
+            self._turn_timings.pop(resolved_turn_id, None)
             return
 
         self._turn_terminal_results[resolved_turn_id] = None
@@ -1353,7 +1356,7 @@ class TurnCoordinator:
             raise
 
         self._turn_terminal_results[resolved_turn_id] = terminal_result
-        self._mark_turn_timing(resolved_turn_id, "turn_completed_at")
+        self._prune_turn_terminal_results()
         turn_identity_map = getattr(self, "turn_identity_map", None)
         if turn_identity_map is not None:
             turn_identity_map.clear_frontend_turn(resolved_turn_id)
@@ -1370,6 +1373,22 @@ class TurnCoordinator:
         self._closed_output_turn_ids.discard(resolved_turn_id)
         self._output_emitted_turn_ids.discard(resolved_turn_id)
         self._clear_active_vad_turn(resolved_turn_id)
+        self._turn_timings.pop(resolved_turn_id, None)
+
+    def _prune_turn_terminal_results(self) -> None:
+        completed_count = sum(
+            result is not None for result in self._turn_terminal_results.values()
+        )
+        excess = completed_count - MAX_REMEMBERED_TERMINAL_TURNS
+        if excess <= 0:
+            return
+        for turn_id, result in tuple(self._turn_terminal_results.items()):
+            if excess <= 0:
+                break
+            if result is None:
+                continue
+            self._turn_terminal_results.pop(turn_id, None)
+            excess -= 1
 
     async def _handle_vad_speech_started(self, capture_turn_id: str) -> None:
         normalized_capture_turn_id = self._require_turn_id_value(capture_turn_id)

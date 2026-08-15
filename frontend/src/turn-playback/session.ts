@@ -152,13 +152,20 @@ export type OutputSegmentMotionMaterial =
   | { state: "failed"; reason: string };
 
 /**
- * 已通过协议和领域校验、可以一次性写入 SessionStore 的完整逻辑段。
+ * output.segment 的原子提交结果。accepted 携带完整播放材料；rejected 表示
+ * 整段在入站领域校验阶段被拒绝，不能释放其中任何单项材料。
  */
-export interface OutputSegmentMaterial {
-  text: OutputSegmentTextMaterial;
-  audio: OutputSegmentAudioMaterial;
-  motion: OutputSegmentMotionMaterial;
-}
+export type OutputSegmentMaterial =
+  | {
+      state: "accepted";
+      text: OutputSegmentTextMaterial;
+      audio: OutputSegmentAudioMaterial;
+      motion: OutputSegmentMotionMaterial;
+    }
+  | {
+      state: "rejected";
+      reason: string;
+    };
 
 /**
  * 后端轮次三段信号在前端的镜像。
@@ -179,6 +186,8 @@ export interface TurnPlaybackSegment {
   id: string;
   messageId: string;
   turnId: string | null;
+  rejected: boolean;
+  rejectionReason: string;
   text: TurnPlaybackSessionText;
   audio: TurnPlaybackSessionAudio;
   motion: TurnPlaybackSessionMotion;
@@ -262,6 +271,8 @@ export function createTurnPlaybackSegment(
     id: messageId,
     messageId,
     turnId,
+    rejected: false,
+    rejectionReason: "",
     text: createEmptyTextState(),
     audio: createEmptyAudioState(),
     motion: createEmptyMotionState(),
@@ -297,10 +308,13 @@ export function createTurnPlaybackSession(
 }
 
 /**
- * 段是否已经本地结算：text 已 delivered、audio 已到终态、motion 已 absent/completed/failed
- * 三者之一。注意不读 backend.*，仅看本段三个子状态。
+ * 段是否已经本地结算：整段已被原子拒绝，或者 text 已 delivered、audio 已到终态、
+ * motion 已 absent/completed/failed 三者之一。注意不读 backend.*。
  */
 export function isSegmentLocallySettled(segment: TurnPlaybackSegment): boolean {
+  if (segment.rejected) {
+    return true;
+  }
   if (!segment.text.delivered) {
     return false;
   }

@@ -153,6 +153,7 @@ export function useTurnPlaybackSessionStore() {
     }
     const session = ensureSession(turnId);
     state.activeSessionId = session.id;
+    pruneSessions();
   }
 
   // ── segments ────────────────────────────────────────────────────
@@ -196,7 +197,7 @@ export function useTurnPlaybackSessionStore() {
   }
 
   function rejectTerminalRewrite(
-    material: "text" | "audio" | "motion",
+    material: "text" | "audio" | "motion" | "turn",
     current: string,
     next: string,
   ): void {
@@ -237,6 +238,9 @@ export function useTurnPlaybackSessionStore() {
       const segment = session.segments.get(messageId);
       if (!segment) {
         throw new Error(`Turn playback segment order is corrupt: messageId=${messageId}.`);
+      }
+      if (segment.rejected) {
+        continue;
       }
       const textResolved = Boolean(segment.text.content) || segment.text.delivered;
       const audioResolved = Boolean(segment.audio.url) || segment.audio.terminal !== "idle";
@@ -288,6 +292,27 @@ export function useTurnPlaybackSessionStore() {
 
     const receivedAtMs = performance.now();
     const segment = createTurnPlaybackSegment(segmentId, turnId);
+
+    if (material.state === "rejected") {
+      const rejectionReason = material.reason.trim();
+      if (!rejectionReason) {
+        throw new Error(`Rejected output segment requires a reason: messageId=${segmentId}.`);
+      }
+      segment.rejected = true;
+      segment.rejectionReason = rejectionReason;
+      session.segments.set(segmentId, segment);
+      session.segmentOrder.push(segmentId);
+      if (session.phase === "collecting") {
+        markPhaseInternal(session, "ready");
+      }
+      log("atomic output segment rejected", {
+        sessionId: session.id,
+        messageId: segmentId,
+        turnId,
+        reason: rejectionReason,
+      });
+      return segment;
+    }
 
     if (material.text.state === "present") {
       segment.text.content = material.text.content;
@@ -582,38 +607,74 @@ export function useTurnPlaybackSessionStore() {
     turnId: string | null,
     success: boolean,
     reason = "",
-  ): void {
+  ): boolean {
     const session = requireSession(turnId);
-    session.backend.turnFinished = true;
-    session.backend.success = success;
-    session.backend.reason = reason || session.backend.reason;
+    const normalizedReason = reason.trim();
+    if (session.backend.turnFinished) {
+      const current = `${session.backend.success === true}:${session.backend.reason}`;
+      const next = `${success}:${normalizedReason}`;
+      if (current !== next) {
+        rejectTerminalRewrite("turn", current, next);
+      }
+      return false;
+    }
+    if (
+      (session.phase === "completed" && !success)
+      || (session.phase === "failed" && success)
+    ) {
+      rejectTerminalRewrite(
+        "turn",
+        session.phase,
+        `${success ? "completed" : "failed"}:${normalizedReason}`,
+      );
+      return false;
+    }
     if (!success) {
       markPhaseInternal(session, "failed");
     }
+    session.backend.turnFinished = true;
+    session.backend.success = success;
+    session.backend.reason = normalizedReason || session.backend.reason;
+    return true;
   }
 
   // ── interrupt ───────────────────────────────────────────────────
 
   function markInterrupt(
     turnId: string | null,
-  ): void {
+  ): boolean {
     const session = requireSession(turnId);
+    if (session.interrupted) {
+      return false;
+    }
+    if (isTerminalPhase(session.phase) || session.backend.turnFinished) {
+      rejectTerminalRewrite("turn", session.phase, "interrupted");
+      return false;
+    }
+    markPhaseInternal(session, "failed");
     session.interrupted = true;
     session.backend.reason = session.backend.reason || "interrupted";
-    markPhaseInternal(session, "failed");
     log("session interrupted", {
       id: session.id,
       turnId: session.turnId,
     });
+    return true;
   }
 
   function markSessionFailed(
     turnId: string | null,
     reason: string,
-  ): void {
+  ): boolean {
     const session = requireSession(turnId);
-    session.backend.reason = reason || session.backend.reason;
+    if (isTerminalPhase(session.phase)) {
+      if (session.phase !== "failed") {
+        rejectTerminalRewrite("turn", session.phase, `failed:${reason}`);
+      }
+      return false;
+    }
     markPhaseInternal(session, "failed");
+    session.backend.reason = reason || session.backend.reason;
+    return true;
   }
 
   // ── phase ───────────────────────────────────────────────────────

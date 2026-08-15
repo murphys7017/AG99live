@@ -93,6 +93,7 @@ def _prepare_turn_finalization(coordinator) -> None:
     coordinator._closing_output_turn_ids = set()
     coordinator._closed_output_turn_ids = set()
     coordinator._output_emitted_turn_ids = set()
+    coordinator._turn_terminal_results = {}
     coordinator._turn_timings = {}
     coordinator._events_by_turn_id = {}
     coordinator._active_vad_turn_by_capture_turn = {}
@@ -117,6 +118,7 @@ def test_reset_turn_tracking_clears_connection_owned_state(
     coordinator._closing_output_turn_ids = {"turn-2"}
     coordinator._closed_output_turn_ids = {"turn-1"}
     coordinator._output_emitted_turn_ids = {"turn-1", "turn-2"}
+    coordinator._turn_terminal_results = {"turn-1": (True, None)}
     coordinator._active_vad_turn_by_capture_turn = {"capture-1": "turn-1"}
     coordinator._last_prompt_motion_snapshot = {"turn_id": "turn-1"}
     coordinator._events_by_turn_id = {}
@@ -129,6 +131,7 @@ def test_reset_turn_tracking_clears_connection_owned_state(
     assert coordinator._closing_output_turn_ids == set()
     assert coordinator._closed_output_turn_ids == set()
     assert coordinator._output_emitted_turn_ids == set()
+    assert coordinator._turn_terminal_results == {}
     assert coordinator._active_vad_turn_by_capture_turn == {}
     assert coordinator._last_prompt_motion_snapshot is None
 
@@ -359,15 +362,36 @@ def test_close_turn_output_queue_rejects_zero_segments(
     coordinator._closing_output_turn_ids = set()
     coordinator._closed_output_turn_ids = set()
     coordinator._output_emitted_turn_ids = set()
+    coordinator._turn_terminal_results = {}
+    coordinator._turn_timings = {"turn-1": {}}
+    coordinator._pending_output_segments = {}
+    coordinator._events_by_turn_id = {}
+    coordinator._active_vad_turn_by_capture_turn = {}
+    coordinator.turn_identity_map = None
+
+    sent_payloads: list[dict[str, object]] = []
+
+    async def fake_send_json(payload):
+        sent_payloads.append(payload)
+        return True
 
     async def flush_segments(*, turn_id: str) -> int:
         assert turn_id == "turn-1"
         return 0
 
     coordinator._flush_pending_output_segments = flush_segments
+    coordinator._send_json = fake_send_json
 
-    with pytest.raises(RuntimeError, match="output_segment_missing"):
-        asyncio.run(coordinator.close_turn_output_queue(turn_id="turn-1"))
+    asyncio.run(coordinator.close_turn_output_queue(turn_id="turn-1"))
+
+    assert [payload.get("type") for payload in sent_payloads] == [
+        "control.error",
+        "control.turn_finished",
+    ]
+    assert sent_payloads[1].get("payload") == {
+        "success": False,
+        "reason": "output_segment_missing:turn-1",
+    }
 
 
 def test_emit_message_chain_converts_audio_off_thread(

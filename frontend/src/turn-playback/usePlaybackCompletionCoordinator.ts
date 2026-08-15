@@ -77,17 +77,15 @@ export function usePlaybackCompletionCoordinator(
       return;
     }
 
-    const success = session.segmentOrder.every((segmentId) => {
-      const segment = session.segments.get(segmentId);
-      return segment
-        ? !segment.text.failed
-          && segment.audio.terminal !== "failed"
-          && !segment.motion.failed
-        : true;
-    });
+    const failureReason = resolvePlaybackFailureReason(session);
+    const success = failureReason === null;
     options.sessionStore.markPhase(session.turnId, "settling");
     pendingAckSessions.add(sessionId);
-    void sendPlaybackFinished(sessionId, success, reason);
+    void sendPlaybackFinished(
+      sessionId,
+      success,
+      success ? reason : failureReason,
+    );
   }
 
   async function sendPlaybackFinished(
@@ -150,6 +148,7 @@ export function usePlaybackCompletionCoordinator(
         const segment = session.segments.get(messageId);
         return {
           messageId,
+          rejected: segment?.rejected ?? false,
           audioUrl: segment?.audio.url ?? null,
           audioReleased: segment?.audio.released ?? false,
           textDelivered: segment?.text.delivered ?? false,
@@ -179,4 +178,26 @@ export function usePlaybackCompletionCoordinator(
       unsubscribeExecutionStateChanges();
     },
   };
+}
+
+function resolvePlaybackFailureReason(session: TurnPlaybackSession): string | null {
+  for (const segmentId of session.segmentOrder) {
+    const segment = session.segments.get(segmentId);
+    if (!segment) {
+      return `playback_segment_missing:${segmentId}`;
+    }
+    if (segment.rejected) {
+      return segment.rejectionReason || `output_segment_rejected:${segmentId}`;
+    }
+    if (segment.text.failed) {
+      return segment.text.reason || `text_playback_failed:${segmentId}`;
+    }
+    if (segment.audio.terminal === "failed") {
+      return segment.audio.reason || `audio_playback_failed:${segmentId}`;
+    }
+    if (segment.motion.failed) {
+      return segment.motion.reason || `motion_playback_failed:${segmentId}`;
+    }
+  }
+  return null;
 }
