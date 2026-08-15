@@ -89,15 +89,18 @@ export function usePreviewMotionPlayer() {
       console.error("[MotionPlayer] catalog motion stop failed.", error);
       stopErrors.push(error);
     }
+    if (stopErrors.length > 0) {
+      state.status = "failed";
+      state.message = `参数计划停止失败（${reason}）。`;
+      state.finishedAt = new Date().toISOString();
+      throw stopErrors[0];
+    }
     if (state.status === "playing" || state.status === "preparing") {
       state.status = "idle";
       state.message = reason === "stopped"
         ? "参数计划已停止。"
         : `参数计划已停止（${reason}）。`;
       state.finishedAt = new Date().toISOString();
-    }
-    if (stopErrors.length > 0) {
-      throw stopErrors[0];
     }
   }
 
