@@ -127,7 +127,6 @@ export interface MotionStartDependencies {
     options: PlayCatalogMotionOptions,
   ) => CatalogMotionStartResult;
   getPlayerMessage?: () => string;
-  onCatalogMotionAccepted: (run: ModelEngineActivePlaybackRun) => void;
   onPlanStarted: (event: ModelEnginePlanStartedEvent) => void;
   onMotionRejected: (event: {
     turnId: string;
@@ -176,8 +175,7 @@ export interface MotionRuntimeStateController {
   ) => void;
 }
 
-export interface ModelEngineDependencies
-  extends Omit<MotionStartDependencies, "onCatalogMotionAccepted"> {
+export interface ModelEngineDependencies extends MotionStartDependencies {
   stopPlan: (reason?: string) => void;
   canStartSpeechOnlyMotion: (
     turnId: string | null,

@@ -11,7 +11,6 @@ export type {
 
 export type CatalogMotionStartResult =
   | { status: "rejected"; reason: string }
-  | { status: "accepted"; runId: string }
   | { status: "started"; runId: string };
 
 export interface CatalogMotionLifecycleCallbacks {

@@ -70,8 +70,6 @@ import {
   markLive2DModelReady,
 } from "./modelreadiness";
 
-const AsyncMotionAcceptedHandle = { status: "async_motion_accepted" };
-
 interface CatalogMotionLifecycleCallbacks {
   playbackClockReader?: { getElapsedMs: () => number | null };
   onStarted?: () => void;
@@ -136,7 +134,6 @@ interface ActiveParameterFrameFailure {
 export class LAppModel extends CubismUserModel {
   private readonly _loadGeneration = getLive2DModelLoadState().generation;
   private _released = false;
-  private _catalogMotionRequestGeneration = 0;
   private _activeCatalogMotionStop: ((reason: string) => void) | null = null;
   private _activeCatalogMotionClockReader: { getElapsedMs: () => number | null } | null = null;
   private _activeCatalogMotionClockElapsedMs: number | null = null;
@@ -766,7 +763,6 @@ export class LAppModel extends CubismUserModel {
     this._activeCatalogMotionClockReader = null;
     this._activeCatalogMotionClockElapsedMs = null;
     activeStop?.(reason);
-    this._catalogMotionRequestGeneration += 1;
     this._motionManager.stopAllMotions();
     this._motionManager.setReservePriority(0);
   }
@@ -788,23 +784,21 @@ export class LAppModel extends CubismUserModel {
     const lifecycleCallbacks = typeof callbacks === "function"
       ? { onFinished: callbacks }
       : callbacks;
-    const requestGeneration = ++this._catalogMotionRequestGeneration;
     let terminalSettled = false;
     let activeStop: ((reason: string) => void) | null = null;
-    const isCurrentRequest = () =>
-      !this._released && this._catalogMotionRequestGeneration === requestGeneration;
-    const clearActiveStop = () => {
-      if (this._activeCatalogMotionStop === activeStop) {
-        this._activeCatalogMotionStop = null;
+    const clearOwnedCatalogMotionState = () => {
+      if (!activeStop || this._activeCatalogMotionStop !== activeStop) {
+        return;
       }
+      this._activeCatalogMotionStop = null;
+      this.clearCatalogMotionClock();
     };
     const finish = () => {
       if (terminalSettled) {
         return;
       }
       terminalSettled = true;
-      clearActiveStop();
-      this.clearCatalogMotionClock();
+      clearOwnedCatalogMotionState();
       lifecycleCallbacks?.onFinished?.();
     };
     const fail = (reason: string) => {
@@ -812,8 +806,7 @@ export class LAppModel extends CubismUserModel {
         return;
       }
       terminalSettled = true;
-      clearActiveStop();
-      this.clearCatalogMotionClock();
+      clearOwnedCatalogMotionState();
       lifecycleCallbacks?.onFailed?.(reason);
     };
     const start = () => {
@@ -835,8 +828,13 @@ export class LAppModel extends CubismUserModel {
       lifecycleCallbacks?.onStarted?.();
     };
     this._motionStartError = "";
-    if (this._released || !this._motionManager) {
+    if (this._released) {
       this._motionStartError = "motion_model_released";
+      fail(this._motionStartError);
+      return InvalidMotionQueueEntryHandleValue;
+    }
+    if (!this._model || !this._motionManager || this._state !== LoadStep.CompleteSetup) {
+      this._motionStartError = "motion_model_not_ready";
       fail(this._motionStartError);
       return InvalidMotionQueueEntryHandleValue;
     }
@@ -848,6 +846,14 @@ export class LAppModel extends CubismUserModel {
         fail(this._motionStartError);
         return InvalidMotionQueueEntryHandleValue;
       }
+    }
+
+    const name = `${group}_${no}`;
+    const motion = this._motions.getValue(name) as CubismMotion;
+    if (motion == null) {
+      this._motionStartError = `motion_not_loaded:${name}`;
+      fail(this._motionStartError);
+      return InvalidMotionQueueEntryHandleValue;
     }
 
     // Add a log specifically when trying to start a tap motion (which uses priority 3)
@@ -867,122 +873,36 @@ export class LAppModel extends CubismUserModel {
     }
 
     const previousActiveStop = this._activeCatalogMotionStop;
-    this._activeCatalogMotionStop = null;
     previousActiveStop?.("motion_replaced");
     activeStop = (reason: string) => {
       if (terminalSettled) {
         return;
       }
       terminalSettled = true;
-      clearActiveStop();
+      clearOwnedCatalogMotionState();
       lifecycleCallbacks?.onInterrupted?.(reason);
     };
     this._activeCatalogMotionStop = activeStop;
 
-    const motionFileName = this._modelSetting.getMotionFileName(group, no);
-
-    // ex) idle_0 or _0 if group is ""
-    const name = `${group}_${no}`;
-    let motion: CubismMotion = this._motions.getValue(name) as CubismMotion;
-    let autoDelete = false;
-    const finishAsyncMotionWithoutStart = (reason: string): void => {
-      this._motionStartError = reason;
-      if (this._motionManager && this._motionManager.getReservePriority() === priority) {
+    if (LAppDefine.DebugLogEnable) {
+      console.log(`[APP] startMotion: Starting preloaded motion '${name}'.`);
+    }
+    motion.setFinishedMotionHandler(finish);
+    const handle = this._motionManager.startMotionPriority(
+      motion,
+      false,
+      priority,
+    );
+    if (handle === InvalidMotionQueueEntryHandleValue) {
+      this._motionStartError = "motion_start_rejected";
+      if (this._motionManager.getReservePriority() === priority) {
         this._motionManager.setReservePriority(0);
       }
-      fail(reason);
-    };
-
-    if (motion == null) {
-      if (LAppDefine.DebugLogEnable) {
-        console.log(`[APP] startMotion: Motion '${name}' not found in cache, fetching: ${motionFileName}`);
-      }
-      this.fetchRuntimeArrayBuffer(`${this._modelHomeDir}${motionFileName}`)
-        .then((arrayBuffer) => {
-          if (!isCurrentRequest() || !this._motionManager) {
-            fail("motion_model_released");
-            return;
-          }
-          motion = this.loadMotion(
-            arrayBuffer,
-            arrayBuffer.byteLength,
-            null, // Pass null for name here? Original code did. Let's keep it for now.
-            finish
-          );
-
-          if (motion == null) {
-             if (LAppDefine.DebugLogEnable) {
-                console.error(`[APP] startMotion: Failed to load motion from fetched data for '${name}'`);
-             }
-            finishAsyncMotionWithoutStart("motion_load_failed");
-            return;
-          }
-
-          let fadeTime: number = this._modelSetting.getMotionFadeInTimeValue(
-            group,
-            no
-          );
-
-          if (fadeTime >= 0.0) {
-            motion.setFadeInTime(fadeTime);
-          }
-
-          fadeTime = this._modelSetting.getMotionFadeOutTimeValue(group, no);
-          if (fadeTime >= 0.0) {
-            motion.setFadeOutTime(fadeTime);
-          }
-
-          motion.setEffectIds(this._eyeBlinkIds, this._lipSyncIds);
-          motion.setFinishedMotionHandler(finish);
-          autoDelete = true; // 終了時にメモリから削除
-
-          // Start the motion *after* it's loaded (moved from outside)
-          if (LAppDefine.DebugLogEnable) {
-            console.log(`[APP] startMotion: Starting fetched motion '${name}'`);
-          }
-          const loadedHandle = this._motionManager.startMotionPriority(
-            motion,
-            autoDelete,
-            priority
-          );
-          if (loadedHandle === InvalidMotionQueueEntryHandleValue) {
-            finishAsyncMotionWithoutStart("motion_start_rejected");
-            return;
-          }
-          start();
-        })
-        .catch((error) => {
-          if (!isCurrentRequest()) {
-            fail("motion_model_released");
-            return;
-          }
-          if (LAppDefine.DebugLogEnable) {
-            console.error(`[APP] startMotion: Failed to fetch motion '${name}'`, error);
-          }
-          finishAsyncMotionWithoutStart("motion_fetch_failed");
-        });
-      return AsyncMotionAcceptedHandle;
+      fail(this._motionStartError);
     } else {
-      if (LAppDefine.DebugLogEnable) {
-        console.log(`[APP] startMotion: Motion '${name}' found in cache. Starting.`);
-      }
-      motion.setFinishedMotionHandler(finish);
-      // Start the motion if found in cache
-      const handle = this._motionManager.startMotionPriority(
-          motion,
-          autoDelete, // Should be false for cached motions? Let's assume true based on original code.
-          priority
-      );
-      if (handle === InvalidMotionQueueEntryHandleValue) {
-        this._motionStartError = "motion_start_rejected";
-        fail(this._motionStartError);
-      } else {
-        start();
-      }
-      return handle;
+      start();
     }
-
-    // Original code had voice logic and startMotionPriority call here, moved inside blocks
+    return handle;
   }
 
   public getMotionStartError(): string {

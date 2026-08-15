@@ -299,6 +299,7 @@ export function usePreviewMotionPlayer() {
     state.startedAt = "";
     state.finishedAt = "";
     activeCatalogMotionRunId = playbackRunId;
+    let lifecycleStarted = false;
 
     const handle = adapter.startMotion(
       motion.group,
@@ -310,20 +311,14 @@ export function usePreviewMotionPlayer() {
           if (activeRunId !== runId) {
             return;
           }
+          lifecycleStarted = true;
           state.status = "playing";
           state.message = `正在执行现成 motion（${motion.label || motion.motion_id}）...`;
           state.startedAt = new Date().toISOString();
           activeMotionStop = (reason) => adapter.stopMotion?.(reason);
           options.onStarted?.(motion, playbackRunId);
         },
-        onFinished: () => {
-          const motionStartError = getMotionStartError();
-          if (motionStartError) {
-            failCatalogMotion(motionStartError);
-            return;
-          }
-          completeCatalogMotion();
-        },
+        onFinished: completeCatalogMotion,
         onFailed: failCatalogMotion,
         onInterrupted: (reason) => {
           if (activeRunId !== runId || activeCatalogMotionRunId !== playbackRunId) {
@@ -351,9 +346,14 @@ export function usePreviewMotionPlayer() {
       activeCatalogMotionRunId = "";
       return { status: "rejected", reason: failureReason };
     }
-    if (state.status === "preparing") {
-      activeMotionStop = (reason) => adapter.stopMotion?.(reason);
-      return { status: "accepted", runId: playbackRunId };
+    if (!lifecycleStarted || activeCatalogMotionRunId !== playbackRunId) {
+      const reason = "catalog_motion_started_without_lifecycle_callback";
+      adapter.stopMotion(reason);
+      state.status = "failed";
+      state.message = `现成 motion 执行失败：${motion.motion_id}（${reason}）。`;
+      state.finishedAt = new Date().toISOString();
+      activeCatalogMotionRunId = "";
+      return { status: "rejected", reason };
     }
     return { status: "started", runId: playbackRunId };
   }

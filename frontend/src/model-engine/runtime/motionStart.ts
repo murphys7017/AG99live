@@ -18,7 +18,6 @@ import type {
 } from "../../types/protocol.js";
 import type {
   CatalogMotionStartResult,
-  DirectParameterPlanTerminalEvent,
 } from "../../types/live2d-runtime.d.ts";
 import {
   resolvePerformanceCurveTimeline,
@@ -482,8 +481,6 @@ interface CatalogMotionExecutionOptions {
   dependencies: MotionStartDependencies;
   state: MotionRuntimeStateController;
   diagnostics: CompileDiagnostics | null;
-  payloadKind: "catalog_motion" | "semantic_intent";
-  preparingMessage: string;
   failureMessage: string;
   startedHistory: (successMessage: string) => string;
   buildStartedEvent: (
@@ -504,70 +501,28 @@ function startCatalogMotionExecution(
     diagnostics,
   } = options;
   let notifiedStarted = false;
-  let startResult: CatalogMotionStartResult | null = null;
-  let deferredTerminal: DirectParameterPlanTerminalEvent | null = null;
 
-  const reportTerminalBeforeStart = (
-    event: DirectParameterPlanTerminalEvent,
-  ): void => {
-    const reason = event.reason?.trim()
-      || `catalog_motion_${event.status}_before_start`;
-    state.setLastCompileReason(reason);
-    if (event.status === "stopped") {
-      state.setState("idle", `动作准备已停止（${reason}）。`, diagnostics);
-      state.pushHistory("system", `动作准备已停止（${reason}）。`);
-    } else {
-      state.setState("failed", reason, diagnostics);
-      state.pushHistory("error", `动作播放失败：${reason}`);
-    }
-    const turnId = typeof context.turnId === "string"
-      ? context.turnId.trim()
-      : "";
-    if (context.playbackOrigin === "conversation" && turnId) {
-      dependencies.onMotionRejected({
-        turnId,
-        messageId: context.messageId,
-        reason,
-      });
-    }
-  };
-
-  const handleTerminal = (event: DirectParameterPlanTerminalEvent): void => {
-    if (notifiedStarted) {
-      return;
-    }
-    if (startResult === null) {
-      deferredTerminal = event;
-      return;
-    }
-    if (startResult.status === "accepted") {
-      reportTerminalBeforeStart(event);
-    }
-  };
-
-  startResult = dependencies.playCatalogMotion(motion, selectedModel, {
-    playbackClockReader: context.playbackClockReader,
-    requiresPlaybackClock: context.playbackOrigin === "conversation",
-    onStarted: (_motion, runId) => {
-      const normalizedRunId = normalizeMotionRunId(runId);
-      if (!normalizedRunId) {
-        handleTerminal({
-          runId: "",
-          status: "failed",
-          reason: MOTION_PLAYER_RUN_ID_MISSING,
-        });
-        return;
-      }
-      notifiedStarted = true;
-      const successMessage = buildSuccessMessage(context, dependencies);
-      state.setState("playing", successMessage, diagnostics);
-      state.pushHistory("system", options.startedHistory(successMessage));
-      dependencies.onPlanStarted(
-        options.buildStartedEvent(normalizedRunId, successMessage),
-      );
+  const startResult: CatalogMotionStartResult = dependencies.playCatalogMotion(
+    motion,
+    selectedModel,
+    {
+      playbackClockReader: context.playbackClockReader,
+      requiresPlaybackClock: context.playbackOrigin === "conversation",
+      onStarted: (_motion, runId) => {
+        const normalizedRunId = normalizeMotionRunId(runId);
+        if (!normalizedRunId) {
+          return;
+        }
+        notifiedStarted = true;
+        const successMessage = buildSuccessMessage(context, dependencies);
+        state.setState("playing", successMessage, diagnostics);
+        state.pushHistory("system", options.startedHistory(successMessage));
+        dependencies.onPlanStarted(
+          options.buildStartedEvent(normalizedRunId, successMessage),
+        );
+      },
     },
-    onFinished: handleTerminal,
-  });
+  );
 
   if (startResult.status === "rejected") {
     const failureReason = startResult.reason.trim()
@@ -583,26 +538,9 @@ function startCatalogMotionExecution(
   if (!runId) {
     return rejectMotionStartWithoutRunId(state, diagnostics);
   }
-  if (startResult.status === "started") {
-    return notifiedStarted
-      ? true
-      : rejectMotionStartWithoutRunId(state, diagnostics);
-  }
-
-  dependencies.onCatalogMotionAccepted({
-    runId,
-    origin: context.playbackOrigin,
-    turnId: typeof context.turnId === "string"
-      ? context.turnId.trim() || null
-      : null,
-    messageId: context.messageId.trim(),
-    payloadKind: options.payloadKind,
-  });
-  state.setState("pending", options.preparingMessage, diagnostics);
-  if (deferredTerminal !== null) {
-    reportTerminalBeforeStart(deferredTerminal);
-  }
-  return true;
+  return notifiedStarted
+    ? true
+    : rejectMotionStartWithoutRunId(state, diagnostics);
 }
 
 function startCatalogMotionPayload(
@@ -619,8 +557,6 @@ function startCatalogMotionPayload(
     dependencies,
     state,
     diagnostics: null,
-    payloadKind: payload.kind,
-    preparingMessage: "现成 motion 已接受，等待 Live2D 实际启动。",
     failureMessage: "现成 motion 被运行时拒绝执行。",
     startedHistory: (successMessage) =>
       `现成 motion 执行中（${successMessage}）。`,
@@ -786,8 +722,6 @@ function startMotionResourcePayload(
     dependencies,
     state,
     diagnostics: prepared.diagnostics,
-    payloadKind: "semantic_intent",
-    preparingMessage: `完整动作资源已接受，等待 Live2D 实际启动：${prepared.resourceId}`,
     failureMessage: `完整动作资源执行失败：${prepared.resourceId}`,
     startedHistory: (successMessage) =>
       `完整动作资源执行中（${successMessage}）。`,
