@@ -141,7 +141,7 @@ class AG99liveRemoteOperatorResultContributor:
     async def collect(self, event, plugin_context, view):
         del plugin_context
 
-        if _get_event_extra(event, "ag99live_remote_operator_scheduled"):
+        if event.get_extra("ag99live_remote_operator_scheduled"):
             return None
 
         request, reason = parse_remote_operator_request_from_view(event, view)
@@ -226,8 +226,7 @@ def arbitrate_remote_operator_tools_for_request(event: Any, request: Any) -> lis
             prompt_text,
         )
         request.system_prompt = f"{getattr(request, 'system_prompt', '') or ''}\n{override_prompt}\n"
-        _set_event_extra(
-            event,
+        event.set_extra(
             "ag99live_remote_operator_core_override",
             {
                 "computer": config.default_computer,
@@ -250,8 +249,7 @@ def arbitrate_remote_operator_tools_for_request(event: Any, request: Any) -> lis
         removed.append(tool_name)
 
     if removed:
-        _set_event_extra(
-            event,
+        event.set_extra(
             "ag99live_remote_operator_tool_arbitration",
             {
                 "removed_tools": removed,
@@ -556,39 +554,19 @@ def _resolve_profile_labels(config: Mapping[str, Any]) -> dict[str, str]:
 
 
 def _is_ag99live_event(event: Any) -> bool:
-    platform_id = _call_event_method(event, "get_platform_id")
-    platform_name = _call_event_method(event, "get_platform_name")
+    platform_id = event.get_platform_id()
+    platform_name = event.get_platform_name()
     return platform_id == "olv_pet_adapter" or platform_name == "olv_pet_adapter"
 
 
 def _is_remote_operator_result_event(event: Any) -> bool:
-    if _get_event_extra(event, "ag99live_input_source") == "remote_operator_result":
+    if event.get_extra("ag99live_input_source") == "remote_operator_result":
         return True
     message_obj = getattr(event, "message_obj", None)
     raw_message = getattr(message_obj, "raw_message", None)
     if isinstance(raw_message, Mapping):
         return raw_message.get("ag99live_input_source") == "remote_operator_result"
     return False
-
-
-def _get_event_extra(event: Any, key: str) -> Any:
-    method = getattr(event, "get_extra", None)
-    if not callable(method):
-        return None
-    try:
-        return method(key)
-    except Exception:
-        return None
-
-
-def _set_event_extra(event: Any, key: str, value: Any) -> None:
-    method = getattr(event, "set_extra", None)
-    if not callable(method):
-        return
-    try:
-        method(key, value)
-    except Exception:
-        return
 
 
 def _extract_assistant_text(view: Any) -> str:
@@ -598,16 +576,6 @@ def _extract_assistant_text(view: Any) -> str:
         if text:
             return text
     return ""
-
-
-def _call_event_method(event: Any, name: str) -> Any:
-    method = getattr(event, name, None)
-    if not callable(method):
-        return None
-    try:
-        return method()
-    except Exception:
-        return None
 
 
 def _extract_request_text(event: Any, request: Any) -> str:
@@ -624,10 +592,7 @@ def _extract_request_text(event: Any, request: Any) -> str:
 def _get_tool(toolset: Any, tool_name: str) -> Any:
     method = getattr(toolset, "get_tool", None)
     if callable(method):
-        try:
-            return method(tool_name)
-        except Exception:
-            return None
+        return method(tool_name)
 
     for tool in list(getattr(toolset, "tools", []) or []):
         if getattr(tool, "name", None) == tool_name:

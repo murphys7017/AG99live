@@ -1,9 +1,9 @@
 task:
   class: bugfix
   risk: low
-  phase: compiled_semantic_motion_parser_boundary
+  phase: remote_operator_error_visibility
   status: implementation_complete
-  scope: "Separate CompiledSemanticMotion DTOs from runtime parsing so Electron Node typechecking does not depend on renderer utilities."
+  scope: "Remove Remote Operator compatibility wrappers that silently reinterpret AstrMessageEvent and toolset API failures as missing state or capability."
 
 context:
   confidence: high
@@ -41,6 +41,8 @@ context:
     - Official compatibility mode must not create RemoteOperatorRuntime or probe configured endpoints when no request/result lifecycle exists.
     - `src/types/compiledSemanticMotion.ts` is a shared contract module and must not own runtime cloning or parsing dependencies.
     - The unique CompiledSemanticMotion runtime parser belongs to ModelEngine compiler and is shared by MotionLab transport and desktop snapshot projections.
+    - Enhanced-Core Remote Operator contributors depend on the formal AstrMessageEvent get/set-extra and platform identity APIs; failures must remain visible.
+    - Toolset shape adaptation may distinguish `get_tool()` from a tools list, but an exception from an available API must not be converted into “tool absent.”
 
 documentation:
   authorities:
@@ -61,8 +63,8 @@ verification:
     - Automated tests are low-confidence input/output smoke checks; do not run the full suite.
     - Live AstrBot, Electron, TTS, and Live2D behavior remains user-led runtime acceptance.
   current:
-    - Runtime cloning and validation moved from `types/compiledSemanticMotion.ts` to the existing intended `model-engine/compiler/compiledSemanticMotionParser.ts` boundary.
-    - Motion tuning payload and desktop snapshot callers now consume that single parser; shared types no longer import `utils/cloneJson.ts`.
-    - `npm run typecheck` now passes renderer, WebSDK, and Electron Node projects.
-    - The existing desktopBridgeClone boundary smoke passed through an in-memory bundle.
-    - Live MotionLab save/reload and preview remain pending user runtime acceptance.
+    - Remote Operator now calls AstrMessageEvent identity and extra-state APIs directly and propagates their failures.
+    - Toolset `get_tool()` failures now propagate instead of silently skipping conflicting-tool removal.
+    - The obsolete optional Event method wrappers were deleted rather than retained beside the corrected path.
+    - Python compilation, the AstrBot plugin structure checker, and `git diff --check` passed.
+    - Live enhanced-Core Remote Operator arbitration and result scheduling remain pending user runtime acceptance.
