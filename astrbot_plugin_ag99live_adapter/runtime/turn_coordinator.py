@@ -772,7 +772,13 @@ class TurnCoordinator:
         )
         cancel_curve_turn = getattr(performance_curve_runtime, "cancel_turn", None)
         if callable(cancel_curve_turn):
-            cancel_curve_turn(current_turn_id)
+            try:
+                cancel_curve_turn(current_turn_id)
+            except Exception:  # noqa: BLE001 - optional curve cleanup must not reopen output.
+                logger.exception(
+                    "Failed to cancel performance curve after output closure: turn_id=%s",
+                    current_turn_id,
+                )
         self._mark_turn_playing(current_turn_id)
 
     def _mark_turn_synthesizing(self, turn_id: str) -> None:
