@@ -820,7 +820,7 @@ class TurnCoordinator:
         播放完成信号按自身 turn_id 收口，不依赖最新输入轮次。这样 AstrBot 队列可以
         继续接收后续输入，而较早轮次仍能独立完成前端播放生命周期。
         """
-        resolved_turn_id = self._resolve_frontend_turn_id(turn_id) if turn_id else None
+        resolved_turn_id = self._normalize_optional_turn_value(turn_id)
         if not resolved_turn_id:
             raise ValueError("playback_finished_turn_id_missing")
 
@@ -986,7 +986,7 @@ class TurnCoordinator:
         )
 
     async def _handle_interrupt_signal(self, turn_id: str | None) -> None:
-        resolved_turn_id = self._resolve_frontend_turn_id(turn_id) if turn_id else None
+        resolved_turn_id = self._normalize_optional_turn_value(turn_id)
         if not resolved_turn_id:
             raise ValueError("interrupt_turn_id_missing")
 
@@ -1492,16 +1492,6 @@ class TurnCoordinator:
             if normalized:
                 return normalized
         return frontend_turn_id
-
-    def _resolve_frontend_turn_id(self, frontend_turn_id: str | None) -> str | None:
-        normalized = self._normalize_optional_turn_value(frontend_turn_id)
-        if not normalized:
-            return None
-        turn_identity_map = getattr(self, "turn_identity_map", None)
-        if turn_identity_map is None:
-            return normalized
-        resolved = turn_identity_map.resolve_frontend_turn(normalized)
-        return resolved or normalized
 
     @staticmethod
     def _normalize_optional_turn_value(value: object) -> str | None:

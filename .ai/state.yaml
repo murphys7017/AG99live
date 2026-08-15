@@ -1,9 +1,9 @@
 task:
   class: bugfix
-  risk: medium
-  phase: speech_ingress_pre_turn_failure_lifecycle
+  risk: low
+  phase: frontend_turn_identity_direction_cleanup
   status: implementation_complete
-  scope: "Stop SpeechIngress failures from publishing control.turn_finished for input identities that have not entered the formal Turn lifecycle."
+  scope: "Remove the reverse Turn identity lookup from protocol handlers that already receive frontend Turn IDs."
 
 context:
   confidence: high
@@ -27,6 +27,7 @@ context:
     - Event stop-flag publication and Event stopping are independent cleanup operations; failure of one must not suppress the other.
     - SpeechIngress allocates or receives input identities before a formal Turn exists; only TurnCoordinator._commit_inbound_message owns identity registration and control.turn_started publication.
     - A pre-Turn input failure must remain observable through control.error, but it must not fabricate a terminal event for a session that was never started.
+    - control.playback_finished and control.interrupt carry frontend Turn IDs by protocol contract; their handlers must not query the AstrBot-to-frontend index with those values.
 
 documentation:
   authorities:
@@ -47,9 +48,8 @@ verification:
     - Automated tests are low-confidence input/output smoke checks; do not run the full suite.
     - Live AstrBot, Electron, TTS, and Live2D behavior remains user-led runtime acceptance.
   current:
-    - Source tracing confirmed that dropped audio, empty audio, VAD initialization failure, STT exception, empty transcription, filtered transcription, and empty VAD segments all return before TurnCoordinator._commit_inbound_message.
-    - SpeechIngress now reports these pre-Turn failures only through control.error and no longer imports or publishes control.turn_finished.
-    - TurnCoordinator still clears capture-scoped VAD tracking when SpeechIngress returns None, without registering a Turn identity or mutating SessionState.
-    - The focused dropped-input smoke passed and confirmed that one control.error is emitted with the original input identity and no control.turn_finished follows.
-    - Python syntax validation and `git diff --check` passed; no stale terminal helper, builder import, R11 entry, or old test expectation remains.
-    - Live STT failure and VAD-empty behavior remain pending user runtime acceptance.
+    - finalize_turn and _handle_interrupt_signal now normalize the frontend Turn ID carried by their protocol messages directly.
+    - The dead _resolve_frontend_turn_id helper was deleted; TurnIdentityMap remains unchanged for boundaries that genuinely translate between frontend and AstrBot identities.
+    - The focused finalize smoke and Python syntax validation passed.
+    - `git diff --check` passed and no stale R10 or helper references remain.
+    - Live playback-finished and interrupt behavior remain pending user runtime acceptance.
