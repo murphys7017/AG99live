@@ -1,9 +1,9 @@
 task:
   class: bugfix
   risk: medium
-  phase: issue_reconciliation_batch_r3_r5_r13
+  phase: issue_reconciliation_segment_terminal_cleanup
   status: implementation_complete
-  scope: "Preserve normalization failure reasons, keep segment-level output rejection local to the segment, and move the shared normalized motion DTO to the neutral types layer."
+  scope: "Close rejected output segments through the existing SessionStore lifecycle, make frontend Turn terminal writes atomic and keep-first, and bound connection-owned terminal history."
 
 context:
   confidence: high
@@ -14,6 +14,8 @@ context:
     - Remote Operator, VTS recording, small-model training, Physics diagnostics, and productization keep their own boundaries and do not become Performance Director responsibilities.
     - Segment-level output rejection must not close the WebSocket; session-store and connection infrastructure failures remain fatal.
     - The existing MotionLab outbound queue is the only persistence path for frontend rejection diagnostics.
+    - A rejected atomic segment is a settled SessionStore fact: none of its individual materials are released, but it still participates in synth_finished and failed playback acknowledgement.
+    - Frontend sessions retain only recent terminal history, and the backend terminal idempotency ledger retains at most 256 completed turns per connection.
 
 documentation:
   authorities:
@@ -34,7 +36,11 @@ verification:
     - Automated tests are low-confidence input/output smoke checks; do not run the full suite.
     - Live AstrBot, Electron, TTS, and Live2D behavior remains user-led runtime acceptance.
   current:
-    - Commit 00f11b0 made the Turn terminal lifecycle keep-first and idempotent.
-    - `npm run typecheck:renderer` passed after the R3/R5/R13 changes.
+    - Rejected motion/audio segments now remain local to their segment, preserve the exact rejection reason, and close through failed playback_finished instead of blocking later sessions.
+    - Frontend Turn, interrupt, and local session failure writes validate terminal state before mutation and preserve the first terminal result.
+    - Frontend terminal sessions are pruned through the existing store API; backend terminal tombstones and timing records are bounded or cleared by their lifecycle owner.
+    - `npm run typecheck:renderer` passed.
+    - `python -m py_compile astrbot_plugin_ag99live_adapter/runtime/turn_coordinator.py` passed.
+    - The zero-Segment Turn boundary smoke test passed (`1 passed, 14 deselected`).
     - `git diff --check` passed.
-    - `npm run test:model-engine` is blocked by pre-existing WebSDK strict-type errors and a missing compiledSemanticMotionParser test module.
+    - Live AstrBot, Electron, TTS, and Live2D verification remains pending user runtime acceptance.
