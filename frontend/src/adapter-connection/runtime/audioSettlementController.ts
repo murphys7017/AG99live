@@ -17,31 +17,82 @@ export interface AdapterAudioSettlementControllerDeps {
 export function createAdapterAudioSettlementController(
   deps: AdapterAudioSettlementControllerDeps,
 ) {
+  function runSettlementStep(
+    step: string,
+    action: () => void,
+    errors: unknown[],
+  ): void {
+    try {
+      action();
+    } catch (error) {
+      console.error(`[AudioSettlement] ${step} failed.`, error);
+      errors.push(error);
+    }
+  }
+
   function stopAudioAndSettleTurn(
     turnId: string | null,
     reason: string,
   ): void {
-    const activeSegment = findOpenAudioSegmentForTurn(turnId);
+    const errors: unknown[] = [];
+    let activeSegment: AudioSettlementSegment | null = null;
+    try {
+      activeSegment = findOpenAudioSegmentForTurn(turnId);
+    } catch (error) {
+      console.error("[AudioSettlement] open audio lookup failed.", error);
+      errors.push(error);
+    }
     if (activeSegment) {
-      deps.stopAudioPlayback(
-        activeSegment.turnId,
-        activeSegment.messageId,
-        reason,
+      const segment = activeSegment;
+      runSettlementStep(
+        `audio stop (${segment.messageId})`,
+        () => deps.stopAudioPlayback(
+          segment.turnId,
+          segment.messageId,
+          reason,
+        ),
+        errors,
       );
     }
-    deps.stopTimelinesForTurn(turnId, reason);
+    runSettlementStep(
+      "turn timeline stop",
+      () => deps.stopTimelinesForTurn(turnId, reason),
+      errors,
+    );
+    if (errors.length > 0) {
+      throw errors[0];
+    }
   }
 
   function stopAudioAndSettleAll(reason: string): void {
-    const activeSegments = deps.findOpenAudioSegments();
-    if (activeSegments.length === 0) {
-      deps.stopAllTimelines(reason);
-      return;
-    }
+    const errors: unknown[] = [];
+    let activeSegments: AudioSettlementSegment[] = [];
+    runSettlementStep(
+      "open audio enumeration",
+      () => {
+        activeSegments = deps.findOpenAudioSegments();
+      },
+      errors,
+    );
     for (const activeSegment of activeSegments) {
-      deps.stopAudioPlayback(activeSegment.turnId, activeSegment.messageId, reason);
+      runSettlementStep(
+        `audio stop (${activeSegment.messageId})`,
+        () => deps.stopAudioPlayback(
+          activeSegment.turnId,
+          activeSegment.messageId,
+          reason,
+        ),
+        errors,
+      );
     }
-    deps.stopAllTimelines(reason);
+    runSettlementStep(
+      "all timeline stop",
+      () => deps.stopAllTimelines(reason),
+      errors,
+    );
+    if (errors.length > 0) {
+      throw errors[0];
+    }
   }
 
   function findOpenAudioSegment(): AudioSettlementSegment | null {
