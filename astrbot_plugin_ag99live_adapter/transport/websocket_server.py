@@ -102,8 +102,6 @@ class WebSocketTransport:
                     logger.debug("Desktop websocket client was already disconnected: %s", exc)
                 else:
                     logger.exception("Failed to close desktop websocket client cleanly")
-            finally:
-                self._ws_client = None
 
         if self._ws_server is not None:
             try:
@@ -135,8 +133,6 @@ class WebSocketTransport:
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            if self._ws_client is client:
-                self._ws_client = None
             if _is_expected_disconnect_error(exc):
                 logger.debug(
                     "Desktop websocket disconnected while sending `%s`: %s",
@@ -243,11 +239,12 @@ class WebSocketTransport:
             else:
                 logger.exception("Desktop frontend handler aborted unexpectedly")
         finally:
-            self._ws_client = None
-            try:
-                await self._on_disconnect()
-            except Exception:
-                logger.exception("Failed to run disconnect cleanup")
+            if self._ws_client is websocket:
+                self._ws_client = None
+                try:
+                    await self._on_disconnect()
+                except Exception:
+                    logger.exception("Failed to run disconnect cleanup")
             logger.debug("Desktop frontend disconnected from adapter transport")
 
     async def _handle_binary_payload(self, raw_message: bytes) -> None:
