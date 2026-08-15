@@ -32,11 +32,8 @@ export interface CompileDiagnostics {
   availableDerivedAxes?: string[];
   appliedDerivedAxes?: string[];
   runtimeAxes?: string[];
-  missingAxes?: string[];
   forbiddenAxes?: string[];
   invalidAxes?: string[];
-  axisErrorCount?: number;
-  axisErrorLimit?: number;
   compiledParameters?: string[];
   intensityApplied: boolean;
   motionIntensityScale: number;

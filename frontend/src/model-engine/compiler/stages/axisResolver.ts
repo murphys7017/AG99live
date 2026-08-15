@@ -27,11 +27,8 @@ const ALLOWED_LLM_ROLES = new Set(["primary", "hint"]);
 // Writes:
 // - context.state.roleAxisIds
 // - context.state.controlledValues
-// - context.state.missingAxes
 // - context.state.forbiddenAxes
 // - context.state.invalidAxes
-// - context.state.axisErrorCount
-// - context.state.axisErrorLimit
 // - context.state.warnings
 //
 // Does not own:
@@ -65,21 +62,13 @@ export function runAxisResolver(
 
   const roleAxisIds = buildRoleAxisBuckets(profile);
   const resolvedAxes = resolveAllowedLlmAxisValues(context);
-  const missingAxes = collectMissingPrimaryAxes(
-    profile,
-    resolvedAxes.controlledValues,
-    resolvedAxes.warnings,
-  );
   const axisErrorCount =
     resolvedAxes.invalidAxes.length + resolvedAxes.forbiddenAxes.length;
 
   context.state.roleAxisIds = roleAxisIds;
   replaceControlledAxisValues(context.state, resolvedAxes.controlledValues);
-  context.state.missingAxes = missingAxes;
   context.state.forbiddenAxes = resolvedAxes.forbiddenAxes;
   context.state.invalidAxes = resolvedAxes.invalidAxes;
-  context.state.axisErrorCount = axisErrorCount;
-  context.state.axisErrorLimit = 0;
   context.state.warnings = [
     ...context.state.warnings,
     ...resolvedAxes.warnings,
@@ -87,7 +76,6 @@ export function runAxisResolver(
   if (axisErrorCount > 0) {
     console.error("[ModelEngine] semantic axis validation failed.", {
       invalidAxes: resolvedAxes.invalidAxes,
-      missingAxes,
       forbiddenAxes: resolvedAxes.forbiddenAxes,
       axisErrorCount,
     });
@@ -166,13 +154,13 @@ function resolveAllowedLlmAxisValues(
     const axis = context.state.axisById.get(axisId);
     if (!axis) {
       invalidAxes.push(axisId);
-      warnings.push(`semantic_axis_ignored_unknown:${axisId}`);
+      warnings.push(`semantic_axis_rejected_unknown:${axisId}`);
       continue;
     }
     if (!ALLOWED_LLM_ROLES.has(axis.control_role)) {
       forbiddenAxes.push(axisId);
       warnings.push(
-        `semantic_axis_ignored_forbidden_role:${axisId}:${axis.control_role}`,
+        `semantic_axis_rejected_forbidden_role:${axisId}:${axis.control_role}`,
       );
       continue;
     }
@@ -187,7 +175,7 @@ function resolveAllowedLlmAxisValues(
     const value = levelResult?.value ?? rawValue;
     if (typeof value !== "number" || !Number.isFinite(value)) {
       invalidAxes.push(axisId);
-      warnings.push(`semantic_axis_ignored_not_number:${axisId}`);
+      warnings.push(`semantic_axis_rejected_not_number:${axisId}`);
       continue;
     }
 
@@ -324,22 +312,6 @@ function seededSignedUnit(seed: string): number {
 
 function roundAxisSample(value: number): number {
   return Math.round(value * 10000) / 10000;
-}
-
-function collectMissingPrimaryAxes(
-  profile: SemanticAxisProfile,
-  controlledValues: DynamicAxisValues,
-  warnings: string[],
-): string[] {
-  const missingAxes: string[] = [];
-  for (const axis of profile.axes) {
-    if (axis.control_role !== "primary" || axis.id in controlledValues) {
-      continue;
-    }
-    missingAxes.push(axis.id);
-    warnings.push(`semantic_primary_axis_missing_ignored:${axis.id}`);
-  }
-  return missingAxes;
 }
 
 function normalizeSemanticAxisValue(

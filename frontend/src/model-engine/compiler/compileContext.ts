@@ -40,12 +40,8 @@ export interface MotionCompileMutableState {
   axisValueSources: MotionAxisValueSourceMap;
   appliedDerivedAxes: string[];
 
-  missingAxes: string[];
   forbiddenAxes: string[];
   invalidAxes: string[];
-
-  axisErrorCount: number;
-  axisErrorLimit: number;
 
   relationAdjustments: MotionAxisRelationAdjustment[];
   relationEvaluations: MotionAxisRelationEvaluation[];
@@ -91,11 +87,8 @@ export function createInitialCompileState(): MotionCompileMutableState {
     allAxisValues: {},
     axisValueSources: {},
     appliedDerivedAxes: [],
-    missingAxes: [],
     forbiddenAxes: [],
     invalidAxes: [],
-    axisErrorCount: 0,
-    axisErrorLimit: 0,
     relationAdjustments: [],
     relationEvaluations: [],
     axisSampling: null,

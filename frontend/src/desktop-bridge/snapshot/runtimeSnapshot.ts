@@ -408,11 +408,8 @@ function cloneMotionCompileDiagnostics(
     availableDerivedAxes: normalizeStringArray(diagnostics.availableDerivedAxes),
     appliedDerivedAxes: normalizeStringArray(diagnostics.appliedDerivedAxes),
     runtimeAxes: normalizeStringArray(diagnostics.runtimeAxes),
-    missingAxes: normalizeStringArray(diagnostics.missingAxes),
     forbiddenAxes: normalizeStringArray(diagnostics.forbiddenAxes),
     invalidAxes: normalizeStringArray(diagnostics.invalidAxes),
-    axisErrorCount: normalizeOptionalInteger(diagnostics.axisErrorCount),
-    axisErrorLimit: normalizeOptionalInteger(diagnostics.axisErrorLimit),
     compiledParameters: normalizeStringArray(diagnostics.compiledParameters),
     intensityApplied: Boolean(diagnostics.intensityApplied),
     motionIntensityScale: isFiniteNumber(diagnostics.motionIntensityScale)
