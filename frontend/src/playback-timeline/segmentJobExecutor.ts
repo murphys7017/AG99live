@@ -83,7 +83,6 @@ export function executePlaybackTimelineSegmentJob<TMotionPayload>(
     }
   }
   if (releasedText) {
-    ports.session.markTextReleased(job.turnId, job.messageId);
     ports.session.markPhase(job.turnId, "playing");
   }
 
@@ -124,9 +123,6 @@ export function executePlaybackTimelineSegmentJob<TMotionPayload>(
                 job.messageId,
                 job.turnId,
               );
-              if (released) {
-                ports.session.markTextReleased(job.turnId, job.messageId);
-              }
               return released;
             },
             fail: (reason) => ports.textSink.failAssistantTextForPlayback(

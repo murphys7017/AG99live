@@ -29,7 +29,6 @@ export interface PlaybackTimelineSegmentExecutionResult {
 
 export interface PlaybackTimelineSegmentSessionPort {
   markSessionFailed(turnId: string | null, reason: string): void;
-  markTextReleased(turnId: string | null, messageId: string): void;
   markAudioReleased(turnId: string | null, messageId: string): void;
   markMotionReleased(turnId: string | null, messageId: string): void;
   markPhase(turnId: string | null, phase: "playing"): boolean;

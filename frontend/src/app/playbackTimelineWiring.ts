@@ -59,7 +59,6 @@ export function createAppPlaybackTimelineRuntime(options: {
     segmentExecution: {
       session: {
         markSessionFailed: sessionStore.markSessionFailed,
-        markTextReleased: sessionStore.markTextReleased,
         markAudioReleased: sessionStore.markAudioReleased,
         markMotionReleased: sessionStore.markMotionReleased,
         markPhase: sessionStore.markPhase,

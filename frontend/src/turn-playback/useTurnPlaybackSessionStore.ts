@@ -374,14 +374,6 @@ export function useTurnPlaybackSessionStore() {
 
   // ── text ────────────────────────────────────────────────────────
 
-  function markTextReleased(
-    turnId: string | null,
-    messageId: string,
-  ): void {
-    const { segment } = getSegmentSession(turnId, messageId);
-    segment.text.released = true;
-  }
-
   function markTextDelivered(
     turnId: string | null,
     messageId: string,
@@ -778,7 +770,6 @@ export function useTurnPlaybackSessionStore() {
     getActiveSession,
     setActiveSession,
     commitOutputSegment,
-    markTextReleased,
     markTextDelivered,
     markTextFailed,
     markAudioReleased,
