@@ -456,21 +456,41 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
   });
 
   onBeforeUnmount(() => {
-    stopMotionLabReconnectWatch();
-    adapter.setMotionLabRawEventRecordedHandler(null);
-    adapter.setMotionLabRawEventReporter(null);
-    motionLabOutboundQueue.dispose();
-    pushToTalk.dispose();
-    bilibiliLive.dispose();
-    playbackCoordinator.resetPlaybackCoordination();
-    playbackCoordinator.dispose();
-    turnPlaybackOrchestrator.dispose();
-    motionPlaybackRecorder.resetMotionPlaybackRecorder();
-    motionTimelineRunTracker.clear();
-    modelEngine.stop("unmount");
-    detachBridgeListener();
-    detachProfileAuthoringBridgeListener();
-    snapshotPublisher?.dispose();
+    const cleanupErrors: unknown[] = [];
+    const cleanupSteps: Array<readonly [string, () => void]> = [
+      ["MotionLab reconnect watch stop", stopMotionLabReconnectWatch],
+      ["MotionLab recorded handler detach", () => {
+        adapter.setMotionLabRawEventRecordedHandler(null);
+      }],
+      ["MotionLab reporter detach", () => {
+        adapter.setMotionLabRawEventReporter(null);
+      }],
+      ["MotionLab outbound queue dispose", () => motionLabOutboundQueue.dispose()],
+      ["push-to-talk dispose", () => pushToTalk.dispose()],
+      ["Bilibili Live dispose", () => bilibiliLive.dispose()],
+      ["playback coordination reset", () => playbackCoordinator.resetPlaybackCoordination()],
+      ["playback coordinator dispose", () => playbackCoordinator.dispose()],
+      ["turn playback orchestrator dispose", () => turnPlaybackOrchestrator.dispose()],
+      ["motion playback recorder reset", () => {
+        motionPlaybackRecorder.resetMotionPlaybackRecorder();
+      }],
+      ["motion Timeline run tracker clear", () => motionTimelineRunTracker.clear()],
+      ["ModelEngine stop", () => modelEngine.stop("unmount")],
+      ["desktop bridge listener detach", detachBridgeListener],
+      ["profile authoring bridge listener detach", detachProfileAuthoringBridgeListener],
+      ["runtime snapshot publisher dispose", () => snapshotPublisher?.dispose()],
+    ];
+    for (const [step, cleanup] of cleanupSteps) {
+      try {
+        cleanup();
+      } catch (error) {
+        console.error(`[PetDesktopRuntime] ${step} failed.`, error);
+        cleanupErrors.push(error);
+      }
+    }
+    if (cleanupErrors.length > 0) {
+      throw cleanupErrors[0];
+    }
   });
 
   const runtime: PetDesktopRuntime = {

@@ -93,4 +93,5 @@ verification:
     - PlaybackTimeline execution-state fan-out isolates Orchestrator and CompletionCoordinator subscribers; one asynchronous observer failure is logged and cannot suppress the other owner.
     - MotionPlayer stop attempts Direct Parameter Plan and Catalog Motion independently; one stop failure cannot suppress cleanup of the other execution owner, and the first error remains visible after both attempts.
     - WebSDK motion lifecycle callbacks are observers rather than execution owners: Catalog Motion start/terminal callbacks and Direct Plan terminal callbacks are logged and isolated from startup transactions and frame updates, while real expression cleanup failures still propagate.
+    - PetDesktopRuntime unmount attempts every owned teardown step independently and propagates the first error only after MotionLab, input runtimes, playback observers, ModelEngine, bridge listeners, and snapshot publication have all been released.
     - Live AstrBot, Electron, TTS, ESP32, and Live2D runtime acceptance remains user-led.
