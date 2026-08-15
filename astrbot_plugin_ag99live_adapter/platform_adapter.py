@@ -283,16 +283,28 @@ class OLVPetPlatformAdapter(Platform):
             )
             await self.turn_coordinator.close_turn_output_queue(turn_id=turn_id)
         except asyncio.CancelledError:
-            await self.turn_coordinator.fail_proactive_output_turn(
-                turn_id=turn_id,
-                reason="proactive_output_cancelled",
-            )
+            try:
+                await self.turn_coordinator.fail_proactive_output_turn(
+                    turn_id=turn_id,
+                    reason="proactive_output_cancelled",
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to publish cancelled proactive output turn: turn_id=%s",
+                    turn_id,
+                )
             raise
         except Exception:
-            await self.turn_coordinator.fail_proactive_output_turn(
-                turn_id=turn_id,
-                reason="proactive_output_delivery_failed",
-            )
+            try:
+                await self.turn_coordinator.fail_proactive_output_turn(
+                    turn_id=turn_id,
+                    reason="proactive_output_delivery_failed",
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to publish failed proactive output turn: turn_id=%s",
+                    turn_id,
+                )
             raise
         await super().send_by_session(session, message_chain)
 
