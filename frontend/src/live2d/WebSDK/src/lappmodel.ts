@@ -135,6 +135,8 @@ export class LAppModel extends CubismUserModel {
   private readonly _loadGeneration = getLive2DModelLoadState().generation;
   private _released = false;
   private _activeCatalogMotionStop: ((reason: string) => void) | null = null;
+  private _activeCatalogMotionHandle = InvalidMotionQueueEntryHandleValue;
+  private _activeCatalogMotionFinish: (() => void) | null = null;
   private _activeCatalogMotionClockReader: { getElapsedMs: () => number | null } | null = null;
   private _activeCatalogMotionClockElapsedMs: number | null = null;
 
@@ -667,6 +669,7 @@ export class LAppModel extends CubismUserModel {
         this._model,
         motionDeltaTimeSeconds
       ); // モーションを更新
+      this.completeActiveCatalogMotionIfFinished();
     }
     this._model.saveParameters(); // 状態を保存
     //--------------------------------------------------------------------------
@@ -773,6 +776,8 @@ export class LAppModel extends CubismUserModel {
   public stopMotion(reason = "motion_stopped"): void {
     const activeStop = this._activeCatalogMotionStop;
     this._activeCatalogMotionStop = null;
+    this._activeCatalogMotionHandle = InvalidMotionQueueEntryHandleValue;
+    this._activeCatalogMotionFinish = null;
     this._activeCatalogMotionClockReader = null;
     this._activeCatalogMotionClockElapsedMs = null;
     const stopErrors: unknown[] = [];
@@ -823,6 +828,8 @@ export class LAppModel extends CubismUserModel {
         return;
       }
       this._activeCatalogMotionStop = null;
+      this._activeCatalogMotionHandle = InvalidMotionQueueEntryHandleValue;
+      this._activeCatalogMotionFinish = null;
       this.clearCatalogMotionClock();
     };
     const finish = () => {
@@ -904,8 +911,6 @@ export class LAppModel extends CubismUserModel {
       return InvalidMotionQueueEntryHandleValue;
     }
 
-    const previousActiveStop = this._activeCatalogMotionStop;
-    previousActiveStop?.("motion_replaced");
     activeStop = (reason: string) => {
       if (terminalSettled) {
         return;
@@ -914,12 +919,10 @@ export class LAppModel extends CubismUserModel {
       clearOwnedCatalogMotionState();
       lifecycleCallbacks?.onInterrupted?.(reason);
     };
-    this._activeCatalogMotionStop = activeStop;
 
     if (LAppDefine.DebugLogEnable) {
       console.log(`[APP] startMotion: Starting preloaded motion '${name}'.`);
     }
-    motion.setFinishedMotionHandler(finish);
     const handle = this._motionManager.startMotionPriority(
       motion,
       false,
@@ -932,6 +935,11 @@ export class LAppModel extends CubismUserModel {
       }
       fail(this._motionStartError);
     } else {
+      const previousActiveStop = this._activeCatalogMotionStop;
+      previousActiveStop?.("motion_replaced");
+      this._activeCatalogMotionStop = activeStop;
+      this._activeCatalogMotionHandle = handle;
+      this._activeCatalogMotionFinish = finish;
       start();
     }
     return handle;
@@ -1020,6 +1028,19 @@ export class LAppModel extends CubismUserModel {
     const previousElapsedMs = this._activeCatalogMotionClockElapsedMs ?? elapsedMs;
     this._activeCatalogMotionClockElapsedMs = elapsedMs;
     return Math.max(0, (elapsedMs - previousElapsedMs) / 1000);
+  }
+
+  private completeActiveCatalogMotionIfFinished(): void {
+    const handle = this._activeCatalogMotionHandle;
+    const finish = this._activeCatalogMotionFinish;
+    if (
+      handle === InvalidMotionQueueEntryHandleValue
+      || !finish
+      || !this._motionManager.isFinishedByHandle(handle)
+    ) {
+      return;
+    }
+    finish();
   }
 
   private clearCatalogMotionClock(): void {

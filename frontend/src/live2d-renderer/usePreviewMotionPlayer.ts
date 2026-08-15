@@ -44,7 +44,6 @@ export function usePreviewMotionPlayer() {
     finishedAt: "",
   });
 
-  let activeRunId = 0;
   let activeDirectPlanRunId = "";
   let activeCatalogMotionRunId = "";
   let activeMotionStop: ((reason: string) => void) | null = null;
@@ -79,8 +78,6 @@ export function usePreviewMotionPlayer() {
       adapter.stopDirectParameterPlan(reason, "stopped");
     }
     stopActiveCatalogMotion(reason);
-    activeRunId += 1;
-
     if (state.status === "playing" || state.status === "preparing") {
       state.status = "idle";
       state.message = reason === "stopped"
@@ -196,8 +193,6 @@ export function usePreviewMotionPlayer() {
     // Catalog motion has a separate SDK lifecycle. Stop it only after the
     // replacement plan is accepted, while its own run is still current.
     stopActiveCatalogMotion("direct_parameter_plan_replaced");
-    activeRunId += 1;
-
     console.info("[MotionPlayer] plan started successfully. totalDurationMs=", playbackPlan.totalDurationMs);
     state.status = "playing";
     state.message = `正在执行参数计划（mode=${playbackPlan.plan.mode}, emotion=${playbackPlan.plan.emotion_label}）...`;
@@ -254,13 +249,7 @@ export function usePreviewMotionPlayer() {
       return { status: "rejected", reason };
     }
 
-    stopActiveCatalogMotion("catalog_motion_replaced");
-    if (typeof adapter.stopDirectParameterPlan === "function") {
-      activeDirectPlanRunId = "";
-      adapter.stopDirectParameterPlan("catalog_motion_replaced", "stopped");
-    }
-    activeRunId += 1;
-    const runId = activeRunId;
+    const hadActivePlayback = Boolean(activeDirectPlanRunId || activeCatalogMotionRunId);
     const playbackRunId = `catalog-motion-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
     const getMotionStartError = (): string => (
@@ -270,7 +259,7 @@ export function usePreviewMotionPlayer() {
     );
 
     const failCatalogMotion = (reason: string) => {
-      if (activeRunId !== runId || activeCatalogMotionRunId !== playbackRunId) {
+      if (activeCatalogMotionRunId !== playbackRunId) {
         return;
       }
       activeMotionStop = null;
@@ -281,7 +270,7 @@ export function usePreviewMotionPlayer() {
       options.onFinished?.({ runId: playbackRunId, status: "failed", reason });
     };
     const completeCatalogMotion = () => {
-      if (activeRunId !== runId || activeCatalogMotionRunId !== playbackRunId) {
+      if (activeCatalogMotionRunId !== playbackRunId) {
         return;
       }
       activeMotionStop = null;
@@ -292,13 +281,6 @@ export function usePreviewMotionPlayer() {
       options.onFinished?.({ runId: playbackRunId, status: "completed" });
     };
 
-    state.status = "preparing";
-    state.message = `正在准备现成 motion（${motion.label || motion.motion_id}）...`;
-    state.keyAxesCount = 0;
-    state.parameterCount = 0;
-    state.startedAt = "";
-    state.finishedAt = "";
-    activeCatalogMotionRunId = playbackRunId;
     let lifecycleStarted = false;
 
     const handle = adapter.startMotion(
@@ -308,10 +290,8 @@ export function usePreviewMotionPlayer() {
       {
         playbackClockReader,
         onStarted: () => {
-          if (activeRunId !== runId) {
-            return;
-          }
           lifecycleStarted = true;
+          activeCatalogMotionRunId = playbackRunId;
           state.status = "playing";
           state.message = `正在执行现成 motion（${motion.label || motion.motion_id}）...`;
           state.startedAt = new Date().toISOString();
@@ -321,7 +301,7 @@ export function usePreviewMotionPlayer() {
         onFinished: completeCatalogMotion,
         onFailed: failCatalogMotion,
         onInterrupted: (reason) => {
-          if (activeRunId !== runId || activeCatalogMotionRunId !== playbackRunId) {
+          if (activeCatalogMotionRunId !== playbackRunId) {
             return;
           }
           activeMotionStop = null;
@@ -340,10 +320,11 @@ export function usePreviewMotionPlayer() {
         ? `现成 motion 执行失败：${motion.motion_id}（${motionStartError}）。`
         : `现成 motion 执行失败：${motion.motion_id}。`;
       console.warn("[MotionPlayer]", reason);
-      state.status = "failed";
-      state.message = reason;
-      state.finishedAt = new Date().toISOString();
-      activeCatalogMotionRunId = "";
+      if (!hadActivePlayback) {
+        state.status = "failed";
+        state.message = reason;
+        state.finishedAt = new Date().toISOString();
+      }
       return { status: "rejected", reason: failureReason };
     }
     if (!lifecycleStarted || activeCatalogMotionRunId !== playbackRunId) {
@@ -354,6 +335,10 @@ export function usePreviewMotionPlayer() {
       state.finishedAt = new Date().toISOString();
       activeCatalogMotionRunId = "";
       return { status: "rejected", reason };
+    }
+    if (typeof adapter.stopDirectParameterPlan === "function" && activeDirectPlanRunId) {
+      activeDirectPlanRunId = "";
+      adapter.stopDirectParameterPlan("catalog_motion_replaced", "stopped");
     }
     return { status: "started", runId: playbackRunId };
   }
