@@ -184,15 +184,23 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
   const timelines = new Map<string, PlaybackTimelineEntry>();
   const closedTimelineKeys = new Set<string>();
   const executionStateListeners = new Set<() => void>();
+  let executionStateNotificationPending = false;
   const sessionProjection = createPlaybackTimelineSessionProjection({
     audioSession: deps.audioSession,
     motionSession: deps.motionSession,
   });
 
   function notifyExecutionStateChanged(): void {
-    for (const listener of executionStateListeners) {
-      listener();
+    if (executionStateNotificationPending) {
+      return;
     }
+    executionStateNotificationPending = true;
+    queueMicrotask(() => {
+      executionStateNotificationPending = false;
+      for (const listener of executionStateListeners) {
+        listener();
+      }
+    });
   }
 
   function resolveTimelineKey(

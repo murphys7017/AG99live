@@ -78,4 +78,5 @@ verification:
     - Motion prompt semantic-profile resolution now propagates its original exception and traceback instead of converting every failure into a synthetic profile-unavailable error string.
     - Static HTTP API handler exceptions remain isolated at the request boundary, but now retain a server traceback and no longer expose internal exception text to clients.
     - Live2D manager update and draw failures are no longer reclassified as Direct Parameter Plan failures merely because a plan was active at frame start; ParameterMixer remains the precise owner of plan-frame rejection.
+    - Playback execution-state subscribers are notified after the current owner stack unwinds; state changes raised during delivery schedule a later microtask instead of synchronously re-entering the Orchestrator or being discarded.
     - Live AstrBot, Electron, TTS, ESP32, and Live2D runtime acceptance remains user-led.
