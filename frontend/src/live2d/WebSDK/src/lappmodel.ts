@@ -823,6 +823,16 @@ export class LAppModel extends CubismUserModel {
       : callbacks;
     let terminalSettled = false;
     let activeStop: ((reason: string) => void) | null = null;
+    const notifyLifecycle = (
+      phase: "started" | "finished" | "failed" | "interrupted",
+      notify: (() => void) | undefined,
+    ): void => {
+      try {
+        notify?.();
+      } catch (error) {
+        console.error(`[LAppModel] catalog motion ${phase} observer failed.`, error);
+      }
+    };
     const clearOwnedCatalogMotionState = () => {
       if (!activeStop || this._activeCatalogMotionStop !== activeStop) {
         return;
@@ -838,7 +848,7 @@ export class LAppModel extends CubismUserModel {
       }
       terminalSettled = true;
       clearOwnedCatalogMotionState();
-      lifecycleCallbacks?.onFinished?.();
+      notifyLifecycle("finished", lifecycleCallbacks?.onFinished);
     };
     const fail = (reason: string) => {
       if (terminalSettled) {
@@ -846,7 +856,7 @@ export class LAppModel extends CubismUserModel {
       }
       terminalSettled = true;
       clearOwnedCatalogMotionState();
-      lifecycleCallbacks?.onFailed?.(reason);
+      notifyLifecycle("failed", () => lifecycleCallbacks?.onFailed?.(reason));
     };
     const start = () => {
       if (terminalSettled) {
@@ -864,7 +874,7 @@ export class LAppModel extends CubismUserModel {
         this._activeCatalogMotionClockReader = clockReader;
         this._activeCatalogMotionClockElapsedMs = elapsedMs;
       }
-      lifecycleCallbacks?.onStarted?.();
+      notifyLifecycle("started", lifecycleCallbacks?.onStarted);
     };
     this._motionStartError = "";
     if (this._released) {
@@ -917,7 +927,10 @@ export class LAppModel extends CubismUserModel {
       }
       terminalSettled = true;
       clearOwnedCatalogMotionState();
-      lifecycleCallbacks?.onInterrupted?.(reason);
+      notifyLifecycle(
+        "interrupted",
+        () => lifecycleCallbacks?.onInterrupted?.(reason),
+      );
     };
 
     if (LAppDefine.DebugLogEnable) {
@@ -1731,14 +1744,27 @@ export class LAppModel extends CubismUserModel {
       return;
     }
     state.terminalEmitted = true;
+    let expressionStopError: unknown = null;
     if (stopOwnedExpression && state.expressionId) {
-      this.stopExpression();
+      try {
+        this.stopExpression();
+      } catch (error) {
+        console.error("[LAppModel] direct plan expression stop failed.", error);
+        expressionStopError = error;
+      }
     }
-    state.onTerminal?.({
-      runId: state.runId,
-      status,
-      reason: reason || undefined,
-    });
+    try {
+      state.onTerminal?.({
+        runId: state.runId,
+        status,
+        reason: reason || undefined,
+      });
+    } catch (error) {
+      console.error("[LAppModel] direct plan terminal observer failed.", error);
+    }
+    if (expressionStopError !== null) {
+      throw expressionStopError;
+    }
   }
 
   public beginExternalAudioSignalSource(
