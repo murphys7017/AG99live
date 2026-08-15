@@ -901,6 +901,7 @@ def validate_semantic_axis_profile(
                 "output_range": _normalize_range(
                     raw_binding.get("output_range"),
                     field_name=f"{axis_id}.parameter_bindings.output_range",
+                    require_positive_span=True,
                 ),
                 "default_weight": default_weight,
                 "invert": _coerce_bool(
@@ -1360,15 +1361,22 @@ def _build_scanned_parameter_axis_id(
     return candidate
 
 
-def _normalize_range(value: Any, *, field_name: str) -> list[float]:
+def _normalize_range(
+    value: Any,
+    *,
+    field_name: str,
+    require_positive_span: bool = False,
+) -> list[float]:
     if not isinstance(value, list) or len(value) != 2:
         raise SemanticAxisProfileError(f"`{field_name}` must be a two-item numeric array.")
     result = [
         _coerce_float(value[0], field_name=field_name),
         _coerce_float(value[1], field_name=field_name),
     ]
-    if result[0] > result[1]:
-        raise SemanticAxisProfileError(f"`{field_name}` minimum must be less than or equal to maximum.")
+    invalid_order = result[0] >= result[1] if require_positive_span else result[0] > result[1]
+    if invalid_order:
+        relation = "less than" if require_positive_span else "less than or equal to"
+        raise SemanticAxisProfileError(f"`{field_name}` minimum must be {relation} maximum.")
     return result
 
 

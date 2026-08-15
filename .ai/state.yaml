@@ -1,9 +1,9 @@
 task:
   class: bugfix
   risk: medium
-  phase: idle_timing_duration_budget
+  phase: semantic_binding_output_range_validation
   status: implementation_complete
-  scope: "Keep speech-active idle timing within the synchronized audio duration while preserving the existing entry and release transitions."
+  scope: "Reject zero-width semantic parameter output ranges at the profile editor, backend profile owner, and frontend model-sync boundary before they can compile into frozen dynamics."
 
 context:
   confidence: high
@@ -21,6 +21,8 @@ context:
     - The existing PlaybackTimeline sink remains the lifecycle owner; this fix must not add a queue, dedupe layer, or fallback.
     - ModelEngine timing compilation owns blend and hold budgets; WebSDK consumes the validated result and must not invent a second timing policy.
     - The minimum legal motion duration is 320 ms, so the existing 80 ms entry and 120 ms release leave at least 120 ms for idle hold.
+    - A semantic parameter binding output range is meaningful only when minimum is strictly less than maximum; inversion remains represented by the existing invert field.
+    - Profile validation owns this invariant. ModelEngine must not become a fallback validator for malformed synchronized profiles.
 
 documentation:
   authorities:
@@ -41,10 +43,11 @@ verification:
     - Automated tests are low-confidence input/output smoke checks; do not run the full suite.
     - Live AstrBot, Electron, TTS, and Live2D behavior remains user-led runtime acceptance.
   current:
-    - Source tracing confirms `createModelEngineMotionTimelineSink` passes duplicate rejection through the existing sink callback without owning pending-payload cleanup.
-    - The scheduler now keeps the first pending payload and rejects the later duplicate without changing pending state.
-    - Source tracing confirms `resolveMotionTiming` is the semantic timing owner and WebSDK only projects its declared timing into execution.
-    - Speech-active idle timing now computes hold from the declared duration, so blend-in, hold, and blend-out sum exactly to that duration.
-    - `npm run typecheck:renderer` passed from `frontend` for the cumulative R17 and R16 changes.
+    - Backend profile normalization now requires every parameter binding output range to have a strictly positive span while preserving non-decreasing axis and input ranges.
+    - Profile Editor applies the same rule before save, and the frontend model-sync parser rejects a malformed synchronized profile before ModelEngine can consume it.
+    - ModelEngine and WebSDK were not changed; they continue to consume profiles that already satisfy the profile contract.
+    - The focused output-range smoke check passed for one valid range, one permitted non-binding zero-width range, and one rejected zero-width binding range.
+    - `python -m py_compile astrbot_plugin_ag99live_adapter/live2d/semantic_axis_profile.py` passed.
+    - `npm run typecheck:renderer` passed from `frontend`.
     - `git diff --check` passed.
-    - Live AstrBot, Electron, TTS, and Live2D verification remains pending user runtime acceptance.
+    - Live Profile Editor save and model-sync rejection remain pending user runtime acceptance.

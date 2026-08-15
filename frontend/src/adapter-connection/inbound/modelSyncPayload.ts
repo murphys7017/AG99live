@@ -840,10 +840,15 @@ function validateSemanticAxis(
       return invalidPayload(type, `${bindingPath}.parameter_id`, "unique parameter binding id");
     }
     parameterIds.add(parameterId);
-    for (const key of ["input_range", "output_range"] as const) {
-      const range = parseFiniteRange(type, binding[key], `${bindingPath}.${key}`);
-      if (!range.ok) return range;
-    }
+    const inputRange = parseFiniteRange(type, binding.input_range, `${bindingPath}.input_range`);
+    if (!inputRange.ok) return inputRange;
+    const outputRange = parseFiniteRange(
+      type,
+      binding.output_range,
+      `${bindingPath}.output_range`,
+      { requirePositiveSpan: true },
+    );
+    if (!outputRange.ok) return outputRange;
     if (binding.parameter_name !== undefined && typeof binding.parameter_name !== "string") {
       return invalidPayload(type, `${bindingPath}.parameter_name`, "string | undefined");
     }
@@ -1139,15 +1144,20 @@ function parseFiniteRange(
   type: string,
   value: unknown,
   path: string,
+  options: { requirePositiveSpan?: boolean } = {},
 ): PayloadParseResult<[number, number]> {
+  const requirePositiveSpan = options.requirePositiveSpan === true;
+  const expected = requirePositiveSpan
+    ? "strictly increasing finite [min, max]"
+    : "ordered finite [min, max]";
   if (
     !Array.isArray(value)
     || value.length !== 2
     || !isFiniteNumber(value[0])
     || !isFiniteNumber(value[1])
-    || value[0] > value[1]
+    || (requirePositiveSpan ? value[0] >= value[1] : value[0] > value[1])
   ) {
-    return invalidPayload(type, path, "ordered finite [min, max]");
+    return invalidPayload(type, path, expected);
   }
   return { ok: true, payload: [value[0], value[1]] };
 }

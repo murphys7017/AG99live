@@ -579,7 +579,12 @@ function validateDraftProfile(profile: SemanticAxisProfile): string[] {
         }
       }
       validateRange(errors, `${bindingLabel}.input_range`, binding.input_range);
-      validateRange(errors, `${bindingLabel}.output_range`, binding.output_range);
+      validateRange(
+        errors,
+        `${bindingLabel}.output_range`,
+        binding.output_range,
+        { requirePositiveSpan: true },
+      );
       validateUnitInterval(errors, `${bindingLabel}.default_weight`, binding.default_weight);
     });
   }
@@ -681,11 +686,25 @@ function validateUnitInterval(errors: string[], label: string, value: number): v
   }
 }
 
-function validateRange(errors: string[], label: string, range: [number, number]): void {
+function validateRange(
+  errors: string[],
+  label: string,
+  range: [number, number],
+  options: { requirePositiveSpan?: boolean } = {},
+): void {
+  const requirePositiveSpan = options.requirePositiveSpan === true;
   validateFinite(errors, `${label}[0]`, range[0]);
   validateFinite(errors, `${label}[1]`, range[1]);
-  if (Number.isFinite(range[0]) && Number.isFinite(range[1]) && range[0] > range[1]) {
-    errors.push(`${label} 的最小值不能大于最大值。`);
+  if (
+    Number.isFinite(range[0])
+    && Number.isFinite(range[1])
+    && (requirePositiveSpan ? range[0] >= range[1] : range[0] > range[1])
+  ) {
+    errors.push(
+      requirePositiveSpan
+        ? `${label} 的最小值必须小于最大值。`
+        : `${label} 的最小值不能大于最大值。`,
+    );
   }
 }
 
