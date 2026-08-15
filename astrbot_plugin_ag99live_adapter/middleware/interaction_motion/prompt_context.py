@@ -197,42 +197,36 @@ def _resolve_previous_motion_prompt_snapshot(turn_coordinator: Any) -> dict[str,
 
 def _summarize_semantic_profile(
     runtime_state: Any,
-) -> tuple[dict[str, Any] | None, str | None]:
-    try:
-        semantic_profile = resolve_selected_semantic_axis_profile(runtime_state=runtime_state)
-        prompt_axes = profile_prompt_axes(semantic_profile)
-    except Exception as exc:  # noqa: BLE001
-        return None, str(exc)
-    return (
-        {
-            "profile_id": str(semantic_profile.get("profile_id") or "").strip(),
-            "profile_revision": int(semantic_profile.get("revision") or 0),
-            "model_id": str(semantic_profile.get("model_id") or "").strip(),
-            "axis_count": len(prompt_axes),
-            "raw_profile": semantic_profile,
-            "prompt_axes": [
-                {
-                    "id": str(axis.get("id") or "").strip(),
-                    "label": str(axis.get("label") or axis.get("id") or "").strip(),
-                    "description": _truncate_text(
-                        str(axis.get("description") or "").strip(), 160
-                    ),
-                    "control_role": str(axis.get("control_role") or "").strip(),
-                    "value_range": _normalize_axis_range(axis.get("value_range"), [0.0, 100.0]),
-                    "negative_semantics": _normalize_axis_text_list(axis.get("negative_semantics")),
-                    "positive_semantics": _normalize_axis_text_list(axis.get("positive_semantics")),
-                    "usage_notes": _truncate_text(str(axis.get("usage_notes") or "").strip(), 160),
-                    "available_levels": resolve_available_axis_levels(axis),
-                }
-                for axis in prompt_axes
-                if str(axis.get("id") or "").strip()
-            ],
-            "axis_prompt": _build_middleware_axis_prompt(
-                prompt_axes,
-            ),
-        },
-        None,
-    )
+) -> dict[str, Any]:
+    semantic_profile = resolve_selected_semantic_axis_profile(runtime_state=runtime_state)
+    prompt_axes = profile_prompt_axes(semantic_profile)
+    return {
+        "profile_id": str(semantic_profile.get("profile_id") or "").strip(),
+        "profile_revision": int(semantic_profile.get("revision") or 0),
+        "model_id": str(semantic_profile.get("model_id") or "").strip(),
+        "axis_count": len(prompt_axes),
+        "raw_profile": semantic_profile,
+        "prompt_axes": [
+            {
+                "id": str(axis.get("id") or "").strip(),
+                "label": str(axis.get("label") or axis.get("id") or "").strip(),
+                "description": _truncate_text(
+                    str(axis.get("description") or "").strip(), 160
+                ),
+                "control_role": str(axis.get("control_role") or "").strip(),
+                "value_range": _normalize_axis_range(axis.get("value_range"), [0.0, 100.0]),
+                "negative_semantics": _normalize_axis_text_list(axis.get("negative_semantics")),
+                "positive_semantics": _normalize_axis_text_list(axis.get("positive_semantics")),
+                "usage_notes": _truncate_text(str(axis.get("usage_notes") or "").strip(), 160),
+                "available_levels": resolve_available_axis_levels(axis),
+            }
+            for axis in prompt_axes
+            if str(axis.get("id") or "").strip()
+        ],
+        "axis_prompt": _build_middleware_axis_prompt(
+            prompt_axes,
+        ),
+    }
 
 def _build_middleware_axis_prompt(
     prompt_axes: list[dict[str, Any]],

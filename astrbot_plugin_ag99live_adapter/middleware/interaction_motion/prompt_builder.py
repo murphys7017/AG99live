@@ -23,11 +23,7 @@ def _build_motion_static_capability_payload(runtime_state: Any) -> dict[str, Any
             getattr(runtime_state, "ag99live_motion_persona_effect_available", True)
         ),
     }
-    profile_payload, profile_error = _summarize_semantic_profile(runtime_state)
-    if profile_payload is None:
-        raise RuntimeError(
-            f"semantic_motion_prompt_profile_unavailable:{profile_error or 'unknown_error'}"
-        )
+    profile_payload = _summarize_semantic_profile(runtime_state)
     raw_profile = profile_payload.pop("raw_profile", None)
     if not isinstance(raw_profile, dict):
         raise RuntimeError("semantic_motion_prompt_profile_payload_invalid")

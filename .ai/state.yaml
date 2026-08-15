@@ -75,4 +75,5 @@ verification:
     - Playback lifecycle documents and detailed Mermaid diagrams distinguish parser rejection, settled rejected segments, and non-destructive duplicate/late rejection.
     - Server-info and output-segment media URLs are rejected at the protocol parser unless they use the declared absolute URL schemes; URL host rewriting no longer converts parse failures into unchanged values.
     - Omitted primary semantic axes are valid by prompt contract and no longer generate fake missing-axis warnings; obsolete axis-error tolerance diagnostics were removed, while unknown and forbidden axes remain explicit compile rejections.
+    - Motion prompt semantic-profile resolution now propagates its original exception and traceback instead of converting every failure into a synthetic profile-unavailable error string.
     - Live AstrBot, Electron, TTS, ESP32, and Live2D runtime acceptance remains user-led.
