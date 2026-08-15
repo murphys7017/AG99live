@@ -102,6 +102,10 @@ class MotionLabRecorder:
                     break
                 except Exception as exc:  # noqa: BLE001
                     if attempt == self._max_retry_attempts:
+                        logger.exception(
+                            "MotionLab raw event write failed after %s attempts",
+                            attempt,
+                        )
                         self._mark_unhealthy(
                             f"database_write_failed_after_{attempt}_attempts:{exc}"
                         )
@@ -125,7 +129,7 @@ class MotionLabRecorder:
                     try:
                         callback()
                     except Exception as exc:  # noqa: BLE001
-                        logger.error("MotionLab persistence callback failed: %s", exc)
+                        logger.exception("MotionLab persistence callback failed: %s", exc)
                 self._queue.task_done()
 
     def _mark_unhealthy(self, reason: str) -> None:

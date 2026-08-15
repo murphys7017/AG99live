@@ -57,5 +57,5 @@ def record_motion_observation(
     try:
         return recorder.enqueue(event, on_persisted=on_persisted)
     except Exception as exc:  # noqa: BLE001
-        logger.error("Motion observation port rejected event: %s", exc)
+        logger.exception("Motion observation port rejected event: %s", exc)
         return False

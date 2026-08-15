@@ -376,6 +376,7 @@ def _record_motion_lab_interaction_event(
     try:
         profile = resolve_selected_semantic_axis_profile(runtime_state=bundle.runtime_state)
     except Exception:  # noqa: BLE001
+        logger.exception("MotionLab interaction profile resolution failed")
         profile = None
     effect_calls = [_thaw_snapshot_value(item) for item in _extract_effect_calls_for_motion(event, view)]
     turn_id = identity.scheduled_frontend_turn_id

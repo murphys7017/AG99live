@@ -694,6 +694,11 @@ class TurnCoordinator:
                             },
                         )
             except Exception as exc:  # noqa: BLE001 - optional curve cannot block turn closure.
+                logger.exception(
+                    "Performance curve output side effect failed: turn_id=%s request_id=%s",
+                    segment.turn_id,
+                    request_id,
+                )
                 self._record_performance_curve_outcome(
                     event_type="performance_curve.failed",
                     reason=f"cleanup_exception:{exc}",
@@ -708,6 +713,12 @@ class TurnCoordinator:
                     try:
                         runtime.clear(turn_id=segment.turn_id, request_id=request_id)
                     except Exception as exc:  # noqa: BLE001 - optional curve cleanup.
+                        logger.exception(
+                            "Performance curve request cleanup failed: "
+                            "turn_id=%s request_id=%s",
+                            segment.turn_id,
+                            request_id,
+                        )
                         self._record_performance_curve_outcome(
                             event_type="performance_curve.failed",
                             reason=f"clear_exception:{exc}",
@@ -1100,6 +1111,11 @@ class TurnCoordinator:
         try:
             profile = resolve_selected_semantic_axis_profile(runtime_state=runtime_state)
         except Exception:  # noqa: BLE001
+            logger.exception(
+                "MotionLab profile resolution failed: event_type=%s turn_id=%s",
+                event_type,
+                turn_id,
+            )
             profile = None
         return record_motion_observation(
             getattr(runtime_state, "motion_lab_recorder", None),
@@ -1127,6 +1143,7 @@ class TurnCoordinator:
         try:
             value = to_list()
         except Exception:  # noqa: BLE001
+            logger.exception("MotionLab chat context snapshot failed")
             return []
         return value if isinstance(value, list) else []
 
@@ -1200,6 +1217,11 @@ class TurnCoordinator:
             if runtime.start(request):
                 return normalized_request_id
         except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "Performance curve request start failed: turn_id=%s request_id=%s",
+                normalized_turn_id,
+                normalized_request_id,
+            )
             self._record_performance_curve_outcome(
                 event_type="performance_curve.failed",
                 reason=f"start_exception:{exc}",
@@ -1284,6 +1306,11 @@ class TurnCoordinator:
         try:
             hint = runtime.get_ready(turn_id=turn_id, request_id=normalized_request_id)
         except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "Performance curve result lookup failed: turn_id=%s request_id=%s",
+                turn_id,
+                normalized_request_id,
+            )
             self._record_performance_curve_outcome(
                 event_type="performance_curve.failed",
                 reason=f"result_lookup_exception:{exc}",
@@ -1303,6 +1330,11 @@ class TurnCoordinator:
                 raise ValueError("performance_curve_runtime_hint_invalid")
             return next_payload
         except Exception as exc:  # noqa: BLE001 - optional curve must not block egress.
+            logger.exception(
+                "Performance curve hint attachment failed: turn_id=%s request_id=%s",
+                turn_id,
+                normalized_request_id,
+            )
             self._record_performance_curve_outcome(
                 event_type="performance_curve.failed",
                 reason=f"hint_invalid:{exc}",
@@ -1336,7 +1368,7 @@ class TurnCoordinator:
             except asyncio.CancelledError:
                 return
             except Exception as exc:
-                logger.warning("Background task in turn coordinator failed: %s", exc)
+                logger.exception("Background task in turn coordinator failed: %s", exc)
 
         task.add_done_callback(_on_done)
 

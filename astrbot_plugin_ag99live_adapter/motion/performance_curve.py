@@ -7,6 +7,8 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+from astrbot.api import logger
+
 from ..protocol.schema_versions import PERFORMANCE_CURVE_HINT_SCHEMA_VERSION
 
 from ..prompts.performance_curve import (
@@ -199,6 +201,11 @@ class PerformanceCurveRuntime:
             raise
         except Exception as exc:  # noqa: BLE001
             latency_ms = int((time.perf_counter() - started_at) * 1000)
+            logger.exception(
+                "Performance curve provider request failed: turn_id=%s request_id=%s",
+                request.turn_id,
+                request.request_id,
+            )
             self._record_failed(request, str(exc), latency_ms=latency_ms)
             self._drop_cached_key(key)
 
@@ -401,5 +408,6 @@ def _get_provider_id(provider: Any) -> str:
     try:
         meta = provider.meta()
     except Exception:  # noqa: BLE001
+        logger.exception("Performance curve provider metadata lookup failed")
         return ""
     return str(getattr(meta, "id", "") or "").strip()
