@@ -190,6 +190,19 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     motionSession: deps.motionSession,
   });
 
+  function runTimelineCleanupStep(
+    step: string,
+    action: () => void,
+    errors: unknown[],
+  ): void {
+    try {
+      action();
+    } catch (error) {
+      console.error(`[PlaybackTimelineRuntime] ${step} failed.`, error);
+      errors.push(error);
+    }
+  }
+
   function notifyExecutionStateChanged(): void {
     if (executionStateNotificationPending) {
       return;
@@ -817,30 +830,72 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
       });
       return;
     }
-    failDeferredText(timeline, `subtitle_timeline_stopped:${reason}`);
-    if (hasOpenSink(timeline, AUDIO_TIMELINE_SINK_ID)) {
-      markAudioSessionTerminal(turnId, messageId, "interrupted", reason);
+    const errors: unknown[] = [];
+    const hasOpenAudio = hasOpenSink(timeline, AUDIO_TIMELINE_SINK_ID);
+    const hasOpenMotion = hasOpenSink(timeline, MOTION_TIMELINE_SINK_ID);
+    runTimelineCleanupStep(
+      "deferred text interruption",
+      () => failDeferredText(timeline, `subtitle_timeline_stopped:${reason}`),
+      errors,
+    );
+    if (hasOpenAudio) {
+      runTimelineCleanupStep(
+        "audio session interruption",
+        () => markAudioSessionTerminal(turnId, messageId, "interrupted", reason),
+        errors,
+      );
     }
-    if (hasOpenSink(timeline, MOTION_TIMELINE_SINK_ID)) {
-      markMotionSessionTerminal(turnId, messageId, "interrupted", reason);
+    if (hasOpenMotion) {
+      runTimelineCleanupStep(
+        "motion session interruption",
+        () => markMotionSessionTerminal(turnId, messageId, "interrupted", reason),
+        errors,
+      );
     }
-    timeline.engine.interrupt(reason);
-    clearTimeline(turnId, messageId);
+    runTimelineCleanupStep(
+      "engine interruption",
+      () => timeline.engine.interrupt(reason),
+      errors,
+    );
+    runTimelineCleanupStep(
+      "timeline removal",
+      () => clearTimeline(turnId, messageId),
+      errors,
+    );
+    if (errors.length > 0) {
+      throw errors[0];
+    }
   }
 
   function stopTimelinesForTurn(turnId: string | null, reason: string): void {
     const normalizedTurnId = normalizeTurnId(turnId);
+    const errors: unknown[] = [];
     for (const timeline of Array.from(timelines.values())) {
       if (normalizeTurnId(timeline.turnId) !== normalizedTurnId) {
         continue;
       }
-      stopTimelineForSegment(timeline.turnId, timeline.messageId, reason);
+      runTimelineCleanupStep(
+        `turn timeline stop (${timeline.messageId})`,
+        () => stopTimelineForSegment(timeline.turnId, timeline.messageId, reason),
+        errors,
+      );
+    }
+    if (errors.length > 0) {
+      throw errors[0];
     }
   }
 
   function stopAllTimelines(reason: string): void {
+    const errors: unknown[] = [];
     for (const timeline of Array.from(timelines.values())) {
-      stopTimelineForSegment(timeline.turnId, timeline.messageId, reason);
+      runTimelineCleanupStep(
+        `timeline stop (${timeline.messageId})`,
+        () => stopTimelineForSegment(timeline.turnId, timeline.messageId, reason),
+        errors,
+      );
+    }
+    if (errors.length > 0) {
+      throw errors[0];
     }
   }
 
@@ -1103,24 +1158,46 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     timeline: PlaybackTimelineEntry,
     reason: string,
   ): void {
-    if (hasOpenSink(timeline, AUDIO_TIMELINE_SINK_ID)) {
-      markAudioSessionTerminal(
-        timeline.turnId,
-        timeline.messageId,
-        "failed",
-        reason,
+    const errors: unknown[] = [];
+    const hasOpenAudio = hasOpenSink(timeline, AUDIO_TIMELINE_SINK_ID);
+    const hasOpenMotion = hasOpenSink(timeline, MOTION_TIMELINE_SINK_ID);
+    if (hasOpenAudio) {
+      runTimelineCleanupStep(
+        "audio session failure",
+        () => markAudioSessionTerminal(
+          timeline.turnId,
+          timeline.messageId,
+          "failed",
+          reason,
+        ),
+        errors,
       );
     }
-    if (hasOpenSink(timeline, MOTION_TIMELINE_SINK_ID)) {
-      markMotionSessionTerminal(
-        timeline.turnId,
-        timeline.messageId,
-        "failed",
-        reason,
+    if (hasOpenMotion) {
+      runTimelineCleanupStep(
+        "motion session failure",
+        () => markMotionSessionTerminal(
+          timeline.turnId,
+          timeline.messageId,
+          "failed",
+          reason,
+        ),
+        errors,
       );
     }
-    timeline.engine.fail(reason);
-    clearTimelineIfTerminal(timeline.turnId, timeline.messageId);
+    runTimelineCleanupStep(
+      "engine failure",
+      () => timeline.engine.fail(reason),
+      errors,
+    );
+    runTimelineCleanupStep(
+      "failed timeline removal",
+      () => clearTimeline(timeline.turnId, timeline.messageId),
+      errors,
+    );
+    if (errors.length > 0) {
+      throw errors[0];
+    }
   }
 
   function hasOpenSink(
