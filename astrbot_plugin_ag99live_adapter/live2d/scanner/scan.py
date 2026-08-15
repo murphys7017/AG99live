@@ -1,16 +1,12 @@
 from __future__ import annotations
 
 import json
-import logging
 from collections import Counter, defaultdict
 from pathlib import Path
 from statistics import median
 from typing import Any
 
-try:
-    from astrbot.api import logger
-except Exception:  # pragma: no cover - fallback for local dry runs outside AstrBot.
-    logger = logging.getLogger(__name__)
+from astrbot.api import logger
 
 from .motion_scan import build_motion_resource_pool, decompose_motion
 from ...protocol.schema_versions import (
