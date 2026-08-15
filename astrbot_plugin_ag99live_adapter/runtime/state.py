@@ -533,14 +533,16 @@ class RuntimeState:
             if isinstance(model, dict) and str(model.get("name") or "").strip()
         ]
         if not models:
-            return result
+            return None if selected_model_name else result
 
         available_models = [
             str(model.get("name") or "").strip()
             for model in models
             if str(model.get("name") or "").strip()
         ]
-        selected_model = selected_model_name if selected_model_name in available_models else available_models[0]
+        if selected_model_name and selected_model_name not in available_models:
+            return None
+        selected_model = selected_model_name or available_models[0]
         result["selected_model"] = selected_model
         result["available_models"] = available_models
         return result

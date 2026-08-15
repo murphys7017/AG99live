@@ -214,8 +214,14 @@ def scan_live2d_models(
     selected_model_name: str = "",
 ) -> dict[str, Any]:
     models: list[dict[str, Any]] = []
+    normalized_selected_model_name = selected_model_name.strip()
 
     if not live2ds_dir.exists():
+        if normalized_selected_model_name:
+            raise ValueError(
+                f"Configured Live2D model `{normalized_selected_model_name}` cannot be scanned "
+                f"because `{live2ds_dir}` does not exist."
+            )
         return {
             "schema_version": SCAN_SCHEMA_VERSION,
             "driver_priority": ["parameters", "expression", "motion"],
@@ -228,12 +234,20 @@ def scan_live2d_models(
         try:
             model_summary = _scan_single_model(candidate, base_url=base_url)
         except Exception as exc:
+            if candidate.name == normalized_selected_model_name:
+                raise ValueError(
+                    f"Configured Live2D model `{normalized_selected_model_name}` failed to scan: {exc}"
+                ) from exc
             logger.warning("Failed to scan Live2D model directory `%s`: %s", candidate, exc)
             continue
+        if model_summary is None and candidate.name == normalized_selected_model_name:
+            raise ValueError(
+                f"Configured Live2D model `{normalized_selected_model_name}` has no model3.json file."
+            )
         if model_summary:
             models.append(model_summary)
 
-    selected = _pick_selected_model(models, selected_model_name)
+    selected = _pick_selected_model(models, normalized_selected_model_name)
     return {
         "schema_version": SCAN_SCHEMA_VERSION,
         "driver_priority": ["parameters", "expression", "motion"],
@@ -2260,6 +2274,7 @@ def _pick_selected_model(models: list[dict[str, Any]], selected_model_name: str)
         for item in models:
             if item["name"] == normalized_target:
                 return item["name"]
+        raise ValueError(f"Configured Live2D model `{normalized_target}` was not found.")
     return models[0]["name"] if models else ""
 
 
