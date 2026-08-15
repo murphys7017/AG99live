@@ -17,6 +17,7 @@ import {
 import {
   MAX_MOTION_DURATION_MS,
   MAX_PARAMETER_KEYFRAME_COUNT,
+  MIN_MOTION_DURATION_MS,
   MIN_PARAMETER_KEYFRAME_COUNT,
 } from "./constants.js";
 
@@ -188,12 +189,16 @@ function normalizeTiming(value: unknown): DirectParameterPlanTiming | null {
   }
 
   if (
-    durationMs < 0
+    !Number.isInteger(durationMs)
+    || !Number.isInteger(blendInMs)
+    || !Number.isInteger(holdMs)
+    || !Number.isInteger(blendOutMs)
+    || durationMs < MIN_MOTION_DURATION_MS
     || blendInMs < 0
     || holdMs < 0
     || blendOutMs < 0
     || durationMs > MAX_MOTION_DURATION_MS
-    || blendInMs + holdMs + blendOutMs > MAX_MOTION_DURATION_MS
+    || blendInMs + holdMs + blendOutMs !== durationMs
   ) {
     return null;
   }
@@ -214,10 +219,10 @@ function normalizeTiming(value: unknown): DirectParameterPlanTiming | null {
   }
 
   return {
-    duration_ms: Math.round(durationMs),
-    blend_in_ms: Math.round(blendInMs),
-    hold_ms: Math.round(holdMs),
-    blend_out_ms: Math.round(blendOutMs),
+    duration_ms: durationMs,
+    blend_in_ms: blendInMs,
+    hold_ms: holdMs,
+    blend_out_ms: blendOutMs,
     curve_preset: curvePreset as PerformanceCurvePresetName | undefined,
   };
 }

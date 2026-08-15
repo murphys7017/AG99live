@@ -36,7 +36,7 @@ export function prepareDirectParameterExecution(
       holdMs,
       blendOutMs,
       curvePreset,
-      totalMs: Math.max(durationMs, blendInMs + holdMs + blendOutMs),
+      totalMs: durationMs,
     },
   };
 }

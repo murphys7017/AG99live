@@ -61,13 +61,9 @@ export function usePreviewMotionPlayer() {
       return null;
     }
     const timing = result.value.timing;
-    const totalDurationMs = Math.max(
-      timing.duration_ms,
-      timing.blend_in_ms + timing.hold_ms + timing.blend_out_ms,
-    );
     return {
       plan: result.value,
-      totalDurationMs,
+      totalDurationMs: timing.duration_ms,
     };
   }
 
