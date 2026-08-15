@@ -193,6 +193,7 @@ export function useMotionPlaybackRecorder(options: MotionPlaybackRecorderOptions
       return;
     }
     const run = currentMotionRun;
+    currentMotionRun = null;
     const timeline = options.getPlaybackTimelineSnapshot?.(
       run.turnId,
       run.messageId,
@@ -234,7 +235,6 @@ export function useMotionPlaybackRecorder(options: MotionPlaybackRecorderOptions
         },
       },
     }, run.turnId);
-    currentMotionRun = null;
   }
 
   function resetMotionPlaybackRecorder(): void {

@@ -139,19 +139,50 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     initialMotionPlaybackRecords,
   });
   const motionTimelineRunTracker = createPlaybackTimelineMotionRunTracker(playbackTimeline);
-  function handleMotionTerminal(event: DirectParameterPlanTerminalEvent): void {
-    const completedRun = modelEngine.handlePlaybackTerminal(event);
-    if (completedRun?.origin !== "manual_preview") {
-      return;
+  function notifyMotionLifecycleObserver(
+    phase: "started" | "terminal",
+    observer: string,
+    runId: string,
+    notify: () => void,
+  ): void {
+    try {
+      notify();
+    } catch (error) {
+      console.error(`[MotionLifecycle] ${phase} observer '${observer}' failed.`, {
+        runId,
+        error,
+      });
     }
-    const status: DesktopMotionPreviewStatus["status"] = event.status;
-    bridge.publishMotionPreviewStatus({
-      requestId: completedRun.messageId,
-      source: "compiled_semantic_motion",
-      status,
-      runId: event.runId,
-      ...(event.reason ? { reason: event.reason } : {}),
+  }
+  function handleMotionTerminal(
+    event: DirectParameterPlanTerminalEvent,
+    localObserver?: (event: DirectParameterPlanTerminalEvent) => void,
+  ): void {
+    notifyMotionLifecycleObserver("terminal", "model_engine", event.runId, () => {
+      const completedRun = modelEngine.handlePlaybackTerminal(event);
+      if (completedRun?.origin !== "manual_preview") {
+        return;
+      }
+      const status: DesktopMotionPreviewStatus["status"] = event.status;
+      bridge.publishMotionPreviewStatus({
+        requestId: completedRun.messageId,
+        source: "compiled_semantic_motion",
+        status,
+        runId: event.runId,
+        ...(event.reason ? { reason: event.reason } : {}),
+      });
     });
+    notifyMotionLifecycleObserver("terminal", "playback_timeline", event.runId, () => {
+      motionTimelineRunTracker.recordTerminal(event);
+    });
+    notifyMotionLifecycleObserver("terminal", "motion_recorder", event.runId, () => {
+      motionPlaybackRecorder.completeMotionPlayback(event);
+    });
+    if (localObserver) {
+      notifyMotionLifecycleObserver("terminal", "caller", event.runId, () => {
+        localObserver(event);
+      });
+    }
   }
   const modelEngine = useModelEngine({
     getSelectedModel: () => selectedModel.value,
@@ -159,19 +190,13 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     playPlan: (plan, model, options) => motionPlayer.playPlan(plan, model, {
       ...options,
       onFinished: (event) => {
-        options?.onFinished?.(event);
-        handleMotionTerminal(event);
-        motionPlaybackRecorder.completeMotionPlayback(event);
-        motionTimelineRunTracker.recordTerminal(event);
+        handleMotionTerminal(event, options?.onFinished);
       },
     }),
     playCatalogMotion: (motion, model, options) => motionPlayer.playCatalogMotion(motion, model, {
       ...options,
       onFinished: (event) => {
-        options?.onFinished?.(event);
-        handleMotionTerminal(event);
-        motionPlaybackRecorder.completeMotionPlayback(event);
-        motionTimelineRunTracker.recordTerminal(event);
+        handleMotionTerminal(event, options?.onFinished);
       },
     }),
     stopPlan: (reason) => motionPlayer.stopPlan(reason),
@@ -203,14 +228,20 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
         runId: event.runId,
         payloadKind: event.payloadKind,
       });
-      motionTimelineRunTracker.recordStarted(event);
-      motionPlaybackRecorder.recordMotionPlayback(event);
+      notifyMotionLifecycleObserver("started", "playback_timeline", event.runId, () => {
+        motionTimelineRunTracker.recordStarted(event);
+      });
+      notifyMotionLifecycleObserver("started", "motion_recorder", event.runId, () => {
+        motionPlaybackRecorder.recordMotionPlayback(event);
+      });
       if (event.playbackOrigin === "manual_preview") {
-        bridge.publishMotionPreviewStatus({
-          requestId: event.messageId,
-          source: "compiled_semantic_motion",
-          status: "started",
-          runId: event.runId,
+        notifyMotionLifecycleObserver("started", "desktop_bridge", event.runId, () => {
+          bridge.publishMotionPreviewStatus({
+            requestId: event.messageId,
+            source: "compiled_semantic_motion",
+            status: "started",
+            runId: event.runId,
+          });
         });
       }
     },

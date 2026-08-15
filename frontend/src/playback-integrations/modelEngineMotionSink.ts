@@ -218,18 +218,17 @@ export function createMotionTimelineRunTracker(options: {
       if (event.playbackOrigin === "manual_preview") {
         return;
       }
-      options.markMotionTimelineStarted(event.turnId, event.messageId);
       runs.set(event.runId, {
         turnId: event.turnId,
         messageId: event.messageId,
       });
+      options.markMotionTimelineStarted(event.turnId, event.messageId);
     },
     recordTerminal(event) {
       const owner = runs.get(event.runId);
       if (!owner) {
         return;
       }
-      runs.delete(event.runId);
       options.markMotionTimelineTerminal(
         owner.turnId,
         owner.messageId,
@@ -240,6 +239,7 @@ export function createMotionTimelineRunTracker(options: {
             : "failed",
         event.reason || event.status,
       );
+      runs.delete(event.runId);
     },
     clear() {
       runs.clear();

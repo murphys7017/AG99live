@@ -85,4 +85,5 @@ verification:
     - Catalog motion replacement is committed only after Cubism returns a valid playback handle; rejected candidates preserve the current player state, and natural completion is tracked by the per-run handle rather than a callback stored on the shared preloaded motion object.
     - ModelEngine public execution state belongs to the active playback run; pending, compile, and start failures from replacement candidates remain diagnostics and cannot overwrite a still-playing run.
     - Direct Parameter Plan and Catalog Motion starts return the same structured started/rejected result; ModelEngine receives the actual rejection reason instead of inferring errors from mutable player display text.
+    - Motion lifecycle fan-out isolates ModelEngine, Timeline, recorder, caller, and desktop-bridge observers; RunTracker and recorder commit their own ownership transitions before invoking downstream projections so one observer failure cannot strand another owner.
     - Live AstrBot, Electron, TTS, ESP32, and Live2D runtime acceptance remains user-led.
