@@ -91,4 +91,5 @@ verification:
     - Audio settlement continues through every open audio segment and always requests the corresponding Turn or global Timeline stop before propagating the first lookup, audio, or Timeline cleanup error.
     - Adapter disconnect and dispose release pending microphone work, every unresolved Session, audio/Timeline state, synchronized model state, listeners, and socket ownership independently; a cleanup error cannot keep the socket owned or suppress later reset steps.
     - PlaybackTimeline execution-state fan-out isolates Orchestrator and CompletionCoordinator subscribers; one asynchronous observer failure is logged and cannot suppress the other owner.
+    - MotionPlayer stop attempts Direct Parameter Plan and Catalog Motion independently; one stop failure cannot suppress cleanup of the other execution owner, and the first error remains visible after both attempts.
     - Live AstrBot, Electron, TTS, ESP32, and Live2D runtime acceptance remains user-led.

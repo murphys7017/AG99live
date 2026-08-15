@@ -74,16 +74,30 @@ export function usePreviewMotionPlayer() {
 
   function stopPlan(reason = "stopped"): void {
     const adapter = window.getLAppAdapter?.();
-    if (adapter && typeof adapter.stopDirectParameterPlan === "function") {
-      adapter.stopDirectParameterPlan(reason, "stopped");
+    const stopErrors: unknown[] = [];
+    try {
+      if (adapter && typeof adapter.stopDirectParameterPlan === "function") {
+        adapter.stopDirectParameterPlan(reason, "stopped");
+      }
+    } catch (error) {
+      console.error("[MotionPlayer] direct parameter plan stop failed.", error);
+      stopErrors.push(error);
     }
-    stopActiveCatalogMotion(reason);
+    try {
+      stopActiveCatalogMotion(reason);
+    } catch (error) {
+      console.error("[MotionPlayer] catalog motion stop failed.", error);
+      stopErrors.push(error);
+    }
     if (state.status === "playing" || state.status === "preparing") {
       state.status = "idle";
       state.message = reason === "stopped"
         ? "参数计划已停止。"
         : `参数计划已停止（${reason}）。`;
       state.finishedAt = new Date().toISOString();
+    }
+    if (stopErrors.length > 0) {
+      throw stopErrors[0];
     }
   }
 
