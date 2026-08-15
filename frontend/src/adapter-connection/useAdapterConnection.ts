@@ -399,25 +399,62 @@ export function createAdapterConnection(
     openConnectionCandidate(candidates, 0, attemptSerial);
   }
 
+  function runConnectionCleanupStep(
+    step: string,
+    action: () => void,
+    errors: unknown[],
+  ): void {
+    try {
+      action();
+    } catch (error) {
+      console.error(`[useAdapterConnection] ${step} failed.`, error);
+      errors.push(error);
+    }
+  }
+
   function disconnect(): void {
     const hadActiveSocket = Boolean(socket);
-    disconnectInternal(true);
+    const errors: unknown[] = [];
+    runConnectionCleanupStep(
+      "manual disconnect",
+      () => disconnectInternal(true),
+      errors,
+    );
     state.status = "disconnected";
     state.statusMessage = "已断开适配器连接。";
     if (!hadActiveSocket) {
       pushHistory("system", state.statusMessage);
     }
+    if (errors.length > 0) {
+      throw errors[0];
+    }
   }
 
   function disconnectInternal(markManualClose: boolean): void {
     connectAttemptSerial += 1;
-    microphoneRuntime.cancelPendingStart();
+    const errors: unknown[] = [];
+    runConnectionCleanupStep(
+      "pending microphone start cancellation",
+      () => microphoneRuntime.cancelPendingStart(),
+      errors,
+    );
     const reason = markManualClose ? "manual_disconnect" : "connection_reset";
-    resetConnectionRuntimeState(reason);
+    runConnectionCleanupStep(
+      "runtime reset",
+      () => resetConnectionRuntimeState(reason),
+      errors,
+    );
     if (socket) {
       const currentSocket = socket;
       socket = null;
-      currentSocket.close();
+      runConnectionCleanupStep(
+        "websocket close",
+        () => currentSocket.close(),
+        errors,
+      );
+    }
+    if (errors.length > 0) {
+      throw errors[0];
     }
   }
 
@@ -426,12 +463,24 @@ export function createAdapterConnection(
       return;
     }
     disposed = true;
-    disconnectInternal(true);
-    detachPttHookStatusListener?.();
+    const errors: unknown[] = [];
+    runConnectionCleanupStep(
+      "dispose disconnect",
+      () => disconnectInternal(true),
+      errors,
+    );
+    runConnectionCleanupStep(
+      "PTT hook listener detach",
+      () => detachPttHookStatusListener?.(),
+      errors,
+    );
     detachPttHookStatusListener = null;
     state.status = "disconnected";
     state.statusMessage = "已断开适配器连接。";
     state.lastError = "";
+    if (errors.length > 0) {
+      throw errors[0];
+    }
   }
 
   function openConnectionCandidate(
@@ -494,7 +543,11 @@ export function createAdapterConnection(
         }
 
         socket = null;
-        resetConnectionRuntimeState("connection_closed");
+        try {
+          resetConnectionRuntimeState("connection_closed");
+        } catch (error) {
+          console.error("[useAdapterConnection] connection close cleanup failed.", error);
+        }
 
         if (!opened) {
           if (state.status !== "error") {
@@ -517,21 +570,41 @@ export function createAdapterConnection(
   }
 
   function resetConnectionRuntimeState(reason: string): void {
-    failUnresolvedSessions(reason);
-    resetConnectionRuntime({
-      state,
-      stopMicrophoneCapture,
-      stopAudioAndSettleAll,
-      historyAdapter,
-      modelSyncAdapter: modelSync,
-    }, reason);
+    const errors: unknown[] = [];
+    runConnectionCleanupStep(
+      "unresolved session failure projection",
+      () => failUnresolvedSessions(reason),
+      errors,
+    );
+    runConnectionCleanupStep(
+      "connection runtime state reset",
+      () => resetConnectionRuntime({
+        state,
+        stopMicrophoneCapture,
+        stopAudioAndSettleAll,
+        historyAdapter,
+        modelSyncAdapter: modelSync,
+      }, reason),
+      errors,
+    );
+    if (errors.length > 0) {
+      throw errors[0];
+    }
   }
 
   function failUnresolvedSessions(reason: string): void {
+    const errors: unknown[] = [];
     for (const session of sessionStore.getSessions()) {
       if (session.phase !== "completed" && session.phase !== "failed") {
-        sessionStore.markSessionFailed(session.turnId, reason);
+        runConnectionCleanupStep(
+          `session failure (${session.turnId})`,
+          () => sessionStore.markSessionFailed(session.turnId, reason),
+          errors,
+        );
       }
+    }
+    if (errors.length > 0) {
+      throw errors[0];
     }
   }
 
