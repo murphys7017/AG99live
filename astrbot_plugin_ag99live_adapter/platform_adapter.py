@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-import traceback
 from typing import Any
 from uuid import uuid4
 
@@ -264,9 +263,8 @@ class OLVPetPlatformAdapter(Platform):
         except asyncio.CancelledError:
             await self.terminate()
             raise
-        except Exception as exc:
-            logger.error(f"AG99live adapter failed during run(): {exc}")
-            logger.error(traceback.format_exc())
+        except Exception:
+            logger.exception("AG99live adapter failed during run()")
             raise
         finally:
             await asyncio.to_thread(self._debug_server.stop)

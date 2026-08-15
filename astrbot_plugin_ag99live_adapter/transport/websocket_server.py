@@ -98,7 +98,10 @@ class WebSocketTransport:
             try:
                 await self._ws_client.close()
             except Exception as exc:
-                logger.warning("Failed to close desktop websocket client cleanly: %s", exc)
+                if _is_expected_disconnect_error(exc):
+                    logger.debug("Desktop websocket client was already disconnected: %s", exc)
+                else:
+                    logger.exception("Failed to close desktop websocket client cleanly")
             finally:
                 self._ws_client = None
 
@@ -106,16 +109,16 @@ class WebSocketTransport:
             try:
                 self._ws_server.close()
                 await self._ws_server.wait_closed()
-            except Exception as exc:
-                logger.warning("Failed to close websocket server cleanly: %s", exc)
+            except Exception:
+                logger.exception("Failed to close websocket server cleanly")
             finally:
                 self._ws_server = None
 
         if self.static_server is not None:
             try:
                 await asyncio.to_thread(self.static_server.stop)
-            except Exception as exc:
-                logger.warning("Failed to close static resource server cleanly: %s", exc)
+            except Exception:
+                logger.exception("Failed to close static resource server cleanly")
 
     async def send_json(self, payload: dict[str, Any]) -> bool:
         """出站发送：把 dict 序列化为 JSON 经当前 _ws_client 发出。
@@ -134,18 +137,27 @@ class WebSocketTransport:
         except Exception as exc:
             if self._ws_client is client:
                 self._ws_client = None
-            logger.warning(
-                "Failed to send websocket payload `%s`: %s",
-                payload.get("type", "<unknown>"),
-                exc,
-            )
+            if _is_expected_disconnect_error(exc):
+                logger.debug(
+                    "Desktop websocket disconnected while sending `%s`: %s",
+                    payload.get("type", "<unknown>"),
+                    exc,
+                )
+            else:
+                logger.exception(
+                    "Failed to send websocket payload `%s`",
+                    payload.get("type", "<unknown>"),
+                )
             try:
                 await client.close()
             except Exception as close_exc:
-                logger.warning(
-                    "Failed to close websocket client after send failure: %s",
-                    close_exc,
-                )
+                if _is_expected_disconnect_error(close_exc):
+                    logger.debug(
+                        "Desktop websocket was already closed after send failure: %s",
+                        close_exc,
+                    )
+                else:
+                    logger.exception("Failed to close websocket client after send failure")
             return False
 
     async def _handle_client(self, websocket) -> None:
@@ -203,8 +215,8 @@ class WebSocketTransport:
                     await self._handle_message(parsed)
                 except asyncio.CancelledError:
                     raise
-                except Exception as exc:
-                    logger.warning("Failed to process inbound websocket payload: %s", exc)
+                except Exception:
+                    logger.exception("Failed to process inbound websocket payload")
                     turn_id = parsed.get("turn_id")
                     await self.send_json(
                         build_control_error(
@@ -213,7 +225,7 @@ class WebSocketTransport:
                                 if isinstance(turn_id, str) and turn_id.strip()
                                 else None
                             ),
-                            message=f"Failed to process message: {exc}",
+                            message="Failed to process message.",
                         )
                     )
         except asyncio.CancelledError:
@@ -229,13 +241,13 @@ class WebSocketTransport:
             if _is_expected_disconnect_error(exc):
                 logger.debug("Desktop frontend disconnected abruptly: %s", exc)
             else:
-                logger.warning("Desktop frontend handler aborted unexpectedly: %s", exc)
+                logger.exception("Desktop frontend handler aborted unexpectedly")
         finally:
             self._ws_client = None
             try:
                 await self._on_disconnect()
-            except Exception as exc:
-                logger.warning("Failed to run disconnect cleanup: %s", exc)
+            except Exception:
+                logger.exception("Failed to run disconnect cleanup")
             logger.debug("Desktop frontend disconnected from adapter transport")
 
     async def _handle_binary_payload(self, raw_message: bytes) -> None:
@@ -250,11 +262,11 @@ class WebSocketTransport:
             await self._handle_binary_message(raw_message)
         except asyncio.CancelledError:
             raise
-        except Exception as exc:
-            logger.warning("Failed to process inbound binary websocket payload: %s", exc)
+        except Exception:
+            logger.exception("Failed to process inbound binary websocket payload")
             await self.send_json(
                 build_control_error(
-                    message=f"Failed to process binary message: {exc}",
+                    message="Failed to process binary message.",
                 )
             )
 
