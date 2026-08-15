@@ -76,4 +76,5 @@ verification:
     - Server-info and output-segment media URLs are rejected at the protocol parser unless they use the declared absolute URL schemes; URL host rewriting no longer converts parse failures into unchanged values.
     - Omitted primary semantic axes are valid by prompt contract and no longer generate fake missing-axis warnings; obsolete axis-error tolerance diagnostics were removed, while unknown and forbidden axes remain explicit compile rejections.
     - Motion prompt semantic-profile resolution now propagates its original exception and traceback instead of converting every failure into a synthetic profile-unavailable error string.
+    - Static HTTP API handler exceptions remain isolated at the request boundary, but now retain a server traceback and no longer expose internal exception text to clients.
     - Live AstrBot, Electron, TTS, ESP32, and Live2D runtime acceptance remains user-led.

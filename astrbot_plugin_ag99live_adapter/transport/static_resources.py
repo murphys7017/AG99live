@@ -88,8 +88,9 @@ def _build_handler(
 
             try:
                 status_code, response_payload = api_handler(request_path, payload)
-            except Exception as exc:  # pragma: no cover - defensive fallback.
-                self._send_json_response(500, {"ok": False, "error": f"API handler failed: {exc}"})
+            except Exception:  # pragma: no cover - HTTP server boundary.
+                logger.exception("Static API handler failed: path=%s", request_path)
+                self._send_json_response(500, {"ok": False, "error": "Internal server error."})
                 return
 
             if not isinstance(response_payload, dict):
