@@ -46,6 +46,10 @@ def parse_binary_audio_frame(data: bytes) -> BinaryAudioChunkFrame:
     if frame_type != FRAME_TYPE_AUDIO_CHUNK:
         raise BinaryAudioFrameError(f"Unsupported binary audio frame type: {frame_type}")
 
+    flags = int.from_bytes(data[6:8], byteorder="little", signed=False)
+    if flags != 0:
+        raise BinaryAudioFrameError(f"Unsupported binary audio frame flags: {flags}")
+
     meta_len = int.from_bytes(data[8:12], byteorder="little", signed=False)
     if meta_len <= 0:
         raise BinaryAudioFrameError("Binary audio frame metadata is empty.")

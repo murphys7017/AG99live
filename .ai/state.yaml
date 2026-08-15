@@ -1,9 +1,9 @@
 task:
   class: bugfix
   risk: low
-  phase: normalized_motion_start_exhaustiveness
+  phase: binary_audio_reserved_flags_validation
   status: implementation_complete
-  scope: "Replace the normalized motion start catalog fallback with compile-time exhaustiveness and an accurate runtime rejection."
+  scope: "Reject AG99 binary audio frames whose reserved header flags are non-zero."
 
 context:
   confidence: high
@@ -29,6 +29,7 @@ context:
     - A pre-Turn input failure must remain observable through control.error, but it must not fabricate a terminal event for a session that was never started.
     - control.playback_finished and control.interrupt carry frontend Turn IDs by protocol contract; their handlers must not query the AstrBot-to-frontend index with those values.
     - Normalized motion dispatch must handle every declared payload kind explicitly; unknown runtime values are rejected and never reinterpreted as another motion kind.
+    - Binary audio header bytes 6-7 are reserved flags in little-endian order; the current frontend writer sets them to zero and the backend parser owns enforcing that invariant.
 
 documentation:
   authorities:
@@ -49,8 +50,7 @@ verification:
     - Automated tests are low-confidence input/output smoke checks; do not run the full suite.
     - Live AstrBot, Electron, TTS, and Live2D behavior remains user-led runtime acceptance.
   current:
-    - startNormalizedMotionPayload now dispatches semantic_intent and catalog_motion through an exhaustive switch.
-    - The default branch assigns the remaining payload to never so future union members fail compilation, while runtime type escapes receive an explicit normalized_motion_payload_kind_unsupported reason.
-    - Unknown payload kinds now fail ModelEngine state and history without entering catalog execution.
-    - `npm run typecheck:renderer` and `git diff --check` passed.
-    - Live unknown-payload diagnostics remain unexercised because the normal protocol parser rejects such payloads earlier.
+    - parse_binary_audio_frame now reads the reserved uint16 at header offset 6 and rejects any non-zero value before metadata parsing.
+    - The frontend writer remains unchanged and continues to write zero flags at the same offset.
+    - The focused valid-frame and non-zero-flags checks both passed, along with Python syntax validation and `git diff --check`.
+    - No stale R20 documentation remains; live microphone streaming remains pending user runtime acceptance.

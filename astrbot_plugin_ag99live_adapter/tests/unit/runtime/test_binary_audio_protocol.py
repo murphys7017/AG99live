@@ -5,12 +5,17 @@ import json
 import pytest
 
 
-def build_frame(metadata: dict, payload: bytes = b"\x01\x00\xff\xff") -> bytes:
+def build_frame(
+    metadata: dict,
+    payload: bytes = b"\x01\x00\xff\xff",
+    *,
+    flags: int = 0,
+) -> bytes:
     metadata_bytes = json.dumps(metadata).encode("utf-8")
     return (
         b"AG99"
         + bytes([1, 1])
-        + (0).to_bytes(2, "little")
+        + flags.to_bytes(2, "little")
         + len(metadata_bytes).to_bytes(4, "little")
         + metadata_bytes
         + payload
@@ -52,3 +57,14 @@ def test_parse_binary_audio_frame_rejects_bad_magic(install_fake_astrbot) -> Non
 
     with pytest.raises(BinaryAudioFrameError, match="invalid magic"):
         parse_binary_audio_frame(b"BAD!" + build_frame({})[4:])
+
+
+def test_parse_binary_audio_frame_rejects_reserved_flags(install_fake_astrbot) -> None:
+    install_fake_astrbot()
+    from astrbot_plugin_ag99live_adapter.protocol.binary_audio import (
+        BinaryAudioFrameError,
+        parse_binary_audio_frame,
+    )
+
+    with pytest.raises(BinaryAudioFrameError, match="frame flags: 1"):
+        parse_binary_audio_frame(build_frame({}, flags=1))
