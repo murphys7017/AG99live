@@ -1,7 +1,5 @@
 import type { MotionPlaybackClockContext } from "./runtime/playbackClock.js";
 
-export type { NormalizedMotionPayload } from "../playback-integrations/motionPayload.js";
-
 export interface MotionPlaybackClockReader {
   getElapsedMs(): number | null;
 }

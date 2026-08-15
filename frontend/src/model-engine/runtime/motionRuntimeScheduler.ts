@@ -1,6 +1,4 @@
-import type {
-  NormalizedMotionPayload,
-} from "../contracts.js";
+import type { NormalizedMotionPayload } from "../../types/motion.js";
 import type {
   InboundPayloadContext,
 } from "./contracts.js";

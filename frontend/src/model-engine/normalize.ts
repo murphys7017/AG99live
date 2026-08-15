@@ -15,7 +15,10 @@ import {
   MAX_MOTION_DURATION_MS,
   MIN_MOTION_DURATION_MS,
 } from "./constants.js";
-import type { NormalizedMotionPayload } from "./contracts.js";
+import type {
+  MotionPayloadNormalizationResult,
+  NormalizedMotionPayload,
+} from "../types/motion.js";
 import type { ParseResult } from "./planParser.js";
 import {
   isFiniteNumber,
@@ -369,9 +372,7 @@ function parseCatalogMotionPayload(value: unknown): ParseResult<CatalogMotionPay
 
 export function normalizeMotionPayload(
   value: unknown,
-):
-  | { ok: true; payload: NormalizedMotionPayload }
-  | { ok: false; reason: string } {
+): MotionPayloadNormalizationResult {
   if (!isObject(value)) {
     warnNormalizeFailure("motion_payload_not_object", value);
     return { ok: false, reason: "motion_payload_not_object" };

@@ -10,7 +10,7 @@ import type { PlaybackTimelineSegmentMotionSink } from "../playback-timeline/seg
 import type {
   MotionPayloadNormalizer,
   NormalizedMotionPayload,
-} from "../playback-integrations/motionPayload.js";
+} from "../types/motion.js";
 import type { useTurnPlaybackSessionStore } from "../turn-playback/useTurnPlaybackSessionStore.js";
 import {
   createAppPlaybackTimelineRuntime,

@@ -1,4 +1,4 @@
-import type { NormalizedMotionPayload } from "../playback-integrations/motionPayload.js";
+import type { NormalizedMotionPayload } from "../types/motion.js";
 import type { AdapterPlaybackCompositionPort } from "../adapter-connection/useAdapterConnection.js";
 import type { MotionTimelinePreparationResult } from "../model-engine/runtime/playbackClock.js";
 import type { PlaybackTimelineAudioSink } from "../playback-timeline/audioSink.js";

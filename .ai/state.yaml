@@ -1,9 +1,9 @@
 task:
-  class: documentation
+  class: bugfix
   risk: medium
-  phase: project_issue_plan_reconciliation
+  phase: issue_reconciliation_batch_r3_r5_r13
   status: implementation_complete
-  scope: "Reconcile every active issue and planning direction against current source, remove completed or invalid claims, and establish one authority document per fact category without changing runtime code."
+  scope: "Preserve normalization failure reasons, keep segment-level output rejection local to the segment, and move the shared normalized motion DTO to the neutral types layer."
 
 context:
   confidence: high
@@ -12,7 +12,8 @@ context:
     - Only source-confirmed unresolved defects belong in the active defect register; resolved, invalid, speculative, and historical findings are removed.
     - Performance work must distinguish existing foundations from remaining implementation instead of describing completed capabilities as future work.
     - Remote Operator, VTS recording, small-model training, Physics diagnostics, and productization keep their own boundaries and do not become Performance Director responsibilities.
-    - No runtime source, public protocol, or architecture boundary is changed by this documentation reconciliation.
+    - Segment-level output rejection must not close the WebSocket; session-store and connection infrastructure failures remain fatal.
+    - The existing MotionLab outbound queue is the only persistence path for frontend rejection diagnostics.
 
 documentation:
   authorities:
@@ -29,10 +30,11 @@ documentation:
 
 verification:
   policy:
-    - Use source tracing, Markdown link checks, fence checks, Mermaid inventory, and git diff review.
-    - Automated tests are not required for documentation-only changes.
+    - Use source tracing, type/static checks, git diff review, and the smallest available boundary smoke check.
+    - Automated tests are low-confidence input/output smoke checks; do not run the full suite.
     - Live AstrBot, Electron, TTS, and Live2D behavior remains user-led runtime acceptance.
   current:
-    - The external review findings were compared with current backend, frontend, ModelEngine, and WebSDK source.
-    - The active defect register contains only source-confirmed unresolved items and no resolved-history section.
-    - The performance roadmap now distinguishes current foundations from remaining work without duplicating its priority list elsewhere.
+    - Commit 00f11b0 made the Turn terminal lifecycle keep-first and idempotent.
+    - `npm run typecheck:renderer` passed after the R3/R5/R13 changes.
+    - `git diff --check` passed.
+    - `npm run test:model-engine` is blocked by pre-existing WebSDK strict-type errors and a missing compiledSemanticMotionParser test module.

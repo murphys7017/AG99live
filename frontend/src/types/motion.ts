@@ -1,7 +1,7 @@
 import type {
   CatalogMotionPayload,
   SemanticMotionIntent,
-} from "../types/protocol.js";
+} from "./protocol.js";
 
 export type NormalizedMotionPayload =
   | { kind: "catalog_motion"; motion: CatalogMotionPayload }
@@ -9,7 +9,7 @@ export type NormalizedMotionPayload =
 
 export type MotionPayloadNormalizationResult =
   | { ok: true; payload: NormalizedMotionPayload }
-  | { ok: false };
+  | { ok: false; reason: string };
 
 export type MotionPayloadNormalizer = (
   payload: unknown,

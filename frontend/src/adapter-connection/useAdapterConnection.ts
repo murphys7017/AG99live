@@ -55,7 +55,8 @@ import {
 import type {
   MotionPayloadNormalizer,
   NormalizedMotionPayload,
-} from "../playback-integrations/motionPayload.js";
+} from "../types/motion.js";
+import type { MotionLabRawEventInput } from "../motion-lab/outboundQueue.js";
 import {
   type ModelSyncInstance,
 } from "./model-sync/useModelSync.js";
@@ -98,6 +99,9 @@ export interface AdapterConnectionInstance {
   ) => boolean;
   setMotionLabRawEventRecordedHandler: (
     handler: ((eventId: string) => void) | null,
+  ) => void;
+  setMotionLabRawEventReporter: (
+    handler: ((payload: MotionLabRawEventInput, turnId: string | null) => void) | null,
   ) => void;
   sendPlaybackFinishedForCurrentGroup: (
     turnId: string | null,
@@ -163,6 +167,10 @@ export function createAdapterConnection(
   let historyAdapter: AdapterHistory | null = null;
   let motionTuningAdapter: AdapterMotionTuning | null = null;
   let motionLabRawEventRecordedHandler: ((eventId: string) => void) | null = null;
+  let motionLabRawEventReporter: ((
+    payload: MotionLabRawEventInput,
+    turnId: string | null,
+  ) => void) | null = null;
   let detachPttHookStatusListener: (() => void) | null = null;
   let audioRuntime: AdapterAudioRuntime | null = null;
 
@@ -282,6 +290,26 @@ export function createAdapterConnection(
       motionLabRawEventRecordedHandler?.(eventId),
     startMicrophoneCapture: (origin) => startMicrophoneCapture(origin),
     normalizeMotionPayload: options.normalizeMotionPayload,
+    reportOutputSegmentRejected: (message, envelope) => {
+      state.lastError = message;
+      state.statusMessage = message;
+      pushHistory("error", message);
+      console.warn("[Connection] output segment rejected.", message, envelope);
+      motionLabRawEventReporter?.({
+        event_type: "motion.output_segment_rejected",
+        message_id: envelope.message_id,
+        source_route: "adapter_inbound",
+        phase: "output_segment_rejected",
+        payload_kind: "output.segment.v3",
+        raw: {
+          reason: message,
+          type: envelope.type,
+          message_id: envelope.message_id,
+          turn_id: envelope.turn_id,
+          payload: envelope.payload,
+        },
+      }, envelope.turn_id);
+    },
   });
 
   const outboundClient = createAdapterOutboundClient({
@@ -647,6 +675,12 @@ export function createAdapterConnection(
     motionLabRawEventRecordedHandler = handler;
   }
 
+  function setMotionLabRawEventReporter(
+    handler: ((payload: MotionLabRawEventInput, turnId: string | null) => void) | null,
+  ): void {
+    motionLabRawEventReporter = handler;
+  }
+
   async function sendPlaybackFinished(
     turnId: string | null,
     success: boolean,
@@ -716,6 +750,7 @@ export function createAdapterConnection(
     deleteMotionTuningSample,
     sendMotionLabRawEvent,
     setMotionLabRawEventRecordedHandler,
+    setMotionLabRawEventReporter,
     sendPlaybackFinishedForCurrentGroup: sendPlaybackFinished,
     clearPlaybackGroupContext,
     toggleMicrophoneCapture,

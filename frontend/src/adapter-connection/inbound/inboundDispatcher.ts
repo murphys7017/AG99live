@@ -25,7 +25,7 @@ import type {
   SystemServerInfoPayload,
 } from "../../types/protocol.js";
 import type { InboundAdapterEvent, InboundEventMappingContext } from "./inboundEvents.js";
-import type { NormalizedMotionPayload } from "../../playback-integrations/motionPayload.js";
+import type { NormalizedMotionPayload } from "../../types/motion.js";
 import type { OutputSegmentMaterial } from "../../turn-playback/session.js";
 import { dispatchInboundConnectionEvent } from "./inboundConnectionDispatcher.js";
 import { dispatchInboundFeatureEvent } from "./inboundFeatureDispatcher.js";
@@ -95,7 +95,13 @@ export interface InboundDispatchDeps {
   stopAudioAndSettleTurn: (turnId: string | null, reason: string) => void;
   findActiveAudioSegment: () => { turnId: string | null; messageId: string } | null;
   reportRuntimeProtocolViolation: (message: string) => void;
-  normalizeMotionPayload: (payload: unknown) => { ok: true; payload: NormalizedMotionPayload } | { ok: false };
+  reportOutputSegmentRejected: (
+    message: string,
+    envelope: ProtocolEnvelope<unknown>,
+  ) => void;
+  normalizeMotionPayload: (payload: unknown) =>
+    | { ok: true; payload: NormalizedMotionPayload }
+    | { ok: false; reason: string };
   // mic
   startMicrophoneCapture: (origin?: "manual" | "ptt" | "auto") => Promise<boolean>;
   // protocol warnings

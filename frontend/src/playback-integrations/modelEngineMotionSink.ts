@@ -1,4 +1,4 @@
-import type { NormalizedMotionPayload } from "./motionPayload.js";
+import type { NormalizedMotionPayload } from "../types/motion.js";
 import type { InboundPayloadContext } from "../model-engine/contracts.js";
 import type { ModelEnginePlanStartedEvent } from "../model-engine/runtime/contracts.js";
 import type {

@@ -9,8 +9,8 @@ import type {
 import type {
   InboundPayloadContext,
   MotionPlaybackClockReader,
-  NormalizedMotionPayload,
 } from "../contracts.js";
+import type { NormalizedMotionPayload } from "../../types/motion.js";
 import type {
   CompileDiagnostics,
   CompiledSemanticMotion,

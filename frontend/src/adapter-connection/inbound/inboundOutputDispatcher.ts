@@ -2,7 +2,10 @@ import type {
   OutputTranscriptionPayload,
   ProtocolEnvelope,
 } from "../../types/protocol.js";
-import type { NormalizedMotionPayload } from "../../playback-integrations/motionPayload.js";
+import type {
+  MotionPayloadNormalizer,
+  NormalizedMotionPayload,
+} from "../../types/motion.js";
 import type { OutputSegmentMaterial } from "../../turn-playback/session.js";
 import type { InboundAdapterEvent } from "./inboundEvents.js";
 
@@ -24,9 +27,11 @@ export interface InboundOutputDispatchDeps {
   } | undefined;
   pushHistory: (role: string, text: string) => void;
   rewriteHttpUrl: (rawUrl: string | null) => string;
-  normalizeMotionPayload: (
-    payload: unknown,
-  ) => { ok: true; payload: NormalizedMotionPayload } | { ok: false };
+  normalizeMotionPayload: MotionPayloadNormalizer;
+  reportOutputSegmentRejected: (
+    message: string,
+    envelope: ProtocolEnvelope<unknown>,
+  ) => void;
 }
 
 type InboundOutputEvent = Extract<
@@ -59,7 +64,11 @@ function applyOutputSegment(
   if (payload.motion.state === "present") {
     const normalized = deps.normalizeMotionPayload(payload.motion.payload);
     if (!normalized.ok) {
-      throw new Error(`output_segment_motion_invalid:${event.messageId}`);
+      deps.reportOutputSegmentRejected(
+        `output_segment_motion_invalid:${event.messageId}:${normalized.reason}`,
+        event.envelope,
+      );
+      return;
     }
     normalizedMotion = normalized.payload;
   }
@@ -71,7 +80,11 @@ function applyOutputSegment(
     payload.audio.state === "present"
     && (!resolvedAudioUrl || !resolvedAudioUrl.trim())
   ) {
-    throw new Error(`output_segment_audio_url_invalid:${event.messageId}`);
+    deps.reportOutputSegmentRejected(
+      `output_segment_audio_url_invalid:${event.messageId}`,
+      event.envelope,
+    );
+    return;
   }
 
   const material: OutputSegmentMaterial = {

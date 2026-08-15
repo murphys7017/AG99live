@@ -19,7 +19,7 @@
  *     motion 已 absent/completed/failed 三者之一。
  */
 
-import type { NormalizedMotionPayload } from "../playback-integrations/motionPayload.js";
+import type { NormalizedMotionPayload } from "../types/motion.js";
 
 // ── Phase ──────────────────────────────────────────────────────────
 

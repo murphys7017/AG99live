@@ -276,6 +276,9 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       adapter.pushHistory("error", message);
     });
   });
+  adapter.setMotionLabRawEventReporter((payload, turnId) => {
+    sendMotionLabEvent(payload, turnId);
+  });
   conversationPlayback.bindMotionTimelineRuntime(playbackTimelineMotionRuntime);
 
   const turnPlaybackOrchestrator = useTurnPlaybackOrchestrator({
@@ -424,6 +427,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
   onBeforeUnmount(() => {
     stopMotionLabReconnectWatch();
     adapter.setMotionLabRawEventRecordedHandler(null);
+    adapter.setMotionLabRawEventReporter(null);
     motionLabOutboundQueue.dispose();
     pushToTalk.dispose();
     bilibiliLive.dispose();

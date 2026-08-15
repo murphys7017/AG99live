@@ -1,5 +1,5 @@
 import type { ProtocolEnvelope, SystemModelSyncPayload } from "../../types/protocol.js";
-import type { MotionPayloadNormalizer } from "../../playback-integrations/motionPayload.js";
+import type { MotionPayloadNormalizer } from "../../types/motion.js";
 import type { AdapterConnectionState } from "../state/adapterConnectionState.js";
 import { parseInboundEnvelope } from "./inboundProtocol.js";
 import {
@@ -33,6 +33,10 @@ export interface AdapterInboundRuntimeDeps {
   acknowledgeMotionLabRawEventPersisted: (eventId: string) => void;
   startMicrophoneCapture: (origin?: "manual" | "ptt" | "auto") => Promise<boolean>;
   normalizeMotionPayload: MotionPayloadNormalizer;
+  reportOutputSegmentRejected: (
+    message: string,
+    envelope: ProtocolEnvelope<unknown>,
+  ) => void;
 }
 
 export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
@@ -156,6 +160,8 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
       stopAudioAndSettleTurn: (turnId, reason) =>
         deps.stopAudioAndSettleTurn(turnId, reason),
       reportRuntimeProtocolViolation,
+      reportOutputSegmentRejected: (message, envelope) =>
+        deps.reportOutputSegmentRejected(message, envelope),
       findActiveAudioSegment: () => deps.findActiveAudioSegment(),
       normalizeMotionPayload: deps.normalizeMotionPayload,
       startMicrophoneCapture: (origin) => deps.startMicrophoneCapture(origin),

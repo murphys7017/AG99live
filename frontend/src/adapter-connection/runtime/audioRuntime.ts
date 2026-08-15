@@ -13,7 +13,7 @@ import {
 import {
   createAdapterAudioSettlementController,
 } from "./audioSettlementController.js";
-import type { NormalizedMotionPayload } from "../../playback-integrations/motionPayload.js";
+import type { NormalizedMotionPayload } from "../../types/motion.js";
 
 export interface AdapterAudioRuntimeState {
   isPlayingAudio: boolean;

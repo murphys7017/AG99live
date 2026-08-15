@@ -4,7 +4,7 @@ import { resolveCatalogResource } from "../compiler/resourceCatalog.js";
 import { buildBaseCompileDiagnostics } from "../compiler/diagnostics.js";
 import { normalizeModelEngineSettings } from "../settings.js";
 import { MOTION_MIN_REMAINING_AUDIO_MS } from "../constants.js";
-import type { NormalizedMotionPayload } from "../contracts.js";
+import type { NormalizedMotionPayload } from "../../types/motion.js";
 import {
   SEMANTIC_MOTION_TRANSFORM_VERSION,
   type CompileDiagnostics,
