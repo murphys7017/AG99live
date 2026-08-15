@@ -52,17 +52,17 @@ export class LAppLive2DManager {
    * 释放类的实例（单例）。
    */
   public static releaseInstance(): void {
-    if (s_instance != null) {
-      s_instance.release();
-      s_instance = void 0;
-    }
-
+    const instance = s_instance;
     s_instance = null;
+    instance?.release();
   }
 
   public release(): void {
-    this.releaseAllModel();
-    this._viewMatrix = null;
+    try {
+      this.releaseAllModel();
+    } finally {
+      this._viewMatrix = null;
+    }
   }
 
   /**
@@ -83,12 +83,22 @@ export class LAppLive2DManager {
    * 現在のシーンで保持しているすべてのモデルを解放する
    */
   public releaseAllModel(): void {
+    const releaseErrors: unknown[] = [];
     for (let i = 0; i < this._models.getSize(); i++) {
-      this._models.at(i).release();
+      const model = this._models.at(i);
       this._models.set(i, null);
+      try {
+        model?.release();
+      } catch (error) {
+        console.error('[LAppLive2DManager] model release failed.', { index: i, error });
+        releaseErrors.push(error);
+      }
     }
 
     this._models.clear();
+    if (releaseErrors.length > 0) {
+      throw releaseErrors[0];
+    }
   }
 
   /**

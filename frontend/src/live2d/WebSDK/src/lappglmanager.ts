@@ -30,11 +30,9 @@ export class LAppGlManager {
    * クラスのインスタンス（シングルトン）を解放する。
    */
   public static releaseInstance(): void {
-    if (s_instance != null) {
-      s_instance.release();
-    }
-
+    const instance = s_instance;
     s_instance = null;
+    instance?.release();
   }
 
   constructor() {

@@ -126,10 +126,24 @@ export function releaseLive2D(
 ): void {
   cancelCurrentLive2DModelLoad(reason);
   cleanupHitTestPointerHandlers();
-  LAppDelegate.releaseInstance();
-  LAppGlManager.releaseInstance();
+  const releaseErrors: unknown[] = [];
+  try {
+    LAppDelegate.releaseInstance();
+  } catch (error) {
+    console.error("[Live2D] delegate release failed.", error);
+    releaseErrors.push(error);
+  }
+  try {
+    LAppGlManager.releaseInstance();
+  } catch (error) {
+    console.error("[Live2D] WebGL manager release failed.", error);
+    releaseErrors.push(error);
+  }
   delete (window as any).getLive2DManager;
   delete (window as any).getLAppAdapter;
+  if (releaseErrors.length > 0) {
+    throw releaseErrors[0];
+  }
 }
 
 async function initializeLive2DOnce(): Promise<void> {

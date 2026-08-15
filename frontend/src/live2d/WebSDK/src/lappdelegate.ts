@@ -52,11 +52,9 @@ export class LAppDelegate {
    * 
    */
   public static releaseInstance(): void {
-    if (s_instance != null) {
-      s_instance.release();
-    }
-
+    const instance = s_instance;
     s_instance = null;
+    instance?.release();
   }
 
   /**
@@ -138,6 +136,15 @@ export class LAppDelegate {
    * 解放する。
    */
   public release(): void {
+    const releaseErrors: unknown[] = [];
+    const releaseStep = (step: string, action: () => void): void => {
+      try {
+        action();
+      } catch (error) {
+        console.error(`[LAppDelegate] ${step} failed during release.`, error);
+        releaseErrors.push(error);
+      }
+    };
     this._isRunning = false;
     if (this._rafId !== null) {
       cancelAnimationFrame(this._rafId);
@@ -158,17 +165,23 @@ export class LAppDelegate {
       this._boundCanvas = null;
     }
 
-    this._textureManager!.release();
+    const textureManager = this._textureManager;
     this._textureManager = null;
+    releaseStep('texture manager release', () => textureManager?.release());
 
-    this._view!.release();
+    const view = this._view;
     this._view = null;
+    releaseStep('view release', () => view?.release());
 
     // リソースを解放
-    LAppLive2DManager.releaseInstance();
+    releaseStep('model manager release', () => LAppLive2DManager.releaseInstance());
 
     // Cubism SDKの解放
-    CubismFramework.dispose();
+    releaseStep('Cubism Framework dispose', () => CubismFramework.dispose());
+
+    if (releaseErrors.length > 0) {
+      throw releaseErrors[0];
+    }
   }
 
   /**

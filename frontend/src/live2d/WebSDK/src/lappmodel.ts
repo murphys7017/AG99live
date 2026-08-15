@@ -188,12 +188,25 @@ export class LAppModel extends CubismUserModel {
     if (this._released) {
       return;
     }
-    this.stopDirectParameterPlan("direct_parameter_plan_model_released", "failed");
-    this.stopMotion("motion_model_released");
-    this._speechSignalRuntime.reset();
     this._released = true;
     cancelLive2DModelLoad(this._loadGeneration, "live2d_model_load_released");
-    super.release();
+    const releaseErrors: unknown[] = [];
+    const releaseStep = (step: string, action: () => void): void => {
+      try {
+        action();
+      } catch (error) {
+        console.error(`[LAppModel] ${step} failed during release.`, error);
+        releaseErrors.push(error);
+      }
+    };
+    releaseStep("direct parameter plan stop", () =>
+      this.stopDirectParameterPlan("direct_parameter_plan_model_released", "failed"));
+    releaseStep("catalog motion stop", () => this.stopMotion("motion_model_released"));
+    releaseStep("speech signal reset", () => this._speechSignalRuntime.reset());
+    releaseStep("Cubism model release", () => super.release());
+    if (releaseErrors.length > 0) {
+      throw releaseErrors[0];
+    }
   }
 
   /**
@@ -762,9 +775,28 @@ export class LAppModel extends CubismUserModel {
     this._activeCatalogMotionStop = null;
     this._activeCatalogMotionClockReader = null;
     this._activeCatalogMotionClockElapsedMs = null;
-    activeStop?.(reason);
-    this._motionManager.stopAllMotions();
-    this._motionManager.setReservePriority(0);
+    const stopErrors: unknown[] = [];
+    try {
+      this._motionManager.stopAllMotions();
+    } catch (error) {
+      console.error("[LAppModel] motion manager stop failed.", error);
+      stopErrors.push(error);
+    }
+    try {
+      this._motionManager.setReservePriority(0);
+    } catch (error) {
+      console.error("[LAppModel] motion priority reset failed.", error);
+      stopErrors.push(error);
+    }
+    try {
+      activeStop?.(reason);
+    } catch (error) {
+      console.error("[LAppModel] catalog motion terminal callback failed.", error);
+      stopErrors.push(error);
+    }
+    if (stopErrors.length > 0) {
+      throw stopErrors[0];
+    }
   }
 
   /**

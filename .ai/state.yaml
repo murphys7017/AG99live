@@ -81,4 +81,5 @@ verification:
     - Playback execution-state subscribers are notified after the current owner stack unwinds; state changes raised during delivery schedule a later microtask instead of synchronously re-entering the Orchestrator or being discarded.
     - Catalog motions are a ready-model, preloaded-cache execution path. Runtime cache misses and model-not-ready states are explicit rejections; there is no second asynchronous fetch or preparing-run lifecycle, and a rejected request cannot clear another run's clock or lend it a stale start error.
     - Live2D renderer selection changes now use one serialized lifecycle: empty model sync, replacement, initialization failure, and component unmount all release the WebSDK instance through its public teardown owner; superseded loads cannot publish ready/error state for the current selection.
+    - Live2D teardown clears singleton ownership before invoking release work, completes all owned cleanup steps even when terminal callbacks fail, logs every cleanup failure, and rethrows the original first failure after cleanup.
     - Live AstrBot, Electron, TTS, ESP32, and Live2D runtime acceptance remains user-led.
