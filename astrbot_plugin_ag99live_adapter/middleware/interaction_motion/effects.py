@@ -144,12 +144,10 @@ def _is_ag99live_motion_effect_event(event: Any) -> bool:
         return False
 
     get_extra = getattr(event, "get_extra", None)
-    if callable(get_extra):
-        try:
-            if get_extra("ag99live_input_source") == "remote_operator_result":
-                return False
-        except Exception:  # noqa: BLE001
-            return False
+    if callable(get_extra) and (
+        get_extra("ag99live_input_source") == "remote_operator_result"
+    ):
+        return False
 
     message_obj = getattr(event, "message_obj", None)
     raw_message = getattr(message_obj, "raw_message", None)
