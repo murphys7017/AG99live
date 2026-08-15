@@ -42,6 +42,17 @@ export function createPlaybackTimelineLipSyncRuntime(
   let terminalSettled = false;
   let started = false;
 
+  const notify = (
+    phase: "started" | "unavailable" | "terminal",
+    callback: (() => void) | undefined,
+  ): void => {
+    try {
+      callback?.();
+    } catch (error) {
+      console.error(`[PlaybackTimeline] lip sync ${phase} observer failed.`, error);
+    }
+  };
+
   const settleTerminal = (
     terminal: "completed" | "failed" | "interrupted",
     reason: string,
@@ -50,7 +61,7 @@ export function createPlaybackTimelineLipSyncRuntime(
       return;
     }
     terminalSettled = true;
-    callbacks.onTerminal?.(terminal, reason);
+    notify("terminal", () => callbacks.onTerminal?.(terminal, reason));
   };
 
   return {
@@ -65,10 +76,10 @@ export function createPlaybackTimelineLipSyncRuntime(
             return;
           }
           started = true;
-          callbacks.onStarted?.();
+          notify("started", callbacks.onStarted);
         },
         onUnavailable: (reason, degraded) => {
-          callbacks.onUnavailable?.(reason, degraded);
+          notify("unavailable", () => callbacks.onUnavailable?.(reason, degraded));
           if (!degraded) {
             settleTerminal("failed", reason);
           }

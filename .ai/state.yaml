@@ -95,4 +95,5 @@ verification:
     - WebSDK motion lifecycle callbacks are observers rather than execution owners: Catalog Motion start/terminal callbacks and Direct Plan terminal callbacks are logged and isolated from startup transactions and frame updates, while real expression cleanup failures still propagate.
     - PetDesktopRuntime unmount attempts every owned teardown step independently and propagates the first error only after MotionLab, input runtimes, playback observers, ModelEngine, bridge listeners, and snapshot publication have all been released.
     - Audio stop releases LipSync, the browser audio sink, the segment Timeline, and the connection playback flag independently; failures remain visible only after every owner has attempted its transition.
+    - LipSync runtime lifecycle callbacks are observers; their failures are logged without suppressing terminal settlement or sink stop, while real sink errors continue to propagate.
     - Live AstrBot, Electron, TTS, ESP32, and Live2D runtime acceptance remains user-led.
