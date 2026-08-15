@@ -153,10 +153,10 @@ function applyInterrupt(
     );
     return;
   }
-  deps.stopAudioAndSettleTurn(interruptedTurnId, "audio_playback_interrupted");
   if (!accepted) {
     return;
   }
+  deps.stopAudioAndSettleTurn(interruptedTurnId, "audio_playback_interrupted");
   if (s.currentTurnId === interruptedTurnId) {
     s.currentTurnId = null;
   }
