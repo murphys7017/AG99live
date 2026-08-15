@@ -106,6 +106,22 @@ def test_reset_turn_tracking_clears_connection_owned_state(
     TurnCoordinator = _load_module(install_fake_astrbot, monkeypatch)
     coordinator = TurnCoordinator.__new__(TurnCoordinator)
     cancelled_turns: list[str] = []
+    stopped_turns: list[str] = []
+
+    class FaultyEvent:
+        def set_extra(self, _key: str, _value: bool) -> None:
+            raise RuntimeError("set_extra_failed")
+
+        def stop_event(self) -> None:
+            stopped_turns.append("turn-1")
+
+    class HealthyEvent:
+        def set_extra(self, _key: str, _value: bool) -> None:
+            return None
+
+        def stop_event(self) -> None:
+            stopped_turns.append("turn-2")
+
     coordinator.runtime_state = types.SimpleNamespace(
         performance_curve_runtime=types.SimpleNamespace(
             cancel_turn=lambda turn_id: cancelled_turns.append(turn_id)
@@ -121,10 +137,15 @@ def test_reset_turn_tracking_clears_connection_owned_state(
     coordinator._turn_terminal_results = {"turn-1": (True, None)}
     coordinator._active_vad_turn_by_capture_turn = {"capture-1": "turn-1"}
     coordinator._last_prompt_motion_snapshot = {"turn_id": "turn-1"}
-    coordinator._events_by_turn_id = {}
+    coordinator._events_by_turn_id = {
+        "turn-1": FaultyEvent(),
+        "turn-2": HealthyEvent(),
+    }
 
-    coordinator.reset_turn_tracking()
+    with pytest.raises(RuntimeError, match="turn-1:set_extra_failed"):
+        coordinator.reset_turn_tracking()
 
+    assert stopped_turns == ["turn-1", "turn-2"]
     assert set(cancelled_turns) == {"turn-1", "turn-2"}
     assert coordinator._turn_timings == {}
     assert coordinator._pending_output_segments == {}

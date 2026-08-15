@@ -132,3 +132,49 @@ def test_send_by_session_raises_when_frontend_is_unavailable(
     assert coordinator.emit_calls == []
     assert coordinator.closed_turn_ids == []
     assert coordinator.failed_turns == []
+
+
+def test_disconnect_cleanup_continues_after_coordinator_failure(
+    adapter_module,
+) -> None:
+    cleanup_calls: list[str] = []
+
+    class SpeechIngressStub:
+        async def handle_audio_stream_interrupt(self) -> None:
+            cleanup_calls.append("speech_ingress")
+
+    class CoordinatorStub:
+        speech_ingress = SpeechIngressStub()
+
+        def reset_turn_tracking(self) -> None:
+            cleanup_calls.append("turn_coordinator")
+            raise RuntimeError("event_stop_failed")
+
+    class SessionStateStub:
+        def reset_to_idle(self) -> None:
+            cleanup_calls.append("session_state")
+
+    class TurnIdentityMapStub:
+        def clear_all(self) -> None:
+            cleanup_calls.append("turn_identity_map")
+
+    class MediaServiceStub:
+        async def clear_audio_buffer(self) -> None:
+            cleanup_calls.append("media_service")
+
+    adapter = object.__new__(adapter_module.OLVPetPlatformAdapter)
+    adapter.turn_coordinator = CoordinatorStub()
+    adapter.session_state = SessionStateStub()
+    adapter.turn_identity_map = TurnIdentityMapStub()
+    adapter.media_service = MediaServiceStub()
+
+    with pytest.raises(RuntimeError, match="disconnect_cleanup_incomplete"):
+        asyncio.run(adapter._handle_transport_disconnect())
+
+    assert cleanup_calls == [
+        "turn_coordinator",
+        "session_state",
+        "turn_identity_map",
+        "speech_ingress",
+        "media_service",
+    ]

@@ -1,9 +1,9 @@
 task:
   class: bugfix
   risk: medium
-  phase: semantic_binding_output_range_validation
+  phase: disconnect_cleanup_isolation
   status: implementation_complete
-  scope: "Reject zero-width semantic parameter output ranges at the profile editor, backend profile owner, and frontend model-sync boundary before they can compile into frozen dynamics."
+  scope: "Ensure one faulty AstrBot Event cannot interrupt TurnCoordinator-owned cleanup or prevent the remaining connection-level owners from releasing state on frontend disconnect."
 
 context:
   confidence: high
@@ -23,6 +23,8 @@ context:
     - The minimum legal motion duration is 320 ms, so the existing 80 ms entry and 120 ms release leave at least 120 ms for idle hold.
     - A semantic parameter binding output range is meaningful only when minimum is strictly less than maximum; inversion remains represented by the existing invert field.
     - Profile validation owns this invariant. ModelEngine must not become a fallback validator for malformed synchronized profiles.
+    - Disconnect cleanup is resource release, not runtime fallback: each owner must attempt its own cleanup, emit precise diagnostics on failure, and never preserve stale connection state merely because another owner failed first.
+    - Event stop-flag publication and Event stopping are independent cleanup operations; failure of one must not suppress the other.
 
 documentation:
   authorities:
@@ -43,11 +45,11 @@ verification:
     - Automated tests are low-confidence input/output smoke checks; do not run the full suite.
     - Live AstrBot, Electron, TTS, and Live2D behavior remains user-led runtime acceptance.
   current:
-    - Backend profile normalization now requires every parameter binding output range to have a strictly positive span while preserving non-decreasing axis and input ranges.
-    - Profile Editor applies the same rule before save, and the frontend model-sync parser rejects a malformed synchronized profile before ModelEngine can consume it.
-    - ModelEngine and WebSDK were not changed; they continue to consume profiles that already satisfy the profile contract.
-    - The focused output-range smoke check passed for one valid range, one permitted non-binding zero-width range, and one rejected zero-width binding range.
-    - `python -m py_compile astrbot_plugin_ag99live_adapter/live2d/semantic_axis_profile.py` passed.
-    - `npm run typecheck:renderer` passed from `frontend`.
-    - `git diff --check` passed.
-    - Live Profile Editor save and model-sync rejection remain pending user runtime acceptance.
+    - TurnCoordinator now attempts stop-flag publication and Event stopping independently for every active Turn, diagnoses each failure, and clears all Coordinator-owned state in a guaranteed finalization path.
+    - Performance curve cancellation is isolated per Turn and cannot prevent the remaining curve requests or Coordinator maps from being cleared.
+    - Platform disconnect cleanup now attempts TurnCoordinator, SessionState, TurnIdentityMap, SpeechIngress, and MediaService cleanup independently, then reports a summarized failure to transport after all owners have run.
+    - The focused TurnCoordinator smoke passed with one faulty and one healthy Event; both stop calls, curve cancellation, and all owned state cleanup completed.
+    - The focused PlatformAdapter smoke passed with an initial Coordinator failure; all four later connection owners still ran in order and the final failure remained observable.
+    - Python syntax validation passed for both production files and the two focused smoke files.
+    - `git diff --check` passed; the only test output beyond the assertions was pre-existing third-party deprecation warnings emitted while importing PlatformAdapter dependencies.
+    - Live disconnect/reconnect behavior remains pending user runtime acceptance.

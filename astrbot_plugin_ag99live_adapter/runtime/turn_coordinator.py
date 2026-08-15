@@ -250,49 +250,89 @@ class TurnCoordinator:
 
     def reset_turn_tracking(self) -> None:
         """Stop active AstrBot events before discarding connection-scoped state."""
-        active_events = tuple(self._events_by_turn_id.items())
-        for turn_id, event in active_events:
-            set_extra = getattr(event, "set_extra", None)
-            if not callable(set_extra):
-                raise RuntimeError(
-                    f"turn_event_stop_flag_unavailable:{turn_id}"
-                )
-            stop_event = getattr(event, "stop_event", None)
-            if not callable(stop_event):
-                raise RuntimeError(
-                    f"turn_event_stop_unavailable:{turn_id}"
-                )
-            set_extra("agent_stop_requested", True)
-            stop_event()
+        cleanup_failures: list[str] = []
+        try:
+            active_events = tuple(self._events_by_turn_id.items())
+            for turn_id, event in active_events:
+                set_extra = getattr(event, "set_extra", None)
+                if callable(set_extra):
+                    try:
+                        set_extra("agent_stop_requested", True)
+                    except Exception:
+                        cleanup_failures.append(f"{turn_id}:set_extra_failed")
+                        logger.exception(
+                            "Failed to mark active AstrBot event for disconnect stop: "
+                            "turn_id=%s",
+                            turn_id,
+                        )
+                else:
+                    cleanup_failures.append(f"{turn_id}:set_extra_unavailable")
+                    logger.error(
+                        "Active AstrBot event cannot publish disconnect stop flag: "
+                        "turn_id=%s",
+                        turn_id,
+                    )
 
-        tracked_turn_ids = set(self._turn_timings)
-        tracked_turn_ids.update(self._closing_output_turn_ids)
-        tracked_turn_ids.update(self._closed_output_turn_ids)
-        tracked_turn_ids.update(self._output_emitted_turn_ids)
-        tracked_turn_ids.update(self._turn_terminal_results)
-        tracked_turn_ids.update(self._events_by_turn_id)
-        tracked_turn_ids.update(
-            segment.turn_id for segment in self._pending_output_segments.values()
-        )
-        performance_curve_runtime = getattr(
-            self.runtime_state,
-            "performance_curve_runtime",
-            None,
-        )
-        cancel_curve_turn = getattr(performance_curve_runtime, "cancel_turn", None)
-        if callable(cancel_curve_turn):
-            for turn_id in tracked_turn_ids:
-                cancel_curve_turn(turn_id)
+                stop_event = getattr(event, "stop_event", None)
+                if callable(stop_event):
+                    try:
+                        stop_event()
+                    except Exception:
+                        cleanup_failures.append(f"{turn_id}:stop_event_failed")
+                        logger.exception(
+                            "Failed to stop active AstrBot event during disconnect: "
+                            "turn_id=%s",
+                            turn_id,
+                        )
+                else:
+                    cleanup_failures.append(f"{turn_id}:stop_event_unavailable")
+                    logger.error(
+                        "Active AstrBot event cannot be stopped during disconnect: "
+                        "turn_id=%s",
+                        turn_id,
+                    )
 
-        self._turn_timings.clear()
-        self._pending_output_segments.clear()
-        self._closing_output_turn_ids.clear()
-        self._closed_output_turn_ids.clear()
-        self._output_emitted_turn_ids.clear()
-        self._turn_terminal_results.clear()
-        self._events_by_turn_id.clear()
-        self._active_vad_turn_by_capture_turn.clear()
-        self._last_prompt_motion_snapshot = None
+            tracked_turn_ids = set(self._turn_timings)
+            tracked_turn_ids.update(self._closing_output_turn_ids)
+            tracked_turn_ids.update(self._closed_output_turn_ids)
+            tracked_turn_ids.update(self._output_emitted_turn_ids)
+            tracked_turn_ids.update(self._turn_terminal_results)
+            tracked_turn_ids.update(self._events_by_turn_id)
+            tracked_turn_ids.update(
+                segment.turn_id for segment in self._pending_output_segments.values()
+            )
+            performance_curve_runtime = getattr(
+                self.runtime_state,
+                "performance_curve_runtime",
+                None,
+            )
+            cancel_curve_turn = getattr(performance_curve_runtime, "cancel_turn", None)
+            if callable(cancel_curve_turn):
+                for turn_id in tracked_turn_ids:
+                    try:
+                        cancel_curve_turn(turn_id)
+                    except Exception:
+                        cleanup_failures.append(f"{turn_id}:curve_cancel_failed")
+                        logger.exception(
+                            "Failed to cancel performance curve during disconnect: "
+                            "turn_id=%s",
+                            turn_id,
+                        )
+        finally:
+            self._turn_timings.clear()
+            self._pending_output_segments.clear()
+            self._closing_output_turn_ids.clear()
+            self._closed_output_turn_ids.clear()
+            self._output_emitted_turn_ids.clear()
+            self._turn_terminal_results.clear()
+            self._events_by_turn_id.clear()
+            self._active_vad_turn_by_capture_turn.clear()
+            self._last_prompt_motion_snapshot = None
+
+        if cleanup_failures:
+            raise RuntimeError(
+                "turn_tracking_cleanup_incomplete:" + ",".join(cleanup_failures)
+            )
 
     async def handle_binary_msg(self, raw_message: bytes) -> None:
         """WebSocket 二进制帧入口：解析 AG99 麦克风音频帧并交给语音入口。

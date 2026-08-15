@@ -454,16 +454,46 @@ class OLVPetPlatformAdapter(Platform):
     async def _handle_transport_disconnect(self) -> None:
         """WebSocket 断开时调用的清理钩子。
 
-        顺序固定：停止 TurnCoordinator 中的在飞 AstrBot 事件并清理连接级状态，session_state → idle，
-        turn_identity_map 全清，调
-        speech_ingress.handle_audio_stream_interrupt 中断所有在飞的音频流，
-        media_service.clear_audio_buffer 丢弃缓冲。
+        各连接级所有者按固定顺序释放资源；任一所有者失败都必须留下诊断，但不能阻止
+        后续所有者清理。全部尝试结束后再把失败汇总交回 transport。
         """
-        self.turn_coordinator.reset_turn_tracking()
-        self.session_state.reset_to_idle()
-        self.turn_identity_map.clear_all()
-        await self.turn_coordinator.speech_ingress.handle_audio_stream_interrupt()
-        await self.media_service.clear_audio_buffer()
+        cleanup_failures: list[tuple[str, Exception]] = []
+
+        try:
+            self.turn_coordinator.reset_turn_tracking()
+        except Exception as exc:
+            cleanup_failures.append(("turn_coordinator", exc))
+            logger.exception("TurnCoordinator disconnect cleanup failed")
+
+        try:
+            self.session_state.reset_to_idle()
+        except Exception as exc:
+            cleanup_failures.append(("session_state", exc))
+            logger.exception("SessionState disconnect cleanup failed")
+
+        try:
+            self.turn_identity_map.clear_all()
+        except Exception as exc:
+            cleanup_failures.append(("turn_identity_map", exc))
+            logger.exception("TurnIdentityMap disconnect cleanup failed")
+
+        try:
+            await self.turn_coordinator.speech_ingress.handle_audio_stream_interrupt()
+        except Exception as exc:
+            cleanup_failures.append(("speech_ingress", exc))
+            logger.exception("SpeechIngress disconnect cleanup failed")
+
+        try:
+            await self.media_service.clear_audio_buffer()
+        except Exception as exc:
+            cleanup_failures.append(("media_service", exc))
+            logger.exception("MediaService disconnect cleanup failed")
+
+        if cleanup_failures:
+            failed_owners = ",".join(owner for owner, _exc in cleanup_failures)
+            raise RuntimeError(
+                f"disconnect_cleanup_incomplete:{failed_owners}"
+            ) from cleanup_failures[0][1]
 
     def _sync_client_profile_from_runtime_state(self) -> None:
         self.client_uid = normalize_client_uid(
