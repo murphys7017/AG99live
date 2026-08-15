@@ -225,14 +225,11 @@ export function createMotionRuntimeScheduler(
     }
 
     const pendingKey = buildPendingMotionKey(normalizedTurnId, context.messageId);
-    const existing = pendingInboundMotionPayloads.get(pendingKey);
-    if (existing) {
-      console.error("[ModelEngine] duplicate pending motion payload rejected.", {
+    if (pendingInboundMotionPayloads.has(pendingKey)) {
+      console.error("[ModelEngine] duplicate pending motion payload rejected; keeping first payload.", {
         turnId: normalizedTurnId,
         messageId: context.messageId,
       });
-      dropPendingPayload(existing, "duplicate_motion_payload");
-      syncPendingState();
       return false;
     }
 
