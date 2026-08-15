@@ -3,7 +3,8 @@
 只处理"前端 → 后端"方向的麦克风/语音路径；文本回复不在这里。
 可转写的完整音频段会走到 _build_message_from_audio_buffer，产出
 AstrBotMessage 并配套发 build_output_transcription（如果转写出了文字）。
-空流、丢帧、VAD 不可用或被过滤的转写可能只发控制信号或直接 return None。
+空流、丢帧、VAD 不可用或被过滤的转写只报告输入错误或直接 return None，
+不会为尚未提交到 TurnCoordinator 的输入发布 Turn 终态。
 """
 
 from __future__ import annotations
@@ -22,7 +23,6 @@ from astrbot.api import logger
 from ..protocol.binary_audio import BinaryAudioChunkFrame
 from ..protocol.builder import (
     build_control_error,
-    build_control_turn_finished,
     build_output_transcription,
 )
 
@@ -81,9 +81,9 @@ class SpeechIngressService:
         回收的 STT 临时 wav 文件；
       - _vad_turn_counters: dict[root_turn_id, int]，VAD 切分出来的子轮次自增计数。
 
-    出站时通过构造注入的 send_json 发 control_error / control_turn_finished /
-    output_transcription；检测到用户开口时通知 TurnCoordinator 选择要中断的正式
-    轮次。能形成有效转写的路径才返回 AstrBotMessage 交给 TurnCoordinator commit。
+    出站时通过构造注入的 send_json 发 control_error / output_transcription；
+    检测到用户开口时通知 TurnCoordinator 选择要中断的正式轮次。能形成有效转写的路径
+    才返回 AstrBotMessage 交给 TurnCoordinator commit。
     """
 
     def __init__(
@@ -247,9 +247,9 @@ class SpeechIngressService:
         """处理 input.audio_stream_end：取走流、组装一轮消息。
 
         行为分支：
-          - dropped=True → 发 terminal_turn_signal(microphone_audio_dropped) 后 return；
+          - dropped=True → 报告 microphone audio dropped 输入错误后 return；
           - capture_mode∈{manual, auto} 且流为 VAD 模式 → 转写前若一轮 VAD 子段都没
-            收到，发 terminal_turn_signal(microphone_audio_empty)；
+            收到，报告 microphone audio empty 输入错误；
           - 否则把所有 chunks 拼成 float32 缓冲，走 _build_message_from_audio_buffer。
         返回 None 或 AstrBotMessage；后者会被 turn_coordinator 进一步 commit。
         """
@@ -266,9 +266,8 @@ class SpeechIngressService:
         )
         if dropped:
             logger.warning("Dropping binary microphone audio stream because frontend reported chunk loss.")
-            await self._emit_terminal_turn_signal(
+            await self._emit_input_error(
                 turn_id=message.turn_id,
-                reason="microphone_audio_dropped",
                 error_message="Microphone audio segment dropped before transcription.",
             )
             return None
@@ -280,9 +279,8 @@ class SpeechIngressService:
             if self._consume_vad_turn_counter(message.turn_id):
                 logger.debug("Ignoring VAD audio stream end after child turns: %s", stream_id)
                 return None
-            await self._emit_terminal_turn_signal(
+            await self._emit_input_error(
                 turn_id=message.turn_id,
-                reason="microphone_audio_empty",
                 error_message="Microphone audio segment was empty before transcription.",
             )
             return None
@@ -330,9 +328,8 @@ class SpeechIngressService:
             vad_engine = self._ensure_vad_engine()
         except Exception as exc:
             logger.error("Failed to initialize VAD engine: %s", exc)
-            await self._emit_terminal_turn_signal(
+            await self._emit_input_error(
                 turn_id=turn_id,
-                reason="vad_unavailable",
                 error_message=f"VAD unavailable: {exc}",
             )
             return None
@@ -372,17 +369,15 @@ class SpeechIngressService:
             text = (await self._transcribe_audio(audio_buffer, sample_rate=sample_rate)).strip()
         except Exception as exc:
             logger.error("Audio transcription failed: %s", exc)
-            await self._emit_terminal_turn_signal(
+            await self._emit_input_error(
                 turn_id=turn_id,
-                reason="audio_transcription_failed",
                 error_message=f"Audio transcription failed: {exc}",
             )
             return None
 
         if not text:
-            await self._emit_terminal_turn_signal(
+            await self._emit_input_error(
                 turn_id=turn_id,
-                reason="audio_transcription_empty",
                 error_message="The LLM can't hear you.",
             )
             return None
@@ -390,9 +385,8 @@ class SpeechIngressService:
         should_drop, drop_reason = should_drop_transcription(text)
         if should_drop:
             logger.info("Dropped transcription `%s`: %s", text, drop_reason)
-            await self._emit_terminal_turn_signal(
+            await self._emit_input_error(
                 turn_id=turn_id,
-                reason=f"audio_transcription_dropped:{drop_reason}",
                 error_message=f"Audio transcription dropped: {drop_reason}",
             )
             return None
@@ -421,9 +415,8 @@ class SpeechIngressService:
 
         if audio_buffer.size == 0:
             logger.debug("Ignoring VAD segment with empty buffer.")
-            await self._emit_terminal_turn_signal(
+            await self._emit_input_error(
                 turn_id=vad_turn_id,
-                reason="audio_transcription_empty",
                 error_message="Microphone audio segment was empty before transcription.",
             )
             return None
@@ -465,24 +458,16 @@ class SpeechIngressService:
         cloned["turn_id"] = turn_id
         return cloned
 
-    async def _emit_terminal_turn_signal(
+    async def _emit_input_error(
         self,
         *,
         turn_id: str | None,
-        reason: str,
         error_message: str,
     ) -> None:
         await self._send_json(
             build_control_error(
                 turn_id=turn_id,
                 message=error_message,
-            )
-        )
-        await self._send_json(
-            build_control_turn_finished(
-                turn_id=turn_id,
-                success=False,
-                reason=reason,
             )
         )
 

@@ -170,7 +170,7 @@ def test_handle_manual_binary_audio_stream_chunk_uses_vad_segments(
     assert sent_messages[0]["type"] == "output.transcription"
     assert sent_messages[0]["turn_id"] == "input:manual-binary:vad:1"
 
-def test_handle_binary_audio_stream_end_dropped_reports_terminal_signal(
+def test_handle_binary_audio_stream_end_dropped_reports_input_error(
     install_fake_astrbot,
 ) -> None:
     install_fake_astrbot()
@@ -217,9 +217,7 @@ def test_handle_binary_audio_stream_end_dropped_reports_terminal_signal(
 
     assert result is None
     assert build_calls == []
-    assert len(sent_messages) == 2
+    assert len(sent_messages) == 1
     assert sent_messages[0]["type"] == "control.error"
     assert sent_messages[0]["payload"]["message"] == "Microphone audio segment dropped before transcription."
     assert sent_messages[0]["turn_id"] == "input:binary-dropped"
-    assert sent_messages[1]["type"] == "control.turn_finished"
-    assert sent_messages[1]["turn_id"] == "input:binary-dropped"

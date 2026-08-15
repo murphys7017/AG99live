@@ -1,9 +1,9 @@
 task:
   class: bugfix
   risk: medium
-  phase: disconnect_cleanup_isolation
+  phase: speech_ingress_pre_turn_failure_lifecycle
   status: implementation_complete
-  scope: "Ensure one faulty AstrBot Event cannot interrupt TurnCoordinator-owned cleanup or prevent the remaining connection-level owners from releasing state on frontend disconnect."
+  scope: "Stop SpeechIngress failures from publishing control.turn_finished for input identities that have not entered the formal Turn lifecycle."
 
 context:
   confidence: high
@@ -25,6 +25,8 @@ context:
     - Profile validation owns this invariant. ModelEngine must not become a fallback validator for malformed synchronized profiles.
     - Disconnect cleanup is resource release, not runtime fallback: each owner must attempt its own cleanup, emit precise diagnostics on failure, and never preserve stale connection state merely because another owner failed first.
     - Event stop-flag publication and Event stopping are independent cleanup operations; failure of one must not suppress the other.
+    - SpeechIngress allocates or receives input identities before a formal Turn exists; only TurnCoordinator._commit_inbound_message owns identity registration and control.turn_started publication.
+    - A pre-Turn input failure must remain observable through control.error, but it must not fabricate a terminal event for a session that was never started.
 
 documentation:
   authorities:
@@ -45,11 +47,9 @@ verification:
     - Automated tests are low-confidence input/output smoke checks; do not run the full suite.
     - Live AstrBot, Electron, TTS, and Live2D behavior remains user-led runtime acceptance.
   current:
-    - TurnCoordinator now attempts stop-flag publication and Event stopping independently for every active Turn, diagnoses each failure, and clears all Coordinator-owned state in a guaranteed finalization path.
-    - Performance curve cancellation is isolated per Turn and cannot prevent the remaining curve requests or Coordinator maps from being cleared.
-    - Platform disconnect cleanup now attempts TurnCoordinator, SessionState, TurnIdentityMap, SpeechIngress, and MediaService cleanup independently, then reports a summarized failure to transport after all owners have run.
-    - The focused TurnCoordinator smoke passed with one faulty and one healthy Event; both stop calls, curve cancellation, and all owned state cleanup completed.
-    - The focused PlatformAdapter smoke passed with an initial Coordinator failure; all four later connection owners still ran in order and the final failure remained observable.
-    - Python syntax validation passed for both production files and the two focused smoke files.
-    - `git diff --check` passed; the only test output beyond the assertions was pre-existing third-party deprecation warnings emitted while importing PlatformAdapter dependencies.
-    - Live disconnect/reconnect behavior remains pending user runtime acceptance.
+    - Source tracing confirmed that dropped audio, empty audio, VAD initialization failure, STT exception, empty transcription, filtered transcription, and empty VAD segments all return before TurnCoordinator._commit_inbound_message.
+    - SpeechIngress now reports these pre-Turn failures only through control.error and no longer imports or publishes control.turn_finished.
+    - TurnCoordinator still clears capture-scoped VAD tracking when SpeechIngress returns None, without registering a Turn identity or mutating SessionState.
+    - The focused dropped-input smoke passed and confirmed that one control.error is emitted with the original input identity and no control.turn_finished follows.
+    - Python syntax validation and `git diff --check` passed; no stale terminal helper, builder import, R11 entry, or old test expectation remains.
+    - Live STT failure and VAD-empty behavior remain pending user runtime acceptance.
