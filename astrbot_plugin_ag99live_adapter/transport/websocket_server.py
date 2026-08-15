@@ -39,8 +39,8 @@ class WebSocketTransport:
         handle_message: Callable[[dict[str, Any]], Awaitable[None]],
         handle_binary_message: Callable[[bytes], Awaitable[None]] | None = None,
         refresh_runtime_settings_async: Callable[..., Awaitable[None]],
-        send_current_model_and_conf: Callable[..., Awaitable[None]],
-        send_motion_tuning_samples_state: Callable[..., Awaitable[None]],
+        send_current_model_and_conf: Callable[..., Awaitable[bool]],
+        send_motion_tuning_samples_state: Callable[..., Awaitable[bool]],
         on_disconnect: Callable[[], Awaitable[None]],
     ) -> None:
         self.host = host
@@ -268,17 +268,21 @@ class WebSocketTransport:
         await self._refresh_runtime_settings_async(
             reload_providers=True,
         )
-        await self.send_json(
+        server_info_sent = await self.send_json(
             build_system_server_info(
                 ws_url=f"ws://{self.host}:{self.port}",
                 http_base_url=f"http://{self.static_server.host}:{self.static_server.port}",
                 auto_start_mic=self.auto_start_mic,
             )
         )
-        await self._send_current_model_and_conf(force=True)
-        await self._send_motion_tuning_samples_state()
-        if self.auto_start_mic:
-            await self.send_json(build_control_start_mic())
+        if not server_info_sent:
+            raise RuntimeError("initial_server_info_send_failed")
+        if not await self._send_current_model_and_conf(force=True):
+            raise RuntimeError("initial_model_sync_send_failed")
+        if not await self._send_motion_tuning_samples_state():
+            raise RuntimeError("initial_motion_tuning_state_send_failed")
+        if self.auto_start_mic and not await self.send_json(build_control_start_mic()):
+            raise RuntimeError("initial_start_mic_send_failed")
 
 
 def _is_expected_disconnect_error(exc: Exception) -> bool:

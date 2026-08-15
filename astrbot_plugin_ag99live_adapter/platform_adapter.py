@@ -377,7 +377,7 @@ class OLVPetPlatformAdapter(Platform):
         if self._vad_engine is not None and vad_settings_changed:
             self._vad_engine = None
 
-    async def _send_current_model_and_conf(self, *, force: bool = False) -> None:
+    async def _send_current_model_and_conf(self, *, force: bool = False) -> bool:
         payload = self.runtime_state.build_current_model_payload(
             conf_name=self.conf_name,
             conf_uid=self.conf_uid,
@@ -385,7 +385,7 @@ class OLVPetPlatformAdapter(Platform):
         )
         signature = self.runtime_state.build_model_payload_signature(payload)
         if not self.runtime_state.should_send_model_payload(signature, force=force):
-            return
+            return True
 
         sent = await self._send_json(payload)
         if not sent:
@@ -394,15 +394,16 @@ class OLVPetPlatformAdapter(Platform):
                 "(conf_uid=%s, phase=message-only). Will retry on next refresh.",
                 self.conf_uid,
             )
-            return
+            return False
 
         self.runtime_state.mark_model_payload_sent(signature)
+        return True
 
     async def _refresh_and_send_current_model_and_conf(self, *, force: bool = False) -> None:
         self._refresh_runtime_settings()
         await self._send_current_model_and_conf(force=force)
 
-    async def _send_motion_tuning_samples_state(self) -> None:
+    async def _send_motion_tuning_samples_state(self) -> bool:
         payload = build_system_motion_tuning_samples_state(
             samples=self.runtime_state.list_motion_tuning_samples(),
             root_error=self.runtime_state.get_motion_tuning_store_root_error(),
@@ -410,7 +411,7 @@ class OLVPetPlatformAdapter(Platform):
             diagnostics=self.runtime_state.list_motion_tuning_fewshot_diagnostics(),
             effective_examples=self.runtime_state.list_effective_motion_tuning_examples(),
         )
-        await self._send_json(payload)
+        return await self._send_json(payload)
 
     async def _handle_frontend_system(self, message: dict[str, Any]) -> None:
         await self.frontend_system_handler.handle(
