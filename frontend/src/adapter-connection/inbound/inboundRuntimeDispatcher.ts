@@ -22,7 +22,6 @@ export interface InboundRuntimeDispatchState {
   turnFinishedTurnId: string | null;
   turnFinishedSuccess: boolean;
   turnFinishedReason: string;
-  micRequested: boolean;
   pttModeEnabled: boolean;
 }
 
@@ -56,7 +55,7 @@ type InboundRuntimeEvent = Extract<
 /**
  * 运行时事件的内部 switch，按 event.kind 调对应 apply* 处理函数。
  *
- * 同步执行（applyStartMic 内部以 void 启动 startMicrophoneCapture，不 await）。
+ * 同步执行；麦克风采集运行时独立完成异步启动并发布结果状态。
  * 协议生命周期错误会交给 reportRuntimeProtocolViolation 显式上报，不创建缺失会话。
  */
 export function dispatchInboundRuntimeEvent(
@@ -172,7 +171,6 @@ function applyStartMic(deps: InboundRuntimeDispatchDeps): void {
     return;
   }
   s.statusMessage = "后端已请求启动麦克风，准备自动收音。";
-  s.micRequested = true;
   deps.pushHistory("system", s.statusMessage);
   void deps.startMicrophoneCapture("auto");
 }

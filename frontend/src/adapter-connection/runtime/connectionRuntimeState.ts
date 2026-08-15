@@ -3,7 +3,6 @@ export interface ConnectionRuntimeState {
   currentTurnId: string | null;
   serverInfo: unknown;
   activeWsAddress: string;
-  micRequested: boolean;
   micCapturing: boolean;
   assistantTextDeliveryTurnId: string | null;
   turnFinishedTurnId: string | null;
@@ -34,7 +33,6 @@ export function resetConnectionRuntimeState(
   s.currentTurnId = null;
   s.serverInfo = null;
   s.activeWsAddress = "";
-  s.micRequested = false;
   s.micCapturing = false;
   s.assistantTextDeliveryTurnId = null;
   s.turnFinishedTurnId = null;

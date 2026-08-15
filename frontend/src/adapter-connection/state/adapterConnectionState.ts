@@ -45,7 +45,6 @@ export function createAdapterConnectionState() {
     lastTranscription: "",
     lastImageCount: 0,
     currentTurnId: null as string | null,
-    micRequested: false,
     micCapturing: false,
     pttModeEnabled: loadStoredPttModeEnabled(),
     pttKeyBinding: loadStoredPttKeyBinding(),

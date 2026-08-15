@@ -3,7 +3,6 @@ import type { InboundAdapterEvent } from "./inboundEvents.js";
 
 export interface InboundConnectionDispatchState {
   statusMessage: string;
-  micRequested: boolean;
   pttModeEnabled: boolean;
   serverInfo: SystemServerInfoPayload | null;
 }
@@ -44,7 +43,6 @@ function applyServerInfoMessage(
     if (s.pttModeEnabled) {
       deps.pushHistory("system", "后端请求自动收音，当前为按键说话模式，已跳过。");
     } else {
-      s.micRequested = true;
       void deps.startMicrophoneCapture("auto");
     }
   }

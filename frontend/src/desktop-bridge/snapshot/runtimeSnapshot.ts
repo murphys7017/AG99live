@@ -69,7 +69,6 @@ export const defaultSnapshot: DesktopRuntimeSnapshot = {
   connectionLabel: "未连接",
   connectionStatusMessage: "等待桌宠窗口启动。",
   aiState: "offline",
-  micRequested: false,
   micCapturing: false,
   pttModeEnabled: false,
   pttKeyBinding: DEFAULT_PTT_KEY_BINDING,

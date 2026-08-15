@@ -33,7 +33,6 @@ type MicrophoneStartFailureReason =
 export interface AdapterMicrophoneRuntimeState {
   microphoneDeviceId: string;
   microphoneDevices: MicrophoneDeviceInfo[];
-  micRequested: boolean;
   micCapturing: boolean;
   pttModeEnabled: boolean;
   pttKeyBinding: DesktopPttKeyBinding;
@@ -286,7 +285,6 @@ export function createAdapterMicrophoneRuntime(
         }
 
         deps.state.micCapturing = true;
-        deps.state.micRequested = true;
         deps.state.lastError = "";
         lastStartFailureReason = "none";
         deps.state.statusMessage = "麦克风已开启，正在自动检测说话。";
@@ -318,13 +316,9 @@ export function createAdapterMicrophoneRuntime(
     const previousOrigin = micCaptureOrigin ?? "manual";
     const stopped = await stopMicrophoneCapture("device_change");
     if (!stopped) {
-      deps.state.micRequested = false;
       return;
     }
-    const started = await startMicrophoneCapture(previousOrigin);
-    if (!started) {
-      deps.state.micRequested = false;
-    }
+    await startMicrophoneCapture(previousOrigin);
   }
 
   function setPttMode(enabled: boolean): void {
@@ -381,7 +375,6 @@ export function createAdapterMicrophoneRuntime(
   async function discardMicrophoneCaptureBeforeRecognition(reason: string): Promise<void> {
     await stopMicrophoneCaptureRuntime();
     deps.state.micCapturing = false;
-    deps.state.micRequested = false;
     deps.state.statusMessage = reason === "ptt_release_before_ready"
       ? "按键时间过短，未开始识别。"
       : "麦克风启动已取消。";
@@ -391,18 +384,11 @@ export function createAdapterMicrophoneRuntime(
   async function stopMicrophoneCapture(reason = "manual_stop"): Promise<boolean> {
     if (!isMicrophoneCaptureRuntimeActive()) {
       deps.state.micCapturing = false;
-      if (reason === "manual_stop") {
-        deps.state.micRequested = false;
-      }
       clearMicCaptureSession();
       return false;
     }
 
     deps.state.micCapturing = false;
-    if (reason === "manual_stop" || reason === "device_ended" || reason === "ptt_release") {
-      deps.state.micRequested = false;
-    }
-
     const inputTurnId = activeMicTurnId ?? createRootInputTurnId();
     const inputStreamId = activeMicStreamId;
     const inputLastSequence = activeMicSeq - 1;

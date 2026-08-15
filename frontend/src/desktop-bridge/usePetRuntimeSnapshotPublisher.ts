@@ -46,7 +46,6 @@ interface PetRuntimeSnapshotAdapterPort {
     readonly lastTranscription: string;
     readonly lastImageCount: number;
     readonly currentTurnId: string | null;
-    readonly micRequested: boolean;
     readonly micCapturing: boolean;
     readonly isPlayingAudio: boolean;
     readonly pttModeEnabled: boolean;
@@ -163,7 +162,6 @@ export function createPetRuntimeSnapshotPublisher(
         lastTranscription: a.lastTranscription,
         lastImageCount: a.lastImageCount,
         currentTurnId: a.currentTurnId,
-        micRequested: a.micRequested,
         micCapturing: a.micCapturing,
         isPlayingAudio: a.isPlayingAudio,
         pttModeEnabled: a.pttModeEnabled,

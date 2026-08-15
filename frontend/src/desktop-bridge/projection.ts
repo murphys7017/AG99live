@@ -29,7 +29,6 @@ export interface AdapterRuntimeProjection {
   lastTranscription: string;
   lastImageCount: number;
   currentTurnId: string | null;
-  micRequested: boolean;
   micCapturing: boolean;
   pttModeEnabled: boolean;
   pttKeyBinding: DesktopPttKeyBinding;
@@ -56,7 +55,6 @@ export interface AdapterRuntimeProjectionInput {
   lastTranscription: string;
   lastImageCount: number;
   currentTurnId: string | null;
-  micRequested: boolean;
   micCapturing: boolean;
   pttModeEnabled: boolean;
   pttKeyBinding: DesktopPttKeyBinding;
@@ -96,7 +94,6 @@ export interface DesktopRuntimeSnapshotOutput {
   connectionLabel: string;
   connectionStatusMessage: string;
   aiState: string;
-  micRequested: boolean;
   micCapturing: boolean;
   pttModeEnabled: boolean;
   pttKeyBinding: DesktopPttKeyBinding;
@@ -137,7 +134,6 @@ export function buildAdapterRuntimeProjection(
     lastTranscription: input.lastTranscription,
     lastImageCount: input.lastImageCount,
     currentTurnId: input.currentTurnId,
-    micRequested: input.micRequested,
     micCapturing: input.micCapturing,
     audioPlaying: input.isPlayingAudio,
     pttModeEnabled: input.pttModeEnabled,
@@ -182,7 +178,6 @@ export function buildDesktopRuntimeSnapshot(
     connectionLabel: input.connectionLabel,
     connectionStatusMessage: p.connectionStatusMessage,
     aiState: input.aiState,
-    micRequested: p.micRequested,
     micCapturing: p.micCapturing,
     audioPlaying: p.audioPlaying,
     pttModeEnabled: p.pttModeEnabled,

@@ -55,7 +55,6 @@ export interface InboundDispatchState {
   turnFinishedSuccess: boolean;
   turnFinishedReason: string;
   // mic
-  micRequested: boolean;
   pttModeEnabled: boolean;
   // server info
   serverInfo: SystemServerInfoPayload | null;
