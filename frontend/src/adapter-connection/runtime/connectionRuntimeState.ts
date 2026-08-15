@@ -19,28 +19,27 @@ export interface ConnectionRuntimeDeps {
   modelSyncAdapter: { resetModelSyncState: () => void } | null;
 }
 
-export function resetConnectionRuntimeState(
+export async function resetConnectionRuntimeState(
   deps: ConnectionRuntimeDeps,
   reason: string,
-): void {
+): Promise<void> {
   const errors: unknown[] = [];
-  const resetStep = (step: string, action: () => void): void => {
+  const resetStep = async (
+    step: string,
+    action: () => void | Promise<unknown>,
+  ): Promise<void> => {
     try {
-      action();
+      await action();
     } catch (error) {
       console.error(`[Connection] ${step} failed.`, error);
       errors.push(error);
     }
   };
 
-  resetStep("microphone cleanup start", () => {
-    void deps.stopMicrophoneCapture(reason).catch((error) => {
-      console.error("[Connection] microphone cleanup failed.", error);
-    });
-  });
-  resetStep("audio and timeline cleanup", () => deps.stopAudioAndSettleAll(reason));
-  resetStep("history reset", () => deps.historyAdapter?.resetHistoryState());
-  resetStep("connection state reset", () => {
+  await resetStep("microphone cleanup", () => deps.stopMicrophoneCapture(reason));
+  await resetStep("audio and timeline cleanup", () => deps.stopAudioAndSettleAll(reason));
+  await resetStep("history reset", () => deps.historyAdapter?.resetHistoryState());
+  await resetStep("connection state reset", () => {
     const s = deps.state;
     s.isPlayingAudio = false;
     s.currentTurnId = null;
@@ -53,7 +52,7 @@ export function resetConnectionRuntimeState(
     s.turnFinishedReason = "";
     s.latestSemanticAxisProfileSaveResult = null;
   });
-  resetStep("model sync reset", () => deps.modelSyncAdapter?.resetModelSyncState());
+  await resetStep("model sync reset", () => deps.modelSyncAdapter?.resetModelSyncState());
   if (errors.length > 0) {
     throw errors[0];
   }

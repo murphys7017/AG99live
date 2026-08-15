@@ -450,7 +450,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
 
   onMounted(async () => {
     await adapter.initialize();
-    adapter.connect();
+    await adapter.connect();
     pushToTalk.install();
     bilibiliLive.start();
   });

@@ -74,7 +74,9 @@ export function createConversationPlaybackRuntime(options: {
   });
 
   onScopeDispose(() => {
-    adapter.dispose();
+    void adapter.dispose().catch((error) => {
+      console.error("[ConversationPlaybackRuntime] adapter dispose failed.", error);
+    });
     motionRuntime = null;
   });
 

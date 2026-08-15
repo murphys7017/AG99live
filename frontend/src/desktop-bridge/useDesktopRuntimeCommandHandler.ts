@@ -36,8 +36,8 @@ interface DesktopRuntimeCommandAdapterPort {
   createHistory: () => boolean;
   loadHistory: (historyUid: string) => boolean;
   deleteHistory: (historyUid: string) => boolean;
-  connect: () => void;
-  disconnect: () => void;
+  connect: () => Promise<void>;
+  disconnect: () => Promise<void>;
   sendText: (text: string) => Promise<boolean>;
   interruptCurrentTurn: () => boolean;
   toggleMicrophoneCapture: () => Promise<unknown>;
@@ -134,10 +134,14 @@ export function createDesktopRuntimeCommandHandler(
         if (typeof command.address === "string") {
           deps.adapter.setAddress(command.address);
         }
-        deps.adapter.connect();
+        void deps.adapter.connect().catch((error) => {
+          console.error("[DesktopRuntime] adapter connect failed.", error);
+        });
         return;
       case "disconnect":
-        deps.adapter.disconnect();
+        void deps.adapter.disconnect().catch((error) => {
+          console.error("[DesktopRuntime] adapter disconnect failed.", error);
+        });
         return;
       case "send_text":
         void deps.adapter.sendText(command.text);

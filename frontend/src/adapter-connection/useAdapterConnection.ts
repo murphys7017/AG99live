@@ -76,14 +76,14 @@ export interface AdapterConnectionInstance {
   readonly state: DeepReadonly<ReturnType<typeof createAdapterConnectionState>>;
   readonly modelSync: ModelSyncInstance;
   initialize: () => Promise<void>;
-  dispose: () => void;
+  dispose: () => Promise<void>;
   setAddress: (nextAddress: string) => void;
   setDesktopScreenshotOnSendEnabled: (enabled: boolean) => void;
   setMicrophoneDevice: (deviceId: string) => void;
   setMicrophoneDevices: (devices: Parameters<ReturnType<typeof createAdapterMicrophoneRuntime>["setMicrophoneDevices"]>[0]) => void;
   refreshMicrophoneDevices: () => Promise<void>;
-  connect: () => void;
-  disconnect: () => void;
+  connect: () => Promise<void>;
+  disconnect: () => Promise<void>;
   sendText: (text: string) => Promise<boolean>;
   interruptCurrentTurn: () => boolean;
   sendSemanticAxisProfileSave: (payload: SystemSemanticAxisProfileSavePayload) => boolean;
@@ -158,6 +158,8 @@ export function createAdapterConnection(
   let initializePromise: Promise<void> | null = null;
   let connectAttemptSerial = 0;
   let disposed = false;
+  let disposePromise: Promise<void> | null = null;
+  let lifecyclePromise: Promise<void> = Promise.resolve();
   const assistantHistoryKeys: string[] = [];
   const assistantHistoryKeySet = new Set<string>();
 
@@ -373,30 +375,40 @@ export function createAdapterConnection(
     await initializePromise;
   }
 
-  function connect(): void {
-    if (disposed) {
-      throw new Error("Adapter connection runtime has been disposed.");
-    }
-    disconnectInternal(false);
+  function connect(): Promise<void> {
+    return enqueueLifecycleOperation(async () => {
+      if (disposed) {
+        throw new Error("Adapter connection runtime has been disposed.");
+      }
+      try {
+        await disconnectInternal(false);
+      } catch (error) {
+        projectLifecycleFailure("适配器重连清理", error);
+        throw error;
+      }
+      if (disposed) {
+        return;
+      }
 
-    let candidates: string[] = [normalizeWsAddress(DEFAULT_ADAPTER_ADDRESS)];
-    try {
-      candidates = buildConnectionCandidates(state.address);
-    } catch (error) {
-      state.status = "error";
-      state.lastError = error instanceof Error ? error.message : "连接地址格式无效。";
-      state.statusMessage = state.lastError;
-      pushHistory("error", state.lastError);
-      return;
-    }
+      let candidates: string[] = [normalizeWsAddress(DEFAULT_ADAPTER_ADDRESS)];
+      try {
+        candidates = buildConnectionCandidates(state.address);
+      } catch (error) {
+        state.status = "error";
+        state.lastError = error instanceof Error ? error.message : "连接地址格式无效。";
+        state.statusMessage = state.lastError;
+        pushHistory("error", state.lastError);
+        return;
+      }
 
-    state.status = "connecting";
-    state.statusMessage = "正在连接适配器...";
-    state.lastError = "";
-    pushHistory("system", `开始连接 ${candidates[0]}`);
+      state.status = "connecting";
+      state.statusMessage = "正在连接适配器...";
+      state.lastError = "";
+      pushHistory("system", `开始连接 ${candidates[0]}`);
 
-    const attemptSerial = ++connectAttemptSerial;
-    openConnectionCandidate(candidates, 0, attemptSerial);
+      const attemptSerial = ++connectAttemptSerial;
+      openConnectionCandidate(candidates, 0, attemptSerial);
+    });
   }
 
   function runConnectionCleanupStep(
@@ -412,25 +424,56 @@ export function createAdapterConnection(
     }
   }
 
-  function disconnect(): void {
-    const hadActiveSocket = Boolean(socket);
-    const errors: unknown[] = [];
-    runConnectionCleanupStep(
-      "manual disconnect",
-      () => disconnectInternal(true),
-      errors,
-    );
-    state.status = "disconnected";
-    state.statusMessage = "已断开适配器连接。";
-    if (!hadActiveSocket) {
-      pushHistory("system", state.statusMessage);
-    }
-    if (errors.length > 0) {
-      throw errors[0];
+  async function runConnectionCleanupStepAsync(
+    step: string,
+    action: () => void | Promise<unknown>,
+    errors: unknown[],
+  ): Promise<void> {
+    try {
+      await action();
+    } catch (error) {
+      console.error(`[useAdapterConnection] ${step} failed.`, error);
+      errors.push(error);
     }
   }
 
-  function disconnectInternal(markManualClose: boolean): void {
+  function enqueueLifecycleOperation(
+    operation: () => Promise<void>,
+  ): Promise<void> {
+    const next = lifecyclePromise.then(operation, operation);
+    lifecyclePromise = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    return next;
+  }
+
+  function projectLifecycleFailure(action: string, error: unknown): void {
+    const details = error instanceof Error ? error.message : String(error);
+    state.status = "error";
+    state.lastError = `${action}失败：${details}`;
+    state.statusMessage = state.lastError;
+    pushHistory("error", state.lastError);
+  }
+
+  function disconnect(): Promise<void> {
+    return enqueueLifecycleOperation(async () => {
+      const hadActiveSocket = Boolean(socket);
+      try {
+        await disconnectInternal(true);
+      } catch (error) {
+        projectLifecycleFailure("适配器断开清理", error);
+        throw error;
+      }
+      state.status = "disconnected";
+      state.statusMessage = "已断开适配器连接。";
+      if (!hadActiveSocket) {
+        pushHistory("system", state.statusMessage);
+      }
+    });
+  }
+
+  async function disconnectInternal(markManualClose: boolean): Promise<void> {
     connectAttemptSerial += 1;
     const errors: unknown[] = [];
     runConnectionCleanupStep(
@@ -439,7 +482,7 @@ export function createAdapterConnection(
       errors,
     );
     const reason = markManualClose ? "manual_disconnect" : "connection_reset";
-    runConnectionCleanupStep(
+    await runConnectionCleanupStepAsync(
       "runtime reset",
       () => resetConnectionRuntimeState(reason),
       errors,
@@ -458,29 +501,33 @@ export function createAdapterConnection(
     }
   }
 
-  function dispose(): void {
+  function dispose(): Promise<void> {
     if (disposed) {
-      return;
+      return disposePromise ?? Promise.resolve();
     }
     disposed = true;
-    const errors: unknown[] = [];
-    runConnectionCleanupStep(
-      "dispose disconnect",
-      () => disconnectInternal(true),
-      errors,
-    );
-    runConnectionCleanupStep(
-      "PTT hook listener detach",
-      () => detachPttHookStatusListener?.(),
-      errors,
-    );
-    detachPttHookStatusListener = null;
-    state.status = "disconnected";
-    state.statusMessage = "已断开适配器连接。";
-    state.lastError = "";
-    if (errors.length > 0) {
-      throw errors[0];
-    }
+    disposePromise = enqueueLifecycleOperation(async () => {
+      const errors: unknown[] = [];
+      await runConnectionCleanupStepAsync(
+        "dispose disconnect",
+        () => disconnectInternal(true),
+        errors,
+      );
+      runConnectionCleanupStep(
+        "PTT hook listener detach",
+        () => detachPttHookStatusListener?.(),
+        errors,
+      );
+      detachPttHookStatusListener = null;
+      if (errors.length > 0) {
+        projectLifecycleFailure("适配器释放清理", errors[0]);
+        throw errors[0];
+      }
+      state.status = "disconnected";
+      state.statusMessage = "已断开适配器连接。";
+      state.lastError = "";
+    });
+    return disposePromise;
   }
 
   function openConnectionCandidate(
@@ -543,40 +590,49 @@ export function createAdapterConnection(
         }
 
         socket = null;
-        try {
-          resetConnectionRuntimeState("connection_closed");
-        } catch (error) {
-          console.error("[useAdapterConnection] connection close cleanup failed.", error);
-        }
-
-        if (!opened) {
-          if (state.status !== "error") {
-            state.status = "error";
-            state.lastError = buildConnectFailureMessage(candidates);
-            state.statusMessage = state.lastError;
-            pushHistory("error", state.lastError);
+        void enqueueLifecycleOperation(async () => {
+          let cleanupError: unknown = null;
+          try {
+            await resetConnectionRuntimeState("connection_closed");
+          } catch (error) {
+            cleanupError = error;
           }
-          return;
-        }
 
-        if (state.status !== "error") {
-          state.status = "disconnected";
-          state.statusMessage = "连接已关闭。";
-          pushHistory("system", state.statusMessage);
-        }
+          if (cleanupError !== null) {
+            projectLifecycleFailure("连接关闭清理", cleanupError);
+          }
+
+          if (!opened) {
+            if (state.status !== "error") {
+              state.status = "error";
+              state.lastError = buildConnectFailureMessage(candidates);
+              state.statusMessage = state.lastError;
+              pushHistory("error", state.lastError);
+            }
+            return;
+          }
+
+          if (state.status !== "error") {
+            state.status = "disconnected";
+            state.statusMessage = "连接已关闭。";
+            pushHistory("system", state.statusMessage);
+          }
+        }).catch((error) => {
+          projectLifecycleFailure("连接关闭清理", error);
+        });
       },
     });
     socket = transport.socket;
   }
 
-  function resetConnectionRuntimeState(reason: string): void {
+  async function resetConnectionRuntimeState(reason: string): Promise<void> {
     const errors: unknown[] = [];
     runConnectionCleanupStep(
       "unresolved session failure projection",
       () => failUnresolvedSessions(reason),
       errors,
     );
-    runConnectionCleanupStep(
+    await runConnectionCleanupStepAsync(
       "connection runtime state reset",
       () => resetConnectionRuntime({
         state,
@@ -837,7 +893,9 @@ export function useAdapterConnection(
   });
 
   onScopeDispose(() => {
-    connection.dispose();
+    void connection.dispose().catch((error) => {
+      console.error("[useAdapterConnection] adapter dispose failed.", error);
+    });
   });
 
   return connection;
