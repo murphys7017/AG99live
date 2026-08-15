@@ -9,7 +9,6 @@ import {
 } from "./playbackTimelineEngine.js";
 import type {
   PlaybackTimelineSegmentExecutionPorts,
-  PlaybackTimelineSegmentExecutionResult,
   PlaybackTimelineSegmentJob,
 } from "./segmentJob.js";
 import {
@@ -82,7 +81,7 @@ export interface PlaybackTimelineRuntimeDeps<TMotionPayload = unknown> {
 export interface PlaybackTimelineRuntime<TMotionPayload = unknown> {
   startSegmentJob: (
     job: PlaybackTimelineSegmentJob<TMotionPayload>,
-  ) => PlaybackTimelineSegmentExecutionResult;
+  ) => void;
   rejectMotionBeforeStart: (
     turnId: string | null,
     messageId: string,
@@ -365,14 +364,13 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
 
   function startSegmentJob(
     job: PlaybackTimelineSegmentJob<TMotionPayload>,
-  ): PlaybackTimelineSegmentExecutionResult {
-    const result = executePlaybackTimelineSegmentJob({
+  ): void {
+    executePlaybackTimelineSegmentJob({
       job,
       ports: deps.segmentExecution,
       timeline: segmentExecutorTimelinePort,
     });
     notifyExecutionStateChanged();
-    return result;
   }
 
   const segmentExecutorTimelinePort: PlaybackTimelineSegmentExecutorTimelinePort = {

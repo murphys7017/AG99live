@@ -19,14 +19,6 @@ export interface PlaybackTimelineSegmentJob<TMotionPayload = unknown> {
   };
 }
 
-export interface PlaybackTimelineSegmentExecutionResult {
-  releasedText: boolean;
-  releasedAudio: boolean;
-  releasedMotion: boolean;
-  /** Motion payload reached a terminal decision and must not be retried. */
-  handledMotion?: boolean;
-}
-
 export interface PlaybackTimelineSegmentSessionPort {
   markSessionFailed(turnId: string | null, reason: string): void;
   markAudioReleased(turnId: string | null, messageId: string): void;
@@ -70,16 +62,4 @@ export interface PlaybackTimelineSegmentExecutionPorts<
   textSink: PlaybackTimelineSegmentTextSink;
   audioSink: PlaybackTimelineSegmentAudioSink;
   motionSink: PlaybackTimelineSegmentMotionSink<TMotionPayload>;
-}
-export interface PlaybackTimelineSegmentStartPort<
-  TMotionPayload = unknown,
-> {
-  startSegmentJob(
-    job: PlaybackTimelineSegmentJob<TMotionPayload>,
-  ): PlaybackTimelineSegmentExecutionResult;
-  rejectMotionBeforeStart(
-    turnId: string | null,
-    messageId: string,
-    reason: string,
-  ): void;
 }

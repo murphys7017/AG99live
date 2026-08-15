@@ -1,6 +1,5 @@
 import type {
   PlaybackTimelineSegmentExecutionPorts,
-  PlaybackTimelineSegmentExecutionResult,
   PlaybackTimelineSegmentJob,
 } from "./segmentJob.js";
 
@@ -63,7 +62,7 @@ export function executePlaybackTimelineSegmentJob<TMotionPayload>(
     ports: PlaybackTimelineSegmentExecutionPorts<TMotionPayload>;
     timeline: PlaybackTimelineSegmentExecutorTimelinePort;
   },
-): PlaybackTimelineSegmentExecutionResult {
+): void {
   const { job, ports, timeline } = options;
 
   const deferTextUntilAudioStarted = job.text.release && job.audio.release;
@@ -79,7 +78,7 @@ export function executePlaybackTimelineSegmentJob<TMotionPayload>(
         job.turnId,
         `text_sink_release_failed:${job.messageId}`,
       );
-      return { releasedText: false, releasedAudio: false, releasedMotion: false };
+      return;
     }
   }
   if (releasedText) {
@@ -101,7 +100,7 @@ export function executePlaybackTimelineSegmentJob<TMotionPayload>(
         job.turnId,
         `text_sink_failure_projection_failed:${job.messageId}`,
       );
-      return { releasedText: false, releasedAudio: false, releasedMotion: false };
+      return;
     }
   }
 
@@ -144,7 +143,7 @@ export function executePlaybackTimelineSegmentJob<TMotionPayload>(
         job.turnId,
         `audio_sink_release_failed:${job.messageId}`,
       );
-      return { releasedText, releasedAudio: false, releasedMotion: false };
+      return;
     }
   }
   if (releasedAudio) {
@@ -166,14 +165,9 @@ export function executePlaybackTimelineSegmentJob<TMotionPayload>(
     && job.motion.payload !== null
     && !job.audio.noAudioConfirmed
   ) {
-    return {
-      releasedText,
-      releasedAudio,
-      releasedMotion: false,
-    };
+    return;
   }
 
-  let releasedMotion = false;
   if (job.motion.payload !== null) {
     const motionPayload = job.motion.payload;
     const receivedAtMs = job.motion.receivedAtMs;
@@ -215,11 +209,7 @@ export function executePlaybackTimelineSegmentJob<TMotionPayload>(
           job.messageId,
           "motion_only_timeline_unavailable",
         );
-        return {
-          releasedText,
-          releasedAudio,
-          releasedMotion: false,
-        };
+        return;
       }
     } else {
       const prepared = timeline.ensureMotionTimelineSink(
@@ -234,11 +224,7 @@ export function executePlaybackTimelineSegmentJob<TMotionPayload>(
           job.messageId,
           "motion_timeline_unavailable",
         );
-        return {
-          releasedText,
-          releasedAudio,
-          releasedMotion: false,
-        };
+        return;
       }
     }
     const motionStarted = timeline.startMotionSink(
@@ -246,21 +232,9 @@ export function executePlaybackTimelineSegmentJob<TMotionPayload>(
       job.messageId,
     ) === true;
     if (!motionStarted) {
-      return {
-        releasedText,
-        releasedAudio,
-        releasedMotion: false,
-        handledMotion: true,
-      };
+      return;
     }
     ports.session.markMotionReleased(job.turnId, job.messageId);
-    releasedMotion = true;
     ports.session.markPhase(job.turnId, "playing");
   }
-
-  return {
-    releasedText,
-    releasedAudio,
-    releasedMotion,
-  };
 }
