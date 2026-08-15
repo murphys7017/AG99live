@@ -142,8 +142,11 @@ class WebSocketTransport:
             )
             try:
                 await client.close()
-            except Exception:
-                pass
+            except Exception as close_exc:
+                logger.warning(
+                    "Failed to close websocket client after send failure: %s",
+                    close_exc,
+                )
             return False
 
     async def _handle_client(self, websocket) -> None:
