@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 from typing import Awaitable, Callable
-from uuid import uuid4
 
 from astrbot.api import logger
 
@@ -134,7 +133,7 @@ class FrontendSystemCommandHandler:
             )
         elif msg_type == TYPE_SYSTEM_HISTORY_CREATE:
             history_uid = await self._history_bridge.create_history()
-            self._history_uid = history_uid or str(uuid4())
+            self._history_uid = history_uid
             await send_json(
                 build_system_history_created(
                     history_uid=self._history_uid,

@@ -39,9 +39,6 @@ class ConversationHistoryBridge:
 
     async def list_histories(self) -> list[dict[str, Any]]:
         conv_mgr = self._get_conversation_manager()
-        if conv_mgr is None:
-            return []
-
         conversations = await conv_mgr.get_conversations(
             unified_msg_origin=self._build_unified_msg_origin(),
             platform_id=self._platform_id,
@@ -65,37 +62,31 @@ class ConversationHistoryBridge:
 
     async def fetch_history(self, history_uid: str) -> list[dict[str, Any]]:
         conv_mgr = self._get_conversation_manager()
-        if conv_mgr is None or not history_uid:
-            self._sync_chat_buffer([])
-            return []
-
         umo = self._build_unified_msg_origin()
         await conv_mgr.switch_conversation(umo, history_uid)
         conversation = await conv_mgr.get_conversation(
             unified_msg_origin=umo,
             conversation_id=history_uid,
         )
+        if conversation is None:
+            raise ValueError(f"Conversation `{history_uid}` does not exist.")
         messages = self._conversation_to_frontend_messages(conversation)
         self._sync_chat_buffer(messages)
         return messages
 
-    async def create_history(self) -> str | None:
+    async def create_history(self) -> str:
         conv_mgr = self._get_conversation_manager()
-        if conv_mgr is None:
-            return None
-
         history_uid = await conv_mgr.new_conversation(
             self._build_unified_msg_origin(),
             platform_id=self._platform_id,
         )
+        if not isinstance(history_uid, str) or not history_uid.strip():
+            raise RuntimeError("Conversation manager returned an empty conversation ID.")
         self._sync_chat_buffer([])
-        return history_uid
+        return history_uid.strip()
 
     async def delete_history(self, history_uid: str) -> bool:
         conv_mgr = self._get_conversation_manager()
-        if conv_mgr is None or not history_uid:
-            return False
-
         umo = self._build_unified_msg_origin()
         try:
             await conv_mgr.delete_conversation(
@@ -127,16 +118,14 @@ class ConversationHistoryBridge:
         self._sync_chat_buffer(self._conversation_to_frontend_messages(conversation))
         return True
 
-    def _get_conversation_manager(self) -> Any | None:
+    def _get_conversation_manager(self) -> Any:
         context = self._plugin_context
         if context is None:
-            logger.warning("Plugin context is unavailable, skip conversation history bridge.")
-            return None
+            raise RuntimeError("Plugin context is unavailable for conversation history.")
 
         conv_mgr = getattr(context, "conversation_manager", None)
         if conv_mgr is None:
-            logger.warning("Conversation manager is unavailable on plugin context.")
-            return None
+            raise RuntimeError("Conversation manager is unavailable on plugin context.")
         return conv_mgr
 
     def _build_unified_msg_origin(self) -> str:
@@ -240,19 +229,20 @@ class ConversationHistoryBridge:
     @staticmethod
     def _parse_history_records(history_value: Any) -> list[dict[str, Any]]:
         if isinstance(history_value, list):
-            return [item for item in history_value if isinstance(item, dict)]
-        if not isinstance(history_value, str) or not history_value.strip():
+            parsed = history_value
+        elif not isinstance(history_value, str) or not history_value.strip():
             return []
-
-        try:
-            parsed = json.loads(history_value)
-        except Exception:
-            logger.warning("Failed to parse conversation history JSON.")
-            return []
+        else:
+            try:
+                parsed = json.loads(history_value)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("Conversation history contains invalid JSON.") from exc
 
         if not isinstance(parsed, list):
-            return []
-        return [item for item in parsed if isinstance(item, dict)]
+            raise ValueError("Conversation history must contain a JSON array.")
+        if any(not isinstance(item, dict) for item in parsed):
+            raise ValueError("Conversation history contains a non-object record.")
+        return parsed
 
     def _collect_tool_results(
         self,
@@ -275,12 +265,12 @@ class ConversationHistoryBridge:
         updated_at = getattr(conversation, "updated_at", 0) or 0
         created_at = getattr(conversation, "created_at", 0) or 0
         timestamp = updated_at or created_at
-        if isinstance(timestamp, (int, float)) and timestamp > 0:
-            try:
-                return datetime.fromtimestamp(timestamp, tz=timezone.utc)
-            except Exception:
-                pass
-        return datetime.now(timezone.utc)
+        if isinstance(timestamp, bool) or not isinstance(timestamp, (int, float)) or timestamp <= 0:
+            raise ValueError("Conversation has no valid creation or update timestamp.")
+        try:
+            return datetime.fromtimestamp(timestamp, tz=timezone.utc)
+        except (OverflowError, OSError, ValueError) as exc:
+            raise ValueError(f"Conversation timestamp is invalid: {timestamp!r}.") from exc
 
     def _sync_chat_buffer(self, messages: list[dict[str, Any]]) -> None:
         self._chat_buffer.clear()
