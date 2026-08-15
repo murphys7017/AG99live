@@ -135,7 +135,7 @@ class RuntimeState:
             message_id=message_id,
         )
 
-    def refresh(self) -> bool:
+    def refresh(self, *, reload_providers: bool = False) -> bool:
         latest_plugin_config = self._load_latest_plugin_config()
         if latest_plugin_config is not None:
             self.plugin_config = latest_plugin_config
@@ -237,7 +237,6 @@ class RuntimeState:
         )
         provider_binding_missing = (
             (self.stt_provider_id and self.selected_stt_provider is None)
-            or (not self.stt_provider_id and self.selected_stt_provider is not None)
             or (
                 self.enable_performance_curve
                 and self.selected_performance_curve_provider is None
@@ -247,9 +246,9 @@ class RuntimeState:
                 and self.selected_performance_curve_provider is not None
             )
         )
-        if provider_config_changed or provider_binding_missing:
+        if reload_providers or provider_config_changed or provider_binding_missing:
             logger.info(
-                "Provider runtime settings changed, reloading provider bindings "
+                "Reloading provider bindings "
                 "(stt: %s -> %s, performance_curve: %s -> %s, performance_curve_enabled: %s -> %s)",
                 previous_stt_provider_id or "<default>",
                 self.stt_provider_id or "<default>",
@@ -272,14 +271,7 @@ class RuntimeState:
         *,
         reload_providers: bool = False,
     ) -> bool:
-        vad_changed = self.refresh()
-
-        if reload_providers:
-            self.selected_stt_provider = None
-            self.selected_performance_curve_provider = None
-            self.load_selected_providers()
-
-        return vad_changed
+        return self.refresh(reload_providers=reload_providers)
 
     def load_selected_providers(self) -> None:
         if self.plugin_context is None:
