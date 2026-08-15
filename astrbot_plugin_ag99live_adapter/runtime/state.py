@@ -600,10 +600,7 @@ class RuntimeState:
     def _clone_plugin_config(config: Any) -> Any:
         if config is None:
             return {}
-        try:
-            return deepcopy(config)
-        except Exception:
-            return config
+        return deepcopy(config)
 
     def _load_latest_plugin_config(self) -> Any:
         if self.plugin_config_loader is None:
