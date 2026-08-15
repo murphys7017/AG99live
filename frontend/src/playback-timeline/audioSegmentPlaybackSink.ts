@@ -120,13 +120,34 @@ export function createPlaybackTimelineAudioSegmentSink(options: {
           },
         });
       } catch (error) {
-        lipSyncSink.failAfterAudioError();
+        try {
+          lipSyncSink.failAfterAudioError();
+        } catch (terminalError) {
+          console.error(
+            "[PlaybackTimeline] lip sync failure projection failed after audio start error.",
+            terminalError,
+          );
+        }
         throw error;
       }
     },
     stop() {
-      stopActiveLipSyncSink();
-      options.audioSink.stop();
+      const stopErrors: unknown[] = [];
+      try {
+        stopActiveLipSyncSink();
+      } catch (error) {
+        console.error("[PlaybackTimeline] lip sync sink stop failed.", error);
+        stopErrors.push(error);
+      }
+      try {
+        options.audioSink.stop();
+      } catch (error) {
+        console.error("[PlaybackTimeline] audio sink stop failed.", error);
+        stopErrors.push(error);
+      }
+      if (stopErrors.length > 0) {
+        throw stopErrors[0];
+      }
     },
   };
 }

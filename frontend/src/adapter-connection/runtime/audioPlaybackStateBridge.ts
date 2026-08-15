@@ -84,19 +84,23 @@ export function stopAudioSegmentAndBridgeStateForSegment(
   messageId: string | null,
   reason = "audio_playback_stopped",
 ): void {
-  ctx.audioSegmentRunner.stop(
-    turnId,
-    messageId,
-    reason,
-  );
-  if (!messageId && ctx.state.isPlayingAudio) {
-    console.error(
-      "[Connection] audio playback stopped without segment identity; timeline was not interrupted.",
-      {
-        turnId,
-        messageId,
-      },
+  const wasPlayingAudio = ctx.state.isPlayingAudio;
+  try {
+    ctx.audioSegmentRunner.stop(
+      turnId,
+      messageId,
+      reason,
     );
+  } finally {
+    if (!messageId && wasPlayingAudio) {
+      console.error(
+        "[Connection] audio playback stopped without segment identity; timeline was not interrupted.",
+        {
+          turnId,
+          messageId,
+        },
+      );
+    }
+    ctx.state.isPlayingAudio = false;
   }
-  ctx.state.isPlayingAudio = false;
 }

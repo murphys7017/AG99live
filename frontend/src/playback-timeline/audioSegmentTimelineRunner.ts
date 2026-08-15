@@ -119,11 +119,24 @@ export function createPlaybackTimelineAudioSegmentRunner<TMotionPayload = unknow
       }
     },
     stop(turnId, messageId, reason) {
-      options.audioSegmentSink.stop();
-      if (!messageId) {
-        return;
+      const stopErrors: unknown[] = [];
+      try {
+        options.audioSegmentSink.stop();
+      } catch (error) {
+        console.error("[PlaybackTimelineAudioSegmentRunner] audio segment stop failed.", error);
+        stopErrors.push(error);
       }
-      options.runtime.stopTimelineForSegment(turnId, messageId, reason);
+      if (messageId) {
+        try {
+          options.runtime.stopTimelineForSegment(turnId, messageId, reason);
+        } catch (error) {
+          console.error("[PlaybackTimelineAudioSegmentRunner] Timeline stop failed.", error);
+          stopErrors.push(error);
+        }
+      }
+      if (stopErrors.length > 0) {
+        throw stopErrors[0];
+      }
     },
   };
 }
