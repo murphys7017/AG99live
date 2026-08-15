@@ -211,7 +211,14 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     queueMicrotask(() => {
       executionStateNotificationPending = false;
       for (const listener of executionStateListeners) {
-        listener();
+        try {
+          listener();
+        } catch (error) {
+          console.error(
+            "[PlaybackTimelineRuntime] execution state listener failed.",
+            error,
+          );
+        }
       }
     });
   }
