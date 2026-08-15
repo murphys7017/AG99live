@@ -45,6 +45,17 @@ function parseObjectPayload(
   return { ok: true, payload: record };
 }
 
+function isAbsoluteUrlWithProtocol(
+  value: string,
+  protocols: readonly string[],
+): boolean {
+  try {
+    return protocols.includes(new URL(value).protocol);
+  } catch (_error) {
+    return false;
+  }
+}
+
 export function parseOutputSegmentPayload(
   envelope: ProtocolEnvelope<unknown>,
 ): PayloadParseResult<OutputSegmentPayload> {
@@ -130,9 +141,13 @@ function parseSegmentAudioSlot(type: string, value: unknown): PayloadParseResult
   ) {
     const keys = validateExactKeys(type, "payload.audio", slot, ["state", "url"]);
     if (!keys.ok) return keys;
+    const url = slot.url.trim();
+    if (!isAbsoluteUrlWithProtocol(url, ["http:", "https:"])) {
+      return invalidPayload(type, "payload.audio.url", "absolute HTTP(S) URL");
+    }
     return {
       ok: true,
-      payload: { state: "present", url: slot.url.trim() },
+      payload: { state: "present", url },
     };
   }
   if (slot.state === "failed" && typeof slot.reason === "string" && slot.reason.trim()) {
@@ -251,6 +266,14 @@ export function parseSystemServerInfoPayload(
   if (!wsUrl.ok) return wsUrl;
   const httpBaseUrl = requiredString(envelope.type, record.payload, "http_base_url");
   if (!httpBaseUrl.ok) return httpBaseUrl;
+  const normalizedWsUrl = wsUrl.payload.trim();
+  if (!isAbsoluteUrlWithProtocol(normalizedWsUrl, ["ws:", "wss:"])) {
+    return invalidPayload(envelope.type, "payload.ws_url", "absolute WS(S) URL");
+  }
+  const normalizedHttpBaseUrl = httpBaseUrl.payload.trim();
+  if (!isAbsoluteUrlWithProtocol(normalizedHttpBaseUrl, ["http:", "https:"])) {
+    return invalidPayload(envelope.type, "payload.http_base_url", "absolute HTTP(S) URL");
+  }
   const autoStartMic = requiredBoolean(envelope.type, record.payload, "auto_start_mic");
   if (!autoStartMic.ok) return autoStartMic;
   const schemaManifest = parseSchemaManifest(envelope.type, record.payload.schema_manifest);
@@ -258,8 +281,8 @@ export function parseSystemServerInfoPayload(
   return {
     ok: true,
     payload: {
-      ws_url: wsUrl.payload,
-      http_base_url: httpBaseUrl.payload,
+      ws_url: normalizedWsUrl,
+      http_base_url: normalizedHttpBaseUrl,
       auto_start_mic: autoStartMic.payload,
       schema_manifest: schemaManifest.payload,
     },

@@ -165,7 +165,7 @@ AstrBot 内部 Plain、Record、图片与 motion client object 可以物理分�
 
 `control.synth_finished` 只能在至少一个 `output.segment` 成功发送后发送；其 WebSocket 发送成功后，后端才能提交 `output_queue_closed`。零段收口或发送失败必须显式报错。
 
-`audio.url` 指向 Adapter HTTP 静态资源，常见路径为 `/cache/audio/*.wav`。前端可以按当前连接重写 host；如果 URL 无法 fetch，属于音频交付 / 静态资源服务问题，不等同于 TTS 生成失败。
+`audio.url` 必须是绝对 HTTP(S) URL，指向 Adapter HTTP 静态资源，常见路径为 `/cache/audio/*.wav`。`system.server_info` 中的 `ws_url` 和 `http_base_url` 也必须分别是绝对 WS(S) 与 HTTP(S) URL。前端可以按当前连接重写 host，但不会把无效 URL 当作正常值原样放行；合法 URL 无法 fetch 属于音频交付 / 静态资源服务问题，不等同于 TTS 生成失败。
 
 ### control.* （双向）
 

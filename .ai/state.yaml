@@ -73,4 +73,5 @@ verification:
     - The WebSocket protocol document now distinguishes capture identities from formal Turn identities.
     - Frontend output-segment commit now returns an explicit committed/rejected result; duplicate and late segment delivery no longer escape as fatal WebSocket handler exceptions.
     - Playback lifecycle documents and detailed Mermaid diagrams distinguish parser rejection, settled rejected segments, and non-destructive duplicate/late rejection.
+    - Server-info and output-segment media URLs are rejected at the protocol parser unless they use the declared absolute URL schemes; URL host rewriting no longer converts parse failures into unchanged values.
     - Live AstrBot, Electron, TTS, ESP32, and Live2D runtime acceptance remains user-led.

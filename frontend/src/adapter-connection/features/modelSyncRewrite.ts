@@ -82,11 +82,8 @@ function rewriteUrlWithConnectedHost(
     return trimmed;
   }
 
-  const activeUrl = parseUrlSafely(activeWsAddress);
-  const targetUrl = parseUrlSafely(trimmed);
-  if (!activeUrl || !targetUrl) {
-    return trimmed;
-  }
+  const activeUrl = new URL(activeWsAddress);
+  const targetUrl = new URL(trimmed);
 
   const rewritten = new URL(targetUrl.toString());
   rewritten.hostname = activeUrl.hostname;
@@ -109,12 +106,4 @@ function rewriteUrlWithConnectedHost(
   }
 
   return rewritten.toString().replace(/\/$/, "");
-}
-
-function parseUrlSafely(rawUrl: string): URL | null {
-  try {
-    return new URL(rawUrl);
-  } catch (_error) {
-    return null;
-  }
 }
