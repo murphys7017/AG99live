@@ -83,4 +83,5 @@ verification:
     - Live2D renderer selection changes now use one serialized lifecycle: empty model sync, replacement, initialization failure, and component unmount all release the WebSDK instance through its public teardown owner; superseded loads cannot publish ready/error state for the current selection.
     - Live2D teardown clears singleton ownership before invoking release work, completes all owned cleanup steps even when terminal callbacks fail, logs every cleanup failure, and rethrows the original first failure after cleanup.
     - Catalog motion replacement is committed only after Cubism returns a valid playback handle; rejected candidates preserve the current player state, and natural completion is tracked by the per-run handle rather than a callback stored on the shared preloaded motion object.
+    - ModelEngine public execution state belongs to the active playback run; pending, compile, and start failures from replacement candidates remain diagnostics and cannot overwrite a still-playing run.
     - Live AstrBot, Electron, TTS, ESP32, and Live2D runtime acceptance remains user-led.

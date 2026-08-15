@@ -75,6 +75,12 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     message: string,
     diagnostics: CompileDiagnostics | null = state.lastCompileDiagnostics,
   ): void {
+    // An active run owns the public execution state. Preparation or start
+    // failures from a replacement candidate remain diagnostics until that
+    // candidate actually becomes the active run.
+    if (activePlaybackRun && status !== "playing") {
+      return;
+    }
     state.status = status;
     state.message = message;
     state.lastCompileDiagnostics = diagnostics;
