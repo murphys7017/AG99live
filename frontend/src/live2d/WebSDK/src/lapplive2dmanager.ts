@@ -171,26 +171,8 @@ export class LAppLive2DManager {
         }
       }
 
-      const directPlanActiveAtFrameStart = model.hasActiveDirectParameterPlan();
-      try {
-        model.update();
-      } catch (error) {
-        if (!directPlanActiveAtFrameStart) {
-          throw error;
-        }
-        failActiveDirectPlan(model, "update", error);
-        continue;
-      }
-
-      const directPlanActiveBeforeDraw = model.hasActiveDirectParameterPlan();
-      try {
-        model.draw(projection); // 参照渡しなのでprojectionは変質する。
-      } catch (error) {
-        if (!directPlanActiveBeforeDraw) {
-          throw error;
-        }
-        failActiveDirectPlan(model, "draw", error);
-      }
+      model.update();
+      model.draw(projection); // 参照渡しなのでprojectionは変質する。
     }
   }
 
@@ -249,15 +231,4 @@ export class LAppLive2DManager {
     LAppPal.printMessage('Motion Finished:');
     console.log(self);
   };
-}
-
-function failActiveDirectPlan(
-  model: LAppModel,
-  phase: "update" | "draw",
-  error: unknown,
-): void {
-  const message = error instanceof Error ? error.message : String(error);
-  const reason = `direct_parameter_plan_${phase}_failed:${message || 'unknown_error'}`;
-  console.error(`[LAppLive2DManager] Direct parameter plan ${phase} failed.`, error);
-  model.stopDirectParameterPlan(reason, 'failed');
 }
