@@ -87,15 +87,28 @@ flowchart TD
         CREATE[创建 TurnPlaybackSession]:::state
         SEGIN[Inbound Dispatcher<br/>握手后接收 output.segment.v3]:::protocol
         PARSE[信封与 slot parser]:::protocol
-        PRECHECK[URL 重写 + motion 归一化<br/>完成所有前置校验]:::protocol
-        VALID{整段是否合法？}:::protocol
-        REJECT[拒绝整段<br/>零 Store 副作用]:::failure
+        SCHEMA{信封、身份与 slot<br/>结构是否合法？}:::protocol
+        PARSEREJECT[parser 拒绝<br/>不写 SessionStore]:::failure
+        PRECHECK[URL 重写 + motion 归一化]:::protocol
+        DOMAIN{领域预检是否合法？}:::protocol
+        ACCEPTMATERIAL[构造 accepted material]:::protocol
+        REJECTMATERIAL[构造 rejected material<br/>保留明确 reason]:::failure
+        STOREGUARD{Session 可写、未 synthFinished<br/>且 turn_id + message_id 唯一？}:::state
+        DELIVERYREJECT[拒绝本次提交<br/>不覆盖首段 / 不关闭连接]:::failure
+        MATERIALSTATE{material.state}:::state
+        REJECTCOMMIT[SessionStore 原子写入 rejected 段<br/>不释放播放材料 / 已结算失败]:::failure
         COMMIT[SessionStore.commitOutputSegment<br/>原子写入 text / audio / motion 事实]:::state
 
         START --> STARTIN --> CREATE
-        SEGMENT --> SEGIN --> PARSE --> PRECHECK --> VALID
-        VALID -->|否| REJECT
-        VALID -->|是| COMMIT
+        SEGMENT --> SEGIN --> PARSE --> SCHEMA
+        SCHEMA -->|否| PARSEREJECT
+        SCHEMA -->|是| PRECHECK --> DOMAIN
+        DOMAIN -->|否| REJECTMATERIAL --> STOREGUARD
+        DOMAIN -->|是| ACCEPTMATERIAL --> STOREGUARD
+        STOREGUARD -->|否| DELIVERYREJECT
+        STOREGUARD -->|是| MATERIALSTATE
+        MATERIALSTATE -->|rejected| REJECTCOMMIT
+        MATERIALSTATE -->|accepted| COMMIT
     end
 
     subgraph O[唯一事实源与播放编排]
@@ -193,7 +206,7 @@ flowchart TD
 
     subgraph C[终态回写与轮次收口]
         TLTERM[Timeline sink terminal<br/>completed / failed / interrupted]:::terminal
-        FACTS[SessionStore segment facts<br/>text / audio / motion]:::terminal
+        FACTS[SessionStore segment facts<br/>accepted slots / rejected reason]:::terminal
         ASSERT[assertOutputSegmentsResolved]:::state
         SYNTHIN[Inbound Dispatcher<br/>control.synth_finished]:::protocol
         COMPLETE{所有后端段是否完整？}:::state
@@ -216,6 +229,7 @@ flowchart TD
         AUDIOFAILED --> FACTS
         AUDIOCAPTIONFAILED --> FACTS
         MOTIONFAILED --> FACTS
+        REJECTCOMMIT --> FACTS
         TLTERM --> FACTS
 
         SYNTH --> SYNTHIN --> ASSERT --> COMPLETE

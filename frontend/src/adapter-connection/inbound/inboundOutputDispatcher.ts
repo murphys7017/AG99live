@@ -6,7 +6,10 @@ import type {
   MotionPayloadNormalizer,
   NormalizedMotionPayload,
 } from "../../types/motion.js";
-import type { OutputSegmentMaterial } from "../../turn-playback/session.js";
+import type {
+  OutputSegmentCommitResult,
+  OutputSegmentMaterial,
+} from "../../turn-playback/session.js";
 import type { InboundAdapterEvent } from "./inboundEvents.js";
 
 export interface InboundOutputDispatchState {
@@ -23,7 +26,7 @@ export interface InboundOutputDispatchDeps {
       turnId: string | null,
       messageId: string,
       material: OutputSegmentMaterial,
-    ) => void;
+    ) => OutputSegmentCommitResult;
   } | undefined;
   pushHistory: (role: string, text: string) => void;
   rewriteHttpUrl: (rawUrl: string | null) => string;
@@ -61,58 +64,57 @@ function applyOutputSegment(
   const { payload } = event;
   const { state } = deps;
   let normalizedMotion: NormalizedMotionPayload | null = null;
+  let rejectionReason: string | null = null;
   if (payload.motion.state === "present") {
     const normalized = deps.normalizeMotionPayload(payload.motion.payload);
     if (!normalized.ok) {
-      const reason = `output_segment_motion_invalid:${event.messageId}:${normalized.reason}`;
-      deps.sessionStore.commitOutputSegment(event.turnId, event.messageId, {
-        state: "rejected",
-        reason,
-      });
-      deps.reportOutputSegmentRejected(
-        reason,
-        event.envelope,
-      );
-      return;
+      rejectionReason = `output_segment_motion_invalid:${event.messageId}:${normalized.reason}`;
+    } else {
+      normalizedMotion = normalized.payload;
     }
-    normalizedMotion = normalized.payload;
   }
 
-  const resolvedAudioUrl = payload.audio.state === "present"
+  const resolvedAudioUrl = rejectionReason === null && payload.audio.state === "present"
     ? deps.rewriteHttpUrl(payload.audio.url)
     : null;
   if (
-    payload.audio.state === "present"
+    rejectionReason === null
+    && payload.audio.state === "present"
     && (!resolvedAudioUrl || !resolvedAudioUrl.trim())
   ) {
-    const reason = `output_segment_audio_url_invalid:${event.messageId}`;
-    deps.sessionStore.commitOutputSegment(event.turnId, event.messageId, {
-      state: "rejected",
-      reason,
-    });
-    deps.reportOutputSegmentRejected(
-      reason,
-      event.envelope,
-    );
-    return;
+    rejectionReason = `output_segment_audio_url_invalid:${event.messageId}`;
   }
 
-  const material: OutputSegmentMaterial = {
-    state: "accepted",
-    text: payload.text,
-    audio: payload.audio.state === "present"
-      ? {
-          state: "present",
-          url: resolvedAudioUrl!,
-        }
-      : payload.audio,
-    motion: payload.motion.state === "present"
-      ? { state: "present", payload: normalizedMotion as NormalizedMotionPayload }
-      : payload.motion,
-  };
+  const material: OutputSegmentMaterial = rejectionReason !== null
+    ? { state: "rejected", reason: rejectionReason }
+    : {
+        state: "accepted",
+        text: payload.text,
+        audio: payload.audio.state === "present"
+          ? {
+              state: "present",
+              url: resolvedAudioUrl!,
+            }
+          : payload.audio,
+        motion: payload.motion.state === "present"
+          ? { state: "present", payload: normalizedMotion as NormalizedMotionPayload }
+          : payload.motion,
+      };
 
   // SessionStore is the sole owner of the complete segment material.
-  deps.sessionStore.commitOutputSegment(event.turnId, event.messageId, material);
+  const commitResult = deps.sessionStore.commitOutputSegment(
+    event.turnId,
+    event.messageId,
+    material,
+  );
+  if (commitResult.status === "rejected") {
+    deps.reportOutputSegmentRejected(commitResult.reason, event.envelope);
+    return;
+  }
+  if (material.state === "rejected") {
+    deps.reportOutputSegmentRejected(material.reason, event.envelope);
+    return;
+  }
 
   state.lastImageCount = payload.images.length;
   const failures = [

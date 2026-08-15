@@ -167,6 +167,10 @@ export type OutputSegmentMaterial =
       reason: string;
     };
 
+export type OutputSegmentCommitResult =
+  | { status: "committed" }
+  | { status: "rejected"; reason: string };
+
 /**
  * 后端轮次三段信号在前端的镜像。
  *   turnStarted     是否收到 turn_started

@@ -31,6 +31,7 @@ import type {
   TurnPlaybackPhase,
   AudioTerminalState,
   TurnPlaybackSegment,
+  OutputSegmentCommitResult,
   OutputSegmentMaterial,
 } from "./session.js";
 import {
@@ -271,23 +272,26 @@ export function useTurnPlaybackSessionStore() {
     turnId: string | null,
     messageId: string,
     material: OutputSegmentMaterial,
-  ): TurnPlaybackSegment {
+  ): OutputSegmentCommitResult {
     const session = requireSession(turnId);
     const segmentId = normalizeRequiredMessageId(messageId);
     if (isTerminalPhase(session.phase)) {
-      throw new Error(
-        `Cannot commit output segment to terminal session: turnId=${turnId}, messageId=${segmentId}.`,
-      );
+      return {
+        status: "rejected",
+        reason: `output_segment_session_terminal:${turnId}:${segmentId}`,
+      };
     }
     if (session.backend.synthFinished) {
-      throw new Error(
-        `Cannot commit output segment after synth_finished: turnId=${turnId}, messageId=${segmentId}.`,
-      );
+      return {
+        status: "rejected",
+        reason: `output_segment_after_synth_finished:${turnId}:${segmentId}`,
+      };
     }
     if (session.segments.has(segmentId)) {
-      throw new Error(
-        `Duplicate output segment: turnId=${turnId}, messageId=${segmentId}.`,
-      );
+      return {
+        status: "rejected",
+        reason: `output_segment_duplicate:${turnId}:${segmentId}`,
+      };
     }
 
     const receivedAtMs = performance.now();
@@ -311,7 +315,7 @@ export function useTurnPlaybackSessionStore() {
         turnId,
         reason: rejectionReason,
       });
-      return segment;
+      return { status: "committed" };
     }
 
     if (material.text.state === "present") {
@@ -365,7 +369,7 @@ export function useTurnPlaybackSessionStore() {
       audioState: material.audio.state,
       motionState: material.motion.state,
     });
-    return segment;
+    return { status: "committed" };
   }
 
   // ── text ────────────────────────────────────────────────────────

@@ -44,17 +44,25 @@ flowchart TD
     subgraph INBOUND[前端协议与提交边界]
         ENVELOPE{信封版本和身份有效？}:::check
         SLOTS{所有 slot 严格可解析？}:::check
-        MOTION{motion payload 可归一化？}:::check
+        DOMAIN{motion payload 与 audio URL<br/>领域预检通过？}:::check
+        REJECTMATERIAL[构造 rejected material<br/>保留明确 reason]:::failure
+        ACCEPTMATERIAL[构造 accepted material]:::owner
+        STOREGUARD{Session 可写且 identity 唯一？}:::check
         ATOMIC[SessionStore 原子提交]:::owner
-        PFAIL[拒绝整段<br/>关闭/报告协议错误<br/>零 queue 副作用]:::failure
+        PARSERFAIL[parser 拒绝整段<br/>不写 SessionStore]:::failure
+        DOMAINFAIL[SessionStore 记录 rejected 段<br/>不释放任何播放材料]:::failure
+        DELIVERYFAIL[拒绝重复/迟到提交<br/>不覆盖首段 / 不关闭连接]:::failure
 
         SEG --> ENVELOPE
-        ENVELOPE -->|否| PFAIL
+        ENVELOPE -->|否| PARSERFAIL
         ENVELOPE -->|是| SLOTS
-        SLOTS -->|否| PFAIL
-        SLOTS -->|是| MOTION
-        MOTION -->|否| PFAIL
-        MOTION -->|是| ATOMIC
+        SLOTS -->|否| PARSERFAIL
+        SLOTS -->|是| DOMAIN
+        DOMAIN -->|否| REJECTMATERIAL --> STOREGUARD
+        DOMAIN -->|是| ACCEPTMATERIAL --> STOREGUARD
+        STOREGUARD -->|重复/迟到/终态| DELIVERYFAIL
+        STOREGUARD -->|rejected material| DOMAINFAIL
+        STOREGUARD -->|accepted material| ATOMIC
     end
 
     subgraph RELEASE[释放与 Timeline 边界]
@@ -126,7 +134,7 @@ flowchart TD
     BFAIL -.禁止.-> N2
     TFAIL -.禁止.-> N3
     TFAIL -.禁止.-> N4
-    PFAIL -.禁止.-> N5
+    PARSERFAIL -.禁止.-> N5
     MFAIL -.禁止.-> N6
     MFAIL -.禁止.-> N7
     LAB[Motion Lab 异步观察]:::owner -.禁止.-> N8
@@ -141,7 +149,9 @@ flowchart TD
 
     OBS[错误可观察性<br/>日志 reason + SessionStore terminal<br/>Timeline snapshot + MotionFeedback<br/>Motion Lab raw event]:::owner
     BFAIL --> OBS
-    PFAIL --> OBS
+    PARSERFAIL --> OBS
+    DOMAINFAIL --> OBS
+    DELIVERYFAIL --> OBS
     TFAIL --> OBS
     MFAIL --> OBS
     LFAIL --> OBS

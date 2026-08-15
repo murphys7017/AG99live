@@ -86,13 +86,21 @@ sequenceDiagram
 
     loop 每个完整逻辑段
         Buffer->>Inbound: output.segment.v3<br/>唯一 text / audio URL / motion / images 完整 slots
-        Inbound->>Inbound: 校验信封、slot、URL 和 motion payload
-        alt 任一字段或领域校验失败
-            Inbound--xStore: 拒绝整段，不写入 Store
-            Note over Inbound,Store: 协议错误显式暴露，不将失败解释为 absent
-        else 整段预校验通过
-            Inbound->>Store: commitOutputSegment() 原子提交
-            Store-->>Orch: 已解析段状态变更
+        Inbound->>Inbound: parser 校验信封、身份与 slot 结构
+        alt 信封或 slot 结构非法
+            Inbound--xStore: parser 拒绝，不写 SessionStore
+            Note over Inbound,Store: 结构错误显式暴露，不伪造可结算段
+        else 结构解析成功
+            Inbound->>Inbound: 重写 audio URL 并归一化 motion payload
+            Inbound->>Store: commitOutputSegment(accepted / rejected material)
+            alt 重复、迟到或 Session 已终态
+                Store-->>Inbound: 拒绝本次提交
+                Note over Inbound,Store: 不覆盖首段，不创建新段，不关闭 WebSocket
+            else rejected material 已提交
+                Store-->>Completion: rejected 段已结算，保留失败 reason
+                Note over Store,Completion: 不释放 text / audio / motion；<br/>参与 synth_finished 与失败 playback ACK
+            else accepted material 已提交
+                Store-->>Orch: 已解析段状态变更
             Note over Orch,Completion: 段提交后可立即起播；不等待 synth_finished
             Orch->>Timeline: 查询 open required execution timelines
             alt 仍有前一段 required sink
@@ -205,6 +213,7 @@ sequenceDiagram
             Note over Timeline,Store: speech-only 共用 segment clock reader<br/>但不覆盖 motion absent 协议事实
             Timeline->>Projection: 投影稳定的 audio / 正式 motion terminal
             Projection->>Store: 回写 segment execution facts
+            end
         end
     end
 

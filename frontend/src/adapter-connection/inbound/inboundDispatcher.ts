@@ -26,7 +26,10 @@ import type {
 } from "../../types/protocol.js";
 import type { InboundAdapterEvent, InboundEventMappingContext } from "./inboundEvents.js";
 import type { NormalizedMotionPayload } from "../../types/motion.js";
-import type { OutputSegmentMaterial } from "../../turn-playback/session.js";
+import type {
+  OutputSegmentCommitResult,
+  OutputSegmentMaterial,
+} from "../../turn-playback/session.js";
 import { dispatchInboundConnectionEvent } from "./inboundConnectionDispatcher.js";
 import { dispatchInboundFeatureEvent } from "./inboundFeatureDispatcher.js";
 import { dispatchInboundOutputEvent } from "./inboundOutputDispatcher.js";
@@ -73,7 +76,7 @@ export interface InboundDispatchDeps {
       turnId: string | null,
       messageId: string,
       material: OutputSegmentMaterial,
-    ) => void;
+    ) => OutputSegmentCommitResult;
   } | undefined;
   pushHistory: (role: string, text: string) => void;
   modelSyncAdapter: {
