@@ -26,7 +26,7 @@ export {};
 declare global {
   interface Window {
     Live2DCubismCore?: unknown;
-    initializeLive2D?: () => void;
+    initializeLive2D?: () => Promise<void>;
     getLAppAdapter?: () => {
       startMotion?: (
         group: string,

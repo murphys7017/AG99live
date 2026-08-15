@@ -1,5 +1,7 @@
 declare module "@cubismsdksamples/main" {
+  export function cancelLive2DInitialization(reason?: string): boolean;
   export function initializeLive2D(): Promise<void>;
+  export function releaseLive2D(reason?: string): void;
 }
 
 declare module "@cubismsdksamples/lappdefine" {

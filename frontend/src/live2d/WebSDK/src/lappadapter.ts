@@ -34,12 +34,12 @@ export class LAppAdapter {
 
   /* gets */
 
-  private getMgr(): LAppLive2DManager {
-    return LAppLive2DManager.getInstance();
+  private getMgr(): LAppLive2DManager | null {
+    return LAppLive2DManager.getExistingInstance();
   }
 
   private getModel(): LAppModel | null {
-    return this.getMgr().getModel(0);
+    return this.getMgr()?.getModel(0) ?? null;
   }
 
   /* motion */

@@ -108,8 +108,12 @@ export function useLive2dRenderer(
   let disposeForceRedrawListener: (() => void) | null = null;
   let lastCanvasWidth = 0;
   let lastCanvasHeight = 0;
-  let modelLoadQueue = Promise.resolve();
-  let rendererReleasePromise: Promise<void> | null = null;
+  let modelLoadQueue: Promise<void> = Promise.resolve();
+  let modelRequestVersion = 0;
+  let activeLoadVersion: number | null = null;
+  let cancelActiveModelLoad: ((reason?: string) => boolean) | null = null;
+  let rendererLifecycleStarted = false;
+  let disposed = false;
 
   const statusLabel = computed(() => {
     if (renderStatus.value === "ready") {
@@ -174,25 +178,40 @@ export function useLive2dRenderer(
     });
   }
 
-  function releaseRenderer(): Promise<void> {
-    if (!rendererReleasePromise) {
-      rendererReleasePromise = import("@cubismsdksamples/lappdelegate")
-        .then(({ LAppDelegate }) => LAppDelegate.releaseInstance());
-    }
-    return rendererReleasePromise;
+  function clearMountedRendererState(): void {
+    mountedModelUrl.value = "";
+    resizeLive2D.value = null;
   }
 
-  async function loadModel(model: ModelSummary) {
+  async function releaseRenderer(reason: string): Promise<void> {
+    const { releaseLive2D } = await import("@cubismsdksamples/main");
+    releaseLive2D(reason);
+    rendererLifecycleStarted = false;
+    clearMountedRendererState();
+  }
+
+  function isCurrentModelRequest(requestVersion: number, modelUrl: string): boolean {
+    return (
+      !disposed
+      && requestVersion === modelRequestVersion
+      && selectedModel.value?.model_url === modelUrl
+    );
+  }
+
+  async function loadModel(model: ModelSummary, requestVersion: number): Promise<void> {
     renderStatus.value = "loading";
     renderError.value = "";
 
     try {
       await nextTick();
+      if (!isCurrentModelRequest(requestVersion, model.model_url)) {
+        return;
+      }
       syncCanvasSize();
       await ensureLive2DCoreLoaded();
 
       const [
-        { initializeLive2D },
+        { cancelLive2DInitialization, initializeLive2D },
         { updateModelConfig, applyRuntimeEffectsSettings },
         { LAppDelegate },
       ] =
@@ -202,13 +221,29 @@ export function useLive2dRenderer(
           import("@cubismsdksamples/lappdelegate"),
         ]);
 
+      if (!isCurrentModelRequest(requestVersion, model.model_url)) {
+        return;
+      }
       const { baseUrl, modelDir, modelFileName } = parseModelUrl(model.model_url);
       applyRuntimeEffectsSettings(
         selectLive2dRuntimeEffectsSettings(settings.value, model),
       );
       updateModelConfig(baseUrl, modelDir, modelFileName);
-      await initializeLive2D();
+      activeLoadVersion = requestVersion;
+      cancelActiveModelLoad = cancelLive2DInitialization;
+      rendererLifecycleStarted = true;
+      try {
+        await initializeLive2D();
+      } finally {
+        if (activeLoadVersion === requestVersion) {
+          activeLoadVersion = null;
+          cancelActiveModelLoad = null;
+        }
+      }
       await nextTick();
+      if (!isCurrentModelRequest(requestVersion, model.model_url)) {
+        return;
+      }
       const didResizeCanvas = syncCanvasSize();
       resizeLive2D.value = () => LAppDelegate.getInstance().onResize();
       if (didResizeCanvas) {
@@ -218,11 +253,62 @@ export function useLive2dRenderer(
       mountedModelUrl.value = model.model_url;
       renderStatus.value = "ready";
     } catch (error) {
+      try {
+        await releaseRenderer("live2d_model_initialization_failed");
+      } catch (releaseError) {
+        console.error("[AG99live] Failed to release Live2D renderer after initialization failure", releaseError);
+      }
+      if (!isCurrentModelRequest(requestVersion, model.model_url)) {
+        return;
+      }
       console.error("[AG99live] Failed to initialize Live2D renderer", error);
       renderError.value =
         error instanceof Error ? error.message : "Unknown Live2D initialization error.";
       renderStatus.value = "error";
     }
+  }
+
+  function queueModelRequest(model: ModelSummary | null): void {
+    const requestVersion = ++modelRequestVersion;
+    const modelUrl = model?.model_url ?? "";
+    if (activeLoadVersion !== null) {
+      cancelActiveModelLoad?.("live2d_model_load_replaced");
+    }
+
+    if (model) {
+      renderStatus.value = "loading";
+      renderError.value = "";
+    } else {
+      renderStatus.value = "idle";
+      renderError.value = "";
+      if (!rendererLifecycleStarted && activeLoadVersion === null) {
+        clearMountedRendererState();
+        return;
+      }
+    }
+
+    modelLoadQueue = modelLoadQueue.then(async () => {
+      if (disposed || requestVersion !== modelRequestVersion) {
+        return;
+      }
+      if (!model) {
+        await releaseRenderer("live2d_model_selection_cleared");
+        return;
+      }
+      if (modelUrl === mountedModelUrl.value && renderStatus.value === "ready") {
+        return;
+      }
+      await loadModel(model, requestVersion);
+    }).catch((error) => {
+      if (disposed || requestVersion !== modelRequestVersion) {
+        return;
+      }
+      console.error("[AG99live] Live2D model transition failed", error);
+      clearMountedRendererState();
+      renderError.value =
+        error instanceof Error ? error.message : "Unknown Live2D model transition error.";
+      renderStatus.value = "error";
+    });
   }
 
   onMounted(() => {
@@ -251,28 +337,10 @@ export function useLive2dRenderer(
   watch(
     () => selectedModel.value?.model_url ?? "",
     (nextUrl) => {
-      if (!nextUrl) {
-        mountedModelUrl.value = "";
-        resizeLive2D.value = null;
-        renderError.value = "";
-        renderStatus.value = "idle";
-        return;
-      }
-
       if (nextUrl === mountedModelUrl.value && renderStatus.value === "ready") {
         return;
       }
-
-      if (!selectedModel.value) {
-        return;
-      }
-      const requestedModel = selectedModel.value;
-      modelLoadQueue = modelLoadQueue.then(async () => {
-        if (selectedModel.value?.model_url !== requestedModel.model_url) {
-          return;
-        }
-        await loadModel(requestedModel);
-      });
+      queueModelRequest(selectedModel.value);
     },
     { immediate: true },
   );
@@ -293,11 +361,12 @@ export function useLive2dRenderer(
         console.error(`[AG99live] ${error}`);
         renderError.value = error;
         renderStatus.value = "error";
-        mountedModelUrl.value = "";
-        resizeLive2D.value = null;
-        void releaseRenderer().catch((releaseError) => {
-          console.error("[AG99live] Failed to terminate Live2D renderer", releaseError);
-        });
+        clearMountedRendererState();
+        modelLoadQueue = modelLoadQueue
+          .then(() => releaseRenderer(error))
+          .catch((releaseError) => {
+            console.error("[AG99live] Failed to terminate Live2D renderer", releaseError);
+          });
         return;
       }
       adapter.applyRuntimeEffectsSettings(
@@ -308,17 +377,22 @@ export function useLive2dRenderer(
   );
 
   onBeforeUnmount(async () => {
+    disposed = true;
+    modelRequestVersion += 1;
+    cancelActiveModelLoad?.("live2d_renderer_unmounted");
     resizeObserver?.disconnect();
     resizeObserver = null;
     disposeForceRedrawListener?.();
     disposeForceRedrawListener = null;
-    mountedModelUrl.value = "";
-    resizeLive2D.value = null;
+    clearMountedRendererState();
     lastCanvasWidth = 0;
     lastCanvasHeight = 0;
 
     try {
-      await releaseRenderer();
+      await modelLoadQueue;
+      if (rendererLifecycleStarted) {
+        await releaseRenderer("live2d_renderer_unmounted");
+      }
     } catch (error) {
       console.warn("[AG99live] Failed to release Live2D delegate cleanly", error);
     }

@@ -42,6 +42,10 @@ export class LAppLive2DManager {
     return s_instance;
   }
 
+  public static getExistingInstance(): LAppLive2DManager | null {
+    return s_instance ?? null;
+  }
+
   /**
    * クラスのインスタンス（シングルトン）を解放する。
    * 

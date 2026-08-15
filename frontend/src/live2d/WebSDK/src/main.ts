@@ -115,6 +115,23 @@ export function initializeLive2D(): Promise<void> {
   return currentInitializationPromise;
 }
 
+export function cancelLive2DInitialization(
+  reason = "live2d_model_load_cancelled",
+): boolean {
+  return cancelCurrentLive2DModelLoad(reason);
+}
+
+export function releaseLive2D(
+  reason = "live2d_renderer_released",
+): void {
+  cancelCurrentLive2DModelLoad(reason);
+  cleanupHitTestPointerHandlers();
+  LAppDelegate.releaseInstance();
+  LAppGlManager.releaseInstance();
+  delete (window as any).getLive2DManager;
+  delete (window as any).getLAppAdapter;
+}
+
 async function initializeLive2DOnce(): Promise<void> {
   isInitializingLive2D = true;
 
@@ -122,14 +139,9 @@ async function initializeLive2DOnce(): Promise<void> {
     isInitializingLive2D = false;
   };
 
-  cancelCurrentLive2DModelLoad("live2d_model_load_replaced");
-
   // Release the previous Cubism instance before assigning the next load
   // generation, so stale model teardown cannot cancel the new generation.
-  cleanupHitTestPointerHandlers();
-  LAppDelegate.releaseInstance();
-  LAppLive2DManager.releaseInstance();
-  LAppGlManager.releaseInstance();
+  releaseLive2D("live2d_model_load_replaced");
 
   const loadGeneration = beginLive2DModelLoad();
 
@@ -233,8 +245,7 @@ async function initializeLive2DOnce(): Promise<void> {
 window.addEventListener(
   "beforeunload",
   (): void => {
-    cleanupHitTestPointerHandlers();
-    LAppDelegate.releaseInstance();
+    releaseLive2D("live2d_window_unloaded");
   },
   { passive: true }
 );
