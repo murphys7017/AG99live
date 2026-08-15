@@ -16,11 +16,16 @@ import type {
   MotionPlanPayload,
   SemanticMotionIntent,
 } from "../../types/protocol.js";
+import type {
+  CatalogMotionStartResult,
+  DirectParameterPlanTerminalEvent,
+} from "../../types/live2d-runtime.d.ts";
 import {
   resolvePerformanceCurveTimeline,
   resolvePlaybackTargetDurationMs,
 } from "./playbackClock.js";
 import type {
+  ModelEnginePlanStartedEvent,
   MotionRuntimeStateController,
   MotionStartDependencies,
 } from "./contracts.js";
@@ -461,6 +466,136 @@ function isMotionResourceIntent(
     && intent.motion_resource_id.trim().length > 0;
 }
 
+interface CatalogMotionExecutionOptions {
+  motion: CatalogMotionPayload;
+  selectedModel: ModelSummary | null;
+  context: StartPayloadContext;
+  dependencies: MotionStartDependencies;
+  state: MotionRuntimeStateController;
+  diagnostics: CompileDiagnostics | null;
+  payloadKind: "catalog_motion" | "semantic_intent";
+  preparingMessage: string;
+  failureMessage: string;
+  startedHistory: (successMessage: string) => string;
+  buildStartedEvent: (
+    runId: string,
+    playerMessage: string,
+  ) => ModelEnginePlanStartedEvent;
+}
+
+function startCatalogMotionExecution(
+  options: CatalogMotionExecutionOptions,
+): boolean {
+  const {
+    motion,
+    selectedModel,
+    context,
+    dependencies,
+    state,
+    diagnostics,
+  } = options;
+  let notifiedStarted = false;
+  let startResult: CatalogMotionStartResult | null = null;
+  let deferredTerminal: DirectParameterPlanTerminalEvent | null = null;
+
+  const reportTerminalBeforeStart = (
+    event: DirectParameterPlanTerminalEvent,
+  ): void => {
+    const reason = event.reason?.trim()
+      || `catalog_motion_${event.status}_before_start`;
+    state.setLastCompileReason(reason);
+    if (event.status === "stopped") {
+      state.setState("idle", `动作准备已停止（${reason}）。`, diagnostics);
+      state.pushHistory("system", `动作准备已停止（${reason}）。`);
+    } else {
+      state.setState("failed", reason, diagnostics);
+      state.pushHistory("error", `动作播放失败：${reason}`);
+    }
+    const turnId = typeof context.turnId === "string"
+      ? context.turnId.trim()
+      : "";
+    if (context.playbackOrigin === "conversation" && turnId) {
+      dependencies.onMotionRejected({
+        turnId,
+        messageId: context.messageId,
+        reason,
+      });
+    }
+  };
+
+  const handleTerminal = (event: DirectParameterPlanTerminalEvent): void => {
+    if (notifiedStarted) {
+      return;
+    }
+    if (startResult === null) {
+      deferredTerminal = event;
+      return;
+    }
+    if (startResult.status === "accepted") {
+      reportTerminalBeforeStart(event);
+    }
+  };
+
+  startResult = dependencies.playCatalogMotion(motion, selectedModel, {
+    playbackClockReader: context.playbackClockReader,
+    requiresPlaybackClock: context.playbackOrigin === "conversation",
+    onStarted: (_motion, runId) => {
+      const normalizedRunId = normalizeMotionRunId(runId);
+      if (!normalizedRunId) {
+        handleTerminal({
+          runId: "",
+          status: "failed",
+          reason: MOTION_PLAYER_RUN_ID_MISSING,
+        });
+        return;
+      }
+      notifiedStarted = true;
+      const successMessage = buildSuccessMessage(context, dependencies);
+      state.setState("playing", successMessage, diagnostics);
+      state.pushHistory("system", options.startedHistory(successMessage));
+      dependencies.onPlanStarted(
+        options.buildStartedEvent(normalizedRunId, successMessage),
+      );
+    },
+    onFinished: handleTerminal,
+  });
+
+  if (startResult.status === "rejected") {
+    const failureReason = startResult.reason.trim()
+      || dependencies.getPlayerMessage?.()
+      || options.failureMessage;
+    state.setLastCompileReason(failureReason);
+    state.setState("failed", failureReason, diagnostics);
+    state.pushHistory("error", `动作播放失败：${failureReason}`);
+    return false;
+  }
+
+  const runId = normalizeMotionRunId(startResult.runId);
+  if (!runId) {
+    return rejectMotionStartWithoutRunId(state, diagnostics);
+  }
+  if (startResult.status === "started") {
+    return notifiedStarted
+      ? true
+      : rejectMotionStartWithoutRunId(state, diagnostics);
+  }
+
+  dependencies.onCatalogMotionAccepted({
+    runId,
+    origin: context.playbackOrigin,
+    turnId: typeof context.turnId === "string"
+      ? context.turnId.trim() || null
+      : null,
+    messageId: context.messageId.trim(),
+    payloadKind: options.payloadKind,
+  });
+  state.setState("pending", options.preparingMessage, diagnostics);
+  if (deferredTerminal !== null) {
+    reportTerminalBeforeStart(deferredTerminal);
+  }
+  return true;
+}
+
 function startCatalogMotionPayload(
   payload: Extract<NormalizedMotionPayload, { kind: "catalog_motion" }>,
   context: StartPayloadContext,
@@ -468,49 +603,34 @@ function startCatalogMotionPayload(
   state: MotionRuntimeStateController,
 ): boolean {
   const selectedModel = dependencies.getSelectedModel();
-  let notifiedStarted = false;
-  const started = dependencies.playCatalogMotion(payload.motion, selectedModel, {
-    playbackClockReader: context.playbackClockReader,
-    requiresPlaybackClock: context.playbackOrigin === "conversation",
-    onStarted: (_motion, runId) => {
-      const normalizedRunId = normalizeMotionRunId(runId);
-      if (!normalizedRunId) {
-        return;
-      }
-      notifiedStarted = true;
-      dependencies.onPlanStarted({
-        motion: payload.motion,
-        model: selectedModel,
-        messageId: context.messageId,
-        turnId: context.turnId,
-        playbackTurnId: context.playbackTurnId,
-        playbackOrigin: context.playbackOrigin,
-        startReason: context.startReason,
-        queuedDelayMs: context.queuedDelayMs,
-        payloadKind: payload.kind,
-        executionKind: "catalog_motion",
-        diagnostics: null,
-        playerMessage: buildSuccessMessage(context, dependencies),
-        runId: normalizedRunId,
-      });
-    },
+  return startCatalogMotionExecution({
+    motion: payload.motion,
+    selectedModel,
+    context,
+    dependencies,
+    state,
+    diagnostics: null,
+    payloadKind: payload.kind,
+    preparingMessage: "现成 motion 已接受，等待 Live2D 实际启动。",
+    failureMessage: "现成 motion 被运行时拒绝执行。",
+    startedHistory: (successMessage) =>
+      `现成 motion 执行中（${successMessage}）。`,
+    buildStartedEvent: (runId, playerMessage) => ({
+      motion: payload.motion,
+      model: selectedModel,
+      messageId: context.messageId,
+      turnId: context.turnId,
+      playbackTurnId: context.playbackTurnId,
+      playbackOrigin: context.playbackOrigin,
+      startReason: context.startReason,
+      queuedDelayMs: context.queuedDelayMs,
+      payloadKind: payload.kind,
+      executionKind: "catalog_motion",
+      diagnostics: null,
+      playerMessage,
+      runId,
+    }),
   });
-  if (!started) {
-    const failureReason = dependencies.getPlayerMessage?.()
-      || "现成 motion 被运行时拒绝执行。";
-    state.setLastCompileReason(failureReason);
-    state.setState("failed", failureReason, null);
-    state.pushHistory("error", `动作播放失败：${failureReason}`);
-    return false;
-  }
-
-  const successMessage = buildSuccessMessage(context, dependencies);
-  if (!notifiedStarted) {
-    return rejectMotionStartWithoutRunId(state, null);
-  }
-  state.setState("playing", successMessage, null);
-  state.pushHistory("system", `现成 motion 执行中（${successMessage}）。`);
-  return true;
 }
 
 function startCompilableMotionPayload(
@@ -650,49 +770,35 @@ function startMotionResourcePayload(
   state: MotionRuntimeStateController,
 ): boolean {
   const selectedModel = dependencies.getSelectedModel();
-  let notifiedStarted = false;
-  const started = dependencies.playCatalogMotion(prepared.motion, selectedModel, {
-    playbackClockReader: context.playbackClockReader,
-    requiresPlaybackClock: context.playbackOrigin === "conversation",
-    onStarted: (_motion, runId) => {
-      const normalizedRunId = normalizeMotionRunId(runId);
-      if (!normalizedRunId) {
-        return;
-      }
-      notifiedStarted = true;
-      dependencies.onPlanStarted({
-        intent: prepared.intent,
-        motion: prepared.motion,
-        model: selectedModel,
-        messageId: context.messageId,
-        turnId: context.turnId,
-        playbackTurnId: context.playbackTurnId,
-        playbackOrigin: context.playbackOrigin,
-        startReason: context.startReason,
-        queuedDelayMs: context.queuedDelayMs,
-        payloadKind: "semantic_intent",
-        executionKind: "motion_resource",
-        diagnostics: prepared.diagnostics,
-        playerMessage: buildSuccessMessage(context, dependencies),
-        runId: normalizedRunId,
-      });
-    },
+  return startCatalogMotionExecution({
+    motion: prepared.motion,
+    selectedModel,
+    context,
+    dependencies,
+    state,
+    diagnostics: prepared.diagnostics,
+    payloadKind: "semantic_intent",
+    preparingMessage: `完整动作资源已接受，等待 Live2D 实际启动：${prepared.resourceId}`,
+    failureMessage: `完整动作资源执行失败：${prepared.resourceId}`,
+    startedHistory: (successMessage) =>
+      `完整动作资源执行中（${successMessage}）。`,
+    buildStartedEvent: (runId, playerMessage) => ({
+      intent: prepared.intent,
+      motion: prepared.motion,
+      model: selectedModel,
+      messageId: context.messageId,
+      turnId: context.turnId,
+      playbackTurnId: context.playbackTurnId,
+      playbackOrigin: context.playbackOrigin,
+      startReason: context.startReason,
+      queuedDelayMs: context.queuedDelayMs,
+      payloadKind: "semantic_intent",
+      executionKind: "motion_resource",
+      diagnostics: prepared.diagnostics,
+      playerMessage,
+      runId,
+    }),
   });
-  if (!started) {
-    const failureReason = dependencies.getPlayerMessage?.()
-      || `完整动作资源执行失败：${prepared.resourceId}`;
-    state.setLastCompileReason(failureReason);
-    state.setState("failed", failureReason, prepared.diagnostics);
-    state.pushHistory("error", failureReason);
-    return false;
-  }
-  const successMessage = buildSuccessMessage(context, dependencies);
-  if (!notifiedStarted) {
-    return rejectMotionStartWithoutRunId(state, prepared.diagnostics);
-  }
-  state.setState("playing", successMessage, prepared.diagnostics);
-  state.pushHistory("system", `完整动作资源执行中（${successMessage}）。`);
-  return true;
 }
 
 function buildSuccessMessage(

@@ -1,5 +1,8 @@
 import type { DesktopHistoryEntry } from "../../types/desktop.js";
-import type { DirectParameterPlanTerminalEvent } from "../../types/live2d-runtime.d.ts";
+import type {
+  CatalogMotionStartResult,
+  DirectParameterPlanTerminalEvent,
+} from "../../types/live2d-runtime.d.ts";
 import type {
   CatalogMotionPayload,
   ModelSummary,
@@ -122,9 +125,15 @@ export interface MotionStartDependencies {
     motion: CatalogMotionPayload,
     model: ModelSummary | null,
     options: PlayCatalogMotionOptions,
-  ) => boolean;
+  ) => CatalogMotionStartResult;
   getPlayerMessage?: () => string;
+  onCatalogMotionAccepted: (run: ModelEngineActivePlaybackRun) => void;
   onPlanStarted: (event: ModelEnginePlanStartedEvent) => void;
+  onMotionRejected: (event: {
+    turnId: string;
+    messageId: string;
+    reason: string;
+  }) => void;
   onCompileFailed?: (event: ModelEngineCompileFailedEvent) => void;
   stageRegistry?: ModelEngineStageRegistry;
 }
@@ -168,13 +177,8 @@ export interface MotionRuntimeStateController {
 }
 
 export interface ModelEngineDependencies
-  extends MotionStartDependencies {
+  extends Omit<MotionStartDependencies, "onCatalogMotionAccepted"> {
   stopPlan: (reason?: string) => void;
-  onMotionRejected: (event: {
-    turnId: string;
-    messageId: string;
-    reason: string;
-  }) => void;
   canStartSpeechOnlyMotion: (
     turnId: string | null,
     messageId: string,

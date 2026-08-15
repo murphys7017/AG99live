@@ -9,6 +9,11 @@ export type {
   DirectParameterPlanTerminalStatus,
 } from "../live2d/WebSDK/src/directparameterplan";
 
+export type CatalogMotionStartResult =
+  | { status: "rejected"; reason: string }
+  | { status: "accepted"; runId: string }
+  | { status: "started"; runId: string };
+
 export interface CatalogMotionLifecycleCallbacks {
   playbackClockReader?: { getElapsedMs: () => number | null };
   onStarted?: () => void;

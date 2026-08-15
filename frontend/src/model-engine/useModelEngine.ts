@@ -55,6 +55,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     lastStartReason: "",
   });
   let activePlaybackRun: ModelEngineActivePlaybackRun | null = null;
+  let preparingCatalogMotionRun: ModelEngineActivePlaybackRun | null = null;
   const preparedSemanticMotions = new Map<string, {
     durationMs: number;
     assistantText: string;
@@ -93,7 +94,13 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     playPlan: dependencies.playPlan,
     playCatalogMotion: dependencies.playCatalogMotion,
     getPlayerMessage: dependencies.getPlayerMessage,
+    onCatalogMotionAccepted: (run) => {
+      preparingCatalogMotionRun = run;
+    },
     onPlanStarted: (event) => {
+      if (preparingCatalogMotionRun?.runId === event.runId) {
+        preparingCatalogMotionRun = null;
+      }
       activePlaybackRun = {
         runId: event.runId,
         origin: event.playbackOrigin,
@@ -102,6 +109,16 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
         payloadKind: event.payloadKind,
       };
       dependencies.onPlanStarted(event);
+    },
+    onMotionRejected: (event) => {
+      if (
+        preparingCatalogMotionRun
+        && preparingCatalogMotionRun.turnId === normalizeTurnId(event.turnId)
+        && preparingCatalogMotionRun.messageId === event.messageId.trim()
+      ) {
+        preparingCatalogMotionRun = null;
+      }
+      dependencies.onMotionRejected(event);
     },
     onCompileFailed: dependencies.onCompileFailed,
     stageRegistry,
@@ -480,11 +497,20 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
   function handlePlaybackTerminal(
     event: ModelEnginePlaybackTerminalEvent,
   ): ModelEngineActivePlaybackRun | null {
-    if (!activePlaybackRun || activePlaybackRun.runId !== event.runId) {
+    const completedRun = activePlaybackRun?.runId === event.runId
+      ? activePlaybackRun
+      : preparingCatalogMotionRun?.runId === event.runId
+        ? preparingCatalogMotionRun
+        : null;
+    if (!completedRun) {
       return null;
     }
-    const completedRun = activePlaybackRun;
-    activePlaybackRun = null;
+    if (activePlaybackRun?.runId === event.runId) {
+      activePlaybackRun = null;
+    }
+    if (preparingCatalogMotionRun?.runId === event.runId) {
+      preparingCatalogMotionRun = null;
+    }
     if (event.status === "failed" || event.status === "rejected") {
       setState(
         "failed",
@@ -506,6 +532,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     preparedSemanticMotions.clear();
     dependencies.stopPlan(reason);
     activePlaybackRun = null;
+    preparingCatalogMotionRun = null;
     state.lastCompileReason = "";
     setState(
       "idle",
@@ -523,14 +550,22 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
   ): void {
     runtimeScheduler.cancelPendingPayloadForSegment(turnId, messageId);
     preparedSemanticMotions.delete(buildSegmentKey(turnId, messageId));
-    if (
-      activePlaybackRun?.turnId !== normalizeTurnId(turnId)
-      || activePlaybackRun.messageId !== messageId.trim()
-    ) {
+    const normalizedTurnId = normalizeTurnId(turnId);
+    const normalizedMessageId = messageId.trim();
+    const activeRunMatches = activePlaybackRun?.turnId === normalizedTurnId
+      && activePlaybackRun.messageId === normalizedMessageId;
+    const preparingRunMatches = preparingCatalogMotionRun?.turnId === normalizedTurnId
+      && preparingCatalogMotionRun.messageId === normalizedMessageId;
+    if (!activeRunMatches && !preparingRunMatches) {
       return;
     }
     dependencies.stopPlan(reason);
-    activePlaybackRun = null;
+    if (activeRunMatches) {
+      activePlaybackRun = null;
+    }
+    if (preparingRunMatches) {
+      preparingCatalogMotionRun = null;
+    }
     state.lastCompileReason = "";
     setState("idle", `动作引擎已停止（${reason}）。`, null);
   }

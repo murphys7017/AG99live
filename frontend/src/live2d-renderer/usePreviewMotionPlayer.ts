@@ -5,7 +5,10 @@ import type {
   SemanticParameterPlan,
 } from "../types/protocol.js";
 import { SCHEMA_PARAMETER_PLAN_V3 } from "../types/protocol.js";
-import type { DirectParameterPlanTerminalEvent } from "../types/live2d-runtime.d.ts";
+import type {
+  CatalogMotionStartResult,
+  DirectParameterPlanTerminalEvent,
+} from "../types/live2d-runtime.d.ts";
 import { isObject, normalizeText } from "../utils/guards.js";
 import { parseSemanticParameterPlan } from "../model-engine/planParser.js";
 import type { MotionPlaybackClockReader } from "../model-engine/contracts.js";
@@ -214,7 +217,7 @@ export function usePreviewMotionPlayer() {
     motion: CatalogMotionPayload,
     _model: ModelSummary | null = null,
     options: PlayCatalogMotionOptions = {},
-  ): boolean {
+  ): CatalogMotionStartResult {
     const manualPreviewStartedAtMs = performance.now();
     const playbackClockReader = options.playbackClockReader ?? (
       options.requiresPlaybackClock
@@ -227,7 +230,7 @@ export function usePreviewMotionPlayer() {
       state.message = reason;
       state.finishedAt = new Date().toISOString();
       console.error("[MotionPlayer]", reason);
-      return false;
+      return { status: "rejected", reason };
     }
     const catalogDurationMs = motion.duration_ms;
     if (
@@ -239,7 +242,7 @@ export function usePreviewMotionPlayer() {
       state.status = "failed";
       state.message = reason;
       state.finishedAt = new Date().toISOString();
-      return false;
+      return { status: "rejected", reason };
     }
     const adapter = window.getLAppAdapter?.();
     if (
@@ -252,7 +255,7 @@ export function usePreviewMotionPlayer() {
       state.status = "failed";
       state.message = reason;
       state.finishedAt = new Date().toISOString();
-      return false;
+      return { status: "rejected", reason };
     }
 
     stopActiveCatalogMotion("catalog_motion_replaced");
@@ -341,6 +344,7 @@ export function usePreviewMotionPlayer() {
     );
     if (handle === -1) {
       const motionStartError = getMotionStartError();
+      const failureReason = motionStartError || "catalog_motion_start_rejected";
       const reason = motionStartError
         ? `现成 motion 执行失败：${motion.motion_id}（${motionStartError}）。`
         : `现成 motion 执行失败：${motion.motion_id}。`;
@@ -349,12 +353,13 @@ export function usePreviewMotionPlayer() {
       state.message = reason;
       state.finishedAt = new Date().toISOString();
       activeCatalogMotionRunId = "";
-      return false;
+      return { status: "rejected", reason: failureReason };
     }
     if (state.status === "preparing") {
       activeMotionStop = (reason) => adapter.stopMotion?.(reason);
+      return { status: "accepted", runId: playbackRunId };
     }
-    return true;
+    return { status: "started", runId: playbackRunId };
   }
 
   onScopeDispose(() => {
