@@ -33,7 +33,9 @@
 - 当前外部协议信封不存在 `session_id`。
 - 当前外部协议信封不存在 `orchestration_id`。
 - 前端在文本发送前、麦克风开始采集前主动创建 `turn_id`。由后端发起的轮次不受此限制：AstrBot 主动输出由 Adapter 为每次 `send_by_session()` 创建独立的 `proactive:<uuid>` turn，并在 `output.segment` 前先发送 `control.turn_started`。
-- 一次语音输入如果最终 dropped、空转写或失败，该 `turn_id` 立即终结且不可复用。
+- 采集根 `turn_id` 只标识一次麦克风输入，不等同于正式对话 Turn。dropped、空转写或
+  STT 失败只返回 `control.error`；只有成功转写并进入 AstrBot 的输入才会先收到
+  `control.turn_started`，并在之后收到对应 `control.turn_finished`。
 
 ## 完成信号
 
@@ -60,9 +62,9 @@ control.turn_finished
 | 类型 | 载荷 |
 | --- | --- |
 | `input.text` | `{ text: string, images: ImagePayload[] }` |
-| `input.audio_stream_start` | `{ stream_id: string, source: string, device_id?: string, encoding: "pcm16le", sample_rate: number, channels: 1 }` |
+| `input.audio_stream_start` | `{ stream_id: string, source: string, device_id?: string, encoding: "pcm16le", sample_rate: number, channels: 1, capture_mode?: "manual" | "ptt" | "auto" }` |
 | WebSocket 二进制音频块 | `AG99` 二进制帧，见下文 |
-| `input.audio_stream_end` | `{ stream_id: string, reason: string, dropped?: boolean, last_seq?: number }` |
+| `input.audio_stream_end` | `{ stream_id: string, reason: string, dropped?: boolean, last_seq?: number, capture_mode?: "manual" | "ptt" | "auto" }` |
 
 `input.text` 通过协议校验后必须立即携带其前端 `turn_id` 提交 AstrBot EventBus。Adapter 不因较早 Turn 仍在前端播放而拒绝输入，也不维护第二套输入 FIFO；排队与串行处理由 AstrBot EventBus / Personal Runtime 负责。每个 `PlatformEvent` 保存自己的 `output_correlation_id`，后续物理输出聚合、`control.synth_finished`、`control.playback_finished` 和 `control.turn_finished` 都按该 ID 独立关联，禁止从最新的全局 Turn 推断旧事件身份。
 
@@ -70,9 +72,12 @@ control.turn_finished
 
 - 一段采集期只使用一个新的采集根 `turn_id`。
 - 该采集期先发送 `input.audio_stream_start`，随后发送一个或多个 WebSocket 二进制音频块，最后发送 `input.audio_stream_end`；三者共享同一个采集根 `turn_id` 与 `stream_id`。
+- `stream_id` 在一个连接内必须先 start、再按严格递增 `seq` 发送 chunk、最后 end；重复 start、
+  无 start 的 chunk/end、重复或乱序 chunk 都是协议错误，不允许自动补建、覆盖或忽略。
 - PTT 在 `input.audio_stream_end` 时把该段 PCM16LE 转成一个对话输入。常开收音持续传输同一采集会话的音频，后端使用 `stream_id` 作为缓冲键，并为每段 VAD 语音派生 `<capture_turn_id>:vad:<n>` 作为正式对话 turn ID。
 - 对 VAD 子轮次发出的 `control.interrupt` 只能定位同一采集会话仍在飞的上一子轮次，不能使用采集根 ID；常开采集不会因完成一轮转写而停止。
-- 如果 `dropped === true`，后端丢弃该 turn 的本次音频并立即终结该 turn。
+- 如果 `dropped === true`，后端丢弃该次采集并返回输入错误；因为它尚未建立正式 Turn，
+  不发布 `control.turn_finished`。
 - Electron / Windows 桌面端的设备枚举和采集可以来自主进程 DirectShow/ffmpeg，也可以回退到浏览器 `MediaDevices`。原生路径直接让 ffmpeg 输出 `s16le`，Web Audio 路径在 renderer 内把 Float32 转成 PCM16LE。
 - 按键说话模式只改变采集开始/结束时机。按下配置按键等价于开始一段麦克风采集，松开按键等价于发送该段 `input.audio_stream_end(reason="ptt_release")`。
 - 非流式 JSON 数组音频协议已删除；未知旧类型会作为不受支持的消息拒绝。
@@ -98,7 +103,8 @@ control.turn_finished
   "seq": 0,
   "encoding": "pcm16le",
   "sample_rate": 16000,
-  "channels": 1
+  "channels": 1,
+  "capture_mode": "ptt"
 }
 ```
 

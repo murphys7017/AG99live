@@ -57,7 +57,6 @@ from ..protocol import (
     TYPE_CONTROL_INTERRUPT,
     TYPE_CONTROL_PLAYBACK_FINISHED,
     TYPE_ENGINE_MOTION_INTENT,
-    TYPE_INPUT_AUDIO_STREAM_CHUNK,
     TYPE_INPUT_AUDIO_STREAM_END,
     TYPE_INPUT_AUDIO_STREAM_START,
     TYPE_INPUT_TEXT,
@@ -198,10 +197,6 @@ class TurnCoordinator:
             if message.type == TYPE_INPUT_AUDIO_STREAM_START:
                 self._active_vad_turn_by_capture_turn.pop(turn_id, None)
                 await self.speech_ingress.handle_audio_stream_start(message)
-                return
-
-            if message.type == TYPE_INPUT_AUDIO_STREAM_CHUNK:
-                await self.speech_ingress.handle_audio_stream_chunk(message)
                 return
 
             if message.type == TYPE_INPUT_AUDIO_STREAM_END:

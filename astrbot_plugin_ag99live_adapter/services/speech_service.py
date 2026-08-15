@@ -9,7 +9,6 @@ AstrBotMessage 并配套发 build_output_transcription（如果转写出了文�
 
 from __future__ import annotations
 
-import base64
 from collections import Counter
 from dataclasses import dataclass, field
 import os
@@ -108,103 +107,36 @@ class SpeechIngressService:
         self._vad_turn_counters: dict[str, int] = {}
 
     async def handle_audio_stream_start(self, message) -> None:
-        """处理 input.audio_stream_start：登记新流的状态。
-
-        没拿到 stream_id 时静默 return；已有同名流会被覆盖（用最新一次 start 的参数）。
-        """
+        """处理 input.audio_stream_start：登记一条新的、唯一的流状态。"""
         payload = message.payload
         stream_id = self._normalize_stream_id(payload.get("stream_id"))
         if not stream_id:
-            return
+            raise ValueError("audio_stream_start_stream_id_missing")
+        if stream_id in self._audio_streams:
+            raise ValueError(f"audio_stream_duplicate_start:{stream_id}")
 
         self._audio_streams[stream_id] = AudioStreamState(
             stream_id=stream_id,
-            sample_rate=max(int(payload.get("sample_rate") or 16000), 1),
-            channels=max(int(payload.get("channels") or 1), 1),
-            encoding=str(payload.get("encoding") or "pcm16le"),
+            sample_rate=payload["sample_rate"],
+            channels=payload["channels"],
+            encoding=payload["encoding"],
             capture_mode=self._normalize_capture_mode(payload.get("capture_mode"), default="ptt"),
         )
-
-    async def handle_audio_stream_chunk(self, message) -> None:
-        payload = message.payload
-        stream_id = self._normalize_stream_id(payload.get("stream_id"))
-        if not stream_id:
-            return
-
-        stream = self._audio_streams.get(stream_id)
-        if stream is None:
-            await self.handle_audio_stream_start(message)
-            stream = self._audio_streams.get(stream_id)
-            if stream is None:
-                return
-
-        if stream.encoding != "pcm16le":
-            await self._send_json(
-                build_control_error(
-                    turn_id=message.turn_id,
-                    message=f"Unsupported audio stream encoding: {stream.encoding}",
-                )
-            )
-            self._audio_streams.pop(stream_id, None)
-            return
-
-        seq = int(payload.get("seq") or 0)
-        if seq <= stream.last_seq:
-            logger.warning(
-                "Ignoring out-of-order audio stream chunk: stream_id=%s seq=%s last_seq=%s",
-                stream_id,
-                seq,
-                stream.last_seq,
-            )
-            return
-
-        audio_base64 = payload.get("audio_base64")
-        if not isinstance(audio_base64, str) or not audio_base64:
-            return
-
-        try:
-            chunk_bytes = base64.b64decode(audio_base64)
-        except Exception as exc:
-            logger.warning("Failed to decode audio stream chunk for %s: %s", stream_id, exc)
-            return
-
-        stream.chunks.append(chunk_bytes)
-        stream.last_seq = seq
 
     async def handle_audio_stream_binary_chunk(self, frame: BinaryAudioChunkFrame):
         stream_id = self._normalize_stream_id(frame.stream_id)
         if not stream_id:
-            return
+            raise ValueError("binary_audio_stream_id_missing")
 
         stream = self._audio_streams.get(stream_id)
         if stream is None:
-            stream = AudioStreamState(
-                stream_id=stream_id,
-                sample_rate=frame.sample_rate,
-                channels=frame.channels,
-                encoding=frame.encoding,
-                capture_mode=self._normalize_capture_mode(frame.metadata.get("capture_mode"), default="ptt"),
-            )
-            self._audio_streams[stream_id] = stream
-
-        if stream.encoding != "pcm16le" or frame.encoding != "pcm16le":
-            await self._send_json(
-                build_control_error(
-                    turn_id=frame.turn_id,
-                    message=f"Unsupported audio stream encoding: {stream.encoding or frame.encoding}",
-                )
-            )
-            self._audio_streams.pop(stream_id, None)
-            return
+            raise ValueError(f"binary_audio_chunk_without_start:{stream_id}")
 
         if frame.seq <= stream.last_seq:
-            logger.warning(
-                "Ignoring out-of-order binary audio stream chunk: stream_id=%s seq=%s last_seq=%s",
-                stream_id,
-                frame.seq,
-                stream.last_seq,
+            self._audio_streams.pop(stream_id, None)
+            raise ValueError(
+                f"binary_audio_chunk_sequence_invalid:{stream_id}:{frame.seq}:{stream.last_seq}"
             )
-            return
 
         if stream.sample_rate != frame.sample_rate or stream.channels != frame.channels:
             logger.warning(
@@ -224,10 +156,15 @@ class SpeechIngressService:
             )
             return
 
-        stream.capture_mode = self._normalize_capture_mode(
+        frame_capture_mode = self._normalize_capture_mode(
             frame.metadata.get("capture_mode"),
             default=stream.capture_mode,
         )
+        if frame_capture_mode != stream.capture_mode:
+            self._audio_streams.pop(stream_id, None)
+            raise ValueError(
+                f"binary_audio_capture_mode_changed:{stream_id}:{stream.capture_mode}:{frame_capture_mode}"
+            )
         if stream.capture_mode in {"manual", "auto"}:
             built_message = await self._handle_vad_pcm16_chunk(
                 frame.payload,
@@ -256,14 +193,10 @@ class SpeechIngressService:
         payload = message.payload
         stream_id = self._normalize_stream_id(payload.get("stream_id"))
         if not stream_id:
-            return None
+            raise ValueError("audio_stream_end_stream_id_missing")
 
         stream = self._audio_streams.pop(stream_id, None)
         dropped = bool(payload.get("dropped", False))
-        capture_mode = self._normalize_capture_mode(
-            payload.get("capture_mode"),
-            default=stream.capture_mode if stream else "ptt",
-        )
         if dropped:
             logger.warning("Dropping binary microphone audio stream because frontend reported chunk loss.")
             await self._emit_input_error(
@@ -272,10 +205,24 @@ class SpeechIngressService:
             )
             return None
 
+        if stream is None:
+            raise ValueError(f"audio_stream_end_without_start:{stream_id}")
+
+        capture_mode = self._normalize_capture_mode(
+            payload.get("capture_mode"),
+            default=stream.capture_mode,
+        )
+        if capture_mode != stream.capture_mode:
+            raise ValueError(
+                f"audio_stream_end_capture_mode_changed:{stream_id}:{stream.capture_mode}:{capture_mode}"
+            )
+        last_seq = payload.get("last_seq")
+        if last_seq is not None and last_seq != stream.last_seq:
+            raise ValueError(
+                f"audio_stream_end_sequence_mismatch:{stream_id}:{last_seq}:{stream.last_seq}"
+            )
+
         if capture_mode in {"manual", "auto"}:
-            if stream is None:
-                logger.debug("Ignoring VAD audio stream end with missing stream: %s", stream_id)
-                return None
             if self._consume_vad_turn_counter(message.turn_id):
                 logger.debug("Ignoring VAD audio stream end after child turns: %s", stream_id)
                 return None
@@ -285,8 +232,11 @@ class SpeechIngressService:
             )
             return None
 
-        if stream is None or not stream.chunks:
-            logger.debug("Ignoring `input.audio_stream_end` with empty or missing stream: %s", stream_id)
+        if not stream.chunks:
+            await self._emit_input_error(
+                turn_id=message.turn_id,
+                error_message="Microphone audio segment was empty before transcription.",
+            )
             return None
 
         audio_buffer = self._pcm16_bytes_to_float32(stream.chunks)

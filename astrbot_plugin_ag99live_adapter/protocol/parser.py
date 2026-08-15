@@ -24,7 +24,8 @@ from .constants import (
     PROTOCOL_VERSION,
     SOURCE_FRONTEND,
     TYPE_CONTROL_PLAYBACK_FINISHED,
-    TYPE_INPUT_AUDIO_STREAM_CHUNK,
+    TYPE_INPUT_AUDIO_STREAM_END,
+    TYPE_INPUT_AUDIO_STREAM_START,
     TYPE_INPUT_TEXT,
     TYPE_SYSTEM_HISTORY_DELETE,
     TYPE_SYSTEM_HISTORY_LOAD,
@@ -182,10 +183,39 @@ def _validate_payload(message_type: str, payload: dict[str, Any]) -> None:
             raise ProtocolError(f"`{message_type}` requires `payload.history_uid` to be a non-empty string.")
         return
 
-    if message_type == TYPE_INPUT_AUDIO_STREAM_CHUNK:
-        audio_base64 = payload.get("audio_base64")
-        if not isinstance(audio_base64, str) or not audio_base64:
-            raise ProtocolError("`input.audio_stream_chunk` requires `payload.audio_base64`.")
+    if message_type == TYPE_INPUT_AUDIO_STREAM_START:
+        _require_payload_string(message_type, payload, "stream_id")
+        _require_payload_string(message_type, payload, "source")
+        encoding = _require_payload_string(message_type, payload, "encoding")
+        if encoding != "pcm16le":
+            raise ProtocolError(
+                "`input.audio_stream_start` requires `payload.encoding=pcm16le`."
+            )
+        _require_payload_positive_int(message_type, payload, "sample_rate")
+        channels = _require_payload_positive_int(message_type, payload, "channels")
+        if channels != 1:
+            raise ProtocolError(
+                "`input.audio_stream_start` requires `payload.channels=1`."
+            )
+        _validate_capture_mode(message_type, payload)
+        device_id = payload.get("device_id")
+        if device_id is not None and not isinstance(device_id, str):
+            raise ProtocolError(
+                "`input.audio_stream_start` requires `payload.device_id` to be a string when provided."
+            )
+        return
+
+    if message_type == TYPE_INPUT_AUDIO_STREAM_END:
+        _require_payload_string(message_type, payload, "stream_id")
+        _require_payload_string(message_type, payload, "reason")
+        dropped = payload.get("dropped")
+        if dropped is not None and not isinstance(dropped, bool):
+            raise ProtocolError(
+                "`input.audio_stream_end` requires `payload.dropped` to be a boolean when provided."
+            )
+        if "last_seq" in payload:
+            _require_payload_non_negative_int(message_type, payload, "last_seq")
+        _validate_capture_mode(message_type, payload)
         return
 
     if message_type == TYPE_SYSTEM_SEMANTIC_AXIS_PROFILE_SAVE:
@@ -303,6 +333,58 @@ def _require_message_type(value: Any) -> str:
     if not normalized:
         raise ProtocolError("`type` is required.")
     return normalized
+
+
+def _require_payload_string(
+    message_type: str,
+    payload: Mapping[str, Any],
+    field_name: str,
+) -> str:
+    normalized = _normalize_optional_string(payload.get(field_name))
+    if not normalized:
+        raise ProtocolError(
+            f"`{message_type}` requires `payload.{field_name}` to be a non-empty string."
+        )
+    return normalized
+
+
+def _require_payload_positive_int(
+    message_type: str,
+    payload: Mapping[str, Any],
+    field_name: str,
+) -> int:
+    value = payload.get(field_name)
+    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+        raise ProtocolError(
+            f"`{message_type}` requires `payload.{field_name}` to be a positive integer."
+        )
+    return value
+
+
+def _require_payload_non_negative_int(
+    message_type: str,
+    payload: Mapping[str, Any],
+    field_name: str,
+) -> int:
+    value = payload.get(field_name)
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise ProtocolError(
+            f"`{message_type}` requires `payload.{field_name}` to be a non-negative integer."
+        )
+    return value
+
+
+def _validate_capture_mode(
+    message_type: str,
+    payload: Mapping[str, Any],
+) -> None:
+    capture_mode = payload.get("capture_mode")
+    if capture_mode is None:
+        return
+    if capture_mode not in {"manual", "ptt", "auto"}:
+        raise ProtocolError(
+            f"`{message_type}` requires `payload.capture_mode` to be manual, ptt, or auto when provided."
+        )
 
 
 def _require_protocol_version(value: Any) -> str:

@@ -83,6 +83,11 @@ def parse_binary_audio_frame(data: bytes) -> BinaryAudioChunkFrame:
     seq = _require_non_negative_int(metadata.get("seq"), "seq")
     sample_rate = _require_positive_int(metadata.get("sample_rate"), "sample_rate")
     channels = _require_positive_int(metadata.get("channels"), "channels")
+    capture_mode = _optional_string(metadata.get("capture_mode"))
+    if capture_mode is not None and capture_mode not in {"manual", "ptt", "auto"}:
+        raise BinaryAudioFrameError(
+            "Binary audio metadata `capture_mode` must be manual, ptt, or auto when provided."
+        )
 
     return BinaryAudioChunkFrame(
         stream_id=stream_id,

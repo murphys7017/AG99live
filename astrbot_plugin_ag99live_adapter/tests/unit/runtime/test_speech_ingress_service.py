@@ -62,6 +62,30 @@ async def ignore_vad_speech_started(_capture_turn_id: str) -> None:
     return None
 
 
+def start_audio_stream(
+    service,
+    *,
+    turn_id: str,
+    stream_id: str,
+    capture_mode: str,
+) -> None:
+    asyncio.run(
+        service.handle_audio_stream_start(
+            MessageStub(
+                turn_id=turn_id,
+                payload={
+                    "stream_id": stream_id,
+                    "source": "web_audio",
+                    "encoding": "pcm16le",
+                    "sample_rate": 16000,
+                    "channels": 1,
+                    "capture_mode": capture_mode,
+                },
+            )
+        )
+    )
+
+
 def test_handle_binary_audio_stream_chunk_transcribes_on_stream_end(
     install_fake_astrbot,
 ) -> None:
@@ -86,6 +110,12 @@ def test_handle_binary_audio_stream_chunk_transcribes_on_stream_end(
         on_vad_speech_started=ignore_vad_speech_started,
     )
 
+    start_audio_stream(
+        service,
+        turn_id="input:binary",
+        stream_id="mic:test",
+        capture_mode="ptt",
+    )
     asyncio.run(
         service.handle_audio_stream_binary_chunk(
             BinaryAudioChunkFrame(
@@ -148,6 +178,12 @@ def test_handle_manual_binary_audio_stream_chunk_uses_vad_segments(
         on_vad_speech_started=on_vad_speech_started,
     )
 
+    start_audio_stream(
+        service,
+        turn_id="input:manual-binary",
+        stream_id="mic:manual",
+        capture_mode="manual",
+    )
     result = asyncio.run(
         service.handle_audio_stream_binary_chunk(
             BinaryAudioChunkFrame(
@@ -192,6 +228,12 @@ def test_handle_binary_audio_stream_end_dropped_reports_input_error(
         on_vad_speech_started=ignore_vad_speech_started,
     )
 
+    start_audio_stream(
+        service,
+        turn_id="input:binary-dropped",
+        stream_id="mic:dropped",
+        capture_mode="ptt",
+    )
     asyncio.run(
         service.handle_audio_stream_binary_chunk(
             BinaryAudioChunkFrame(
