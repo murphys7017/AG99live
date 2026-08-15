@@ -1,9 +1,9 @@
 task:
   class: bugfix
   risk: medium
-  phase: catalog_motion_async_start_contract
+  phase: idle_timing_duration_budget
   status: implementation_complete
-  scope: "Distinguish rejected, asynchronously accepted, and actually started catalog motions so ModelEngine and Timeline retain one truthful lifecycle."
+  scope: "Keep speech-active idle timing within the synchronized audio duration while preserving the existing entry and release transitions."
 
 context:
   confidence: high
@@ -16,8 +16,11 @@ context:
     - The existing MotionLab outbound queue is the only persistence path for frontend rejection diagnostics.
     - A rejected atomic segment is a settled SessionStore fact: none of its individual materials are released, but it still participates in synth_finished and failed playback acknowledgement.
     - Frontend sessions retain only recent terminal history, and the backend terminal idempotency ledger retains at most 256 completed turns per connection.
-    - An asynchronously accepted catalog motion is preparation, not a started run; only the real WebSDK onStarted callback may publish the run.
-    - Catalog motion preparation must remain interruptible and must settle through the existing Timeline rejection/terminal path when loading or start fails.
+    - Pending motion identity is the normalized Turn/Message pair, and duplicate delivery is not replacement semantics.
+    - Rejecting a later duplicate must not mutate, fail, or resynchronize the first pending payload.
+    - The existing PlaybackTimeline sink remains the lifecycle owner; this fix must not add a queue, dedupe layer, or fallback.
+    - ModelEngine timing compilation owns blend and hold budgets; WebSDK consumes the validated result and must not invent a second timing policy.
+    - The minimum legal motion duration is 320 ms, so the existing 80 ms entry and 120 ms release leave at least 120 ms for idle hold.
 
 documentation:
   authorities:
@@ -38,14 +41,10 @@ verification:
     - Automated tests are low-confidence input/output smoke checks; do not run the full suite.
     - Live AstrBot, Electron, TTS, and Live2D behavior remains user-led runtime acceptance.
   current:
-    - Catalog motion start now returns explicit rejected, accepted, or started results instead of collapsing asynchronous acceptance into a boolean.
-    - Accepted catalog motions retain an interruptible preparation owner; only the real onStarted callback publishes the active run.
-    - Asynchronous fetch, load, start, and pre-start interruption terminals settle through the existing ModelEngine and Timeline failure path.
-    - Rejected motion/audio segments now remain local to their segment, preserve the exact rejection reason, and close through failed playback_finished instead of blocking later sessions.
-    - Frontend Turn, interrupt, and local session failure writes validate terminal state before mutation and preserve the first terminal result.
-    - Frontend terminal sessions are pruned through the existing store API; backend terminal tombstones and timing records are bounded or cleared by their lifecycle owner.
-    - `npm run typecheck:renderer` passed.
-    - `python -m py_compile astrbot_plugin_ag99live_adapter/runtime/turn_coordinator.py` passed.
-    - The zero-Segment Turn boundary smoke test passed (`1 passed, 14 deselected`).
+    - Source tracing confirms `createModelEngineMotionTimelineSink` passes duplicate rejection through the existing sink callback without owning pending-payload cleanup.
+    - The scheduler now keeps the first pending payload and rejects the later duplicate without changing pending state.
+    - Source tracing confirms `resolveMotionTiming` is the semantic timing owner and WebSDK only projects its declared timing into execution.
+    - Speech-active idle timing now computes hold from the declared duration, so blend-in, hold, and blend-out sum exactly to that duration.
+    - `npm run typecheck:renderer` passed from `frontend` for the cumulative R17 and R16 changes.
     - `git diff --check` passed.
     - Live AstrBot, Electron, TTS, and Live2D verification remains pending user runtime acceptance.
