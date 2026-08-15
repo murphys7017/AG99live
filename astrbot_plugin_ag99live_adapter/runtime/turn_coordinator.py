@@ -156,6 +156,7 @@ class TurnCoordinator:
         self._closing_output_turn_ids: set[str] = set()
         self._closed_output_turn_ids: set[str] = set()
         self._output_emitted_turn_ids: set[str] = set()
+        self._turn_terminal_results: dict[str, tuple[bool, str | None] | None] = {}
         self._active_vad_turn_by_capture_turn: dict[str, str] = {}
 
     async def handle_msg(self, raw_message: dict[str, Any]) -> None:
@@ -265,6 +266,7 @@ class TurnCoordinator:
         tracked_turn_ids.update(self._closing_output_turn_ids)
         tracked_turn_ids.update(self._closed_output_turn_ids)
         tracked_turn_ids.update(self._output_emitted_turn_ids)
+        tracked_turn_ids.update(self._turn_terminal_results)
         tracked_turn_ids.update(self._events_by_turn_id)
         tracked_turn_ids.update(
             segment.turn_id for segment in self._pending_output_segments.values()
@@ -284,6 +286,7 @@ class TurnCoordinator:
         self._closing_output_turn_ids.clear()
         self._closed_output_turn_ids.clear()
         self._output_emitted_turn_ids.clear()
+        self._turn_terminal_results.clear()
         self._events_by_turn_id.clear()
         self._active_vad_turn_by_capture_turn.clear()
         self._last_prompt_motion_snapshot = None
@@ -319,6 +322,7 @@ class TurnCoordinator:
         del unified_msg_origin
 
         turn_id = self._require_turn_id_value(turn_id)
+        self._require_output_queue_open(turn_id)
         platform_extras_dict = platform_extras if isinstance(platform_extras, dict) else {}
         segment_message_id = _resolve_platform_segment_message_id(platform_extras_dict)
         self._mark_turn_timing(turn_id, "emit_started_at")
@@ -431,6 +435,15 @@ class TurnCoordinator:
             segment = PendingOutputSegment(turn_id=turn_id, message_id=message_id)
             segments[key] = segment
         return segment
+
+    def _require_output_queue_open(self, turn_id: str) -> None:
+        if (
+            turn_id in self._closing_output_turn_ids
+            or turn_id in self._closed_output_turn_ids
+            or turn_id in self._output_emitted_turn_ids
+            or turn_id in self._turn_terminal_results
+        ):
+            raise RuntimeError(f"output_segment_queue_closed:{turn_id}")
 
     def _resolve_output_segment_motion(
         self,
@@ -700,7 +713,21 @@ class TurnCoordinator:
             if flushed_count > 0:
                 self._output_emitted_turn_ids.add(current_turn_id)
             if current_turn_id not in self._output_emitted_turn_ids:
-                raise RuntimeError(f"output_segment_missing:{current_turn_id}")
+                reason = f"output_segment_missing:{current_turn_id}"
+                error_sent = await self._send_json(
+                    build_control_error(
+                        turn_id=current_turn_id,
+                        message=reason,
+                    )
+                )
+                if not error_sent:
+                    raise RuntimeError(f"control_error_send_failed:{current_turn_id}")
+                await self._finish_turn(
+                    turn_id=current_turn_id,
+                    success=False,
+                    reason=reason,
+                )
+                return
             sent = await self._send_json(
                 build_control_synth_finished(
                     turn_id=current_turn_id,
@@ -1292,13 +1319,40 @@ class TurnCoordinator:
         reason: str | None,
     ) -> None:
         resolved_turn_id = self._require_turn_id_value(turn_id)
-        await self._send_json(
-            build_control_turn_finished(
-                turn_id=resolved_turn_id,
-                success=success,
-                reason=reason,
+        normalized_reason = str(reason or "").strip() or None
+        terminal_result = (success, normalized_reason)
+        if resolved_turn_id in self._turn_terminal_results:
+            existing_result = self._turn_terminal_results[resolved_turn_id]
+            if existing_result is None:
+                logger.debug(
+                    "Turn terminal publication already in progress: turn_id=%s",
+                    resolved_turn_id,
+                )
+            elif existing_result != terminal_result:
+                logger.warning(
+                    "Conflicting Turn terminal ignored: turn_id=%s existing=%s incoming=%s",
+                    resolved_turn_id,
+                    existing_result,
+                    terminal_result,
+                )
+            return
+
+        self._turn_terminal_results[resolved_turn_id] = None
+        try:
+            sent = await self._send_json(
+                build_control_turn_finished(
+                    turn_id=resolved_turn_id,
+                    success=success,
+                    reason=normalized_reason,
+                )
             )
-        )
+            if not sent:
+                raise RuntimeError(f"turn_finished_send_failed:{resolved_turn_id}")
+        except Exception:
+            self._turn_terminal_results.pop(resolved_turn_id, None)
+            raise
+
+        self._turn_terminal_results[resolved_turn_id] = terminal_result
         self._mark_turn_timing(resolved_turn_id, "turn_completed_at")
         turn_identity_map = getattr(self, "turn_identity_map", None)
         if turn_identity_map is not None:

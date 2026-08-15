@@ -199,9 +199,14 @@ export function useTurnPlaybackSessionStore() {
     material: "text" | "audio" | "motion",
     current: string,
     next: string,
-  ): never {
-    throw new Error(
-      `Playback ${material} terminal is stable and cannot change: ${current} -> ${next}.`,
+  ): void {
+    console.warn(
+      "[TurnPlaybackSessionStore] terminal rewrite ignored; first terminal is stable.",
+      {
+        material,
+        current,
+        next,
+      },
     );
   }
 
@@ -356,6 +361,7 @@ export function useTurnPlaybackSessionStore() {
     if (segment.text.delivered) {
       if (segment.text.failed) {
         rejectTerminalRewrite("text", "failed", "delivered");
+        return;
       }
       return;
     }
@@ -376,6 +382,7 @@ export function useTurnPlaybackSessionStore() {
         return;
       }
       rejectTerminalRewrite("text", "delivered", "failed");
+      return;
     }
     segment.text.released = true;
     segment.text.delivered = true;
@@ -394,6 +401,7 @@ export function useTurnPlaybackSessionStore() {
     const { segment, session } = getSegmentSession(turnId, messageId);
     if (segment.audio.terminal !== "idle") {
       rejectTerminalRewrite("audio", segment.audio.terminal, "started");
+      return;
     }
     segment.audio.released = true;
     segment.audio.started = true;
@@ -434,6 +442,7 @@ export function useTurnPlaybackSessionStore() {
         return;
       }
       rejectTerminalRewrite("audio", segment.audio.terminal, terminal);
+      return;
     }
     segment.audio.released = true;
     segment.audio.terminal = terminal;
@@ -447,6 +456,7 @@ export function useTurnPlaybackSessionStore() {
     const { segment } = getSegmentSession(turnId, messageId);
     if (segment.audio.terminal !== "idle") {
       rejectTerminalRewrite("audio", segment.audio.terminal, "released");
+      return;
     }
     segment.audio.released = true;
   }
@@ -465,6 +475,7 @@ export function useTurnPlaybackSessionStore() {
         return;
       }
       rejectTerminalRewrite("motion", currentTerminal, "absent");
+      return;
     }
     segment.motion.payload = null;
     segment.motion.receivedAtMs = null;
@@ -488,6 +499,7 @@ export function useTurnPlaybackSessionStore() {
         return;
       }
       rejectTerminalRewrite("motion", currentTerminal, "failed");
+      return;
     }
     segment.motion.absent = false;
     segment.motion.released = true;
@@ -505,6 +517,7 @@ export function useTurnPlaybackSessionStore() {
     const currentTerminal = getMotionTerminal(segment);
     if (currentTerminal) {
       rejectTerminalRewrite("motion", currentTerminal, "released");
+      return;
     }
     segment.motion.absent = false;
     segment.motion.failed = false;
@@ -520,6 +533,7 @@ export function useTurnPlaybackSessionStore() {
     const currentTerminal = getMotionTerminal(segment);
     if (currentTerminal) {
       rejectTerminalRewrite("motion", currentTerminal, "started");
+      return;
     }
     segment.motion.absent = false;
     segment.motion.failed = false;
@@ -539,6 +553,7 @@ export function useTurnPlaybackSessionStore() {
         return;
       }
       rejectTerminalRewrite("motion", currentTerminal, "completed");
+      return;
     }
     segment.motion.absent = false;
     segment.motion.failed = false;
