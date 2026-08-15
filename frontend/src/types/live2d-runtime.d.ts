@@ -2,12 +2,12 @@ import type {
   DirectParameterPlanInput,
   DirectParameterPlanStartOptions,
   DirectParameterPlanTerminalStatus,
-} from "../live2d/WebSDK/src/directparameterplan";
+} from "./direct-parameter-plan";
 
 export type {
   DirectParameterPlanTerminalEvent,
   DirectParameterPlanTerminalStatus,
-} from "../live2d/WebSDK/src/directparameterplan";
+} from "./direct-parameter-plan";
 
 export type CatalogMotionStartResult =
   | { status: "rejected"; reason: string }

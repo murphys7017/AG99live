@@ -1,9 +1,9 @@
 task:
   class: bugfix
-  risk: low
-  phase: ptt_keyboard_listener_ownership
+  risk: medium
+  phase: direct_parameter_contract_boundary
   status: implementation_complete
-  scope: "Make document the sole renderer DOM keyboard owner for PTT while retaining the independent Electron IPC hook."
+  scope: "Move Direct Parameter Plan contracts out of the WebSDK implementation directory while preserving one shared type definition and the existing runtime API."
 
 context:
   confidence: high
@@ -31,6 +31,8 @@ context:
     - Normalized motion dispatch must handle every declared payload kind explicitly; unknown runtime values are rejected and never reinterpreted as another motion kind.
     - Binary audio header bytes 6-7 are reserved flags in little-endian order; the current frontend writer sets them to zero and the backend parser owns enforcing that invariant.
     - Renderer keyboard events bubble through document to window; PTT must listen on one DOM owner only, while Electron global-hook events remain a separate IPC source.
+    - Direct Parameter Plan DTOs are an application-to-WebSDK boundary contract and must live outside the WebSDK implementation directory.
+    - WebSDK retains execution preparation ownership and re-exports the neutral contract only to preserve existing internal imports, not as a second type definition.
 
 documentation:
   authorities:
@@ -51,9 +53,8 @@ verification:
     - Automated tests are low-confidence input/output smoke checks; do not run the full suite.
     - Live AstrBot, Electron, TTS, and Live2D behavior remains user-led runtime acceptance.
   current:
-    - usePushToTalkController now installs and removes renderer keydown/keyup listeners only on document.
-    - The Electron global PTT hook remains unchanged on desktop:ptt-keydown and desktop:ptt-keyup IPC channels.
-    - `npm run typecheck:renderer` and `git diff --check` passed.
-    - The focused PTT test output ran directly from the emitted test artifact and passed, with document as the only DOM listener owner.
-    - The package test script itself remains blocked before execution by pre-existing WebSDK strict-type errors and a pre-existing missing compiledSemanticMotionParser test import.
-    - Live renderer focus and Electron global-hook behavior remain pending user runtime acceptance.
+    - Direct Parameter Plan contracts now have one definition in `frontend/src/types/direct-parameter-plan.ts`.
+    - `directparameterplan.ts` retains only execution preparation and type re-exports for stable WebSDK-local imports.
+    - `frontend/src/types/` no longer imports `frontend/src/live2d/WebSDK/src/`.
+    - `npm run typecheck:renderer`, `npm run typecheck:websdk`, and `git diff --check` passed.
+    - Live Direct Parameter Plan playback remains pending user runtime acceptance because this phase changes compile-time dependency direction only.
