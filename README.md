@@ -323,15 +323,9 @@ HTTP       127.0.0.1:12397
 由 ModelEngine 内的 Performance Director 统一编排 phrase、语义步骤、部位延迟、停顿、强调、
 收势和残留，再沿现有 Timeline、参数计划、ParameterMixer 和 Cubism Physics 执行。
 
-当前已完成二期阶段 A：`PerformanceSchedule` 已统一 phrase、sequence step、部位事件和来源诊断，
-Parameter Track Graph 负责把编排结果投影为现有 V3 参数轨道，不新增协议或第二套播放时钟。
-阶段 B 的 gaze 第一批也已完成：单姿态支持 lead/dwell/phrase transfer/release，sequence 支持在
-semantic step 前约 80ms 的 gaze transfer，并保留四步 sequence 的四个主模型目标。
-
-- 继续深化 face、hesitation、方向反转和动态 residual 等部位级表现。
-- 建立 Motion Lab 评价闭环和最近动作多样性反馈。
-- 按 Physics setting 调校头发、衣服和饰品，而不是只使用全局倍率。
-- 在职责与评价稳定后，再确定动作小模型的唯一训练目标。
+当前已完成二期阶段 A 和阶段 B 的 gaze 第一批。后续会继续深化部位协作、主动动力学、语音耦合、
+Motion Lab 评价、Physics 模型级调校和动作小模型数据闭环；已有基础、剩余边界与实施顺序统一见
+[二期角色表演系统总体规划](./docs/02-设计文档/18-二期角色表演系统总体规划.md)，不在 README 重复维护。
 
 小模型未来可以负责语义动作或表演编排提示，但不会取代 ModelEngine、Timeline、参数融合和
 Live2D 执行层。现阶段继续由主模型联合生成文本与动作，并先把评价标准和数据闭环做稳。
@@ -352,6 +346,7 @@ Live2D 执行层。现阶段继续由主模型联合生成文本与动作，并�
 - [二期角色表演系统总体规划](./docs/02-设计文档/18-二期角色表演系统总体规划.md)
 - [ModelEngine 边界与分层设计](./docs/02-设计文档/01-ModelEngine边界与分层设计.md)
 - [动作参数处理与轴关系图](./docs/02-设计文档/13-动作参数处理与轴关系图.md)
+- [端到端链路已确认问题与修复边界](./docs/02-设计文档/20-端到端链路已确认问题与修复边界.md)
 - [动作小模型训练前置条件与职责边界](./docs/05-小模型训练/01-动作小模型训练前置条件与职责边界.md)
 - [独立 VTube Studio 原始参数录制架构](./docs/05-小模型训练/03-独立VTS原始参数录制架构.md)
 - [流程图与分析图集](./docs/04-流程图与分析图/README.md)

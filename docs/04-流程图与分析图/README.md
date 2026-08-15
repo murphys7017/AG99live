@@ -63,9 +63,9 @@
 - ModelEngine 分为 semantic 与 model_parameter 两个编译阶段；每个完整 pose/sequence 由
   `PerformanceSchedule` 统一生成 phrase、step、部位事件和来源诊断，SpeechPoseStage 只选择说话表现，
   Parameter Track Graph 再把 Schedule 投影为 V3 keyframes/modulation。
-- `PerformanceSchedule` 已属于当前运行链路的 ModelEngine 编译事实；gaze 第一批已消费该 Schedule，
-  face、hesitation 和动态 residual 仍属于二期后续实现。目标依赖图继续描述完整 Performance Director
-  的最终边界，不把未完成部位策略写成当前能力。
+- `PerformanceSchedule` 已属于当前运行链路的 ModelEngine 编译事实；目标依赖图可以描述完整
+  Performance Director 的目标边界，但图集不维护阶段进度或下一批清单。当前状态与剩余规划分别以
+  `06-一期完成边界与二期入口.md` 和 `18-二期角色表演系统总体规划.md` 为准。
 - WebSDK 先形成 Cubism Motion / EyeBlink / Expression / drag / breath 的 base snapshot，再由 Parameter Mixer 组合 direct plan 与 lip-sync；Physics 只消费最终主动参数帧，不是 Mixer 输入。
 - 每条 WebSocket 连接必须先通过 `system.server_info.schema_manifest`；ModelSync 不接受 window/devtools 旁路写入。
 - 当前桌宠 WebSocket 与 HTTP 资源只支持同机 `127.0.0.1` / `localhost`；远程执行器连接是独立边界。

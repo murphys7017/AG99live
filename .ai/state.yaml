@@ -1,123 +1,38 @@
 task:
   class: documentation
   risk: medium
-  phase: phase_two_documentation_sync
+  phase: project_issue_plan_reconciliation
   status: implementation_complete
-  scope: "Synchronize current phase status, ModelEngine ownership, action conversion flow, and Mermaid diagrams with the completed Schedule/A3 and gaze first-slice source implementation; remove stale future-only descriptions without changing code or protocols."
+  scope: "Reconcile every active issue and planning direction against current source, remove completed or invalid claims, and establish one authority document per fact category without changing runtime code."
 
 context:
   confidence: high
   assumptions:
-    - Product phase one implementation is complete.
-    - Phase two optimizes complete character performance rather than treating gaze, face, Physics, Prompt, or motion range as independent product directions.
-    - Performance Director is a ModelEngine compile-time orchestration responsibility, not a second player, Timeline, parameter mixer, or backend motion service.
-    - PerformanceSchedule now owns phrase, semantic-step, semantic-group and SpeechPose timing events plus event-to-parameter-node diagnostics.
-    - Phase A introduces one internal PerformanceSchedule while preserving motion intent v4, parameter plan v3, PlaybackTimeline, ParameterPresentation, ActiveParameterMixer, SpeechSignalRuntime, and Cubism Physics boundaries.
-    - Phase A first records estimated phrase-to-sequence alignment; motion intent v4 is not extended unless real runtime samples prove internal alignment insufficient.
-    - Gaze, face, hesitation, release, and residual are Schedule-consuming body-part strategies, not independent clocks or parallel dynamics systems.
-    - Physics setting diagnostics remain a separate model-level tuning phase and do not become Performance Director or ParameterMixer control logic.
-    - Manual observation, model tuning, and live runtime acceptance are not implementation backlog.
-    - The first parameter track graph is a compile-time ModelEngine structure, not a second runtime graph engine or player.
-    - The graph emits the existing engine.parameter_plan.v3 keyframes and modulation fields; no protocol migration is required.
-    - ActiveParameterMixer remains a per-frame contribution mixer and does not acquire semantic timing ownership.
-    - Deeper dynamics and Physics work, Motion Lab editing, small-model training, VTS semantic export, remote-operator separation, cross-host deployment, and release packaging belong to phase two or later.
-    - Obsolete documents, code, tests, protocol versions, and migration history are deleted rather than retained as compatibility guidance.
-    - Public media, disposable caches, and durable Motion Lab or Motion Tuning data must use separate directories and failure domains.
-    - PlaybackTimeline remains the authoritative frontend execution lifecycle; SessionStore stores its settled projection and AdapterConnection does not own a parallel audio terminal state machine.
-    - Cubism native motion, expression, drag, blink, and breath remain the base layer; ActiveParameterMixer owns AG99 active overlays before Cubism Physics.
-    - parameter_action_library.v2 is the only Action Lab model-sync library; frontend validation reconstructs only fields consumed by Action Lab.
-    - New Motion Tuning samples obtain conversation context from backend Motion Lab records; existing sample updates preserve stored context and identity.
-    - Desktop runtime snapshots do not project PlaybackTimeline session internals; PlaybackTimeline remains the local lifecycle authority.
-    - Gaze timing events belong to PerformanceSchedule; gaze target ratios are projected by Parameter Track Graph and do not enter Schedule, Mixer, or WebSDK ownership.
-    - Gaze release lowers Direct Plan ownership through the existing plan blend and never inserts a Profile-neutral release keyframe.
-    - The shared engine.parameter_plan.v3 keyframe boundary remains two to four points; a four-step semantic sequence keeps all four main-model targets and uses plan blend for gaze release.
-    - Documentation authority is `docs/01-架构与结构/06-一期完成边界与二期入口.md`; README and diagrams provide summaries and must not redefine phase status.
+    - Phase one feature scope remains complete, but this does not imply that the current source is defect-free.
+    - Only source-confirmed unresolved defects belong in the active defect register; resolved, invalid, speculative, and historical findings are removed.
+    - Performance work must distinguish existing foundations from remaining implementation instead of describing completed capabilities as future work.
+    - Remote Operator, VTS recording, small-model training, Physics diagnostics, and productization keep their own boundaries and do not become Performance Director responsibilities.
+    - No runtime source, public protocol, or architecture boundary is changed by this documentation reconciliation.
 
-architecture:
-  phase_boundary:
-    source: docs/01-架构与结构/06-一期完成边界与二期入口.md
-    phase_one: complete
-    phase_two: in_progress
-  product_flow:
-    - AstrBot owns conversation, event queues, main-model calls, and TTS.
-    - The Adapter projects Live2D capabilities, validates motion intent, binds identities, and emits one atomic output.segment.v3.
-    - SessionStore owns settled protocol facts; PlaybackTimeline owns the segment clock and required sink lifecycle.
-    - ModelEngine compiles engine.motion_intent.v4 into CompiledSemanticMotion and engine.parameter_plan.v3.
-    - ParameterPresentation and ActiveParameterMixer produce one active parameter frame before Cubism Physics.
-    - Live2D WebSDK owns final parameter writes, lip sync, Physics, model update, and rendering.
-  identity:
-    turn_id: Conversation turn identity shared across AstrBot, Adapter, frontend, and Motion Lab.
-    message_id: Logical assistant output segment identity.
-    tts_request_id: One TTS generation lifecycle.
-    run_id: One accepted motion execution owned by one segment.
-  protocols:
-    source: astrbot_plugin_ag99live_adapter/protocol/schema_manifest.json
-    websocket_envelope: v2
-    output_segment: output.segment.v3
-    motion_intent: engine.motion_intent.v4
-    parameter_plan: engine.parameter_plan.v3
-    semantic_axis_profile: ag99.semantic_axis_profile.v3
-    relation_graph: ag99.semantic_axis_relation_graph.v1
-    voice_following_profile: ag99.voice_following_profile.v3
-    model_info: live2d_scan.v3
-  ownership_rules:
-    - The main model is the only source of semantic motion direction and level.
-    - Optional performance curves never block TTS, segment release, or base motion playback.
-    - ActiveParameterMixer combines resolved active contributions and does not interpret semantic levels or own Timeline state.
-    - Cubism Physics output parameters are never directly driven by semantic motion or active-parameter smoothing.
-    - Invalid identity, schema, timing, binding, or lifecycle state fails visibly instead of activating a fallback path.
+documentation:
+  authorities:
+    phase_status: docs/01-架构与结构/06-一期完成边界与二期入口.md
+    active_defects: docs/02-设计文档/20-端到端链路已确认问题与修复边界.md
+    performance_roadmap: docs/02-设计文档/18-二期角色表演系统总体规划.md
+    performance_source_audit: docs/02-设计文档/19-角色表演主流程与编排职责审计.md
+    remote_operator_boundary: docs/02-设计文档/07-远程执行器接入设计.md
+    training_and_vts_boundary: docs/05-小模型训练/01-动作小模型训练前置条件与职责边界.md
+  rules:
+    - README and diagram indexes may summarize and link, but do not own phase, defect, or next-step lists.
+    - Fixed defects are deleted from the active register after source review; they are not retained as history.
+    - Source audit documents describe current ownership and completed migrations, not a second roadmap.
 
 verification:
   policy:
-    - Use focused source inspection, documentation link checks, protocol-manifest validation, Mermaid source checks, and git diff review for documentation work.
-    - Automated tests are low-confidence boundary smoke checks and are not end-to-end evidence.
-    - Live Electron, AstrBot, TTS, and Live2D observation is user-led acceptance, not unfinished implementation work.
-  current_checks:
-    - Phase A1 now creates one internal PerformanceSchedule for each complete pose or sequence compilation and shares it with every pose compile context.
-    - Canonical phrase segmentation, boundary classification, weighting, emphasis, and normalized phrase windows were removed from SpeechPoseStage and moved into the shared Schedule compiler.
-    - Phase A2 now validates semantic sequence shape, computes duration-weighted step windows, and estimates phrase/step overlap inside the same PerformanceSchedule.
-    - Parameter Track Graph consumes Schedule step starts; its duplicate duration-weight calculation and local step-start algorithm were removed.
-    - Schedule failures are explicit; no equal-weight, legacy, or silent-repair branch was added.
-    - Duration-only schedules preserve the placeholder phrase used by SpeechPose but record no estimated phrase/step alignment.
-    - Schedule duration remains the audio/semantic body duration; Track Graph transition and residual tail extension does not stretch phrase or step windows.
-    - A3 moved semantic-group offset, transition, hold, residual, SpeechPose intro, phrase onset, transition and release into PerformanceSchedule while retaining the existing deterministic seed formulas and timing constants.
-    - SpeechPose now owns only valid channel selection, preset selection, gesture direction and amplitude; Parameter Track Graph only projects scheduled events as v3 keyframes.
-    - Every scheduled semantic keyframe and speech modulation point records its source event through transform trace v2; Motion Lab renders the phrase / step / event / parameter relation.
-    - Desktop runtime snapshot rejects any motion history record carrying a non-v2 or structurally incomplete PerformanceSchedule trace; stale development history is discarded instead of reaching Motion Lab.
-    - Performance Schedule diagnostics use independent performance_schedule_trace.v2 versioning; semantic_motion_transform.v5 remains unchanged so deterministic nine-level sampling identities do not shift.
-    - Renderer TypeScript validation passed after the A3 migration; no live Electron, TTS, or Live2D sequence playback has yet exercised the refactored path.
-    - The current AstrBot-to-Adapter-to-Timeline-to-ModelEngine-to-Cubism source path was re-traced for the phase-two performance orchestration review.
-    - Superseded action backlogs, implementation histories, ParameterMixer migration notes, duplicate architecture summaries, and the premature small-model target draft were removed.
-    - Documentation indexes, public READMEs, target dependency rules, and VTS recorder boundaries were aligned with the retained authority documents.
-    - Relative Markdown links, protocol schema manifest, Markdown fences, Mermaid file inventory, deleted-document references, and git diff whitespace were checked.
-    - A3 changed only the ModelEngine compile-time scheduling path, transform trace and Motion Lab diagnostics; no live AstrBot, Electron, TTS, VTube Studio, or Live2D execution was exercised.
-    - Current source was re-checked: PerformanceSchedule owns phrase, duration-weight step and existing body-part timing events; Physics exposure remains limited to file/count scanning plus a global terminal response scale.
-    - Removed base action filtering, its Provider settings, cache segment, scanner projection, tests, and documentation references.
-    - Added nested consumer-driven validation for parameter_action_library.v2 and updated the model-sync fixture and cache-boundary smoke data.
-    - Motion Tuning updates no longer re-read raw Motion Lab context for an existing sample; new samples still require backend-recorded context.
-    - Removed unused session internals from the persisted desktop runtime snapshot and narrowed the platform prompt compatibility import.
-    - `python scripts/check_protocol_schema_manifest.py`, focused Python compile checks, `frontend/npm run typecheck:renderer`, and `git diff --check` passed; no live end-to-end runtime was exercised.
-    - Phase B gaze now generates Schedule-owned lead, dwell, phrase/step transfer and release events for active gaze axes only.
-    - Pose gaze is projected by the existing ParameterTrackGraphStage; sequence gaze is projected once by the final sequence track graph compiler.
-    - The former generic gaze semantic-group offset was removed so gaze timing has one explicit owner.
-    - Motion Lab diagnostics and persisted runtime snapshot validation recognize gaze events; gaze release intentionally has no parameter node because plan ownership blend performs the release.
-    - `frontend/npm run typecheck:renderer` and `git diff --check` passed after the gaze implementation; no live Electron, TTS, or Live2D playback was exercised.
-    - Documentation sync updated the phase authority, public README, project/module overview, action-chain docs, ModelEngine layering, diagram index, and current action-flow/Motion Lab diagrams.
-    - Documentation cleanup removed stale claims that PerformanceSchedule was only a future dependency target; current diagrams now show Schedule and Parameter Track Graph as compile-time ModelEngine paths.
-    - No WebSocket schema, playback clock, ParameterMixer, WebSDK, or Cubism Physics source was changed by the documentation sync.
-
-backlog:
-  phase_two:
-    - Phase A1 complete: internal PerformanceSchedule plus shared phrase analysis.
-    - Phase A2 complete: sequence-step scheduling plus observable estimated phrase alignment.
-    - Phase A3 complete: shared body-part timing events and Director/Motion Lab source diagnostics.
-    - Phase B gaze first slice complete: lead, dwell, phrase/step transfer, plan-blend release, and Motion Lab diagnostics.
-    - Phase B next: face entry, hold, residual, and release consuming the shared Schedule.
-    - Phase B later: hesitation, reversal, and dynamic residual strategies without private clocks.
-    - Consider explicit sequence-step phrase identity only after real data proves the internal alignment insufficient.
-    - Phase D: Cubism Physics setting diagnostics and model-level presentation profiles, independent from active parameter planning.
-    - Motion Lab sequence editing, diversity summaries, and training-data workbench.
-    - Small motion-model training and VTube Studio semantic labeling/export.
-    - Remote-operator plugin separation, authenticated cross-host deployment, and release packaging.
-    - Perform user-led live AstrBot/Electron/Live2D acceptance for the gaze timing and tune constants only from observed model behavior.
-    - Commit the documentation synchronization as one reviewable documentation batch after link and Mermaid-source checks.
+    - Use source tracing, Markdown link checks, fence checks, Mermaid inventory, and git diff review.
+    - Automated tests are not required for documentation-only changes.
+    - Live AstrBot, Electron, TTS, and Live2D behavior remains user-led runtime acceptance.
+  current:
+    - The external review findings were compared with current backend, frontend, ModelEngine, and WebSDK source.
+    - The active defect register contains only source-confirmed unresolved items and no resolved-history section.
+    - The performance roadmap now distinguishes current foundations from remaining work without duplicating its priority list elsewhere.
