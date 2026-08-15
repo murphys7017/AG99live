@@ -283,10 +283,9 @@ class RuntimeState:
 
     def load_selected_providers(self) -> None:
         if self.plugin_context is None:
-            logger.warning(
-                "Plugin context is unavailable, skip loading providers from plugin config."
+            raise RuntimeStateConfigurationError(
+                "Plugin context is unavailable while loading provider bindings."
             )
-            return
 
         if self.stt_provider_id:
             provider = self.plugin_context.get_provider_by_id(self.stt_provider_id)
@@ -294,16 +293,12 @@ class RuntimeState:
                 self.selected_stt_provider = provider
                 logger.info("Loaded STT provider from plugin config: %s", self.stt_provider_id)
             else:
-                logger.warning(
-                    "Configured STT provider `%s` not found or not a STTProvider.",
-                    self.stt_provider_id,
+                raise RuntimeStateConfigurationError(
+                    "Configured STT provider "
+                    f"`{self.stt_provider_id}` was not found or is not an STTProvider."
                 )
         else:
-            try:
-                provider = self.plugin_context.get_using_stt_provider(umo=self.client_uid)
-            except Exception as exc:
-                logger.warning("Failed to get current STT provider: %s", exc)
-                provider = None
+            provider = self.plugin_context.get_using_stt_provider(umo=self.client_uid)
             if isinstance(provider, STTProvider):
                 self.selected_stt_provider = provider
                 logger.info("Using current STT provider: %s", provider.meta().id)
