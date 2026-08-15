@@ -16,10 +16,8 @@ import {
   cloneLive2dPresentationSettings,
 } from "../../live2d-renderer/settings.js";
 import { cloneSemanticParameterPlan } from "../../model-engine/planParser.js";
-import {
-  cloneCompiledSemanticMotion,
-  PERFORMANCE_SCHEDULE_TRACE_VERSION,
-} from "../../types/compiledSemanticMotion.js";
+import { cloneCompiledSemanticMotion } from "../../model-engine/compiler/compiledSemanticMotionParser.js";
+import { PERFORMANCE_SCHEDULE_TRACE_VERSION } from "../../types/compiledSemanticMotion.js";
 import { DEFAULT_ADAPTER_ADDRESS } from "../../adapter-connection/core/address.js";
 import {
   DEFAULT_PTT_KEY_BINDING,

@@ -1,7 +1,7 @@
 import { cloneJson } from "../../utils/cloneJson.js";
 import type { DesktopMotionTuningSample } from "../../types/desktop.js";
 import type { MotionTuningSampleProtocolPayload } from "../../types/protocol.js";
-import { cloneCompiledSemanticMotion } from "../../types/compiledSemanticMotion.js";
+import { cloneCompiledSemanticMotion } from "../../model-engine/compiler/compiledSemanticMotionParser.js";
 import { SCHEMA_MOTION_TUNING_SAMPLE_V2 } from "../../types/protocolSchema.generated.js";
 
 export function serializeMotionTuningSample(

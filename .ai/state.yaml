@@ -1,9 +1,9 @@
 task:
   class: bugfix
-  risk: medium
-  phase: official_remote_operator_boundary
+  risk: low
+  phase: compiled_semantic_motion_parser_boundary
   status: implementation_complete
-  scope: "Make Remote Operator an explicit enhanced-Core capability and prevent official compatibility mode from creating or probing an unreachable runtime."
+  scope: "Separate CompiledSemanticMotion DTOs from runtime parsing so Electron Node typechecking does not depend on renderer utilities."
 
 context:
   confidence: high
@@ -39,6 +39,8 @@ context:
     - The plugin platform event owns how completion closes the AG99 output queue, but the plugin must not invoke that completion from its own Hook.
     - Remote Operator requires the enhanced Core Interaction Prompt/Result contributor lifecycle; official compatibility mode does not promise this capability.
     - Official compatibility mode must not create RemoteOperatorRuntime or probe configured endpoints when no request/result lifecycle exists.
+    - `src/types/compiledSemanticMotion.ts` is a shared contract module and must not own runtime cloning or parsing dependencies.
+    - The unique CompiledSemanticMotion runtime parser belongs to ModelEngine compiler and is shared by MotionLab transport and desktop snapshot projections.
 
 documentation:
   authorities:
@@ -59,8 +61,8 @@ verification:
     - Automated tests are low-confidence input/output smoke checks; do not run the full suite.
     - Live AstrBot, Electron, TTS, and Live2D behavior remains user-led runtime acceptance.
   current:
-    - RuntimeState now exposes one general `interaction_contributors_available` capability used by motion and Remote Operator ownership decisions.
-    - PlatformAdapter creates, starts, and stops RemoteOperatorRuntime only when that capability is available.
-    - Official compatibility startup logs, plugin configuration descriptions, README, and Remote Operator design docs explicitly mark the capability unavailable.
-    - Python compilation, JSON parsing, the AstrBot plugin structure checker, and `git diff --check` passed.
-    - Live enhanced-Core delegation and official-mode no-probe behavior remain pending user runtime acceptance.
+    - Runtime cloning and validation moved from `types/compiledSemanticMotion.ts` to the existing intended `model-engine/compiler/compiledSemanticMotionParser.ts` boundary.
+    - Motion tuning payload and desktop snapshot callers now consume that single parser; shared types no longer import `utils/cloneJson.ts`.
+    - `npm run typecheck` now passes renderer, WebSDK, and Electron Node projects.
+    - The existing desktopBridgeClone boundary smoke passed through an in-memory bundle.
+    - Live MotionLab save/reload and preview remain pending user runtime acceptance.
