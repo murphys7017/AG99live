@@ -1,9 +1,9 @@
 task:
   class: bugfix
   risk: low
-  phase: binary_audio_reserved_flags_validation
+  phase: ptt_keyboard_listener_ownership
   status: implementation_complete
-  scope: "Reject AG99 binary audio frames whose reserved header flags are non-zero."
+  scope: "Make document the sole renderer DOM keyboard owner for PTT while retaining the independent Electron IPC hook."
 
 context:
   confidence: high
@@ -30,6 +30,7 @@ context:
     - control.playback_finished and control.interrupt carry frontend Turn IDs by protocol contract; their handlers must not query the AstrBot-to-frontend index with those values.
     - Normalized motion dispatch must handle every declared payload kind explicitly; unknown runtime values are rejected and never reinterpreted as another motion kind.
     - Binary audio header bytes 6-7 are reserved flags in little-endian order; the current frontend writer sets them to zero and the backend parser owns enforcing that invariant.
+    - Renderer keyboard events bubble through document to window; PTT must listen on one DOM owner only, while Electron global-hook events remain a separate IPC source.
 
 documentation:
   authorities:
@@ -50,7 +51,9 @@ verification:
     - Automated tests are low-confidence input/output smoke checks; do not run the full suite.
     - Live AstrBot, Electron, TTS, and Live2D behavior remains user-led runtime acceptance.
   current:
-    - parse_binary_audio_frame now reads the reserved uint16 at header offset 6 and rejects any non-zero value before metadata parsing.
-    - The frontend writer remains unchanged and continues to write zero flags at the same offset.
-    - The focused valid-frame and non-zero-flags checks both passed, along with Python syntax validation and `git diff --check`.
-    - No stale R20 documentation remains; live microphone streaming remains pending user runtime acceptance.
+    - usePushToTalkController now installs and removes renderer keydown/keyup listeners only on document.
+    - The Electron global PTT hook remains unchanged on desktop:ptt-keydown and desktop:ptt-keyup IPC channels.
+    - `npm run typecheck:renderer` and `git diff --check` passed.
+    - The focused PTT test output ran directly from the emitted test artifact and passed, with document as the only DOM listener owner.
+    - The package test script itself remains blocked before execution by pre-existing WebSDK strict-type errors and a pre-existing missing compiledSemanticMotionParser test import.
+    - Live renderer focus and Electron global-hook behavior remain pending user runtime acceptance.

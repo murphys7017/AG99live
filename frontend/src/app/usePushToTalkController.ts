@@ -46,16 +46,12 @@ export function usePushToTalkController(adapter: PushToTalkAdapterPort): PushToT
   function installPttKeyboardListeners(): void {
     document.addEventListener("keydown", onPttKeyDown);
     document.addEventListener("keyup", onPttKeyUp);
-    window.addEventListener("keydown", onPttKeyDown);
-    window.addEventListener("keyup", onPttKeyUp);
-    console.info("[PTT] keyboard listeners installed (document + window)");
+    console.info("[PTT] keyboard listeners installed (document)");
   }
 
   function removePttKeyboardListeners(): void {
     document.removeEventListener("keydown", onPttKeyDown);
     document.removeEventListener("keyup", onPttKeyUp);
-    window.removeEventListener("keydown", onPttKeyDown);
-    window.removeEventListener("keyup", onPttKeyUp);
   }
 
   function onPttIpcKeyDown(payload: DesktopPttEventPayload): void {
