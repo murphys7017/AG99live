@@ -17,7 +17,7 @@ import type {
   SemanticMotionIntent,
 } from "../../types/protocol.js";
 import type {
-  CatalogMotionStartResult,
+  MotionPlaybackStartResult,
 } from "../../types/live2d-runtime.d.ts";
 import {
   resolvePerformanceCurveTimeline,
@@ -502,7 +502,7 @@ function startCatalogMotionExecution(
   } = options;
   let notifiedStarted = false;
 
-  const startResult: CatalogMotionStartResult = dependencies.playCatalogMotion(
+  const startResult: MotionPlaybackStartResult = dependencies.playCatalogMotion(
     motion,
     selectedModel,
     {
@@ -645,7 +645,7 @@ function startCompilableMotionPayload(
   }
 
   let notifiedStarted = false;
-  const started = dependencies.playPlan(
+  const startResult = dependencies.playPlan(
     prepared.plan,
     selectedModel,
     {
@@ -690,9 +690,10 @@ function startCompilableMotionPayload(
     },
   );
 
-  if (!started) {
-    const failureReason = dependencies.getPlayerMessage?.()
+  if (startResult.status === "rejected") {
+    const failureReason = startResult.reason.trim()
       || "动作意图编译成功，但运行时拒绝执行。";
+    state.setLastCompileReason(failureReason);
     state.setState("failed", failureReason, prepared.diagnostics);
     state.pushHistory("error", `动作播放失败：${failureReason}`);
     return false;

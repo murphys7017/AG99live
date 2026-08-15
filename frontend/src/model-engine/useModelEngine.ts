@@ -445,13 +445,18 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
         runId: normalizedRunId,
       });
     };
-    const started = dependencies.playPlan(plan, selectedModel, {
+    const startResult = dependencies.playPlan(plan, selectedModel, {
       requiresPlaybackClock: false,
       onStarted: (startedPlan, runId) => notifyStarted(runId, startedPlan),
     });
-    if (!started || !notifiedStarted) {
-      state.lastCompileReason = dependencies.getPlayerMessage?.()
+    if (startResult.status === "rejected") {
+      state.lastCompileReason = startResult.reason.trim()
         || "compiled_semantic_motion_preview_start_failed";
+      setState("failed", state.lastCompileReason, semanticMotion.diagnostics);
+      return false;
+    }
+    if (!notifiedStarted) {
+      state.lastCompileReason = "motion_player_started_without_run_id";
       setState("failed", state.lastCompileReason, semanticMotion.diagnostics);
       return false;
     }

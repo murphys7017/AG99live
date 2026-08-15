@@ -9,7 +9,7 @@ export type {
   DirectParameterPlanTerminalStatus,
 } from "./direct-parameter-plan";
 
-export type CatalogMotionStartResult =
+export type MotionPlaybackStartResult =
   | { status: "rejected"; reason: string }
   | { status: "started"; runId: string };
 

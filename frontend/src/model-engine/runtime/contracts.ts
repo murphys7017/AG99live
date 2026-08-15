@@ -1,7 +1,7 @@
 import type { DesktopHistoryEntry } from "../../types/desktop.js";
 import type {
-  CatalogMotionStartResult,
   DirectParameterPlanTerminalEvent,
+  MotionPlaybackStartResult,
 } from "../../types/live2d-runtime.d.ts";
 import type {
   CatalogMotionPayload,
@@ -120,12 +120,12 @@ export interface MotionStartDependencies {
     plan: unknown,
     model: ModelSummary | null,
     options: PlayPlanOptions,
-  ) => boolean;
+  ) => MotionPlaybackStartResult;
   playCatalogMotion: (
     motion: CatalogMotionPayload,
     model: ModelSummary | null,
     options: PlayCatalogMotionOptions,
-  ) => CatalogMotionStartResult;
+  ) => MotionPlaybackStartResult;
   getPlayerMessage?: () => string;
   onPlanStarted: (event: ModelEnginePlanStartedEvent) => void;
   onMotionRejected: (event: {

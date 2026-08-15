@@ -6,8 +6,8 @@ import type {
 } from "../types/protocol.js";
 import { SCHEMA_PARAMETER_PLAN_V3 } from "../types/protocol.js";
 import type {
-  CatalogMotionStartResult,
   DirectParameterPlanTerminalEvent,
+  MotionPlaybackStartResult,
 } from "../types/live2d-runtime.d.ts";
 import { isObject, normalizeText } from "../utils/guards.js";
 import { parseSemanticParameterPlan } from "../model-engine/planParser.js";
@@ -91,17 +91,20 @@ export function usePreviewMotionPlayer() {
     plan: unknown,
     _model: ModelSummary | null = null,
     options: PlayPlanOptions = {},
-  ): boolean {
+  ): MotionPlaybackStartResult {
     console.info("[MotionPlayer] playPlan called. plan type:", typeof plan, "plan:", JSON.stringify(plan)?.slice(0, 200));
+    const hadActivePlayback = Boolean(activeDirectPlanRunId || activeCatalogMotionRunId);
 
     const parsed = parseParameterPlan(plan);
     if (!parsed) {
       const reason = `动作计划无效：仅支持 ${SCHEMA_PARAMETER_PLAN_V3}。`;
       console.warn("[MotionPlayer] parse failed:", reason, "plan keys:", plan && typeof plan === "object" ? Object.keys(plan as object) : "N/A");
-      state.status = "failed";
-      state.message = reason;
-      state.finishedAt = new Date().toISOString();
-      return false;
+      if (!hadActivePlayback) {
+        state.status = "failed";
+        state.message = reason;
+        state.finishedAt = new Date().toISOString();
+      }
+      return { status: "rejected", reason: "parameter_plan_v3_invalid" };
     }
     const playbackPlan = parsed;
     const manualPreviewStartedAtMs = performance.now();
@@ -112,11 +115,13 @@ export function usePreviewMotionPlayer() {
     );
     if (!playbackClockReader) {
       const reason = "动作计划无法执行：会话 Timeline 时钟缺失。";
-      state.status = "failed";
-      state.message = reason;
-      state.finishedAt = new Date().toISOString();
+      if (!hadActivePlayback) {
+        state.status = "failed";
+        state.message = reason;
+        state.finishedAt = new Date().toISOString();
+      }
       console.error("[MotionPlayer]", reason);
-      return false;
+      return { status: "rejected", reason: "parameter_plan_clock_missing" };
     }
     console.info(
       "[MotionPlayer] parse OK. mode=",
@@ -133,16 +138,17 @@ export function usePreviewMotionPlayer() {
     if (!adapter || typeof adapter.startDirectParameterPlan !== "function") {
       const reason = "动作计划无法执行：Live2D 运行时未提供 Direct Parameter 接口。";
       console.warn("[MotionPlayer]", reason);
-      state.status = "failed";
-      state.message = reason;
-      state.finishedAt = new Date().toISOString();
-      return false;
+      if (!hadActivePlayback) {
+        state.status = "failed";
+        state.message = reason;
+        state.finishedAt = new Date().toISOString();
+      }
+      return { status: "rejected", reason: "direct_parameter_plan_api_unavailable" };
     }
 
     console.info("[MotionPlayer] calling startDirectParameterPlan...");
     const playbackRunId = `motion-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const previousDirectPlanRunId = activeDirectPlanRunId;
-    const hadActiveDirectPlan = Boolean(previousDirectPlanRunId);
     // WebSDK can synchronously terminal the replaced run. Reserve the new id
     // first so that old terminal events remain Timeline facts without rewriting
     // this player back to the old run's state.
@@ -182,12 +188,15 @@ export function usePreviewMotionPlayer() {
         ? `动作计划执行失败：${runtimeReason}`
         : "动作计划执行失败：Direct Parameter 计划被运行时拒绝。";
       console.warn("[MotionPlayer]", reason);
-      if (!hadActiveDirectPlan) {
+      if (!hadActivePlayback) {
         state.status = "failed";
         state.message = reason;
         state.finishedAt = new Date().toISOString();
       }
-      return false;
+      return {
+        status: "rejected",
+        reason: runtimeReason || "direct_parameter_plan_rejected",
+      };
     }
 
     // Catalog motion has a separate SDK lifecycle. Stop it only after the
@@ -201,14 +210,14 @@ export function usePreviewMotionPlayer() {
     state.startedAt = new Date().toISOString();
     state.finishedAt = "";
     options.onStarted?.(playbackPlan.plan, playbackRunId);
-    return true;
+    return { status: "started", runId: playbackRunId };
   }
 
   function playCatalogMotion(
     motion: CatalogMotionPayload,
     _model: ModelSummary | null = null,
     options: PlayCatalogMotionOptions = {},
-  ): CatalogMotionStartResult {
+  ): MotionPlaybackStartResult {
     const manualPreviewStartedAtMs = performance.now();
     const playbackClockReader = options.playbackClockReader ?? (
       options.requiresPlaybackClock
