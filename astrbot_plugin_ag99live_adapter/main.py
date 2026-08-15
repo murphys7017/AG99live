@@ -47,7 +47,7 @@ class MyPlugin(Star):
                 "AG99live official AstrBot compatibility enabled: "
                 "Persona Effect and TTS lifecycle hooks are unavailable; "
                 "using <@anim> V4 and final Record audio facts; "
-                "optional performance curve generation is disabled."
+                "optional performance curve generation and Remote Operator are disabled."
             )
 
     @filter.on_llm_request()

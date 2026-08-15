@@ -77,8 +77,11 @@ class RuntimeState:
         self.stt_provider_id = ""
         self.performance_curve_provider_id = ""
         self.enable_performance_curve = False
-        self.ag99live_motion_persona_effect_available = supports_interaction_contributors(
+        self.interaction_contributors_available = supports_interaction_contributors(
             plugin_context
+        )
+        self.ag99live_motion_persona_effect_available = (
+            self.interaction_contributors_available
         )
         self.motion_tuning_fewshot_enabled = True
         self.motion_tuning_fewshot_count = 7

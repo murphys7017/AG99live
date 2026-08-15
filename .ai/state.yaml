@@ -1,9 +1,9 @@
 task:
   class: bugfix
-  risk: low
-  phase: official_output_completion_ownership
+  risk: medium
+  phase: official_remote_operator_boundary
   status: implementation_complete
-  scope: "Make AstrBot TurnDeliveryCoordinator the sole normal-path caller of platform visible-turn completion in official compatibility mode."
+  scope: "Make Remote Operator an explicit enhanced-Core capability and prevent official compatibility mode from creating or probing an unreachable runtime."
 
 context:
   confidence: high
@@ -37,6 +37,8 @@ context:
     - Unknown fields are protocol errors rather than optional extension points and must report their exact object path.
     - AstrBot TurnDeliveryCoordinator owns the sequence of after_message_sent Hook dispatch followed by visible-turn completion.
     - The plugin platform event owns how completion closes the AG99 output queue, but the plugin must not invoke that completion from its own Hook.
+    - Remote Operator requires the enhanced Core Interaction Prompt/Result contributor lifecycle; official compatibility mode does not promise this capability.
+    - Official compatibility mode must not create RemoteOperatorRuntime or probe configured endpoints when no request/result lifecycle exists.
 
 documentation:
   authorities:
@@ -57,8 +59,8 @@ verification:
     - Automated tests are low-confidence input/output smoke checks; do not run the full suite.
     - Live AstrBot, Electron, TTS, and Live2D behavior remains user-led runtime acceptance.
   current:
-    - The plugin no longer registers an after_message_sent Hook that calls `event.complete_visible_turn()`.
-    - `OLVPetPlatformEvent.complete_visible_turn()` remains the single platform implementation that closes the Adapter output queue when Core invokes it.
-    - README, architecture notes, and the detailed sequence diagram now name TurnDeliveryCoordinator as the completion caller.
-    - Python compilation, the AstrBot plugin structure checker, and `git diff --check` passed.
-    - A live official-compatibility reply remains pending user runtime acceptance.
+    - RuntimeState now exposes one general `interaction_contributors_available` capability used by motion and Remote Operator ownership decisions.
+    - PlatformAdapter creates, starts, and stops RemoteOperatorRuntime only when that capability is available.
+    - Official compatibility startup logs, plugin configuration descriptions, README, and Remote Operator design docs explicitly mark the capability unavailable.
+    - Python compilation, JSON parsing, the AstrBot plugin structure checker, and `git diff --check` passed.
+    - Live enhanced-Core delegation and official-mode no-probe behavior remain pending user runtime acceptance.

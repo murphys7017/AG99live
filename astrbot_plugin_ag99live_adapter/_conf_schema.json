@@ -22,12 +22,12 @@
     "default": "DesktopUser"
   },
   "remote_operator_default_computer": {
-    "description": "远程执行器默认电脑 key。用户没有指定电脑时使用该 key；如果不在映射中，则使用映射中的第一台电脑。",
+    "description": "增强版 AstrBot 专用。远程执行器默认电脑 key；用户没有指定电脑时使用该 key，如果不在映射中则使用第一台电脑。官方兼容模式不启动 Remote Operator。",
     "type": "string",
     "default": ""
   },
   "remote_operator_computer_entries": {
-    "description": "远程执行器列表。每项配置一个 computer key、用户可说出的名称、执行后端和后端固定参数；模型和工作目录由配置决定，不由聊天模型选择。",
+    "description": "增强版 AstrBot 专用。每项配置一个 computer key、用户可说出的名称、执行后端和后端固定参数；官方兼容模式不探测 endpoint，也不注入或执行远程任务。",
     "type": "template_list",
     "default": [],
     "templates": {
@@ -89,12 +89,12 @@
     }
   },
   "remote_operator_probe_max_failures": {
-    "description": "远程执行器在线探测连续失败多少次后停止继续探测该 endpoint。重启插件或修改 endpoint 后会重新探测。",
+    "description": "增强版 AstrBot 中，远程执行器在线探测连续失败多少次后停止继续探测该 endpoint。重启插件或修改 endpoint 后会重新探测。",
     "type": "int",
     "default": 5
   },
   "remote_operator_default_profile": {
-    "description": "远程执行器默认执行档位。未明确指定复杂任务时使用 simple。",
+    "description": "增强版 AstrBot 中的远程执行器默认执行档位。未明确指定复杂任务时使用 simple。",
     "type": "string",
     "default": "simple",
     "options": [
@@ -103,7 +103,7 @@
     ]
   },
   "remote_operator_profiles": {
-    "description": "远程执行器执行档位配置。仅支持 simple 和 complex 两档。",
+    "description": "增强版 AstrBot 中的远程执行器执行档位配置。仅支持 simple 和 complex 两档。",
     "type": "object",
     "items": {
       "simple": {

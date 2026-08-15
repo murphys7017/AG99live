@@ -10,7 +10,7 @@ AG99live 的 AstrBot 插件侧实现。该目录负责协议桥接、Turn 生命
 - 管理 turn 生命周期，保证文本/语音/动作消息在同一轮次可追踪。
 - 扫描 Live2D 资源并产出结构化能力信息。
 - 生成并下发动作用载荷；统一走 AstrBot 交互中间件主链路，由 `ag99live.motion` Persona Effect 产出动作并通过 `client_objects` 下发。
-- 注入远程执行器能力，并把电脑/桌面/软件操作类请求委托给配置的 Codex app-server / Computer Use。
+- 在增强版 AstrBot 中注入远程执行器能力，并把电脑/桌面/软件操作类请求委托给配置的 Codex app-server / Computer Use。
 
 ## 当前路线说明
 
@@ -74,6 +74,8 @@ astrbot_plugin_ag99live_adapter/
 - 标签外层只接受 `mode="inline"` 与 `intent`；裸 intent、`motion_payload`、`plan` 和其他历史包装字段会被拒绝。
 - 如果 `<@anim>` 内部 JSON、schema 或 v4 payload 无效，后端只记录拒绝原因，不生成替代动作。
 - 官方 Core 没有 `TTSState`、`tts_request_id` 或 TTS 失败通知。Adapter 只把最终 `Record` 当作音频成功事实；没有 `Record` 时只能声明无音频，不能伪造 `failed`。可选 performance curve 在此模式不启动。
+- 官方兼容模式不具备 Remote Operator 的 Prompt/Result contributor 生命周期，因此不创建 Runtime、
+  不探测配置的 endpoint，也不注入远程执行请求；相关配置只在增强版 AstrBot 中生效。
 
 ### 动作效果输出
 
@@ -114,7 +116,7 @@ astrbot_plugin_ag99live_adapter/
 
 ## 远程执行器 / Windows 操作
 
-AG99live 远程执行器当前走任务委托链路：
+AG99live 远程执行器只在具备 Interaction Prompt/Result contributor 的增强版 AstrBot 中启用，当前走任务委托链路：
 
 ```text
 用户请求操作电脑

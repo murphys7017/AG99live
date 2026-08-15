@@ -73,7 +73,7 @@ class OLVPetPlatformAdapter(Platform):
       - MediaService — 音频流缓冲 / 缓存 / 图片落地；
       - MessageFactory — 协议消息 → AstrBotMessage；
       - ChatBuffer / ConversationHistoryBridge / FrontendSystemCommandHandler — 业务组合；
-      - RemoteOperatorRuntime — 远程操作注入入口；
+      - RemoteOperatorRuntime — 增强版 Core 的远程操作注入入口；
       - WebSocketTransport — 单连接 WebSocket 入口；
       - TurnCoordinator — 协议 + 轮次中枢（详细职责见 turn_coordinator.py）。
 
@@ -190,10 +190,12 @@ class OLVPetPlatformAdapter(Platform):
             send_motion_tuning_samples_state=self._send_motion_tuning_samples_state,
             on_disconnect=self._handle_transport_disconnect,
         )
-        self.remote_operator_runtime = RemoteOperatorRuntime(
-            plugin_config_loader=get_plugin_config,
-            submit_system_text_input=self._submit_remote_operator_system_text_input,
-        )
+        self.remote_operator_runtime: RemoteOperatorRuntime | None = None
+        if self.runtime_state.interaction_contributors_available:
+            self.remote_operator_runtime = RemoteOperatorRuntime(
+                plugin_config_loader=get_plugin_config,
+                submit_system_text_input=self._submit_remote_operator_system_text_input,
+            )
 
         self._vad_engine = None
         self.turn_coordinator = TurnCoordinator(
@@ -260,7 +262,8 @@ class OLVPetPlatformAdapter(Platform):
         self._event_loop = asyncio.get_running_loop()
         try:
             await asyncio.to_thread(self._debug_server.start)
-            self.remote_operator_runtime.start()
+            if self.remote_operator_runtime is not None:
+                self.remote_operator_runtime.start()
             await self.transport.start()
         except asyncio.CancelledError:
             await self.terminate()
@@ -424,7 +427,8 @@ class OLVPetPlatformAdapter(Platform):
 
     async def terminate(self) -> None:
         logger.info("AG99live adapter terminate() called")
-        await self.remote_operator_runtime.stop()
+        if self.remote_operator_runtime is not None:
+            await self.remote_operator_runtime.stop()
         await self.transport.stop()
         motion_lab_recorder = getattr(self.runtime_state, "motion_lab_recorder", None)
         close_motion_lab = getattr(motion_lab_recorder, "close", None)
