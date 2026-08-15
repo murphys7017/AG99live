@@ -86,4 +86,5 @@ verification:
     - ModelEngine public execution state belongs to the active playback run; pending, compile, and start failures from replacement candidates remain diagnostics and cannot overwrite a still-playing run.
     - Direct Parameter Plan and Catalog Motion starts return the same structured started/rejected result; ModelEngine receives the actual rejection reason instead of inferring errors from mutable player display text.
     - Motion lifecycle fan-out isolates ModelEngine, Timeline, recorder, caller, and desktop-bridge observers; RunTracker and recorder commit their own ownership transitions before invoking downstream projections so one observer failure cannot strand another owner.
+    - PlaybackTimelineEngine stop, interrupt, and fail transitions always settle every open sink and the Timeline phase before propagating the first clock or sink callback error.
     - Live AstrBot, Electron, TTS, ESP32, and Live2D runtime acceptance remains user-led.

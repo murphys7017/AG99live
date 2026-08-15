@@ -152,6 +152,47 @@ export function createPlaybackTimelineEngine(
     return job;
   }
 
+  function settleTimeline(
+    terminalPhase: Extract<TimelinePhase, "failed" | "interrupted">,
+    reason: string,
+    notifyInterrupt: boolean,
+  ): void {
+    ensureLoaded();
+    if (isTerminalPhase(phase)) {
+      return;
+    }
+    phase = "stopping";
+    const errors: unknown[] = [];
+    try {
+      clock.stop();
+    } catch (error) {
+      console.error("[PlaybackTimelineEngine] clock stop failed.", error);
+      errors.push(error);
+    }
+    for (const sink of sinks.values()) {
+      if (isTerminal(sink.state.terminal)) {
+        continue;
+      }
+      sink.state.terminal = terminalPhase === "failed" && sink.definition.required
+        ? "failed"
+        : "interrupted";
+      sink.state.reason = reason;
+      if (!notifyInterrupt) {
+        continue;
+      }
+      try {
+        sink.definition.onInterrupt?.(reason);
+      } catch (error) {
+        console.error(`[PlaybackTimelineEngine] sink '${sink.state.id}' interrupt failed.`, error);
+        errors.push(error);
+      }
+    }
+    phase = terminalPhase;
+    if (errors.length > 0) {
+      throw errors[0];
+    }
+  }
+
   return {
     load(nextJob, definitions = []) {
       job = nextJob;
@@ -193,54 +234,13 @@ export function createPlaybackTimelineEngine(
       phase = "playing";
     },
     stop(reason = "stopped") {
-      ensureLoaded();
-      if (isTerminalPhase(phase)) {
-        return;
-      }
-      phase = "stopping";
-      clock.stop();
-      for (const sink of sinks.values()) {
-        if (isTerminal(sink.state.terminal)) {
-          continue;
-        }
-        sink.state.terminal = "interrupted";
-        sink.state.reason = reason;
-      }
-      phase = "interrupted";
+      settleTimeline("interrupted", reason, false);
     },
     interrupt(reason) {
-      ensureLoaded();
-      if (isTerminalPhase(phase)) {
-        return;
-      }
-      phase = "stopping";
-      clock.stop();
-      for (const sink of sinks.values()) {
-        if (isTerminal(sink.state.terminal)) {
-          continue;
-        }
-        sink.state.terminal = "interrupted";
-        sink.state.reason = reason;
-        sink.definition.onInterrupt?.(reason);
-      }
-      phase = "interrupted";
+      settleTimeline("interrupted", reason, true);
     },
     fail(reason) {
-      ensureLoaded();
-      if (isTerminalPhase(phase)) {
-        return;
-      }
-      phase = "stopping";
-      clock.stop();
-      for (const sink of sinks.values()) {
-        if (isTerminal(sink.state.terminal)) {
-          continue;
-        }
-        sink.state.terminal = sink.definition.required ? "failed" : "interrupted";
-        sink.state.reason = reason;
-        sink.definition.onInterrupt?.(reason);
-      }
-      phase = "failed";
+      settleTimeline("failed", reason, true);
     },
     registerSink(definition) {
       ensureLoaded();
