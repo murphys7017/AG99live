@@ -1,9 +1,9 @@
 task:
   class: bugfix
   risk: medium
-  phase: issue_reconciliation_segment_terminal_cleanup
+  phase: catalog_motion_async_start_contract
   status: implementation_complete
-  scope: "Close rejected output segments through the existing SessionStore lifecycle, make frontend Turn terminal writes atomic and keep-first, and bound connection-owned terminal history."
+  scope: "Distinguish rejected, asynchronously accepted, and actually started catalog motions so ModelEngine and Timeline retain one truthful lifecycle."
 
 context:
   confidence: high
@@ -16,6 +16,8 @@ context:
     - The existing MotionLab outbound queue is the only persistence path for frontend rejection diagnostics.
     - A rejected atomic segment is a settled SessionStore fact: none of its individual materials are released, but it still participates in synth_finished and failed playback acknowledgement.
     - Frontend sessions retain only recent terminal history, and the backend terminal idempotency ledger retains at most 256 completed turns per connection.
+    - An asynchronously accepted catalog motion is preparation, not a started run; only the real WebSDK onStarted callback may publish the run.
+    - Catalog motion preparation must remain interruptible and must settle through the existing Timeline rejection/terminal path when loading or start fails.
 
 documentation:
   authorities:
@@ -36,6 +38,9 @@ verification:
     - Automated tests are low-confidence input/output smoke checks; do not run the full suite.
     - Live AstrBot, Electron, TTS, and Live2D behavior remains user-led runtime acceptance.
   current:
+    - Catalog motion start now returns explicit rejected, accepted, or started results instead of collapsing asynchronous acceptance into a boolean.
+    - Accepted catalog motions retain an interruptible preparation owner; only the real onStarted callback publishes the active run.
+    - Asynchronous fetch, load, start, and pre-start interruption terminals settle through the existing ModelEngine and Timeline failure path.
     - Rejected motion/audio segments now remain local to their segment, preserve the exact rejection reason, and close through failed playback_finished instead of blocking later sessions.
     - Frontend Turn, interrupt, and local session failure writes validate terminal state before mutation and preserve the first terminal result.
     - Frontend terminal sessions are pruned through the existing store API; backend terminal tombstones and timing records are bounded or cleared by their lifecycle owner.
