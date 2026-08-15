@@ -65,5 +65,7 @@ verification:
   current:
     - The previous Remote Operator error-visibility correction is committed as `e4fe844`.
     - The broader end-to-end source review is in progress; the active defect register remains empty until a finding is source-confirmed.
-    - ESP32 display initial status read failure was confirmed to be silently swallowed and is being corrected in its existing state owner.
+    - ESP32 display initial status read failures are visible after commit `0a0da08`.
+    - TurnCoordinator no longer publishes a terminal event from its generic inbound exception handler; only `_commit_inbound_message` owns failure termination after `control.turn_started` succeeds.
+    - The obsolete test that required a pre-Turn conversion failure to fabricate `control.turn_finished` is being deleted.
     - Live AstrBot, Electron, TTS, ESP32, and Live2D runtime acceptance remains user-led.

@@ -226,26 +226,12 @@ class TurnCoordinator:
             )
         except asyncio.CancelledError:
             raise
-        except Exception as exc:
+        except Exception:
             logger.exception(
                 "Inbound turn message failed: type=%s turn_id=%s",
                 message.type,
                 turn_id,
             )
-            try:
-                await self._finish_turn(
-                    turn_id=turn_id,
-                    success=False,
-                    reason=f"inbound_message_processing_failed:{message.type}",
-                )
-            except Exception:
-                logger.exception(
-                    "Failed to publish terminal state after inbound turn error: "
-                    "type=%s turn_id=%s original_error=%s",
-                    message.type,
-                    turn_id,
-                    exc,
-                )
             raise
 
     def reset_turn_tracking(self) -> None:
