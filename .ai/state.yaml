@@ -1,9 +1,9 @@
 task:
   class: bugfix
-  risk: medium
-  phase: direct_parameter_contract_boundary
+  risk: low
+  phase: strict_parameter_plan_fields
   status: implementation_complete
-  scope: "Move Direct Parameter Plan contracts out of the WebSDK implementation directory while preserving one shared type definition and the existing runtime API."
+  scope: "Make the unique parameter_plan.v3 parser reject unknown fields at every declared object level before the plan reaches WebSDK."
 
 context:
   confidence: high
@@ -33,6 +33,8 @@ context:
     - Renderer keyboard events bubble through document to window; PTT must listen on one DOM owner only, while Electron global-hook events remain a separate IPC source.
     - Direct Parameter Plan DTOs are an application-to-WebSDK boundary contract and must live outside the WebSDK implementation directory.
     - WebSDK retains execution preparation ownership and re-exports the neutral contract only to preserve existing internal imports, not as a second type definition.
+    - The ModelEngine parser is the only runtime schema owner for parameter_plan.v3; WebSDK must continue consuming validated plans without a duplicate parser.
+    - Unknown fields are protocol errors rather than optional extension points and must report their exact object path.
 
 documentation:
   authorities:
@@ -53,8 +55,8 @@ verification:
     - Automated tests are low-confidence input/output smoke checks; do not run the full suite.
     - Live AstrBot, Electron, TTS, and Live2D behavior remains user-led runtime acceptance.
   current:
-    - Direct Parameter Plan contracts now have one definition in `frontend/src/types/direct-parameter-plan.ts`.
-    - `directparameterplan.ts` retains only execution preparation and type re-exports for stable WebSDK-local imports.
-    - `frontend/src/types/` no longer imports `frontend/src/live2d/WebSDK/src/`.
-    - `npm run typecheck:renderer`, `npm run typecheck:websdk`, and `git diff --check` passed.
-    - Live Direct Parameter Plan playback remains pending user runtime acceptance because this phase changes compile-time dependency direction only.
+    - `parseSemanticParameterPlan()` now rejects unknown fields at the plan, timing, resource, diagnostics, summary, parameter, keyframe, modulation, modulation point, dynamics, and response levels.
+    - Rejection reasons include the exact field path, for example `parameter_plan_v3.unknown_field:plan.parameters[0].dynamics.response.frequency`.
+    - `npm run typecheck:renderer` and `git diff --check` passed.
+    - A one-off bundled boundary smoke confirmed one legal plan succeeds while top-level and nested unknown fields are rejected.
+    - Live MotionLab preview and playback remain pending user runtime acceptance.

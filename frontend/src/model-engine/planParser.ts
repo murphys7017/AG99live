@@ -32,6 +32,143 @@ interface ParseSuccess<TValue> {
 
 export type ParseResult<TValue> = ParseFailure | ParseSuccess<TValue>;
 
+interface ObjectFieldSchema {
+  fields: readonly string[];
+  children?: Readonly<Record<string, ObjectFieldChild>>;
+}
+
+type ObjectFieldChild =
+  | ObjectFieldSchema
+  | { items: ObjectFieldSchema }
+  | { select: (value: Record<string, unknown>) => ObjectFieldSchema };
+
+const BOUNDED_RESPONSE_SCHEMA: ObjectFieldSchema = { fields: ["kind"] };
+const SPRING_RESPONSE_SCHEMA: ObjectFieldSchema = {
+  fields: ["kind", "frequency_hz", "damping_ratio"],
+};
+const PARAMETER_PLAN_FIELD_SCHEMA: ObjectFieldSchema = {
+  fields: [
+    "schema_version",
+    "profile_id",
+    "profile_revision",
+    "model_id",
+    "mode",
+    "emotion_label",
+    "resource",
+    "timing",
+    "parameters",
+    "diagnostics",
+    "summary",
+  ],
+  children: {
+    timing: {
+      fields: ["duration_ms", "blend_in_ms", "hold_ms", "blend_out_ms", "curve_preset"],
+    },
+    resource: {
+      fields: ["kind", "resource_id", "expression_id", "parameter_ids"],
+    },
+    diagnostics: { fields: ["warnings"] },
+    summary: {
+      fields: [
+        "axis_count",
+        "parameter_count",
+        "target_duration_ms",
+        "active_groups",
+        "skeleton_groups",
+        "skeleton_groups_present",
+        "missing_skeleton_groups",
+        "max_delta_from_neutral",
+        "neutralish_axis_count",
+        "expressive_axis_count",
+        "neutralish_axes",
+        "expressive_axes",
+        "outside_soft_range_axes",
+        "pose_descriptors",
+      ],
+    },
+    parameters: {
+      items: {
+        fields: [
+          "axis_id",
+          "parameter_id",
+          "target_value",
+          "neutral_target_value",
+          "weight",
+          "input_value",
+          "source",
+          "keyframes",
+          "modulation",
+          "dynamics",
+        ],
+        children: {
+          keyframes: {
+            items: {
+              fields: ["at_ms", "transition_ms", "target_value", "input_value"],
+            },
+          },
+          modulation: {
+            fields: ["kind", "preset", "amplitude", "direction", "delay_ms", "points"],
+            children: {
+              points: {
+                items: { fields: ["at_ms", "transition_ms", "value"] },
+              },
+            },
+          },
+          dynamics: {
+            fields: ["max_velocity", "max_acceleration", "max_speech_offset", "response"],
+            children: {
+              response: {
+                select: (value) => value.kind === "bounded"
+                  ? BOUNDED_RESPONSE_SCHEMA
+                  : SPRING_RESPONSE_SCHEMA,
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+};
+
+function findUnknownField(
+  value: Record<string, unknown>,
+  schema: ObjectFieldSchema,
+  path: string,
+): string | null {
+  const unknownField = Object.keys(value).find((field) => !schema.fields.includes(field));
+  if (unknownField) {
+    return `${path}.${unknownField}`;
+  }
+
+  for (const [field, child] of Object.entries(schema.children ?? {})) {
+    const childValue = value[field];
+    if ("items" in child) {
+      if (!Array.isArray(childValue)) {
+        continue;
+      }
+      for (const [index, item] of childValue.entries()) {
+        if (!isObject(item)) {
+          continue;
+        }
+        const result = findUnknownField(item, child.items, `${path}.${field}[${index}]`);
+        if (result) {
+          return result;
+        }
+      }
+      continue;
+    }
+    if (!isObject(childValue)) {
+      continue;
+    }
+    const childSchema = "select" in child ? child.select(childValue) : child;
+    const result = findUnknownField(childValue, childSchema, `${path}.${field}`);
+    if (result) {
+      return result;
+    }
+  }
+  return null;
+}
+
 function normalizeTiming(value: unknown): DirectParameterPlanTiming | null {
   if (!isObject(value)) {
     return null;
@@ -172,6 +309,11 @@ export function parseSemanticParameterPlan(
 ): ParseResult<SemanticParameterPlan> {
   if (!isObject(value)) {
     return { ok: false, reason: "parameter_plan_v3_not_object" };
+  }
+
+  const unknownField = findUnknownField(value, PARAMETER_PLAN_FIELD_SCHEMA, "plan");
+  if (unknownField) {
+    return { ok: false, reason: `parameter_plan_v3.unknown_field:${unknownField}` };
   }
 
   if (normalizeText(value.schema_version) !== SCHEMA_PARAMETER_PLAN_V3) {
