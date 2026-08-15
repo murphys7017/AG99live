@@ -69,7 +69,9 @@ export function createPlaybackTimelineLipSyncRuntime(
         },
         onUnavailable: (reason, degraded) => {
           callbacks.onUnavailable?.(reason, degraded);
-          settleTerminal("failed", reason);
+          if (!degraded) {
+            settleTerminal("failed", reason);
+          }
         },
       });
     },

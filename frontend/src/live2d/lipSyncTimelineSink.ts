@@ -32,21 +32,23 @@ export function createLive2DLipSyncTimelineSink(): PlaybackTimelineLipSyncSink {
       const serial = attachmentSerial;
       const sourceId = `lip-sync:${serial}`;
       let started = false;
-      let unavailable = false;
+      let terminalUnavailable = false;
       const isActiveAttachment = () =>
         serial === attachmentSerial && options.isCurrentAudio();
       const markStarted = () => {
-        if (!isActiveAttachment() || started || unavailable) {
+        if (!isActiveAttachment() || started || terminalUnavailable) {
           return;
         }
         started = true;
         options.onStarted();
       };
       const markUnavailable = (reason: string, degraded: boolean) => {
-        if (!isActiveAttachment() || unavailable) {
+        if (!isActiveAttachment() || terminalUnavailable) {
           return;
         }
-        unavailable = true;
+        if (!degraded) {
+          terminalUnavailable = true;
+        }
         options.onUnavailable(reason, degraded);
       };
       markActiveStarted = markStarted;
@@ -78,7 +80,6 @@ export function createLive2DLipSyncTimelineSink(): PlaybackTimelineLipSyncSink {
             reason: degradedReason,
           });
           markActiveUnavailable?.(degradedReason, true);
-          return;
         }
         markActiveStarted?.();
       } catch (error) {
@@ -276,6 +277,7 @@ function startLiveLipSync(
                 reason: "lip_sync_resume_degradation_failed",
                 fallbackError,
               });
+              onRuntimeFailure("lip_sync_resume_degradation_failed", false);
             }
             return `lip_sync_resume_failed:${name}`;
           }
