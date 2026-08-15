@@ -185,9 +185,15 @@ export function useLive2dRenderer(
 
   async function releaseRenderer(reason: string): Promise<void> {
     const { releaseLive2D } = await import("@cubismsdksamples/main");
-    releaseLive2D(reason);
-    rendererLifecycleStarted = false;
-    clearMountedRendererState();
+    try {
+      releaseLive2D(reason);
+    } finally {
+      // The local owner is no longer valid even when one teardown step fails.
+      // Keeping it marked as started would make the next model transition
+      // operate on a renderer that has already lost part of its ownership.
+      rendererLifecycleStarted = false;
+      clearMountedRendererState();
+    }
   }
 
   function isCurrentModelRequest(requestVersion: number, modelUrl: string): boolean {
