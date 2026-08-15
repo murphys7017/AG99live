@@ -75,7 +75,7 @@ export function resolveMotionTiming(
       timing: {
         duration_ms: idleDurationMs,
         blend_in_ms: 80,
-        hold_ms: Math.max(220, idleDurationMs - 200),
+        hold_ms: idleDurationMs - 200,
         blend_out_ms: 120,
       },
       resolvedDurationMs: idleDurationMs,
