@@ -1,9 +1,9 @@
 task:
-  class: bugfix
-  risk: low
-  phase: remote_operator_error_visibility
-  status: implementation_complete
-  scope: "Remove Remote Operator compatibility wrappers that silently reinterpret AstrMessageEvent and toolset API failures as missing state or capability."
+  class: review
+  risk: high
+  phase: end_to_end_source_review
+  status: implementation_in_progress
+  scope: "Review the adapter, frontend playback, ModelEngine, ParameterMixer, and WebSDK ownership chain; fix each source-confirmed defect directly and commit it separately."
 
 context:
   confidence: high
@@ -63,8 +63,7 @@ verification:
     - Automated tests are low-confidence input/output smoke checks; do not run the full suite.
     - Live AstrBot, Electron, TTS, and Live2D behavior remains user-led runtime acceptance.
   current:
-    - Remote Operator now calls AstrMessageEvent identity and extra-state APIs directly and propagates their failures.
-    - Toolset `get_tool()` failures now propagate instead of silently skipping conflicting-tool removal.
-    - The obsolete optional Event method wrappers were deleted rather than retained beside the corrected path.
-    - Python compilation, the AstrBot plugin structure checker, and `git diff --check` passed.
-    - Live enhanced-Core Remote Operator arbitration and result scheduling remain pending user runtime acceptance.
+    - The previous Remote Operator error-visibility correction is committed as `e4fe844`.
+    - The broader end-to-end source review is in progress; the active defect register remains empty until a finding is source-confirmed.
+    - ESP32 display initial status read failure was confirmed to be silently swallowed and is being corrected in its existing state owner.
+    - Live AstrBot, Electron, TTS, ESP32, and Live2D runtime acceptance remains user-led.

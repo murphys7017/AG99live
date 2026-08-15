@@ -55,8 +55,12 @@ export function useEsp32DisplayConnection(): Esp32DisplayConnection {
         connected.value = status.connected;
         lastError.value = status.error;
       })
-      .catch(() => {
-        // ignore
+      .catch((error) => {
+        connected.value = false;
+        lastError.value = error instanceof Error
+          ? error.message
+          : "ipc_status_failed";
+        console.warn("[Esp32Display] read connection status failed.", error);
       });
   }
 
