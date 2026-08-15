@@ -467,6 +467,7 @@ class RemoteOperatorRuntime:
         self._opencode_client_factory = opencode_client_factory or OpenCodeRunClient
         self._probe_interval_seconds = max(float(probe_interval_seconds or 15.0), 1.0)
         self._task: asyncio.Task[Any] | None = None
+        self._execution_tasks: set[asyncio.Task[None]] = set()
         self._stopped = asyncio.Event()
         self._probe_failure_counts: dict[tuple[str, str], int] = {}
         self._probe_exhausted: set[tuple[str, str]] = set()
@@ -487,7 +488,31 @@ class RemoteOperatorRuntime:
             except asyncio.CancelledError:
                 pass
         self._task = None
+        execution_tasks = tuple(self._execution_tasks)
+        for execution_task in execution_tasks:
+            execution_task.cancel()
+        if execution_tasks:
+            await asyncio.gather(*execution_tasks, return_exceptions=True)
         set_remote_operator_online_computers([])
+
+    def schedule(self, request: RemoteOperatorRequest) -> None:
+        task = asyncio.create_task(self._execute_and_submit(request))
+        self._execution_tasks.add(task)
+
+        def handle_done(done_task: asyncio.Task[None]) -> None:
+            self._execution_tasks.discard(done_task)
+            try:
+                done_task.result()
+            except asyncio.CancelledError:
+                return
+            except Exception:
+                logger.exception(
+                    "Remote operator execution task failed: computer=%s profile=%s",
+                    request.computer,
+                    request.profile,
+                )
+
+        task.add_done_callback(handle_done)
 
     async def refresh_online_once(self) -> set[str]:
         config = resolve_remote_operator_endpoint_config(self._plugin_config_loader())
@@ -536,7 +561,7 @@ class RemoteOperatorRuntime:
                 self._probe_failure_counts.pop(probe_key, None)
         self._probe_exhausted.intersection_update(active_probe_keys)
 
-    async def execute_and_submit(self, request: RemoteOperatorRequest) -> None:
+    async def _execute_and_submit(self, request: RemoteOperatorRequest) -> None:
         result = await self.execute(request)
         await self._submit_result(result)
 

@@ -102,8 +102,8 @@ class TurnCoordinator:
     """后端单连接的协议+轮次编排器。
 
     一个 WebSocket 会话对应一个 TurnCoordinator 实例：内部以 _turn_lock 串行化轮次
-    生命周期事件，避免"上一轮没收口就被下一轮覆盖"。背景任务、轮次计时、平台动作
-    去重集合都由它持有，跨连接不共享。
+    生命周期事件，避免"上一轮没收口就被下一轮覆盖"。轮次计时和平台动作去重集合
+    都由它持有，跨连接不共享。
     """
 
     def __init__(
@@ -150,7 +150,6 @@ class TurnCoordinator:
         )
 
         self._turn_lock = asyncio.Lock()
-        self._background_tasks: set[asyncio.Task[Any]] = set()
         self._turn_timings: dict[str, dict[str, Any]] = {}
         self._events_by_turn_id: dict[str, Any] = {}
         self._last_prompt_motion_snapshot: dict[str, Any] | None = None
@@ -1356,21 +1355,6 @@ class TurnCoordinator:
             )
             is False
         )
-
-    def _spawn_background_task(self, coroutine: Awaitable[None]) -> None:
-        task = asyncio.create_task(coroutine)
-        self._background_tasks.add(task)
-
-        def _on_done(done_task: asyncio.Task[Any]) -> None:
-            self._background_tasks.discard(done_task)
-            try:
-                done_task.result()
-            except asyncio.CancelledError:
-                return
-            except Exception as exc:
-                logger.exception("Background task in turn coordinator failed: %s", exc)
-
-        task.add_done_callback(_on_done)
 
     async def _finish_turn(
         self,

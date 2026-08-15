@@ -444,12 +444,6 @@ class OLVPetPlatformAdapter(Platform):
             await asyncio.to_thread(self._debug_server.stop)
             self._event_loop = None
 
-    def spawn_background_task(self, coroutine) -> None:
-        if self._event_loop is not None and self._event_loop.is_running():
-            self.turn_coordinator._spawn_background_task(coroutine)
-            return
-        asyncio.create_task(coroutine)
-
     async def _submit_remote_operator_system_text_input(
         self,
         text: str,

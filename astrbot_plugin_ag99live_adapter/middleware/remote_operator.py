@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Mapping
 from dataclasses import dataclass
 import json
@@ -153,7 +152,7 @@ class AG99liveRemoteOperatorResultContributor:
                 )
             return None
 
-        adapter = getattr(event, "adapter", None)
+        adapter = event.adapter
         runtime = getattr(adapter, "remote_operator_runtime", None)
         if runtime is None:
             return InteractionResultContribution(
@@ -167,15 +166,8 @@ class AG99liveRemoteOperatorResultContributor:
                 priority=self.priority,
             )
 
-        task = runtime.execute_and_submit(request)
-        spawn = getattr(adapter, "spawn_background_task", None)
-        if callable(spawn):
-            spawn(task)
-        else:
-            asyncio.create_task(task)
-        set_extra = getattr(event, "set_extra", None)
-        if callable(set_extra):
-            set_extra("ag99live_remote_operator_scheduled", True)
+        event.set_extra("ag99live_remote_operator_scheduled", True)
+        runtime.schedule(request)
 
         return InteractionResultContribution(
             plugin_id=self.plugin_id,
