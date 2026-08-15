@@ -276,11 +276,11 @@ class SpeechIngressService:
         )
         try:
             vad_engine = self._ensure_vad_engine()
-        except Exception as exc:
-            logger.error("Failed to initialize VAD engine: %s", exc)
+        except Exception:
+            logger.exception("Failed to initialize VAD engine")
             await self._emit_input_error(
                 turn_id=turn_id,
-                error_message=f"VAD unavailable: {exc}",
+                error_message="VAD initialization failed.",
             )
             return None
 
@@ -317,11 +317,11 @@ class SpeechIngressService:
     ):
         try:
             text = (await self._transcribe_audio(audio_buffer, sample_rate=sample_rate)).strip()
-        except Exception as exc:
-            logger.error("Audio transcription failed: %s", exc)
+        except Exception:
+            logger.exception("Audio transcription failed")
             await self._emit_input_error(
                 turn_id=turn_id,
-                error_message=f"Audio transcription failed: {exc}",
+                error_message="Audio transcription failed.",
             )
             return None
 
