@@ -60,7 +60,7 @@ class WebSocketTransport:
     async def start(self) -> None:
         """启动静态资源 + WebSocket 监听；直到 ws_server.wait_closed()。
 
-        启动顺序：先刷一次 runtime settings（reload_persona / reload_providers），
+        启动顺序：先刷新 runtime settings 与 providers，
         再 to_thread 起 static_server，最后 websockets.serve。CancelledError
         与其它异常都会在退出前调 stop() 回收静态服务器与 WS 句柄，再重新抛。
         """
@@ -69,7 +69,6 @@ class WebSocketTransport:
             import websockets  # type: ignore
 
             await self._refresh_runtime_settings_async(
-                reload_persona=True,
                 reload_providers=True,
             )
             await asyncio.to_thread(self.static_server.start)
@@ -267,7 +266,6 @@ class WebSocketTransport:
         control.start_mic。
         """
         await self._refresh_runtime_settings_async(
-            reload_persona=True,
             reload_providers=True,
         )
         await self.send_json(

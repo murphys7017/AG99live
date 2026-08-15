@@ -102,7 +102,6 @@ class RuntimeState:
         self.vad_config: dict[str, Any] = {}
         self.model_info: dict[str, Any] = {}
         self.image_cooldown_seconds = 0
-        self.default_persona: dict[str, Any] | None = None
         self.selected_stt_provider: STTProvider | None = None
         self.selected_performance_curve_provider: Provider | None = None
         self.performance_curve_runtime = PerformanceCurveRuntime(runtime_state=self)
@@ -135,46 +134,6 @@ class RuntimeState:
             turn_id=turn_id,
             message_id=message_id,
         )
-
-    async def load_default_persona(self) -> None:
-        if self.plugin_context is None:
-            logger.warning("Plugin context is unavailable, skip loading default persona.")
-            return
-
-        configured_persona_id = _plugin_config_get(self.plugin_config, "persona_id", "")
-        try:
-            persona = None
-            if configured_persona_id:
-                persona = next(
-                    (
-                        item
-                        for item in self.plugin_context.persona_manager.personas_v3
-                        if item["name"] == configured_persona_id
-                    ),
-                    None,
-                )
-                if persona is None:
-                    raise RuntimeStateConfigurationError(
-                        f"Configured persona `{configured_persona_id}` was not found."
-                    )
-
-            if persona is None:
-                persona = await self.plugin_context.persona_manager.get_default_persona_v3(
-                    umo=self.client_uid
-                )
-        except RuntimeStateConfigurationError:
-            raise
-        except Exception as exc:
-            logger.warning("Failed to load default persona: %s", exc)
-            return
-
-        self.default_persona = {
-            "name": persona.get("name", "default"),
-            "prompt": persona.get("prompt", ""),
-            "begin_dialogs": persona.get("begin_dialogs", []),
-            "custom_error_message": persona.get("custom_error_message"),
-        }
-        logger.info("Loaded default persona: %s", self.default_persona["name"])
 
     def refresh(self) -> bool:
         latest_plugin_config = self._load_latest_plugin_config()
@@ -311,13 +270,9 @@ class RuntimeState:
     async def refresh_async(
         self,
         *,
-        reload_persona: bool = False,
         reload_providers: bool = False,
     ) -> bool:
         vad_changed = self.refresh()
-
-        if reload_persona:
-            await self.load_default_persona()
 
         if reload_providers:
             self.selected_stt_provider = None

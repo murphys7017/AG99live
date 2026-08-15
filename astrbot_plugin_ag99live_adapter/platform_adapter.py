@@ -251,10 +251,6 @@ class OLVPetPlatformAdapter(Platform):
         return self.runtime_state.image_cooldown_seconds
 
     @property
-    def _default_persona(self) -> dict[str, Any] | None:
-        return self.runtime_state.default_persona
-
-    @property
     def _selected_stt_provider(self):
         return self.runtime_state.selected_stt_provider
 
@@ -372,11 +368,9 @@ class OLVPetPlatformAdapter(Platform):
     async def _refresh_runtime_settings_async(
         self,
         *,
-        reload_persona: bool = False,
         reload_providers: bool = False,
     ) -> None:
         vad_settings_changed = await self.runtime_state.refresh_async(
-            reload_persona=reload_persona,
             reload_providers=reload_providers,
         )
         self._sync_client_profile_from_runtime_state()

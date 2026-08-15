@@ -1,10 +1,4 @@
 {
-  "persona_id": {
-    "description": "启动时使用的人格名称。留空时使用 AstrBot 当前默认人格。",
-    "type": "string",
-    "default": "",
-    "_special": "select_persona"
-  },
   "chat_buffer_size": {
     "description": "缓存最近多少条用户/助手文本对话。",
     "type": "int",
