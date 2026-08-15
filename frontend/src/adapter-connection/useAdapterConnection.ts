@@ -155,7 +155,6 @@ export function createAdapterConnection(
   const state = createAdapterConnectionState();
 
   let socket: WebSocket | null = null;
-  let manualClose = false;
   let initializePromise: Promise<void> | null = null;
   let connectAttemptSerial = 0;
   let disposed = false;
@@ -411,13 +410,10 @@ export function createAdapterConnection(
   }
 
   function disconnectInternal(markManualClose: boolean): void {
-    manualClose = markManualClose;
     connectAttemptSerial += 1;
-    microphoneRuntime.clearPendingStart();
-    void stopMicrophoneCapture(markManualClose ? "manual_disconnect" : "connection_reset");
+    microphoneRuntime.cancelPendingStart();
     const reason = markManualClose ? "manual_disconnect" : "connection_reset";
-    stopAudioAndSettleAll(reason);
-    failUnresolvedSessions(reason);
+    resetConnectionRuntimeState(reason);
     if (socket) {
       const currentSocket = socket;
       socket = null;
@@ -433,7 +429,6 @@ export function createAdapterConnection(
     disconnectInternal(true);
     detachPttHookStatusListener?.();
     detachPttHookStatusListener = null;
-    resetConnectionRuntimeState();
     state.status = "disconnected";
     state.statusMessage = "已断开适配器连接。";
     state.lastError = "";
@@ -494,23 +489,12 @@ export function createAdapterConnection(
         pushHistory("error", state.lastError);
       },
       onClose: (nextSocket, opened) => {
-        const isCurrentSocket = socket === nextSocket;
-        const shouldHandleClose = isCurrentSocket || (socket === null && manualClose);
-        if (!shouldHandleClose) {
+        if (socket !== nextSocket) {
           return;
         }
 
-        if (isCurrentSocket) {
-          socket = null;
-        }
-
-        resetConnectionRuntimeState();
-
-        if (manualClose) {
-          state.status = "disconnected";
-          state.statusMessage = "已断开适配器连接。";
-          return;
-        }
+        socket = null;
+        resetConnectionRuntimeState("connection_closed");
 
         if (!opened) {
           if (state.status !== "error") {
@@ -532,15 +516,15 @@ export function createAdapterConnection(
     socket = transport.socket;
   }
 
-  function resetConnectionRuntimeState(): void {
-    failUnresolvedSessions("connection_closed");
+  function resetConnectionRuntimeState(reason: string): void {
+    failUnresolvedSessions(reason);
     resetConnectionRuntime({
       state,
       stopMicrophoneCapture,
       stopAudioAndSettleAll,
       historyAdapter,
       modelSyncAdapter: modelSync,
-    });
+    }, reason);
   }
 
   function failUnresolvedSessions(reason: string): void {

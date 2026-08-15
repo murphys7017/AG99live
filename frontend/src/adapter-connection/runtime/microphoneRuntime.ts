@@ -69,7 +69,7 @@ export interface AdapterMicrophoneRuntime {
   setPttKeyBinding: (binding: DesktopPttKeyBinding) => void;
   startPttCapture: () => Promise<PttCaptureCommandResult>;
   stopPttCapture: () => Promise<PttCaptureCommandResult>;
-  clearPendingStart: () => void;
+  cancelPendingStart: () => void;
 }
 
 const MAX_MIC_SOCKET_BUFFERED_AMOUNT = 512 * 1024;
@@ -79,6 +79,9 @@ export function createAdapterMicrophoneRuntime(
   deps: AdapterMicrophoneRuntimeDeps,
 ): AdapterMicrophoneRuntime {
   let micStartPromise: Promise<boolean> | null = null;
+  let micStartToken: object | null = null;
+  let activeMicCaptureToken: object | null = null;
+  let micStartCancelled = false;
   let audioSequenceBroken = false;
   let activeMicTurnId: string | null = null;
   let activeMicStreamId: string | null = null;
@@ -223,7 +226,11 @@ export function createAdapterMicrophoneRuntime(
     origin: MicrophoneCaptureOrigin = "manual",
   ): Promise<boolean> {
     if (micStartPromise) {
-      return micStartPromise;
+      if (!micStartCancelled) {
+        return micStartPromise;
+      }
+      await micStartPromise;
+      return startMicrophoneCapture(origin);
     }
     if (deps.state.micCapturing) {
       return true;
@@ -240,7 +247,11 @@ export function createAdapterMicrophoneRuntime(
 
     deps.state.statusMessage = "正在请求麦克风权限...";
 
-    micStartPromise = (async () => {
+    micStartCancelled = false;
+    const currentStartToken = {};
+    micStartToken = currentStartToken;
+    activeMicCaptureToken = currentStartToken;
+    const currentStartPromise = (async () => {
       try {
         audioSequenceBroken = false;
         lastStartFailureReason = "none";
@@ -250,12 +261,23 @@ export function createAdapterMicrophoneRuntime(
         await startMicrophoneCaptureRuntime({
           deviceId: deps.state.microphoneDeviceId || null,
           onChunk: (chunk) => {
+            if (activeMicCaptureToken !== currentStartToken || micStartCancelled) {
+              return;
+            }
             sendMicrophoneAudioChunk(chunk);
           },
           onDeviceEnded: () => {
+            if (activeMicCaptureToken !== currentStartToken) {
+              return;
+            }
             void stopMicrophoneCapture("device_ended");
           },
         });
+
+        if (micStartToken !== currentStartToken || micStartCancelled) {
+          await discardMicrophoneCaptureBeforeRecognition("connection_closed");
+          return false;
+        }
 
         if (pendingPttRelease && micCaptureOrigin === "ptt") {
           await discardMicrophoneCaptureBeforeRecognition("ptt_release_before_ready");
@@ -273,12 +295,7 @@ export function createAdapterMicrophoneRuntime(
         return true;
       } catch (error) {
         deps.state.micCapturing = false;
-        activeMicTurnId = null;
-        activeMicStreamId = null;
-        activeMicSeq = 0;
-        audioStreamStarted = false;
-        micCaptureOrigin = null;
-        pendingPttRelease = false;
+        clearMicCaptureSession();
         lastStartFailureReason = "start_error";
         deps.state.lastError =
           error instanceof Error ? error.message : "麦克风启动失败。";
@@ -286,16 +303,24 @@ export function createAdapterMicrophoneRuntime(
         deps.pushHistory("error", deps.state.statusMessage);
         return false;
       } finally {
-        micStartPromise = null;
+        if (micStartToken === currentStartToken) {
+          micStartPromise = null;
+          micStartToken = null;
+        }
       }
     })();
+    micStartPromise = currentStartPromise;
 
-    return micStartPromise;
+    return currentStartPromise;
   }
 
   async function restartMicrophoneCaptureAfterDeviceChange(): Promise<void> {
     const previousOrigin = micCaptureOrigin ?? "manual";
-    await stopMicrophoneCapture("device_change");
+    const stopped = await stopMicrophoneCapture("device_change");
+    if (!stopped) {
+      deps.state.micRequested = false;
+      return;
+    }
     const started = await startMicrophoneCapture(previousOrigin);
     if (!started) {
       deps.state.micRequested = false;
@@ -378,35 +403,66 @@ export function createAdapterMicrophoneRuntime(
       deps.state.micRequested = false;
     }
 
-    await stopMicrophoneCaptureRuntime();
-
     const inputTurnId = activeMicTurnId ?? createRootInputTurnId();
     const inputStreamId = activeMicStreamId;
-    const socket = deps.getSocket();
-    let protocolError: Error | null = null;
-    if (socket && socket.readyState === WebSocket.OPEN && audioStreamStarted) {
+    const inputLastSequence = activeMicSeq - 1;
+    const inputCaptureMode = resolveMicrophoneCaptureMode();
+    const shouldEndAudioStream = audioStreamStarted;
+    const inputSequenceBroken = audioSequenceBroken;
+    const inputSocket = deps.getSocket();
+    clearMicCaptureSession();
+
+    let captureStopError: unknown = null;
+    try {
+      await stopMicrophoneCaptureRuntime();
+    } catch (error) {
+      captureStopError = error;
+    }
+
+    let protocolError: unknown = null;
+    if (inputSocket?.readyState === WebSocket.OPEN && shouldEndAudioStream) {
       if (!inputStreamId) {
         protocolError = new Error("audio_stream_started_without_stream_id");
       } else {
-        socket.send(JSON.stringify(deps.buildEnvelope(
-          "input.audio_stream_end",
-          {
-            stream_id: inputStreamId,
-            reason,
-            dropped: audioSequenceBroken,
-            last_seq: activeMicSeq - 1,
-            capture_mode: resolveMicrophoneCaptureMode(),
-          },
-          inputTurnId,
-        )));
+        try {
+          inputSocket.send(JSON.stringify(deps.buildEnvelope(
+            "input.audio_stream_end",
+            {
+              stream_id: inputStreamId,
+              reason,
+              dropped: inputSequenceBroken,
+              last_seq: inputLastSequence,
+              capture_mode: inputCaptureMode,
+            },
+            inputTurnId,
+          )));
+        } catch (error) {
+          protocolError = error;
+        }
       }
     }
-    clearMicCaptureSession();
-    if (protocolError) {
-      throw protocolError;
+
+    if (captureStopError || protocolError) {
+      const failures = [captureStopError, protocolError]
+        .filter((error) => error !== null)
+        .map((error) => error instanceof Error ? error.message : String(error));
+      deps.state.lastError = `麦克风停止失败：${failures.join("; ")}`;
+      deps.state.statusMessage = deps.state.lastError;
+      deps.pushHistory("error", deps.state.lastError);
+      console.error("[Connection] microphone capture stop failed.", {
+        reason,
+        captureStopError,
+        protocolError,
+      });
+      return false;
     }
 
-    if (reason === "device_change") {
+    if (
+      reason === "device_change"
+      || reason === "manual_disconnect"
+      || reason === "connection_reset"
+      || reason === "connection_closed"
+    ) {
       return true;
     }
 
@@ -420,8 +476,8 @@ export function createAdapterMicrophoneRuntime(
     return true;
   }
 
-  function clearPendingStart(): void {
-    micStartPromise = null;
+  function cancelPendingStart(): void {
+    micStartCancelled = true;
   }
 
   function createRootInputTurnId(): string {
@@ -469,6 +525,7 @@ export function createAdapterMicrophoneRuntime(
     activeMicSeq = 0;
     audioStreamStarted = false;
     micCaptureOrigin = null;
+    activeMicCaptureToken = null;
     audioSequenceBroken = false;
     pendingPttRelease = false;
   }
@@ -484,6 +541,6 @@ export function createAdapterMicrophoneRuntime(
     setPttKeyBinding,
     startPttCapture,
     stopPttCapture,
-    clearPendingStart,
+    cancelPendingStart,
   };
 }

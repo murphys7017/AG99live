@@ -166,8 +166,11 @@ export async function startMicrophoneCaptureRuntime(
     if (audioContext) {
       try {
         await audioContext.close();
-      } catch (_closeError) {
-        // Ignore cleanup failures after startup errors.
+      } catch (closeError) {
+        console.warn(
+          "[Connection] failed to close microphone audio context after startup error.",
+          closeError,
+        );
       }
     }
     microphoneRuntime = null;
@@ -203,11 +206,7 @@ export async function stopMicrophoneCaptureRuntime(): Promise<boolean> {
   runtime.sinkGainNode.disconnect();
   runtime.mediaStream.getTracks().forEach((track) => track.stop());
 
-  try {
-    await runtime.audioContext.close();
-  } catch (_error) {
-    // Ignore close failures during teardown.
-  }
+  await runtime.audioContext.close();
 
   return true;
 }

@@ -20,9 +20,14 @@ export interface ConnectionRuntimeDeps {
   modelSyncAdapter: { resetModelSyncState: () => void } | null;
 }
 
-export function resetConnectionRuntimeState(deps: ConnectionRuntimeDeps): void {
-  void deps.stopMicrophoneCapture("connection_closed");
-  deps.stopAudioAndSettleAll("connection_closed");
+export function resetConnectionRuntimeState(
+  deps: ConnectionRuntimeDeps,
+  reason: string,
+): void {
+  void deps.stopMicrophoneCapture(reason).catch((error) => {
+    console.error("[Connection] microphone cleanup failed unexpectedly.", error);
+  });
+  deps.stopAudioAndSettleAll(reason);
   deps.historyAdapter?.resetHistoryState();
   const s = deps.state;
   s.isPlayingAudio = false;
