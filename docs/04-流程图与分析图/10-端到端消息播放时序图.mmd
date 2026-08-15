@@ -209,7 +209,8 @@ sequenceDiagram
     end
 
     opt 官方 Core
-        Persona->>Adapter: after_message_sent<br/>关闭本轮 Adapter 输出队列
+        CoreQueue->>CoreQueue: TurnDeliveryCoordinator<br/>分发 after_message_sent Hook
+        CoreQueue->>Adapter: event.complete_visible_turn()<br/>关闭本轮 Adapter 输出队列
     end
     Adapter->>Inbound: control.synth_finished(turn_id)<br/>所有 output.segment 发送完成后
     Inbound->>Store: assertOutputSegmentsResolved()

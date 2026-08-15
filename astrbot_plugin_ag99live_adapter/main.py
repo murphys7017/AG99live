@@ -128,20 +128,6 @@ class MyPlugin(Star):
                 external_correlation_id=state.external_correlation_id,
             )
 
-    @filter.after_message_sent()
-    async def complete_official_output_turn(
-        self,
-        event: AstrMessageEvent,
-    ) -> None:
-        if not self._official_core_compatibility:
-            return
-        if str(event.get_platform_name() or "").strip() != "olv_pet_adapter":
-            return
-        complete = getattr(event, "complete_visible_turn", None)
-        if callable(complete):
-            await complete()
-
-
 def _configure_noisy_loggers() -> None:
     for logger_name in (
         "pyffmpeg",

@@ -1,9 +1,9 @@
 task:
   class: bugfix
   risk: low
-  phase: strict_parameter_plan_fields
+  phase: official_output_completion_ownership
   status: implementation_complete
-  scope: "Make the unique parameter_plan.v3 parser reject unknown fields at every declared object level before the plan reaches WebSDK."
+  scope: "Make AstrBot TurnDeliveryCoordinator the sole normal-path caller of platform visible-turn completion in official compatibility mode."
 
 context:
   confidence: high
@@ -35,6 +35,8 @@ context:
     - WebSDK retains execution preparation ownership and re-exports the neutral contract only to preserve existing internal imports, not as a second type definition.
     - The ModelEngine parser is the only runtime schema owner for parameter_plan.v3; WebSDK must continue consuming validated plans without a duplicate parser.
     - Unknown fields are protocol errors rather than optional extension points and must report their exact object path.
+    - AstrBot TurnDeliveryCoordinator owns the sequence of after_message_sent Hook dispatch followed by visible-turn completion.
+    - The plugin platform event owns how completion closes the AG99 output queue, but the plugin must not invoke that completion from its own Hook.
 
 documentation:
   authorities:
@@ -55,8 +57,8 @@ verification:
     - Automated tests are low-confidence input/output smoke checks; do not run the full suite.
     - Live AstrBot, Electron, TTS, and Live2D behavior remains user-led runtime acceptance.
   current:
-    - `parseSemanticParameterPlan()` now rejects unknown fields at the plan, timing, resource, diagnostics, summary, parameter, keyframe, modulation, modulation point, dynamics, and response levels.
-    - Rejection reasons include the exact field path, for example `parameter_plan_v3.unknown_field:plan.parameters[0].dynamics.response.frequency`.
-    - `npm run typecheck:renderer` and `git diff --check` passed.
-    - A one-off bundled boundary smoke confirmed one legal plan succeeds while top-level and nested unknown fields are rejected.
-    - Live MotionLab preview and playback remain pending user runtime acceptance.
+    - The plugin no longer registers an after_message_sent Hook that calls `event.complete_visible_turn()`.
+    - `OLVPetPlatformEvent.complete_visible_turn()` remains the single platform implementation that closes the Adapter output queue when Core invokes it.
+    - README, architecture notes, and the detailed sequence diagram now name TurnDeliveryCoordinator as the completion caller.
+    - Python compilation, the AstrBot plugin structure checker, and `git diff --check` passed.
+    - A live official-compatibility reply remains pending user runtime acceptance.

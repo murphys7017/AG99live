@@ -69,7 +69,8 @@ astrbot_plugin_ag99live_adapter/
 
 - 插件入口检测 Interaction contributor 注册接口；可用时保持增强版 middleware-first 链路。
 - 官方 Core 不具备这些接口时，`on_llm_request` 注入同一套语义轴、参考样本和 V4 输出约束，并要求把动作包装进 `<@anim {"mode":"inline","intent":...}>`。
-- 官方 `after_message_sent` 负责关闭该 Turn 的 Adapter 输出队列；默认关闭的 AstrBot 分段回复是当前支持边界。
+- AstrBot `TurnDeliveryCoordinator` 在 `after_message_sent` Hook 返回后唯一调用平台事件的
+  `complete_visible_turn()`，由该事件关闭 Adapter 输出队列；默认关闭的 AstrBot 分段回复是当前支持边界。
 - 标签外层只接受 `mode="inline"` 与 `intent`；裸 intent、`motion_payload`、`plan` 和其他历史包装字段会被拒绝。
 - 如果 `<@anim>` 内部 JSON、schema 或 v4 payload 无效，后端只记录拒绝原因，不生成替代动作。
 - 官方 Core 没有 `TTSState`、`tts_request_id` 或 TTS 失败通知。Adapter 只把最终 `Record` 当作音频成功事实；没有 `Record` 时只能声明无音频，不能伪造 `failed`。可选 performance curve 在此模式不启动。

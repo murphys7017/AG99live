@@ -40,13 +40,6 @@ def _install_main_astrbot_stubs(install_fake_astrbot, monkeypatch) -> None:
 
             return decorator
 
-        @staticmethod
-        def after_message_sent():
-            def decorator(fn):
-                return fn
-
-            return decorator
-
     class AstrMessageEvent:
         pass
 
