@@ -121,12 +121,30 @@ class WebSocketTransport:
     async def send_json(self, payload: dict[str, Any]) -> bool:
         """出站发送：把 dict 序列化为 JSON 经当前 _ws_client 发出。
 
-        没有客户端时直接返回 False，不抛；发送过程中异常会清空 _ws_client 并
-        尝试 close 旧连接再返回 False。CancelledError 透传，调用方需要捕获。
+        没有客户端时直接返回 False，不抛；发送过程中异常会尝试 close 本次捕获的
+        客户端再返回 False。CancelledError 透传，调用方需要捕获。
         """
         client = self._ws_client
         if client is None:
             return False
+        return await self._send_json_to_client(client, payload)
+
+    def bind_current_client_sender(
+        self,
+    ) -> Callable[[dict[str, Any]], Awaitable[bool]]:
+        """Bind deferred replies to the connection that originated the request."""
+        client = self._ws_client
+        if client is None:
+            raise RuntimeError("websocket_client_unavailable")
+
+        async def send_bound(payload: dict[str, Any]) -> bool:
+            if self._ws_client is not client:
+                return False
+            return await self._send_json_to_client(client, payload)
+
+        return send_bound
+
+    async def _send_json_to_client(self, client, payload: dict[str, Any]) -> bool:
         try:
             await client.send(json.dumps(payload, ensure_ascii=False))
             return True

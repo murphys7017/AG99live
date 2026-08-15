@@ -426,7 +426,7 @@ class OLVPetPlatformAdapter(Platform):
     async def _handle_frontend_system(self, message: dict[str, Any]) -> None:
         await self.frontend_system_handler.handle(
             message,
-            send_json=self._send_json,
+            send_json=self.transport.bind_current_client_sender(),
             refresh_and_send_model=self._refresh_and_send_current_model_and_conf,
         )
 
