@@ -114,20 +114,29 @@ export function startNormalizedMotionPayload(
     queuedDelayMs: context.queuedDelayMs,
   });
 
-  if (payload.kind === "semantic_intent") {
-    return startCompilableMotionPayload(
-      payload,
-      context,
-      dependencies,
-      state,
-      preparedSemanticMotion,
-    );
+  switch (payload.kind) {
+    case "semantic_intent":
+      return startCompilableMotionPayload(
+        payload,
+        context,
+        dependencies,
+        state,
+        preparedSemanticMotion,
+      );
+    case "catalog_motion":
+      return startCatalogMotionPayload(payload, context, dependencies, state);
+    default: {
+      const unsupportedPayload: never = payload;
+      const unsupportedKind = String(
+        (unsupportedPayload as { kind?: unknown }).kind ?? "unknown",
+      );
+      const reason = `normalized_motion_payload_kind_unsupported:${unsupportedKind}`;
+      state.setLastCompileReason(reason);
+      state.setState("failed", reason, null);
+      state.pushHistory("error", `动作播放失败：${reason}`);
+      return false;
+    }
   }
-  if (payload.kind === "catalog_motion") {
-    return startCatalogMotionPayload(payload, context, dependencies, state);
-  }
-
-  return startCatalogMotionPayload(payload, context, dependencies, state);
 }
 
 export function startSpeechOnlyMotionRequest(

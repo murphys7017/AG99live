@@ -1,9 +1,9 @@
 task:
   class: bugfix
   risk: low
-  phase: frontend_turn_identity_direction_cleanup
+  phase: normalized_motion_start_exhaustiveness
   status: implementation_complete
-  scope: "Remove the reverse Turn identity lookup from protocol handlers that already receive frontend Turn IDs."
+  scope: "Replace the normalized motion start catalog fallback with compile-time exhaustiveness and an accurate runtime rejection."
 
 context:
   confidence: high
@@ -28,6 +28,7 @@ context:
     - SpeechIngress allocates or receives input identities before a formal Turn exists; only TurnCoordinator._commit_inbound_message owns identity registration and control.turn_started publication.
     - A pre-Turn input failure must remain observable through control.error, but it must not fabricate a terminal event for a session that was never started.
     - control.playback_finished and control.interrupt carry frontend Turn IDs by protocol contract; their handlers must not query the AstrBot-to-frontend index with those values.
+    - Normalized motion dispatch must handle every declared payload kind explicitly; unknown runtime values are rejected and never reinterpreted as another motion kind.
 
 documentation:
   authorities:
@@ -48,8 +49,8 @@ verification:
     - Automated tests are low-confidence input/output smoke checks; do not run the full suite.
     - Live AstrBot, Electron, TTS, and Live2D behavior remains user-led runtime acceptance.
   current:
-    - finalize_turn and _handle_interrupt_signal now normalize the frontend Turn ID carried by their protocol messages directly.
-    - The dead _resolve_frontend_turn_id helper was deleted; TurnIdentityMap remains unchanged for boundaries that genuinely translate between frontend and AstrBot identities.
-    - The focused finalize smoke and Python syntax validation passed.
-    - `git diff --check` passed and no stale R10 or helper references remain.
-    - Live playback-finished and interrupt behavior remain pending user runtime acceptance.
+    - startNormalizedMotionPayload now dispatches semantic_intent and catalog_motion through an exhaustive switch.
+    - The default branch assigns the remaining payload to never so future union members fail compilation, while runtime type escapes receive an explicit normalized_motion_payload_kind_unsupported reason.
+    - Unknown payload kinds now fail ModelEngine state and history without entering catalog execution.
+    - `npm run typecheck:renderer` and `git diff --check` passed.
+    - Live unknown-payload diagnostics remain unexercised because the normal protocol parser rejects such payloads earlier.
