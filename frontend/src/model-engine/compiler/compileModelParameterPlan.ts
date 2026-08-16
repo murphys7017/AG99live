@@ -34,8 +34,9 @@ export function compileModelParameterPlan(
   const performanceScheduleResult = compilePerformanceSchedule({
     assistantText: options.assistantText,
     durationMs: semanticMotion.timing.timing.duration_ms,
-    sequenceDurationWeights: semanticMotion.kind === "sequence"
-      ? semanticMotion.steps.map((step) => step.durationWeight)
+    intentTags: semanticMotion.intentTags,
+    sequenceSteps: semanticMotion.kind === "sequence"
+      ? semanticMotion.steps
       : undefined,
   });
   if (!performanceScheduleResult.ok) {

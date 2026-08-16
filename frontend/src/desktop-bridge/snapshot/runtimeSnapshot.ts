@@ -447,6 +447,8 @@ function hasCompatiblePerformanceScheduleTrace(diagnostics: unknown): boolean {
   return Array.isArray(schedule.phrases)
     && Array.isArray(schedule.semanticSteps)
     && Array.isArray(schedule.estimatedAlignments)
+    && Array.isArray(schedule.decisions)
+    && schedule.decisions.every((decision) => typeof decision === "string")
     && Array.isArray(schedule.events)
     && schedule.events.every(isCompatiblePerformanceEvent)
     && Array.isArray(schedule.parameterNodes)
@@ -472,6 +474,8 @@ function isCompatiblePerformanceEvent(event: unknown): boolean {
       || event.kind === "face_settle"
       || event.kind === "face_transfer"
       || event.kind === "face_release"
+      || event.kind === "hesitation_hold"
+      || event.kind === "hesitation_resume"
     )
     && typeof event.semanticAxisId === "string"
     && Boolean(event.semanticAxisId.trim())

@@ -27,6 +27,8 @@ export interface PerformanceSchedule {
   readonly phrases: readonly PerformancePhraseSlot[];
   readonly semanticSteps: readonly PerformanceSemanticStepSlot[];
   readonly estimatedAlignments: readonly PerformancePhraseStepAlignment[];
+  readonly hesitationWindows: readonly PerformanceHesitationWindow[];
+  readonly decisions: readonly string[];
   readonly events: readonly PerformanceTimingEventTrace[];
   readonly parameterNodes: readonly PerformanceParameterNodeTrace[];
 }
@@ -50,6 +52,30 @@ export interface PerformancePhraseStepAlignment {
   readonly primaryForPhrase: boolean;
 }
 
+type PerformanceHesitationReason = NonNullable<
+  PerformanceTimingEventTrace["hesitationReason"]
+>;
+
+interface PerformanceHesitationWindow {
+  readonly index: number;
+  readonly reason: PerformanceHesitationReason;
+  readonly startMs: number;
+  readonly resumeMs: number;
+  readonly holdMs: number;
+  readonly stepIndex?: number;
+  readonly afterPhraseIndex?: number;
+  readonly phraseIndices?: readonly number[];
+}
+
+interface PerformanceSequenceStepInput {
+  readonly durationWeight: number;
+  readonly axes: readonly {
+    readonly axisId: string;
+    readonly value: number;
+    readonly neutralValue: number;
+  }[];
+}
+
 export type PerformanceScheduleCompileResult =
   | { ok: true; schedule: PerformanceSchedule; reason: "" }
   | { ok: false; schedule: null; reason: string };
@@ -59,6 +85,16 @@ interface PerformancePhraseDraft {
   boundary: PerformancePhraseBoundary;
   weight: number;
   emphasis: number;
+}
+
+interface PerformanceHesitationCandidate {
+  reason: PerformanceHesitationReason;
+  anchorAtMs: number;
+  holdMs: number;
+  priority: number;
+  stepIndex?: number;
+  afterPhraseIndex?: number;
+  phraseIndices?: readonly number[];
 }
 
 interface PerformanceTrackTimingPolicy {
@@ -114,6 +150,10 @@ const FACE_TRANSFER_TRANSITION_MS = 80;
 const FACE_MIN_HOLD_MS = 45;
 const FACE_RESIDUAL_MS = 40;
 const FACE_SEMANTIC_GROUPS = new Set(["eye", "brow", "mouth", "face"]);
+const HESITATION_MIN_START_MS = 120;
+const HESITATION_MIN_REMAINING_MS = 140;
+const HESITATION_INTENT_PATTERN = /hesitat|ponder|uncertain|pause|think|犹豫|迟疑|斟酌|思考|停顿/u;
+const HESITATION_TRANSITION_PATTERN = /^(?:但是|不过|然而|可是|其实|只是|反而|but\b|however\b|though\b|well\b)/iu;
 
 type PerformancePartTrackEventKind =
   | "gaze_lead"
@@ -169,7 +209,8 @@ export function resolvePerformancePartTrackStrategy(
 export function compilePerformanceSchedule(options: {
   assistantText?: string;
   durationMs: number;
-  sequenceDurationWeights?: readonly number[];
+  intentTags?: readonly string[];
+  sequenceSteps?: readonly PerformanceSequenceStepInput[];
 }): PerformanceScheduleCompileResult {
   if (!Number.isFinite(options.durationMs) || options.durationMs <= 0) {
     return {
@@ -195,7 +236,7 @@ export function compilePerformanceSchedule(options: {
     };
   });
   const semanticStepsResult = compileSemanticStepSlots(
-    options.sequenceDurationWeights,
+    options.sequenceSteps?.map((step) => step.durationWeight),
     options.durationMs,
   );
   if (!semanticStepsResult.ok) {
@@ -203,20 +244,36 @@ export function compilePerformanceSchedule(options: {
   }
   const textSource = text ? "assistant_text" : "duration_only";
   const semanticSteps = semanticStepsResult.semanticSteps;
+  const estimatedAlignments = textSource === "assistant_text"
+    ? estimatePhraseStepAlignments(phrases, semanticSteps, options.durationMs)
+    : [];
+  const schedule: PerformanceSchedule = {
+    durationMs: options.durationMs,
+    textSource,
+    phrases,
+    semanticSteps,
+    estimatedAlignments,
+    hesitationWindows: [],
+    decisions: [],
+    events: [],
+    parameterNodes: [],
+  };
+  const hesitationResult = compileHesitationWindows(
+    schedule,
+    options.intentTags ?? [],
+    options.sequenceSteps,
+  );
+  if (!hesitationResult.ok) {
+    return {
+      ok: false,
+      schedule: null,
+      reason: hesitationResult.reason,
+    };
+  }
   return {
     ok: true,
     reason: "",
-    schedule: {
-      durationMs: options.durationMs,
-      textSource,
-      phrases,
-      semanticSteps,
-      estimatedAlignments: textSource === "assistant_text"
-        ? estimatePhraseStepAlignments(phrases, semanticSteps, options.durationMs)
-        : [],
-      events: [],
-      parameterNodes: [],
-    },
+    schedule,
   };
 }
 
@@ -232,12 +289,89 @@ export function buildPerformanceScheduleTrace(
     estimatedAlignments: schedule.estimatedAlignments.map((alignment) => ({
       ...alignment,
     })),
+    decisions: [...schedule.decisions],
     events: schedule.events.map((event) => ({
       ...event,
       phraseIndices: event.phraseIndices ? [...event.phraseIndices] : undefined,
     })),
     parameterNodes: schedule.parameterNodes.map((node) => ({ ...node })),
   };
+}
+
+function compileHesitationWindows(
+  schedule: PerformanceSchedule,
+  intentTags: readonly string[],
+  sequenceSteps: readonly PerformanceSequenceStepInput[] | undefined,
+): PerformanceScheduleMutationResult<readonly PerformanceHesitationWindow[]> {
+  const candidates = collectHesitationCandidates(schedule, intentTags, sequenceSteps);
+  const legalCandidates: PerformanceHesitationCandidate[] = [];
+  for (const candidate of candidates) {
+    if (
+      candidate.anchorAtMs < HESITATION_MIN_START_MS
+      || candidate.anchorAtMs + candidate.holdMs
+        > schedule.durationMs - HESITATION_MIN_REMAINING_MS
+    ) {
+      mutableDecisions(schedule).push(
+        `hesitation_not_scheduled:insufficient_window:${candidate.reason}:${candidate.anchorAtMs}`,
+      );
+      continue;
+    }
+    legalCandidates.push(candidate);
+  }
+  const selected = legalCandidates.sort((left, right) => (
+    right.priority - left.priority || left.anchorAtMs - right.anchorAtMs
+  ))[0];
+  if (!selected) {
+    return { ok: true, value: [], reason: "" };
+  }
+
+  const window: PerformanceHesitationWindow = {
+    index: 0,
+    reason: selected.reason,
+    startMs: selected.anchorAtMs,
+    resumeMs: selected.anchorAtMs + selected.holdMs,
+    holdMs: selected.holdMs,
+    stepIndex: selected.stepIndex,
+    afterPhraseIndex: selected.afterPhraseIndex,
+    phraseIndices: selected.phraseIndices ? [...selected.phraseIndices] : undefined,
+  };
+  const sharedEvent = {
+    source: "hesitation_strategy" as const,
+    timingSource: "hesitation_schedule_policy" as const,
+    semanticAxisId: "performance_hesitation",
+    semanticGroup: "discourse",
+    transitionMs: 0,
+    residualMs: 0,
+    transitionOffsetMs: 0,
+    compressed: false,
+    stepIndex: window.stepIndex,
+    phraseIndices: window.phraseIndices ? [...window.phraseIndices] : undefined,
+    hesitationReason: window.reason,
+    windowStartMs: window.startMs,
+    windowEndMs: window.resumeMs,
+  };
+  const events: PerformanceTimingEventTrace[] = [{
+    ...sharedEvent,
+    id: buildHesitationEventId(window.reason, "hold", window.index),
+    kind: "hesitation_hold",
+    atMs: window.startMs,
+    holdMs: window.holdMs,
+  }, {
+    ...sharedEvent,
+    id: buildHesitationEventId(window.reason, "resume", window.index),
+    kind: "hesitation_resume",
+    atMs: window.resumeMs,
+    holdMs: 0,
+  }];
+  const registerResult = registerPerformanceTimingEvents(schedule, events);
+  if (!registerResult.ok) {
+    return registerResult;
+  }
+  mutableHesitationWindows(schedule).push(window);
+  mutableDecisions(schedule).push(
+    `hesitation_scheduled:${window.reason}:${window.startMs}->${window.resumeMs}`,
+  );
+  return { ok: true, value: [window], reason: "" };
 }
 
 export function compileSemanticTrackTiming(options: {
@@ -280,9 +414,10 @@ export function compileSemanticTrackTiming(options: {
   let previousAtMs = 0;
   for (let position = 1; position < changedStepIndices.length; position += 1) {
     const step = schedule.semanticSteps[changedStepIndices[position]];
-    const desiredAtMs = Math.max(
-      1,
-      Math.round(step.startMs + policy.transitionOffsetMs),
+    const desiredAtMs = resolveHesitationAdjustedStepAtMs(
+      schedule,
+      step.index,
+      Math.max(1, Math.round(step.startMs + policy.transitionOffsetMs)),
     );
     const atMs = Math.max(desiredAtMs, previousAtMs + 1);
     transitionStarts.push(atMs);
@@ -412,7 +547,11 @@ export function compileGazeTrackTiming(options: {
     const step = schedule.semanticSteps[stepIndex];
     return {
       kind: "gaze_transfer" as const,
-      desiredAtMs: Math.max(1, step.startMs - GAZE_LEAD_OFFSET_MS),
+      desiredAtMs: resolveHesitationAdjustedStepAtMs(
+        schedule,
+        stepIndex,
+        Math.max(1, step.startMs - GAZE_LEAD_OFFSET_MS),
+      ),
       preferredTransitionMs: GAZE_TRANSFER_TRANSITION_MS,
       stepIndex,
       phraseIndices: resolvePrimaryPhraseIndices(schedule, stepIndex),
@@ -448,7 +587,11 @@ export function compileGazeTrackTiming(options: {
     if (phraseTransfer) {
       trackDrafts.push({
         kind: "gaze_transfer",
-        desiredAtMs: Math.round(phraseTransfer.endRatio * schedule.durationMs),
+        desiredAtMs: resolveHesitationAdjustedPhraseAtMs(
+          schedule,
+          phraseTransfer.index,
+          Math.round(phraseTransfer.endRatio * schedule.durationMs),
+        ),
         preferredTransitionMs: GAZE_TRANSFER_TRANSITION_MS,
         phraseIndices: [phraseTransfer.index],
         transitionOffsetMs: 0,
@@ -518,7 +661,11 @@ export function compileFaceTrackTiming(options: {
       const step = schedule.semanticSteps[stepIndex];
       return {
         kind: "face_transfer",
-        desiredAtMs: Math.max(1, step.startMs + FACE_TRANSFER_OFFSET_MS),
+        desiredAtMs: resolveHesitationAdjustedStepAtMs(
+          schedule,
+          stepIndex,
+          Math.max(1, step.startMs + FACE_TRANSFER_OFFSET_MS),
+        ),
         preferredTransitionMs: FACE_TRANSFER_TRANSITION_MS,
         stepIndex,
         phraseIndices: resolvePrimaryPhraseIndices(schedule, stepIndex),
@@ -752,8 +899,13 @@ export function compileSpeechTrackTiming(options: {
     const onsetRatio = bodyLayer
       ? 0.12 + performanceUnitInterval(seed) * 0.14
       : 0.05 + performanceUnitInterval(seed) * 0.12;
+    const hesitationDelayMs = resolveHesitationDelayForPhraseGroup(
+      schedule,
+      phrase.phraseIndices,
+    );
     const candidateAtMs = windowStartMs
-      + Math.round(Math.max(1, windowEndMs - windowStartMs) * onsetRatio);
+      + Math.round(Math.max(1, windowEndMs - windowStartMs) * onsetRatio)
+      + Math.round(hesitationDelayMs * availableMs / schedule.durationMs);
     const latestAtMs = Math.max(
       previousAtMs + 1,
       Math.min(settleAtMs - 1, windowEndMs - 1),
@@ -960,6 +1112,16 @@ function mutableEvents(schedule: PerformanceSchedule): PerformanceTimingEventTra
   return schedule.events as PerformanceTimingEventTrace[];
 }
 
+function mutableHesitationWindows(
+  schedule: PerformanceSchedule,
+): PerformanceHesitationWindow[] {
+  return schedule.hesitationWindows as PerformanceHesitationWindow[];
+}
+
+function mutableDecisions(schedule: PerformanceSchedule): string[] {
+  return schedule.decisions as string[];
+}
+
 function mutableParameterNodes(
   schedule: PerformanceSchedule,
 ): PerformanceParameterNodeTrace[] {
@@ -976,6 +1138,14 @@ function buildSpeechEventId(
   index: number,
 ): string {
   return `speech:${channelId}:${kind}:${index}`;
+}
+
+function buildHesitationEventId(
+  reason: PerformanceHesitationReason,
+  kind: "hold" | "resume",
+  index: number,
+): string {
+  return `hesitation:${reason}:${kind}:${index}`;
 }
 
 function buildPartTrackEventId(
@@ -1046,6 +1216,193 @@ function resolvePrimaryPhraseIndices(
     .filter((alignment) => alignment.stepIndex === stepIndex && alignment.primaryForPhrase)
     .map((alignment) => alignment.phraseIndex);
   return phraseIndices.length > 0 ? phraseIndices : undefined;
+}
+
+function collectHesitationCandidates(
+  schedule: PerformanceSchedule,
+  intentTags: readonly string[],
+  sequenceSteps: readonly PerformanceSequenceStepInput[] | undefined,
+): PerformanceHesitationCandidate[] {
+  const candidates: PerformanceHesitationCandidate[] = [];
+  for (let index = 0; index < schedule.phrases.length - 1; index += 1) {
+    const phrase = schedule.phrases[index];
+    const nextPhrase = schedule.phrases[index + 1];
+    const stepIndex = resolveStepIndexAfterPhrase(schedule, index);
+    const anchorAtMs = stepIndex === undefined
+      ? Math.round(phrase.endRatio * schedule.durationMs)
+      : schedule.semanticSteps[stepIndex].startMs;
+    const shared = {
+      anchorAtMs,
+      stepIndex,
+      afterPhraseIndex: index,
+      phraseIndices: [index],
+    };
+    const punctuationReason = resolveHesitationPunctuationReason(phrase.text);
+    if (punctuationReason) {
+      candidates.push({
+        ...shared,
+        reason: punctuationReason,
+        holdMs: punctuationReason === "ellipsis" ? 160 : 130,
+        priority: punctuationReason === "ellipsis" ? 100 : 95,
+      });
+    }
+    if (HESITATION_TRANSITION_PATTERN.test(nextPhrase.text.trim())) {
+      candidates.push({
+        ...shared,
+        reason: "transition",
+        holdMs: 110,
+        priority: 80,
+      });
+    } else if (phrase.boundary === "soft" && nextPhrase.boundary === "soft") {
+      candidates.push({
+        ...shared,
+        reason: "soft_boundary",
+        holdMs: 100,
+        priority: 70,
+      });
+    }
+  }
+
+  for (const stepIndex of resolveSemanticReversalStepIndices(sequenceSteps)) {
+    const step = schedule.semanticSteps[stepIndex];
+    const afterPhraseIndex = resolvePhraseIndexBeforeAtMs(schedule, step.startMs);
+    candidates.push({
+      reason: "semantic_reversal",
+      anchorAtMs: step.startMs,
+      holdMs: 120,
+      priority: 90,
+      stepIndex,
+      afterPhraseIndex,
+      phraseIndices: afterPhraseIndex === undefined ? undefined : [afterPhraseIndex],
+    });
+  }
+
+  if (HESITATION_INTENT_PATTERN.test(intentTags.join(" ").toLowerCase())) {
+    const phrase = schedule.phrases
+      .slice(0, -1)
+      .filter((item) => item.boundary !== "none")
+      .sort((left, right) => (
+        Math.abs(left.endRatio - 0.52) - Math.abs(right.endRatio - 0.52)
+      ))[0];
+    if (phrase) {
+      const stepIndex = resolveStepIndexAfterPhrase(schedule, phrase.index);
+      candidates.push({
+        reason: "intent_tag",
+        anchorAtMs: stepIndex === undefined
+          ? Math.round(phrase.endRatio * schedule.durationMs)
+          : schedule.semanticSteps[stepIndex].startMs,
+        holdMs: 125,
+        priority: 60,
+        stepIndex,
+        afterPhraseIndex: phrase.index,
+        phraseIndices: [phrase.index],
+      });
+    } else if (schedule.semanticSteps[1]) {
+      candidates.push({
+        reason: "intent_tag",
+        anchorAtMs: schedule.semanticSteps[1].startMs,
+        holdMs: 125,
+        priority: 60,
+        stepIndex: 1,
+      });
+    }
+  }
+
+  return candidates;
+}
+
+function resolveHesitationPunctuationReason(
+  text: string,
+): Extract<PerformanceHesitationReason, "ellipsis" | "dash"> | null {
+  if (/(?:…+|\.{3,})\s*$/u.test(text)) {
+    return "ellipsis";
+  }
+  return /(?:—+|--+)\s*$/u.test(text) ? "dash" : null;
+}
+
+function resolveSemanticReversalStepIndices(
+  sequenceSteps: readonly PerformanceSequenceStepInput[] | undefined,
+): number[] {
+  if (!sequenceSteps || sequenceSteps.length < 2) {
+    return [];
+  }
+  const result: number[] = [];
+  for (let index = 1; index < sequenceSteps.length; index += 1) {
+    const previousAxes = new Map(
+      sequenceSteps[index - 1].axes.map((axis) => [axis.axisId, axis]),
+    );
+    const reversed = sequenceSteps[index].axes.some((axis) => {
+      const previous = previousAxes.get(axis.axisId);
+      if (!previous) {
+        return false;
+      }
+      const previousDelta = previous.value - previous.neutralValue;
+      const currentDelta = axis.value - axis.neutralValue;
+      return Math.abs(previousDelta) > 0.000001
+        && Math.abs(currentDelta) > 0.000001
+        && previousDelta * currentDelta < 0;
+    });
+    if (reversed) {
+      result.push(index);
+    }
+  }
+  return result;
+}
+
+function resolveStepIndexAfterPhrase(
+  schedule: PerformanceSchedule,
+  phraseIndex: number,
+): number | undefined {
+  const nextPhraseIndex = phraseIndex + 1;
+  const alignment = schedule.estimatedAlignments.find((item) => (
+    item.phraseIndex === nextPhraseIndex && item.primaryForPhrase && item.stepIndex > 0
+  ));
+  return alignment?.stepIndex;
+}
+
+function resolvePhraseIndexBeforeAtMs(
+  schedule: PerformanceSchedule,
+  atMs: number,
+): number | undefined {
+  let result: number | undefined;
+  for (const phrase of schedule.phrases.slice(0, -1)) {
+    if (Math.round(phrase.endRatio * schedule.durationMs) > atMs) {
+      break;
+    }
+    result = phrase.index;
+  }
+  return result;
+}
+
+function resolveHesitationAdjustedStepAtMs(
+  schedule: PerformanceSchedule,
+  stepIndex: number,
+  desiredAtMs: number,
+): number {
+  const window = schedule.hesitationWindows.find((item) => item.stepIndex === stepIndex);
+  return desiredAtMs + (window?.holdMs ?? 0);
+}
+
+function resolveHesitationAdjustedPhraseAtMs(
+  schedule: PerformanceSchedule,
+  afterPhraseIndex: number,
+  desiredAtMs: number,
+): number {
+  const window = schedule.hesitationWindows.find(
+    (item) => item.afterPhraseIndex === afterPhraseIndex,
+  );
+  return desiredAtMs + (window?.holdMs ?? 0);
+}
+
+function resolveHesitationDelayForPhraseGroup(
+  schedule: PerformanceSchedule,
+  phraseIndices: readonly number[],
+): number {
+  const window = schedule.hesitationWindows.find((item) => (
+    item.afterPhraseIndex !== undefined
+    && phraseIndices.includes(item.afterPhraseIndex + 1)
+  ));
+  return window?.holdMs ?? 0;
 }
 
 function resolveGazePhraseTransfer(
@@ -1236,9 +1593,17 @@ function segmentAssistantText(text: string): PerformancePhraseDraft[] {
 
   const phrases: PerformancePhraseDraft[] = [];
   let buffer = "";
-  for (const character of Array.from(text)) {
+  const characters = Array.from(text);
+  for (let index = 0; index < characters.length; index += 1) {
+    const character = characters[index];
     buffer += character;
-    const boundary = resolvePhraseBoundary(character);
+    const asciiEllipsis = character === "."
+      && characters[index - 1] === "."
+      && characters[index - 2] === ".";
+    const asciiDash = character === "-" && characters[index - 1] === "-";
+    const boundary = asciiEllipsis || asciiDash
+      ? "soft"
+      : resolvePhraseBoundary(character);
     if (boundary === "none") {
       continue;
     }
@@ -1333,12 +1698,12 @@ function resolvePhraseBoundary(character: string): PerformancePhraseBoundary {
   if (/[。！？!?；;\n]/u.test(character)) {
     return "strong";
   }
-  if (/[，、,:：]/u.test(character)) {
+  if (/[，、,:：…—]/u.test(character)) {
     return "soft";
   }
   return "none";
 }
 
 function isEffectiveSpeechCharacter(character: string): boolean {
-  return !/\s/u.test(character) && resolvePhraseBoundary(character) === "none";
+  return !/[\s.\-]/u.test(character) && resolvePhraseBoundary(character) === "none";
 }

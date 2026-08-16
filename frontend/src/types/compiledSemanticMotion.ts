@@ -6,7 +6,7 @@ import type {
 } from "./protocol.js";
 
 export const SEMANTIC_MOTION_TRANSFORM_VERSION = "semantic_motion_transform.v5";
-export const PERFORMANCE_SCHEDULE_TRACE_VERSION = "performance_schedule_trace.v3";
+export const PERFORMANCE_SCHEDULE_TRACE_VERSION = "performance_schedule_trace.v4";
 
 export type CompiledSemanticAxisSource = "semantic_axis" | "relation_graph";
 
@@ -136,6 +136,7 @@ export interface PerformanceScheduleTrace {
     stepCoverageRatio: number;
     primaryForPhrase: boolean;
   }>;
+  decisions: string[];
   events: PerformanceTimingEventTrace[];
   parameterNodes: PerformanceParameterNodeTrace[];
 }
@@ -154,19 +155,23 @@ export interface PerformanceTimingEventTrace {
     | "face_enter"
     | "face_settle"
     | "face_transfer"
-    | "face_release";
+    | "face_release"
+    | "hesitation_hold"
+    | "hesitation_resume";
   source:
     | "semantic_step"
     | "speech_track"
     | "speech_phrase"
     | "speech_release"
     | "gaze_strategy"
-    | "face_strategy";
+    | "face_strategy"
+    | "hesitation_strategy";
   timingSource:
     | "semantic_group_policy"
     | "voice_following_profile"
     | "gaze_schedule_policy"
-    | "face_schedule_policy";
+    | "face_schedule_policy"
+    | "hesitation_schedule_policy";
   semanticAxisId: string;
   semanticGroup: string;
   atMs: number;
@@ -183,6 +188,13 @@ export interface PerformanceTimingEventTrace {
   phraseIndices?: number[];
   channelId?: string;
   gesturePreset?: string;
+  hesitationReason?:
+    | "ellipsis"
+    | "dash"
+    | "transition"
+    | "soft_boundary"
+    | "intent_tag"
+    | "semantic_reversal";
 }
 
 export interface PerformanceParameterNodeTrace {

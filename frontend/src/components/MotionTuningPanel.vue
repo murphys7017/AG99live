@@ -767,10 +767,14 @@ function appendPerformanceScheduleDiagnostics(
   const faceEventCount = schedule.events.filter((event) =>
     event.kind.startsWith("face_"),
   ).length;
+  const hesitationEventCount = schedule.events.filter((event) =>
+    event.kind.startsWith("hesitation_"),
+  ).length;
   const speechEventCount = schedule.events.length
     - semanticEventCount
     - gazeEventCount
-    - faceEventCount;
+    - faceEventCount
+    - hesitationEventCount;
   const keyframeNodeCount = schedule.parameterNodes.filter((node) =>
     node.trackKind === "keyframe",
   ).length;
@@ -779,8 +783,9 @@ function appendPerformanceScheduleDiagnostics(
     `编排: ${schedule.phrases.length} phrase / ${schedule.semanticSteps.length} step / ${schedule.events.length} event / ${schedule.parameterNodes.length} node`,
   );
   lines.push(
-    `事件来源: semantic ${semanticEventCount}, gaze ${gazeEventCount}, face ${faceEventCount}, speech ${speechEventCount}; 参数节点: keyframe ${keyframeNodeCount}, modulation ${speechNodeCount}`,
+    `事件来源: semantic ${semanticEventCount}, gaze ${gazeEventCount}, face ${faceEventCount}, hesitation ${hesitationEventCount}, speech ${speechEventCount}; 参数节点: keyframe ${keyframeNodeCount}, modulation ${speechNodeCount}`,
   );
+  appendList(lines, "编排决策", schedule.decisions);
   const nodesByEventId = new Map<string, typeof schedule.parameterNodes>();
   for (const node of schedule.parameterNodes) {
     const nodes = nodesByEventId.get(node.eventId) ?? [];
@@ -803,7 +808,8 @@ function formatPerformanceEvent(event: PerformanceTimingEventTrace): string {
       : event.kind
     : `step ${event.stepIndex + 1}`;
   const localAtMs = event.localAtMs === undefined ? "" : ` local ${event.localAtMs}ms`;
-  return `${event.kind} (${source}) / ${event.semanticAxisId} @${event.atMs}ms${localAtMs} transition ${event.transitionMs}ms`;
+  const reason = event.hesitationReason ? ` reason ${event.hesitationReason}` : "";
+  return `${event.kind} (${source}) / ${event.semanticAxisId} @${event.atMs}ms${localAtMs} transition ${event.transitionMs}ms${reason}`;
 }
 
 function formatPerformanceNodes(
