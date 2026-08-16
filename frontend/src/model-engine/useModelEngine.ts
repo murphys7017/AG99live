@@ -519,18 +519,37 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     return completedRun;
   }
 
+  function stopActivePlayback(reason: string, idleMessage: string): void {
+    let stopFailed = false;
+    let stopError: unknown = null;
+    try {
+      dependencies.stopPlan(reason);
+    } catch (error) {
+      stopFailed = true;
+      stopError = error;
+      console.error("[ModelEngine] active playback stop failed.", { reason, error });
+    } finally {
+      activePlaybackRun = null;
+      state.lastCompileReason = "";
+      if (stopFailed) {
+        setState("failed", `动作引擎停止失败（${reason}）。`, null);
+      } else {
+        setState("idle", idleMessage, null);
+      }
+    }
+    if (stopFailed) {
+      throw stopError;
+    }
+  }
+
   function stop(reason = "stopped"): void {
     runtimeScheduler.clearAllPendingPayloads();
     preparedSemanticMotions.clear();
-    dependencies.stopPlan(reason);
-    activePlaybackRun = null;
-    state.lastCompileReason = "";
-    setState(
-      "idle",
+    stopActivePlayback(
+      reason,
       reason === "stopped"
         ? "动作引擎已停止。"
         : `动作引擎已停止（${reason}）。`,
-      null,
     );
   }
 
@@ -548,12 +567,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     if (!activeRunMatches) {
       return;
     }
-    dependencies.stopPlan(reason);
-    if (activeRunMatches) {
-      activePlaybackRun = null;
-    }
-    state.lastCompileReason = "";
-    setState("idle", `动作引擎已停止（${reason}）。`, null);
+    stopActivePlayback(reason, `动作引擎已停止（${reason}）。`);
   }
 
   return {

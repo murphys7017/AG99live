@@ -1,4 +1,4 @@
-import { onScopeDispose, reactive, readonly } from "vue";
+import { reactive, readonly } from "vue";
 import type {
   CatalogMotionPayload,
   ModelSummary,
@@ -67,21 +67,48 @@ export function usePreviewMotionPlayer() {
   }
 
   function stopActiveCatalogMotion(reason: string): void {
+    if (!activeCatalogMotionRunId) {
+      if (activeMotionStop) {
+        throw new Error("catalog_motion_run_owner_missing");
+      }
+      return;
+    }
     const stop = activeMotionStop;
+    if (!stop) {
+      throw new Error("catalog_motion_stop_owner_missing");
+    }
     activeMotionStop = null;
-    stop?.(reason);
+    try {
+      stop(reason);
+    } catch (error) {
+      if (activeCatalogMotionRunId) {
+        activeMotionStop = stop;
+      }
+      throw error;
+    }
+    if (activeCatalogMotionRunId) {
+      activeMotionStop = stop;
+      throw new Error("catalog_motion_stop_not_settled");
+    }
   }
 
   function stopPlan(reason = "stopped"): void {
     const adapter = window.getLAppAdapter?.();
     const stopErrors: unknown[] = [];
-    try {
-      if (adapter && typeof adapter.stopDirectParameterPlan === "function") {
+    const directPlanRunId = activeDirectPlanRunId;
+    if (directPlanRunId) {
+      try {
+        if (!adapter || typeof adapter.stopDirectParameterPlan !== "function") {
+          throw new Error("direct_parameter_plan_stop_api_unavailable");
+        }
         adapter.stopDirectParameterPlan(reason, "stopped");
+        if (activeDirectPlanRunId === directPlanRunId) {
+          throw new Error("direct_parameter_plan_stop_not_settled");
+        }
+      } catch (error) {
+        console.error("[MotionPlayer] direct parameter plan stop failed.", error);
+        stopErrors.push(error);
       }
-    } catch (error) {
-      console.error("[MotionPlayer] direct parameter plan stop failed.", error);
-      stopErrors.push(error);
     }
     try {
       stopActiveCatalogMotion(reason);
@@ -91,7 +118,7 @@ export function usePreviewMotionPlayer() {
     }
     if (stopErrors.length > 0) {
       state.status = "failed";
-      state.message = `参数计划停止失败（${reason}）。`;
+      state.message = `动作停止失败（${reason}）。`;
       state.finishedAt = new Date().toISOString();
       throw stopErrors[0];
     }
@@ -163,12 +190,17 @@ export function usePreviewMotionPlayer() {
       return { status: "rejected", reason: "direct_parameter_plan_api_unavailable" };
     }
 
+    if (hadActivePlayback) {
+      try {
+        stopPlan("direct_parameter_plan_replaced");
+      } catch (error) {
+        console.error("[MotionPlayer] direct parameter plan replacement failed.", error);
+        return { status: "rejected", reason: "motion_replacement_stop_failed" };
+      }
+    }
+
     console.info("[MotionPlayer] calling startDirectParameterPlan...");
     const playbackRunId = `motion-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const previousDirectPlanRunId = activeDirectPlanRunId;
-    // WebSDK can synchronously terminal the replaced run. Reserve the new id
-    // first so that old terminal events remain Timeline facts without rewriting
-    // this player back to the old run's state.
     activeDirectPlanRunId = playbackRunId;
     const started = adapter.startDirectParameterPlan(playbackPlan.plan, {
       runId: playbackRunId,
@@ -197,7 +229,9 @@ export function usePreviewMotionPlayer() {
     });
     console.info("[MotionPlayer] startDirectParameterPlan returned:", started);
     if (!started) {
-      activeDirectPlanRunId = previousDirectPlanRunId;
+      if (activeDirectPlanRunId === playbackRunId) {
+        activeDirectPlanRunId = "";
+      }
       const runtimeReason = typeof adapter.getDirectParameterPlanError === "function"
         ? normalizeText(adapter.getDirectParameterPlanError())
         : "";
@@ -205,20 +239,15 @@ export function usePreviewMotionPlayer() {
         ? `动作计划执行失败：${runtimeReason}`
         : "动作计划执行失败：Direct Parameter 计划被运行时拒绝。";
       console.warn("[MotionPlayer]", reason);
-      if (!hadActivePlayback) {
-        state.status = "failed";
-        state.message = reason;
-        state.finishedAt = new Date().toISOString();
-      }
+      state.status = "failed";
+      state.message = reason;
+      state.finishedAt = new Date().toISOString();
       return {
         status: "rejected",
         reason: runtimeReason || "direct_parameter_plan_rejected",
       };
     }
 
-    // Catalog motion has a separate SDK lifecycle. Stop it only after the
-    // replacement plan is accepted, while its own run is still current.
-    stopActiveCatalogMotion("direct_parameter_plan_replaced");
     console.info("[MotionPlayer] plan started successfully. totalDurationMs=", playbackPlan.totalDurationMs);
     state.status = "playing";
     state.message = `正在执行参数计划（mode=${playbackPlan.plan.mode}, emotion=${playbackPlan.plan.emotion_label}）...`;
@@ -235,6 +264,7 @@ export function usePreviewMotionPlayer() {
     _model: ModelSummary | null = null,
     options: PlayCatalogMotionOptions = {},
   ): MotionPlaybackStartResult {
+    const hadActivePlayback = Boolean(activeDirectPlanRunId || activeCatalogMotionRunId);
     const manualPreviewStartedAtMs = performance.now();
     const playbackClockReader = options.playbackClockReader ?? (
       options.requiresPlaybackClock
@@ -243,9 +273,11 @@ export function usePreviewMotionPlayer() {
     );
     if (!playbackClockReader) {
       const reason = "现成 motion 无法执行：会话 Timeline 时钟缺失。";
-      state.status = "failed";
-      state.message = reason;
-      state.finishedAt = new Date().toISOString();
+      if (!hadActivePlayback) {
+        state.status = "failed";
+        state.message = reason;
+        state.finishedAt = new Date().toISOString();
+      }
       console.error("[MotionPlayer]", reason);
       return { status: "rejected", reason };
     }
@@ -256,9 +288,11 @@ export function usePreviewMotionPlayer() {
       || catalogDurationMs <= 0
     ) {
       const reason = `现成 motion 缺少有效 duration_ms：${motion.motion_id}。`;
-      state.status = "failed";
-      state.message = reason;
-      state.finishedAt = new Date().toISOString();
+      if (!hadActivePlayback) {
+        state.status = "failed";
+        state.message = reason;
+        state.finishedAt = new Date().toISOString();
+      }
       return { status: "rejected", reason };
     }
     const adapter = window.getLAppAdapter?.();
@@ -269,13 +303,23 @@ export function usePreviewMotionPlayer() {
     ) {
       const reason = "现成 motion 无法执行：Live2D 运行时缺少 startMotion 或 stopMotion 接口。";
       console.warn("[MotionPlayer]", reason);
-      state.status = "failed";
-      state.message = reason;
-      state.finishedAt = new Date().toISOString();
+      if (!hadActivePlayback) {
+        state.status = "failed";
+        state.message = reason;
+        state.finishedAt = new Date().toISOString();
+      }
       return { status: "rejected", reason };
     }
 
-    const hadActivePlayback = Boolean(activeDirectPlanRunId || activeCatalogMotionRunId);
+    if (hadActivePlayback) {
+      try {
+        stopPlan("catalog_motion_replaced");
+      } catch (error) {
+        console.error("[MotionPlayer] catalog motion replacement failed.", error);
+        return { status: "rejected", reason: "motion_replacement_stop_failed" };
+      }
+    }
+
     const playbackRunId = `catalog-motion-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
     const getMotionStartError = (): string => (
@@ -346,11 +390,9 @@ export function usePreviewMotionPlayer() {
         ? `现成 motion 执行失败：${motion.motion_id}（${motionStartError}）。`
         : `现成 motion 执行失败：${motion.motion_id}。`;
       console.warn("[MotionPlayer]", reason);
-      if (!hadActivePlayback) {
-        state.status = "failed";
-        state.message = reason;
-        state.finishedAt = new Date().toISOString();
-      }
+      state.status = "failed";
+      state.message = reason;
+      state.finishedAt = new Date().toISOString();
       return { status: "rejected", reason: failureReason };
     }
     if (!lifecycleStarted || activeCatalogMotionRunId !== playbackRunId) {
@@ -362,16 +404,8 @@ export function usePreviewMotionPlayer() {
       activeCatalogMotionRunId = "";
       return { status: "rejected", reason };
     }
-    if (typeof adapter.stopDirectParameterPlan === "function" && activeDirectPlanRunId) {
-      activeDirectPlanRunId = "";
-      adapter.stopDirectParameterPlan("catalog_motion_replaced", "stopped");
-    }
     return { status: "started", runId: playbackRunId };
   }
-
-  onScopeDispose(() => {
-    stopPlan("unmount");
-  });
 
   return {
     state: readonly(state),

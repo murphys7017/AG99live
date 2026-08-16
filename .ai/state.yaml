@@ -1,9 +1,9 @@
 task:
-  class: review
+  class: bugfix
   risk: high
-  phase: source_review_findings_pending
-  status: implementation_pending
-  scope: "Record the source-confirmed playback ownership transaction findings, then fix them directly before continuing phase-two performance-quality work."
+  phase: playback_ownership_transaction_complete
+  status: source_review_complete
+  scope: "Unify motion replacement ownership, preserve ModelEngine failure semantics, and remove duplicate player disposal before continuing phase-two performance-quality work."
 
 context:
   confidence: high
@@ -71,10 +71,13 @@ verification:
     - Automated tests are low-confidence input/output smoke checks; do not run the full suite.
     - Live AstrBot, Electron, TTS, and Live2D behavior remains user-led runtime acceptance.
   current:
-    - Architecture documentation now distinguishes AG99 `frontend/src/live2d/WebSDK/src/` runtime code from official Cubism `Framework/Core`; no source code was changed in this documentation pass.
-    - The latest source review found three unresolved runtime ownership issues: motion replacement transaction ordering, ModelEngine stop/interruption cleanup, and Vue Scope disposal interruption. They are recorded in the active defect register and are not yet fixed.
+    - Architecture documentation distinguishes AG99 `frontend/src/live2d/WebSDK/src/` runtime code from official Cubism `Framework/Core`.
+    - Motion replacement now settles the tracked Direct Plan or Catalog Motion before starting the candidate; a stop failure rejects the replacement and cannot publish a new started run.
+    - ModelEngine stop and segment interruption release local run ownership in finally, retain failed state on downstream errors, and rethrow the original error.
+    - MotionPlayer no longer registers a duplicate Vue Scope cleanup; PetDesktopRuntime remains the single component-disposal owner and isolates each cleanup step.
+    - `npm run typecheck:renderer` passes after the playback ownership changes.
     - The previous Remote Operator error-visibility correction is committed as `e4fe844`.
-    - The broader end-to-end source review reached the current Adapter -> PlaybackTimeline -> ModelEngine -> ParameterMixer -> WebSDK boundary; the architecture remains valid, but the active defect register is not empty until the ownership transaction batch is complete.
+    - The broader end-to-end source review reached the current Adapter -> PlaybackTimeline -> ModelEngine -> ParameterMixer -> WebSDK boundary; the architecture remains valid and the active defect register is empty after source review.
     - ESP32 display initial status read failures are visible after commit `0a0da08`.
     - Pre-Turn exceptions remain outside the formal lifecycle after commit `42681e8`.
     - Audio start/end payload shape is owned by the protocol parser, while SpeechIngress rejects duplicate starts, missing starts, mode changes, and non-increasing chunk sequences instead of repairing or ignoring them.
@@ -91,7 +94,7 @@ verification:
     - Catalog motions are a ready-model, preloaded-cache execution path. Runtime cache misses and model-not-ready states are explicit rejections; there is no second asynchronous fetch or preparing-run lifecycle, and a rejected request cannot clear another run's clock or lend it a stale start error.
     - Live2D renderer selection changes now use one serialized lifecycle: empty model sync, replacement, initialization failure, and component unmount all release the WebSDK instance through its public teardown owner; superseded loads cannot publish ready/error state for the current selection.
     - Live2D teardown clears singleton ownership before invoking release work, completes all owned cleanup steps even when terminal callbacks fail, logs every cleanup failure, and rethrows the original first failure after cleanup.
-    - Catalog motion replacement is committed only after Cubism returns a valid playback handle; rejected candidates preserve the current player state, and natural completion is tracked by the per-run handle rather than a callback stored on the shared preloaded motion object.
+    - Catalog motion candidates are preflighted before replacement; once replacement begins, the tracked old run is settled first, so a runtime-rejected candidate leaves no new formal run. Natural completion remains tracked by the per-run handle rather than a callback stored on the shared preloaded motion object.
     - ModelEngine public execution state belongs to the active playback run; pending, compile, and start failures from replacement candidates remain diagnostics and cannot overwrite a still-playing run.
     - Direct Parameter Plan and Catalog Motion starts return the same structured started/rejected result; ModelEngine receives the actual rejection reason instead of inferring errors from mutable player display text.
     - Motion lifecycle fan-out isolates ModelEngine, Timeline, recorder, caller, and desktop-bridge observers; RunTracker and recorder commit their own ownership transitions before invoking downstream projections so one observer failure cannot strand another owner.
