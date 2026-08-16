@@ -12,16 +12,21 @@ import {
   MIN_PARAMETER_KEYFRAME_COUNT,
 } from "../constants.js";
 import {
+  compileFaceTrackTiming,
   compileGazeTrackTiming,
   compileSemanticTrackTiming,
   registerPerformanceParameterNodes,
+  resolvePerformancePartTrackStrategy,
   type PerformancePartTrackTiming,
+  type PerformancePartTrackStrategy,
+  type PerformanceStagedPartTrackStrategy,
   type PerformanceSchedule,
   type PerformanceScheduleMutationResult,
 } from "./performanceSchedule.js";
 
 const GAZE_LEAD_TARGET_RATIO = 0.72;
 const GAZE_PHRASE_TRANSFER_TARGET_RATIO = 0.86;
+const FACE_ENTER_TARGET_RATIO = 0.68;
 
 interface ParameterTrackGraphInput {
   schedule: PerformanceSchedule;
@@ -85,8 +90,13 @@ export function compileParameterSequenceTrackGraph(
   let residualTrackCount = 0;
   let compressedTrackCount = 0;
   let gazeTrackCount = 0;
+  let faceTrackCount = 0;
   const timingsByAxis = new Map<string, PerformancePartTrackTiming>();
   const changedStepsByAxis = new Map<string, readonly number[]>();
+  const activeStagedPartAxes = resolveActiveStagedPartAxes(
+    parameterStepsResult.parameterSteps,
+    axisById,
+  );
   for (const parameterSteps of parameterStepsResult.parameterSteps.values()) {
     const baseParameter = parameterSteps[0];
     const axis = axisById.get(baseParameter.axis_id);
@@ -114,14 +124,16 @@ export function compileParameterSequenceTrackGraph(
       };
     }
     changedStepsByAxis.set(axis.id, changedStepIndices);
-    const gazeTrack = axis.semantic_group.trim().toLowerCase() === "gaze"
-      && isGazeParameterTrackActive(parameterSteps, axis.neutral);
+    const strategy = resolvePartTrackStrategy(
+      axis.semantic_group,
+      activeStagedPartAxes.has(axis.id),
+    );
     const timing = resolvePartTrackTiming(
       timingsByAxis,
       schedule,
       axis,
       changedStepIndices,
-      gazeTrack,
+      strategy,
       firstPlan.timing.blend_out_ms,
     );
     if (!timing.ok) {
@@ -171,6 +183,9 @@ export function compileParameterSequenceTrackGraph(
     if (keyframes.points && timing.value.strategy === "gaze") {
       gazeTrackCount += 1;
     }
+    if (keyframes.points && timing.value.strategy === "face") {
+      faceTrackCount += 1;
+    }
     graphDurationMs = Math.max(
       graphDurationMs,
       keyframes.points
@@ -211,6 +226,7 @@ export function compileParameterSequenceTrackGraph(
     `parameter_track_graph_staggered_tracks:${staggeredTrackCount}`,
     `parameter_track_graph_residual_tracks:${residualTrackCount}`,
     `parameter_track_graph_gaze_tracks:${gazeTrackCount}`,
+    `parameter_track_graph_face_tracks:${faceTrackCount}`,
     `motion_sequence_compiled:${stepPlans.length}`,
   ];
   if (compressedTrackCount > 0) {
@@ -220,6 +236,9 @@ export function compileParameterSequenceTrackGraph(
   }
   if (gazeTrackCount > 0) {
     warnings.push("parameter_track_graph_gaze_release:plan_blend");
+  }
+  if (faceTrackCount > 0) {
+    warnings.push("parameter_track_graph_face_release:plan_blend");
   }
   if (graphDurationMs > scheduleDurationMs) {
     warnings.push(
@@ -307,22 +326,32 @@ function buildSemanticTrack(
   };
 }
 
-export function buildGazeParameterTrack(
+export function buildStagedPartParameterTrack(
   parameterSteps: readonly SemanticParameterPlanEntry[],
-  trackEvents: PerformancePartTrackTiming["parameterEvents"],
+  timing: PerformancePartTrackTiming,
   axisNeutralValue: number,
 ): ParameterTrackBuildResult {
+  const trackEvents = timing.parameterEvents;
+  const strategy = timing.strategy;
+  if (strategy === "semantic") {
+    return {
+      ok: false,
+      reason: "parameter_track_graph_staged_part_strategy_invalid:semantic",
+    };
+  }
   if (
     trackEvents.length < MIN_PARAMETER_KEYFRAME_COUNT
     || trackEvents.length > MAX_PARAMETER_KEYFRAME_COUNT
   ) {
     return {
       ok: false,
-      reason: `parameter_track_graph_gaze_event_count_invalid:${trackEvents.length}`,
+      reason: `parameter_track_graph_${strategy}_event_count_invalid:${trackEvents.length}`,
     };
   }
   const points: NonNullable<SemanticParameterPlanEntry["keyframes"]> = [];
-  const hasDwellEvent = trackEvents.some((event) => event.kind === "gaze_dwell");
+  const hasSettleEvent = trackEvents.some((event) => (
+    event.kind === "gaze_dwell" || event.kind === "face_settle"
+  ));
   for (const event of trackEvents) {
     const parameter = event.stepIndex === undefined
       ? parameterSteps[parameterSteps.length - 1]
@@ -330,27 +359,31 @@ export function buildGazeParameterTrack(
     if (!parameter) {
       return {
         ok: false,
-        reason: `parameter_track_graph_gaze_event_step_out_of_range:${event.id}`,
+        reason: `parameter_track_graph_${strategy}_event_step_out_of_range:${event.id}`,
       };
     }
-    const targetRatio = resolveGazeTargetRatio(event, hasDwellEvent);
+    const targetRatio = resolveStagedPartTargetRatio(
+      strategy,
+      event,
+      hasSettleEvent,
+    );
     if (targetRatio === null) {
       return {
         ok: false,
-        reason: `parameter_track_graph_gaze_event_kind_invalid:${event.id}:${event.kind}`,
+        reason: `parameter_track_graph_${strategy}_event_kind_invalid:${event.id}:${event.kind}`,
       };
     }
     points.push({
       at_ms: event.atMs,
       transition_ms: event.transitionMs,
-      target_value: interpolateGazeValue(
+      target_value: interpolateTargetValue(
         parameter.neutral_target_value,
         parameter.target_value,
         targetRatio,
       ),
       input_value: parameter.input_value === undefined
         ? undefined
-        : interpolateGazeValue(
+        : interpolateTargetValue(
             axisNeutralValue,
             parameter.input_value,
             targetRatio,
@@ -390,10 +423,10 @@ function buildScheduledParameterTrack(
   timing: PerformancePartTrackTiming,
   axisNeutralValue: number,
 ): ParameterTrackBuildResult {
-  if (timing.strategy === "gaze") {
-    return buildGazeParameterTrack(
+  if (timing.strategy !== "semantic") {
+    return buildStagedPartParameterTrack(
       parameterSteps,
-      timing.parameterEvents,
+      timing,
       axisNeutralValue,
     );
   }
@@ -405,22 +438,21 @@ function resolvePartTrackTiming(
   schedule: PerformanceSchedule,
   axis: SemanticAxisDefinition,
   changedStepIndices: readonly number[],
-  gazeTrack: boolean,
+  strategy: PerformancePartTrackStrategy,
   blendOutMs: number,
 ): PerformanceScheduleMutationResult<PerformancePartTrackTiming> {
-  const expectedStrategy = gazeTrack ? "gaze" : "semantic";
   const existing = timingsByAxis.get(axis.id);
   if (existing) {
-    if (existing.strategy !== expectedStrategy) {
+    if (existing.strategy !== strategy) {
       return {
         ok: false,
         value: null,
-        reason: `performance_schedule_axis_strategy_mismatch:${axis.id}:${existing.strategy}:${expectedStrategy}`,
+        reason: `performance_schedule_axis_strategy_mismatch:${axis.id}:${existing.strategy}:${strategy}`,
       };
     }
     return { ok: true, value: existing, reason: "" };
   }
-  if (!gazeTrack && changedStepIndices.length === 1) {
+  if (strategy === "semantic" && changedStepIndices.length === 1) {
     const timing: PerformancePartTrackTiming = {
       strategy: "semantic",
       events: [],
@@ -433,7 +465,7 @@ function resolvePartTrackTiming(
     timingsByAxis.set(axis.id, timing);
     return { ok: true, value: timing, reason: "" };
   }
-  const timing = gazeTrack
+  const timing = strategy === "gaze"
     ? compileGazeTrackTiming({
         schedule,
         semanticAxisId: axis.id,
@@ -442,6 +474,15 @@ function resolvePartTrackTiming(
         blendOutMs,
         allowTailExtension: true,
       })
+    : strategy === "face"
+      ? compileFaceTrackTiming({
+          schedule,
+          semanticAxisId: axis.id,
+          semanticGroup: axis.semantic_group,
+          changedStepIndices,
+          blendOutMs,
+          allowTailExtension: true,
+        })
     : compileSemanticTrackTiming({
         schedule,
         semanticAxisId: axis.id,
@@ -454,7 +495,7 @@ function resolvePartTrackTiming(
   return timing;
 }
 
-export function isGazeParameterTrackActive(
+export function isStagedPartParameterTrackActive(
   parameterSteps: readonly SemanticParameterPlanEntry[],
   axisNeutralValue: number,
 ): boolean {
@@ -521,7 +562,7 @@ function roundValue(value: number): number {
   return Math.round(value * 1000000) / 1000000;
 }
 
-function interpolateGazeValue(
+function interpolateTargetValue(
   neutralValue: number,
   targetValue: number,
   ratio: number,
@@ -529,20 +570,58 @@ function interpolateGazeValue(
   return roundValue(neutralValue + (targetValue - neutralValue) * ratio);
 }
 
-function resolveGazeTargetRatio(
+function resolveStagedPartTargetRatio(
+  strategy: PerformanceStagedPartTrackStrategy,
   event: PerformancePartTrackTiming["parameterEvents"][number],
-  hasDwellEvent: boolean,
+  hasSettleEvent: boolean,
 ): number | null {
-  if (event.kind === "gaze_lead") {
-    return hasDwellEvent ? GAZE_LEAD_TARGET_RATIO : 1;
+  if (strategy === "gaze") {
+    if (event.kind === "gaze_lead") {
+      return hasSettleEvent ? GAZE_LEAD_TARGET_RATIO : 1;
+    }
+    if (event.kind === "gaze_dwell") {
+      return 1;
+    }
+    if (event.kind === "gaze_transfer") {
+      return event.stepIndex === undefined
+        ? GAZE_PHRASE_TRANSFER_TARGET_RATIO
+        : 1;
+    }
+    return null;
   }
-  if (event.kind === "gaze_dwell") {
+  if (event.kind === "face_enter") {
+    return hasSettleEvent ? FACE_ENTER_TARGET_RATIO : 1;
+  }
+  if (event.kind === "face_settle" || event.kind === "face_transfer") {
     return 1;
   }
-  if (event.kind === "gaze_transfer") {
-    return event.stepIndex === undefined
-      ? GAZE_PHRASE_TRANSFER_TARGET_RATIO
-      : 1;
-  }
   return null;
+}
+
+function resolveActiveStagedPartAxes(
+  parameterStepsById: Map<string, SemanticParameterPlanEntry[]>,
+  axisById: Map<string, SemanticAxisDefinition>,
+): Set<string> {
+  const activeAxisIds = new Set<string>();
+  for (const parameterSteps of parameterStepsById.values()) {
+    const axis = axisById.get(parameterSteps[0].axis_id);
+    if (
+      axis
+      && resolvePerformancePartTrackStrategy(axis.semantic_group)
+      && isStagedPartParameterTrackActive(parameterSteps, axis.neutral)
+    ) {
+      activeAxisIds.add(axis.id);
+    }
+  }
+  return activeAxisIds;
+}
+
+function resolvePartTrackStrategy(
+  semanticGroup: string,
+  active: boolean,
+): PerformancePartTrackStrategy {
+  if (!active) {
+    return "semantic";
+  }
+  return resolvePerformancePartTrackStrategy(semanticGroup) ?? "semantic";
 }

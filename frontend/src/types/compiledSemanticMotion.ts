@@ -6,7 +6,7 @@ import type {
 } from "./protocol.js";
 
 export const SEMANTIC_MOTION_TRANSFORM_VERSION = "semantic_motion_transform.v5";
-export const PERFORMANCE_SCHEDULE_TRACE_VERSION = "performance_schedule_trace.v2";
+export const PERFORMANCE_SCHEDULE_TRACE_VERSION = "performance_schedule_trace.v3";
 
 export type CompiledSemanticAxisSource = "semantic_axis" | "relation_graph";
 
@@ -150,17 +150,23 @@ export interface PerformanceTimingEventTrace {
     | "gaze_lead"
     | "gaze_dwell"
     | "gaze_transfer"
-    | "gaze_release";
+    | "gaze_release"
+    | "face_enter"
+    | "face_settle"
+    | "face_transfer"
+    | "face_release";
   source:
     | "semantic_step"
     | "speech_track"
     | "speech_phrase"
     | "speech_release"
-    | "gaze_strategy";
+    | "gaze_strategy"
+    | "face_strategy";
   timingSource:
     | "semantic_group_policy"
     | "voice_following_profile"
-    | "gaze_schedule_policy";
+    | "gaze_schedule_policy"
+    | "face_schedule_policy";
   semanticAxisId: string;
   semanticGroup: string;
   atMs: number;

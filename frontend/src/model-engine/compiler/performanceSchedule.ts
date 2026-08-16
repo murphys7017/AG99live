@@ -68,7 +68,11 @@ interface PerformanceTrackTimingPolicy {
   residualMs: number;
 }
 
-export type PerformancePartTrackStrategy = "semantic" | "gaze";
+export type PerformancePartTrackStrategy = "semantic" | "gaze" | "face";
+export type PerformanceStagedPartTrackStrategy = Exclude<
+  PerformancePartTrackStrategy,
+  "semantic"
+>;
 
 export interface PerformancePartTrackTiming {
   readonly strategy: PerformancePartTrackStrategy;
@@ -103,6 +107,64 @@ const GAZE_DWELL_AT_MS = 60;
 const GAZE_DWELL_TRANSITION_MS = 70;
 const GAZE_TRANSFER_TRANSITION_MS = 80;
 const GAZE_MIN_DWELL_MS = 55;
+const FACE_SETTLE_AT_MS = 45;
+const FACE_SETTLE_TRANSITION_MS = 75;
+const FACE_TRANSFER_OFFSET_MS = 25;
+const FACE_TRANSFER_TRANSITION_MS = 80;
+const FACE_MIN_HOLD_MS = 45;
+const FACE_RESIDUAL_MS = 40;
+const FACE_SEMANTIC_GROUPS = new Set(["eye", "brow", "mouth", "face"]);
+
+type PerformancePartTrackEventKind =
+  | "gaze_lead"
+  | "gaze_dwell"
+  | "gaze_transfer"
+  | "face_enter"
+  | "face_settle"
+  | "face_transfer";
+
+type PerformancePartTrackReleaseKind = "gaze_release" | "face_release";
+
+interface PerformancePartTrackDraft {
+  kind: PerformancePartTrackEventKind;
+  desiredAtMs: number;
+  preferredTransitionMs: number;
+  stepIndex?: number;
+  phraseIndices?: readonly number[];
+  transitionOffsetMs: number;
+}
+
+interface FinalizePartTrackTimingOptions {
+  schedule: PerformanceSchedule;
+  strategy: PerformanceStagedPartTrackStrategy;
+  semanticAxisId: string;
+  semanticGroup: string;
+  blendOutMs: number;
+  allowTailExtension: boolean;
+  trackDrafts: readonly PerformancePartTrackDraft[];
+  releaseKind: PerformancePartTrackReleaseKind;
+  source: Extract<PerformanceTimingEventTrace["source"], "gaze_strategy" | "face_strategy">;
+  timingSource: Extract<
+    PerformanceTimingEventTrace["timingSource"],
+    "gaze_schedule_policy" | "face_schedule_policy"
+  >;
+  minimumFinalHoldMs: number;
+  staggered: boolean;
+}
+
+export function isFaceSemanticGroup(semanticGroup: string): boolean {
+  return FACE_SEMANTIC_GROUPS.has(semanticGroup.trim().toLowerCase());
+}
+
+export function resolvePerformancePartTrackStrategy(
+  semanticGroup: string,
+): PerformanceStagedPartTrackStrategy | null {
+  const normalizedGroup = semanticGroup.trim().toLowerCase();
+  if (normalizedGroup === "gaze") {
+    return "gaze";
+  }
+  return isFaceSemanticGroup(normalizedGroup) ? "face" : null;
+}
 
 export function compilePerformanceSchedule(options: {
   assistantText?: string;
@@ -185,11 +247,14 @@ export function compileSemanticTrackTiming(options: {
   changedStepIndices: readonly number[];
 }): PerformanceScheduleMutationResult<PerformancePartTrackTiming> {
   const { schedule, semanticAxisId, semanticGroup, changedStepIndices } = options;
-  if (semanticGroup.trim().toLowerCase() === "gaze") {
+  const normalizedGroup = semanticGroup.trim().toLowerCase();
+  if (normalizedGroup === "gaze" || isFaceSemanticGroup(normalizedGroup)) {
     return {
       ok: false,
       value: null,
-      reason: `performance_schedule_gaze_strategy_required:${semanticAxisId || "unknown_axis"}`,
+      reason: normalizedGroup === "gaze"
+        ? `performance_schedule_gaze_strategy_required:${semanticAxisId || "unknown_axis"}`
+        : `performance_schedule_face_strategy_required:${semanticAxisId || "unknown_axis"}`,
     };
   }
   if (
@@ -358,14 +423,7 @@ export function compileGazeTrackTiming(options: {
   const includeDwell = changedStepIndices.length < MAX_PARAMETER_KEYFRAME_COUNT
     && (firstTransferAtMs === undefined
       || firstTransferAtMs >= GAZE_DWELL_AT_MS + GAZE_DWELL_TRANSITION_MS + GAZE_MIN_DWELL_MS);
-  const trackDrafts: Array<{
-    kind: "gaze_lead" | "gaze_dwell" | "gaze_transfer";
-    desiredAtMs: number;
-    preferredTransitionMs: number;
-    stepIndex?: number;
-    phraseIndices?: readonly number[];
-    transitionOffsetMs: number;
-  }> = [{
+  const trackDrafts: PerformancePartTrackDraft[] = [{
     kind: "gaze_lead",
     desiredAtMs: 0,
     preferredTransitionMs: 0,
@@ -397,13 +455,144 @@ export function compileGazeTrackTiming(options: {
       });
     }
   }
-  trackDrafts.sort((left, right) => left.desiredAtMs - right.desiredAtMs);
+  return finalizePartTrackTiming({
+    schedule,
+    strategy: "gaze",
+    semanticAxisId,
+    semanticGroup,
+    blendOutMs,
+    allowTailExtension,
+    trackDrafts,
+    releaseKind: "gaze_release",
+    source: "gaze_strategy",
+    timingSource: "gaze_schedule_policy",
+    minimumFinalHoldMs: GAZE_MIN_DWELL_MS,
+    staggered: transferDrafts.length > 0,
+  });
+}
 
+export function compileFaceTrackTiming(options: {
+  schedule: PerformanceSchedule;
+  semanticAxisId: string;
+  semanticGroup: string;
+  changedStepIndices: readonly number[];
+  blendOutMs: number;
+  allowTailExtension: boolean;
+}): PerformanceScheduleMutationResult<PerformancePartTrackTiming> {
+  const {
+    schedule,
+    semanticAxisId,
+    semanticGroup,
+    changedStepIndices,
+    blendOutMs,
+    allowTailExtension,
+  } = options;
+  const sequenceSchedule = schedule.semanticSteps.length > 0;
+  if (
+    !semanticAxisId
+    || !isFaceSemanticGroup(semanticGroup)
+    || !Number.isInteger(blendOutMs)
+    || blendOutMs < 0
+    || blendOutMs > schedule.durationMs
+    || changedStepIndices.length === 0
+    || changedStepIndices[0] !== 0
+    || changedStepIndices.length > MAX_PARAMETER_KEYFRAME_COUNT
+    || changedStepIndices.some((stepIndex, index) => (
+      !Number.isInteger(stepIndex)
+      || stepIndex < 0
+      || (sequenceSchedule && stepIndex >= schedule.semanticSteps.length)
+      || (!sequenceSchedule && stepIndex !== 0)
+      || (index > 0 && stepIndex <= changedStepIndices[index - 1])
+    ))
+  ) {
+    return {
+      ok: false,
+      value: null,
+      reason: `performance_schedule_face_track_invalid:${semanticAxisId || "unknown_axis"}`,
+    };
+  }
+
+  const transferDrafts: PerformancePartTrackDraft[] = changedStepIndices
+    .slice(1)
+    .map((stepIndex) => {
+      const step = schedule.semanticSteps[stepIndex];
+      return {
+        kind: "face_transfer",
+        desiredAtMs: Math.max(1, step.startMs + FACE_TRANSFER_OFFSET_MS),
+        preferredTransitionMs: FACE_TRANSFER_TRANSITION_MS,
+        stepIndex,
+        phraseIndices: resolvePrimaryPhraseIndices(schedule, stepIndex),
+        transitionOffsetMs: FACE_TRANSFER_OFFSET_MS,
+      };
+    });
+  const firstTransferAtMs = transferDrafts[0]?.desiredAtMs;
+  const includeSettle = changedStepIndices.length < MAX_PARAMETER_KEYFRAME_COUNT
+    && (firstTransferAtMs === undefined
+      || firstTransferAtMs >= FACE_SETTLE_AT_MS + FACE_SETTLE_TRANSITION_MS + FACE_MIN_HOLD_MS);
+  const firstPhraseIndices = schedule.phrases[0]
+    ? [schedule.phrases[0].index]
+    : undefined;
+  const trackDrafts: PerformancePartTrackDraft[] = [{
+    kind: "face_enter",
+    desiredAtMs: 0,
+    preferredTransitionMs: 0,
+    stepIndex: sequenceSchedule ? 0 : undefined,
+    phraseIndices: firstPhraseIndices,
+    transitionOffsetMs: 0,
+  }];
+  if (includeSettle) {
+    trackDrafts.push({
+      kind: "face_settle",
+      desiredAtMs: FACE_SETTLE_AT_MS,
+      preferredTransitionMs: FACE_SETTLE_TRANSITION_MS,
+      stepIndex: sequenceSchedule ? 0 : undefined,
+      phraseIndices: firstPhraseIndices,
+      transitionOffsetMs: FACE_SETTLE_AT_MS,
+    });
+  }
+  trackDrafts.push(...transferDrafts);
+
+  return finalizePartTrackTiming({
+    schedule,
+    strategy: "face",
+    semanticAxisId,
+    semanticGroup,
+    blendOutMs,
+    allowTailExtension,
+    trackDrafts,
+    releaseKind: "face_release",
+    source: "face_strategy",
+    timingSource: "face_schedule_policy",
+    minimumFinalHoldMs: FACE_RESIDUAL_MS,
+    staggered: transferDrafts.length > 0,
+  });
+}
+
+function finalizePartTrackTiming(
+  options: FinalizePartTrackTimingOptions,
+): PerformanceScheduleMutationResult<PerformancePartTrackTiming> {
+  const {
+    schedule,
+    strategy,
+    semanticAxisId,
+    semanticGroup,
+    blendOutMs,
+    allowTailExtension,
+    trackDrafts,
+    releaseKind,
+    source,
+    timingSource,
+    minimumFinalHoldMs,
+    staggered,
+  } = options;
+  const sortedDrafts = [...trackDrafts].sort(
+    (left, right) => left.desiredAtMs - right.desiredAtMs,
+  );
   const baseReleaseAtMs = Math.max(1, schedule.durationMs - blendOutMs);
-  const normalizedDrafts: typeof trackDrafts = [];
+  const normalizedDrafts: PerformancePartTrackDraft[] = [];
   let previousAtMs = -1;
-  for (const draft of trackDrafts) {
-    const atMs = draft.kind === "gaze_lead"
+  for (const draft of sortedDrafts) {
+    const atMs = draft.desiredAtMs === 0
       ? 0
       : Math.max(previousAtMs + 1, draft.desiredAtMs);
     if (!allowTailExtension && atMs >= baseReleaseAtMs) {
@@ -420,27 +609,27 @@ export function compileGazeTrackTiming(options: {
       MAX_MOTION_DURATION_MS - blendOutMs,
       Math.max(
         releaseAtMs,
-        finalDraft.desiredAtMs + finalDraft.preferredTransitionMs + GAZE_MIN_DWELL_MS,
+        finalDraft.desiredAtMs
+          + finalDraft.preferredTransitionMs
+          + minimumFinalHoldMs,
       ),
     );
   }
 
-  const trackEvents: PerformanceTimingEventTrace[] = [];
+  const parameterEvents: PerformanceTimingEventTrace[] = [];
   let compressed = false;
   for (let index = 0; index < normalizedDrafts.length; index += 1) {
     const draft = normalizedDrafts[index];
     const nextAtMs = normalizedDrafts[index + 1]?.desiredAtMs ?? releaseAtMs;
     const availableTransitionMs = Math.max(0, nextAtMs - draft.desiredAtMs);
-    const transitionMs = Math.min(
-      draft.preferredTransitionMs,
-      availableTransitionMs,
-    );
-    compressed ||= transitionMs < draft.preferredTransitionMs;
-    const event: PerformanceTimingEventTrace = {
-      id: buildGazeEventId(semanticAxisId, draft.kind, index),
+    const transitionMs = Math.min(draft.preferredTransitionMs, availableTransitionMs);
+    const eventCompressed = transitionMs < draft.preferredTransitionMs;
+    compressed ||= eventCompressed;
+    parameterEvents.push({
+      id: buildPartTrackEventId(strategy, semanticAxisId, draft.kind, index),
       kind: draft.kind,
-      source: "gaze_strategy",
-      timingSource: "gaze_schedule_policy",
+      source,
+      timingSource,
       semanticAxisId,
       semanticGroup,
       atMs: draft.desiredAtMs,
@@ -448,21 +637,18 @@ export function compileGazeTrackTiming(options: {
       holdMs: Math.max(0, nextAtMs - draft.desiredAtMs - transitionMs),
       residualMs: 0,
       transitionOffsetMs: draft.transitionOffsetMs,
-      compressed: transitionMs < draft.preferredTransitionMs,
-      compressionReason: transitionMs < draft.preferredTransitionMs
-        ? "transition_window_short"
-        : undefined,
+      compressed: eventCompressed,
+      compressionReason: eventCompressed ? "transition_window_short" : undefined,
       stepIndex: draft.stepIndex,
       phraseIndices: draft.phraseIndices ? [...draft.phraseIndices] : undefined,
-    };
-    trackEvents.push(event);
+    });
   }
 
   const releaseEvent: PerformanceTimingEventTrace = {
-    id: buildGazeEventId(semanticAxisId, "gaze_release", 0),
-    kind: "gaze_release",
-    source: "gaze_strategy",
-    timingSource: "gaze_schedule_policy",
+    id: buildPartTrackEventId(strategy, semanticAxisId, releaseKind, 0),
+    kind: releaseKind,
+    source,
+    timingSource,
     semanticAxisId,
     semanticGroup,
     atMs: releaseAtMs,
@@ -475,7 +661,7 @@ export function compileGazeTrackTiming(options: {
       ? [schedule.phrases[schedule.phrases.length - 1].index]
       : undefined,
   };
-  const events = [...trackEvents, releaseEvent];
+  const events = [...parameterEvents, releaseEvent];
   const registerResult = registerPerformanceTimingEvents(schedule, events);
   if (!registerResult.ok) {
     return registerResult;
@@ -484,11 +670,11 @@ export function compileGazeTrackTiming(options: {
     ok: true,
     reason: "",
     value: {
-      strategy: "gaze",
+      strategy,
       events,
-      parameterEvents: trackEvents,
+      parameterEvents,
       requiredOwnedUntilMs: releaseAtMs,
-      staggered: transferDrafts.length > 0,
+      staggered,
       residual: releaseAtMs > baseReleaseAtMs,
       compressed,
     },
@@ -792,12 +978,13 @@ function buildSpeechEventId(
   return `speech:${channelId}:${kind}:${index}`;
 }
 
-function buildGazeEventId(
+function buildPartTrackEventId(
+  strategy: PerformanceStagedPartTrackStrategy,
   semanticAxisId: string,
-  kind: "gaze_lead" | "gaze_dwell" | "gaze_transfer" | "gaze_release",
+  kind: PerformancePartTrackEventKind | PerformancePartTrackReleaseKind,
   index: number,
 ): string {
-  return `gaze:${semanticAxisId}:${kind}:${index}`;
+  return `${strategy}:${semanticAxisId}:${kind}:${index}`;
 }
 
 function buildParameterNodeKey(node: PerformanceParameterNodeTrace): string {
@@ -841,14 +1028,6 @@ function resolveTrackTimingPolicy(semanticGroup: string): PerformanceTrackTiming
       transitionMs: 140,
       preferredHoldMs: 70,
       residualMs: 150,
-    };
-  }
-  if (group === "eye" || group === "brow" || group === "mouth" || group === "face") {
-    return {
-      transitionOffsetMs: 25,
-      transitionMs: 80,
-      preferredHoldMs: 45,
-      residualMs: 40,
     };
   }
   return {

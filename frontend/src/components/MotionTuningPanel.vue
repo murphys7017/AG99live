@@ -764,7 +764,13 @@ function appendPerformanceScheduleDiagnostics(
   const gazeEventCount = schedule.events.filter((event) =>
     event.kind.startsWith("gaze_"),
   ).length;
-  const speechEventCount = schedule.events.length - semanticEventCount - gazeEventCount;
+  const faceEventCount = schedule.events.filter((event) =>
+    event.kind.startsWith("face_"),
+  ).length;
+  const speechEventCount = schedule.events.length
+    - semanticEventCount
+    - gazeEventCount
+    - faceEventCount;
   const keyframeNodeCount = schedule.parameterNodes.filter((node) =>
     node.trackKind === "keyframe",
   ).length;
@@ -773,7 +779,7 @@ function appendPerformanceScheduleDiagnostics(
     `编排: ${schedule.phrases.length} phrase / ${schedule.semanticSteps.length} step / ${schedule.events.length} event / ${schedule.parameterNodes.length} node`,
   );
   lines.push(
-    `事件来源: semantic ${semanticEventCount}, gaze ${gazeEventCount}, speech ${speechEventCount}; 参数节点: keyframe ${keyframeNodeCount}, modulation ${speechNodeCount}`,
+    `事件来源: semantic ${semanticEventCount}, gaze ${gazeEventCount}, face ${faceEventCount}, speech ${speechEventCount}; 参数节点: keyframe ${keyframeNodeCount}, modulation ${speechNodeCount}`,
   );
   const nodesByEventId = new Map<string, typeof schedule.parameterNodes>();
   for (const node of schedule.parameterNodes) {

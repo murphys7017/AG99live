@@ -468,6 +468,10 @@ function isCompatiblePerformanceEvent(event: unknown): boolean {
       || event.kind === "gaze_dwell"
       || event.kind === "gaze_transfer"
       || event.kind === "gaze_release"
+      || event.kind === "face_enter"
+      || event.kind === "face_settle"
+      || event.kind === "face_transfer"
+      || event.kind === "face_release"
     )
     && typeof event.semanticAxisId === "string"
     && Boolean(event.semanticAxisId.trim())

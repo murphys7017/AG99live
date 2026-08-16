@@ -1,9 +1,9 @@
 task:
-  class: refactor
+  class: feature
   risk: medium
-  phase: phase_b_b1_part_track_compilation_complete
+  phase: phase_b_b2_face_lifecycle_complete
   status: source_review_complete
-  scope: "Unify semantic and gaze part-track timing results, axis caching, and parameter projection without changing gaze behavior, protocols, or runtime ownership."
+  scope: "Compile face enter, settle, transfer, and release through the shared PerformanceSchedule and parameter-track graph without changing external protocols or runtime ownership."
 
 context:
   confidence: high
@@ -72,6 +72,12 @@ verification:
     - Automated tests are low-confidence input/output smoke checks; do not run the full suite.
     - Live AstrBot, Electron, TTS, and Live2D behavior remains user-led runtime acceptance.
   current:
+    - Phase-B batch B2 is complete: active eye, brow, mouth, and face Direct Plan axes now receive a scheduled enter, optional settle, semantic transfer, and ownership-release lifecycle through the existing PerformanceSchedule.
+    - Pose and sequence face tracks share the same staged-part projection and finalization path as gaze; there is no face-specific stage, clock, player, mixer source, WebSDK semantic branch, or Cubism business logic.
+    - Face settle is admitted only before keyframe generation when the four-point budget and timing window allow it; otherwise the first keyframe preserves the full first LLM target and every later semantic step remains intact.
+    - Face release is diagnostic-only and remains excluded from parameterEvents, so the existing Direct Plan blend returns to the current Cubism base without a neutral keyframe.
+    - The obsolete generic eye/brow/mouth/face timing-policy branch and gaze-only pose projection names are removed; staged-part strategy classification has one source in performanceSchedule.ts.
+    - The internal PerformanceSchedule trace is now v3 and Motion Lab accepts and reports face events; engine.motion_intent.v4 and engine.parameter_plan.v3 remain unchanged.
     - Phase-B batch B1 is complete: semantic and gaze return one PerformancePartTrackTiming shape, sequence compilation uses one per-axis timing cache and one scheduled-track projection entry, and release events remain excluded from parameter keyframe projection.
     - The unified part-track boundary rejects an axis strategy mismatch and any mismatch between projectable timing events and compiled parameter nodes instead of relying on array-index assumptions.
     - Phase-B source planning is documented in five rollback-safe batches: shared part-track compilation, face lifecycle, hesitation events, dynamic residual/part timing, and later bounded speech-energy coupling.

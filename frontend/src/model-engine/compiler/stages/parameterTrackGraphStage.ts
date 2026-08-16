@@ -5,18 +5,20 @@ import type {
   ModelParameterStageResult,
 } from "../modelParameterCompileContext.js";
 import {
-  buildGazeParameterTrack,
-  isGazeParameterTrackActive,
+  buildStagedPartParameterTrack,
+  isStagedPartParameterTrackActive,
 } from "../parameterTrackGraphCompiler.js";
 import {
+  compileFaceTrackTiming,
   compileGazeTrackTiming,
   registerPerformanceParameterNodes,
+  resolvePerformancePartTrackStrategy,
 } from "../performanceSchedule.js";
 
 // Owns composition of already-generated parameter tracks. Semantic binding
-// resolves static targets; this stage projects pose gaze timing and attaches
-// the independent speech track. Sequence gaze is projected once by the final
-// sequence track graph compiler.
+// resolves static targets; this stage projects pose part timing and attaches
+// the independent speech track. Sequence part timing is projected once by the
+// final sequence track graph compiler.
 export const parameterTrackGraphStage: ModelParameterCompileStage = {
   id: "parameterTrackGraph",
   run: runParameterTrackGraphStage,
@@ -25,9 +27,9 @@ export const parameterTrackGraphStage: ModelParameterCompileStage = {
 export function runParameterTrackGraphStage(
   context: ModelParameterCompileContext,
 ): ModelParameterStageResult {
-  const gazeResult = attachPoseGazeTracks(context);
-  if (!gazeResult.ok) {
-    return gazeResult;
+  const partTrackResult = attachPosePartTracks(context);
+  if (!partTrackResult.ok) {
+    return partTrackResult;
   }
   const gestures = Object.entries(context.state.pendingSpeechGestures);
   if (gestures.length === 0) {
@@ -91,7 +93,7 @@ export function runParameterTrackGraphStage(
   return { ok: true };
 }
 
-function attachPoseGazeTracks(
+function attachPosePartTracks(
   context: ModelParameterCompileContext,
 ): ModelParameterStageResult {
   if (context.performanceSchedule.semanticSteps.length > 0) {
@@ -104,23 +106,31 @@ function attachPoseGazeTracks(
     parametersByAxis.set(parameter.axis_id, parameters);
   }
 
-  let attachedTrackCount = 0;
+  let gazeTrackCount = 0;
+  let faceTrackCount = 0;
   for (const axis of context.state.profile.axes) {
-    if (axis.semantic_group.trim().toLowerCase() !== "gaze") {
+    const strategy = resolvePerformancePartTrackStrategy(axis.semantic_group);
+    if (!strategy) {
       continue;
     }
     const parameters = parametersByAxis.get(axis.id);
-    if (!parameters?.length || !isGazeParameterTrackActive(parameters, axis.neutral)) {
+    if (
+      !parameters?.length
+      || !isStagedPartParameterTrackActive(parameters, axis.neutral)
+    ) {
       continue;
     }
-    const timing = compileGazeTrackTiming({
+    const timingOptions = {
       schedule: context.performanceSchedule,
       semanticAxisId: axis.id,
       semanticGroup: axis.semantic_group,
       changedStepIndices: [0],
       blendOutMs: context.semanticMotion.timing.timing.blend_out_ms,
       allowTailExtension: false,
-    });
+    } as const;
+    const timing = strategy === "gaze"
+      ? compileGazeTrackTiming(timingOptions)
+      : compileFaceTrackTiming(timingOptions);
     if (!timing.ok) {
       return { ok: false, reason: timing.reason };
     }
@@ -131,16 +141,16 @@ function attachPoseGazeTracks(
           reason: `parameter_track_graph_keyframe_conflict:${parameter.parameter_id}`,
         };
       }
-      const track = buildGazeParameterTrack(
+      const track = buildStagedPartParameterTrack(
         [parameter],
-        timing.value.parameterEvents,
+        timing.value,
         axis.neutral,
       );
       if (!track.ok || !track.points) {
         return {
           ok: false,
           reason: track.ok
-            ? `parameter_track_graph_gaze_points_missing:${parameter.parameter_id}`
+            ? `parameter_track_graph_${strategy}_points_missing:${parameter.parameter_id}`
             : track.reason,
         };
       }
@@ -160,15 +170,25 @@ function attachPoseGazeTracks(
         return { ok: false, reason: nodeResult.reason };
       }
       parameter.keyframes = track.points;
-      attachedTrackCount += 1;
+      if (strategy === "gaze") {
+        gazeTrackCount += 1;
+      } else {
+        faceTrackCount += 1;
+      }
     }
   }
 
-  if (attachedTrackCount > 0) {
+  if (gazeTrackCount > 0 || faceTrackCount > 0) {
     context.state.warnings = [
       ...context.state.warnings,
-      `parameter_track_graph_gaze_tracks:${attachedTrackCount}`,
-      "parameter_track_graph_gaze_release:plan_blend",
+      `parameter_track_graph_gaze_tracks:${gazeTrackCount}`,
+      `parameter_track_graph_face_tracks:${faceTrackCount}`,
+      ...(gazeTrackCount > 0
+        ? ["parameter_track_graph_gaze_release:plan_blend"]
+        : []),
+      ...(faceTrackCount > 0
+        ? ["parameter_track_graph_face_release:plan_blend"]
+        : []),
     ];
   }
   return { ok: true };
