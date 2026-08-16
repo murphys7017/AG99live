@@ -162,7 +162,8 @@ ModelEngine 先把 `-4..4` 等级确定性采样为轴值，再由关系图计�
 `SpeechPoseStage` 是 compile extension。它读取 `PerformanceSchedule` 和 `ag99.voice_following_profile.v3`，
 只负责选择有效的 speech channel、preset、方向和幅度。Schedule 负责 phrase 起点、过渡和 release 事件，
 `parameterTrackGraphStage` 负责把这些事件投影为确定性的 `speech_gesture_track`；参数绑定、范围和动力学
-由后续阶段与 Live2D WebSDK 统一处理。
+由后续 ModelEngine 参数阶段与 AG99 Live2D Runtime 统一处理；官方 Cubism `Framework` / `Core`
+只负责最终模型、Physics 和渲染执行。
 
 当前实现读取 canonical assistant text、标点、短语长度和真实音频时长，生成确定性的非周期 phrase 轨道；
 它已经不再从四套整段固定控制点中选择。当前仍没有 TTS phoneme 或声学停顿的显式时间戳，因此 phrase
@@ -173,7 +174,8 @@ ModelEngine 先把 `-4..4` 等级确定性采样为轴值，再由关系图计�
 
 - ModelEngine 决定控制点、轨迹极性、延迟和动作幅度。
 - PlaybackTimeline 提供真实音频时钟和时长。
-- Live2D WebSDK 按轨迹和实时 speech energy 逐帧插值。
+- AG99 Live2D Runtime 按轨迹和实时 speech energy 逐帧插值；官方 Cubism `Framework` / `Core`
+  不理解语义轴或表演编排。
 - lip-sync sink 独立生成 mouth value；说话手势不能代替口型。
 
 ## 10. Timing
@@ -226,5 +228,5 @@ ModelEngine 只有在 player 同步报告非空 run id 并调用 started callbac
 - 每个 stage 的输入、输出和来源可追踪。
 - 关系图约束与最终 parameter plan 一致。
 - Timeline 使用匹配 segment 的真实时钟。
-- player 实际报告 started，并在 WebSDK 帧循环中写入参数。
+- player 实际报告 started，并在 AG99 Live2D Runtime 帧循环中写入参数。
 - terminal outcome 回到同一个 motion sink 和 Motion Lab 记录。

@@ -1,9 +1,9 @@
 task:
   class: review
   risk: high
-  phase: end_to_end_source_review
-  status: implementation_in_progress
-  scope: "Review the adapter, frontend playback, ModelEngine, ParameterMixer, and WebSDK ownership chain; fix each source-confirmed defect directly and commit it separately."
+  phase: source_review_findings_pending
+  status: implementation_pending
+  scope: "Record the source-confirmed playback ownership transaction findings, then fix them directly before continuing phase-two performance-quality work."
 
 context:
   confidence: high
@@ -44,6 +44,12 @@ context:
     - Enhanced-Core Remote Operator contributors depend on the formal AstrMessageEvent get/set-extra and platform identity APIs; failures must remain visible.
     - Toolset shape adaptation may distinguish `get_tool()` from a tools list, but an exception from an available API must not be converted into “tool absent.”
     - Parsed output segments may be rejected without terminating the transport: domain-invalid material is committed as a settled rejected fact, while duplicate, late, or terminal-session delivery rejects only the attempted write and preserves the first segment.
+    - Performance Director owns semantic performance scheduling and parameter-track compilation, but never cross-source parameter fusion.
+    - ActiveParameterMixer remains in the AG99 Live2D Runtime layer; it resolves the final active parameter frame before Cubism Physics.
+    - Official Cubism Framework/Core are the target frozen driver boundary; historical AG99 changes in that directory are architecture debt, not a reason to add more business logic there.
+    - Motion replacement must publish started only after the previous execution owner has settled successfully and the new owner has committed.
+    - A downstream stop failure must release local ModelEngine ownership in finally while keeping failed status and the original error visible.
+    - Component disposal must attempt every owned cleanup even when one motion stop fails; disposal must not turn an error into idle.
 
 documentation:
   authorities:
@@ -57,6 +63,7 @@ documentation:
     - README and diagram indexes may summarize and link, but do not own phase, defect, or next-step lists.
     - Fixed defects are deleted from the active register after source review; they are not retained as history.
     - Source audit documents describe current ownership and completed migrations, not a second roadmap.
+    - The architecture decision is that Performance Director does not own parameter mixing; the AG99 Live2D Runtime owns it, while official Cubism Framework/Core remain the final driver boundary.
 
 verification:
   policy:
@@ -64,8 +71,10 @@ verification:
     - Automated tests are low-confidence input/output smoke checks; do not run the full suite.
     - Live AstrBot, Electron, TTS, and Live2D behavior remains user-led runtime acceptance.
   current:
+    - Architecture documentation now distinguishes AG99 `frontend/src/live2d/WebSDK/src/` runtime code from official Cubism `Framework/Core`; no source code was changed in this documentation pass.
+    - The latest source review found three unresolved runtime ownership issues: motion replacement transaction ordering, ModelEngine stop/interruption cleanup, and Vue Scope disposal interruption. They are recorded in the active defect register and are not yet fixed.
     - The previous Remote Operator error-visibility correction is committed as `e4fe844`.
-    - The broader end-to-end source review reached the current Adapter -> PlaybackTimeline -> ModelEngine -> ParameterMixer -> WebSDK boundary; no new source-confirmed defect was found and the active defect register remains empty.
+    - The broader end-to-end source review reached the current Adapter -> PlaybackTimeline -> ModelEngine -> ParameterMixer -> WebSDK boundary; the architecture remains valid, but the active defect register is not empty until the ownership transaction batch is complete.
     - ESP32 display initial status read failures are visible after commit `0a0da08`.
     - Pre-Turn exceptions remain outside the formal lifecycle after commit `42681e8`.
     - Audio start/end payload shape is owned by the protocol parser, while SpeechIngress rejects duplicate starts, missing starts, mode changes, and non-increasing chunk sequences instead of repairing or ignoring them.

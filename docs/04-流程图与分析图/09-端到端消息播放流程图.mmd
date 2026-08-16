@@ -191,8 +191,8 @@ flowchart TD
         TRACK[ParameterTrackGraphStage 85<br/>pose 投影 / sequence final projection]:::engine
         PLAN[parameter plan intermediate]:::engine
         POLICY[ResourcePolicy 90<br/>资源冲突与执行策略]:::engine
-        SDK[Live2D WebSDK<br/>曲线采样 / dynamics / 冲突解析 / 写参]:::engine
-        MODEL[Live2D Model + Physics]:::engine
+        SDK[AG99 Live2D Runtime<br/>曲线采样 / dynamics / Parameter Mixer / 写参]:::engine
+        MODEL[Official Cubism Model + Physics / Renderer]:::engine
 
         PREPARE --> ENGINE
         APPLY -.selected model / profile.-> ENGINE

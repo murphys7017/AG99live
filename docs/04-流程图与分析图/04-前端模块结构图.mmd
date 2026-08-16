@@ -71,8 +71,8 @@ flowchart TB
         PREVIEW[usePreviewMotionPlayer<br/>run ownership / watchdog]:::sdk
         ADAPTER[Live2D adapter<br/>start plan / catalog motion]:::sdk
         LIPLIVE[lipSyncTimelineSink<br/>WebAudio RMS / mouth write]:::sdk
-        WEBSDK[WebSDK/lappmodel.ts<br/>base snapshot / direct source / ActiveParameterMixer]:::sdk
-        CUBISM[Cubism Model / Physics / Renderer]:::sdk
+        WEBSDK[AG99 Live2D Runtime<br/>ParameterPresentation / ActiveParameterMixer]:::sdk
+        CUBISM[Official Cubism Framework/Core<br/>Model / Physics / Renderer]:::sdk
         PREVIEW --> ADAPTER --> WEBSDK --> CUBISM
         LIPLIVE --> WEBSDK
     end
@@ -114,7 +114,7 @@ flowchart TB
     UI --> OBS
     UI --> ESP
 
-    RULE[边界规则<br/>Adapter 不编译动作<br/>TurnPlayback 不播放媒体<br/>Timeline 不解释语义轴<br/>ModelEngine 不写 SessionStore<br/>WebSDK 不读取 turn/session]:::root
+    RULE[边界规则<br/>Adapter 不编译动作<br/>TurnPlayback 不播放媒体<br/>Timeline 不解释语义轴<br/>ModelEngine 不写 SessionStore<br/>AG99 Runtime 不读取 turn/session<br/>Official Cubism 不承载 AG99 编排与融合]:::root
     RULE -.约束.-> CONN
     RULE -.约束.-> STORE
     RULE -.约束.-> TLR

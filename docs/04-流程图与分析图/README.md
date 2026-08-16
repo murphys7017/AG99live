@@ -59,14 +59,14 @@
 - 正式动作输入与官方 `<@anim>` 兼容入口统一使用 v4；手动预览从本地 `CompiledSemanticMotion` 直接进入第二阶段编译。
 - SessionStore 是协议槽位和稳定生命周期投影事实源，PlaybackTimeline 是 required sink
   实时执行与完成门禁事实源；Orchestrator 和 CompletionCoordinator 必须联合读取两者。
-- ModelEngine 编译动作，Live2D WebSDK 逐帧执行参数计划。
+- ModelEngine / Performance Director 编译动作，AG99 Live2D Runtime 逐帧执行参数计划；官方 Cubism `Framework` / `Core` 只负责模型、Physics 和绘制。
 - ModelEngine 分为 semantic 与 model_parameter 两个编译阶段；每个完整 pose/sequence 由
   `PerformanceSchedule` 统一生成 phrase、step、部位事件和来源诊断，SpeechPoseStage 只选择说话表现，
   Parameter Track Graph 再把 Schedule 投影为 V3 keyframes/modulation。
 - `PerformanceSchedule` 已属于当前运行链路的 ModelEngine 编译事实；目标依赖图可以描述完整
   Performance Director 的目标边界，但图集不维护阶段进度或下一批清单。当前状态与剩余规划分别以
   `06-一期完成边界与二期入口.md` 和 `18-二期角色表演系统总体规划.md` 为准。
-- WebSDK 先形成 Cubism Motion / EyeBlink / Expression / drag / breath 的 base snapshot，再由 Parameter Mixer 组合 direct plan 与 lip-sync；Physics 只消费最终主动参数帧，不是 Mixer 输入。
+- AG99 Live2D Runtime 先形成 Cubism Motion / EyeBlink / Expression / drag / breath 的 base snapshot，再由 Parameter Mixer 组合 direct plan 与 lip-sync；Physics 只消费最终主动参数帧，不是 Mixer 输入。
 - 每条 WebSocket 连接必须先通过 `system.server_info.schema_manifest`；ModelSync 不接受 window/devtools 旁路写入。
 - 当前桌宠 WebSocket 与 HTTP 资源只支持同机 `127.0.0.1` / `localhost`；远程执行器连接是独立边界。
 
