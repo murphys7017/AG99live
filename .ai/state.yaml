@@ -1,9 +1,9 @@
 task:
-  class: bugfix
-  risk: high
-  phase: playback_ownership_transaction_complete
+  class: refactor
+  risk: medium
+  phase: phase_b_b1_part_track_compilation_complete
   status: source_review_complete
-  scope: "Unify motion replacement ownership, preserve ModelEngine failure semantics, and remove duplicate player disposal before continuing phase-two performance-quality work."
+  scope: "Unify semantic and gaze part-track timing results, axis caching, and parameter projection without changing gaze behavior, protocols, or runtime ownership."
 
 context:
   confidence: high
@@ -56,6 +56,7 @@ documentation:
     phase_status: docs/01-架构与结构/06-一期完成边界与二期入口.md
     active_defects: docs/02-设计文档/20-端到端链路已确认问题与修复边界.md
     performance_roadmap: docs/02-设计文档/18-二期角色表演系统总体规划.md
+    phase_b_implementation_plan: docs/02-设计文档/21-二期阶段B部位级表演策略实施计划.md
     performance_source_audit: docs/02-设计文档/19-角色表演主流程与编排职责审计.md
     remote_operator_boundary: docs/02-设计文档/07-远程执行器接入设计.md
     training_and_vts_boundary: docs/05-小模型训练/01-动作小模型训练前置条件与职责边界.md
@@ -71,6 +72,10 @@ verification:
     - Automated tests are low-confidence input/output smoke checks; do not run the full suite.
     - Live AstrBot, Electron, TTS, and Live2D behavior remains user-led runtime acceptance.
   current:
+    - Phase-B batch B1 is complete: semantic and gaze return one PerformancePartTrackTiming shape, sequence compilation uses one per-axis timing cache and one scheduled-track projection entry, and release events remain excluded from parameter keyframe projection.
+    - The unified part-track boundary rejects an axis strategy mismatch and any mismatch between projectable timing events and compiled parameter nodes instead of relying on array-index assumptions.
+    - Phase-B source planning is documented in five rollback-safe batches: shared part-track compilation, face lifecycle, hesitation events, dynamic residual/part timing, and later bounded speech-energy coupling.
+    - The phase-B plan keeps engine.motion_intent.v4 and engine.parameter_plan.v3 stable, reuses PerformanceSchedule and existing parameter tracks, and forbids a second clock, mixer, WebSDK semantic policy, or Cubism business logic.
     - Architecture documentation distinguishes AG99 `frontend/src/live2d/WebSDK/src/` runtime code from official Cubism `Framework/Core`.
     - Motion replacement now settles the tracked Direct Plan or Catalog Motion before starting the candidate; a stop failure rejects the replacement and cannot publish a new started run.
     - ModelEngine stop and segment interruption release local run ownership in finally, retain failed state on downstream errors, and rethrow the original error.

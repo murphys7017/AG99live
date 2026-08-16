@@ -133,7 +133,7 @@ function attachPoseGazeTracks(
       }
       const track = buildGazeParameterTrack(
         [parameter],
-        timing.value.trackEvents,
+        timing.value.parameterEvents,
         axis.neutral,
       );
       if (!track.ok || !track.points) {
@@ -151,7 +151,7 @@ function attachPoseGazeTracks(
           axisId: axis.id,
           trackKind: "keyframe" as const,
           nodeIndex,
-          eventId: timing.value.trackEvents[nodeIndex].id,
+          eventId: timing.value.parameterEvents[nodeIndex].id,
           atMs: point.at_ms,
           transitionMs: point.transition_ms,
         })),

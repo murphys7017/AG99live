@@ -68,8 +68,12 @@ interface PerformanceTrackTimingPolicy {
   residualMs: number;
 }
 
-export interface PerformanceSemanticTrackTiming {
+export type PerformancePartTrackStrategy = "semantic" | "gaze";
+
+export interface PerformancePartTrackTiming {
+  readonly strategy: PerformancePartTrackStrategy;
   readonly events: readonly PerformanceTimingEventTrace[];
+  readonly parameterEvents: readonly PerformanceTimingEventTrace[];
   readonly requiredOwnedUntilMs: number;
   readonly staggered: boolean;
   readonly residual: boolean;
@@ -87,14 +91,6 @@ export interface PerformanceSpeechPhraseGroup {
 export interface PerformanceSpeechTrackTiming {
   readonly events: readonly PerformanceTimingEventTrace[];
   readonly phraseEvents: readonly PerformanceTimingEventTrace[];
-}
-
-export interface PerformanceGazeTrackTiming {
-  readonly trackEvents: readonly PerformanceTimingEventTrace[];
-  readonly requiredOwnedUntilMs: number;
-  readonly staggered: boolean;
-  readonly residual: boolean;
-  readonly compressed: boolean;
 }
 
 export type PerformanceScheduleMutationResult<T> =
@@ -187,7 +183,7 @@ export function compileSemanticTrackTiming(options: {
   semanticAxisId: string;
   semanticGroup: string;
   changedStepIndices: readonly number[];
-}): PerformanceScheduleMutationResult<PerformanceSemanticTrackTiming> {
+}): PerformanceScheduleMutationResult<PerformancePartTrackTiming> {
   const { schedule, semanticAxisId, semanticGroup, changedStepIndices } = options;
   if (semanticGroup.trim().toLowerCase() === "gaze") {
     return {
@@ -295,7 +291,9 @@ export function compileSemanticTrackTiming(options: {
     ok: true,
     reason: "",
     value: {
+      strategy: "semantic",
       events,
+      parameterEvents: events,
       requiredOwnedUntilMs: finalTransitionEndMs + policy.residualMs,
       staggered: policy.transitionOffsetMs !== 0,
       residual: policy.residualMs > 0,
@@ -311,7 +309,7 @@ export function compileGazeTrackTiming(options: {
   changedStepIndices: readonly number[];
   blendOutMs: number;
   allowTailExtension: boolean;
-}): PerformanceScheduleMutationResult<PerformanceGazeTrackTiming> {
+}): PerformanceScheduleMutationResult<PerformancePartTrackTiming> {
   const {
     schedule,
     semanticAxisId,
@@ -486,7 +484,9 @@ export function compileGazeTrackTiming(options: {
     ok: true,
     reason: "",
     value: {
-      trackEvents,
+      strategy: "gaze",
+      events,
+      parameterEvents: trackEvents,
       requiredOwnedUntilMs: releaseAtMs,
       staggered: transferDrafts.length > 0,
       residual: releaseAtMs > baseReleaseAtMs,
