@@ -6,7 +6,7 @@ import type {
 } from "./protocol.js";
 
 export const SEMANTIC_MOTION_TRANSFORM_VERSION = "semantic_motion_transform.v5";
-export const PERFORMANCE_SCHEDULE_TRACE_VERSION = "performance_schedule_trace.v4";
+export const PERFORMANCE_SCHEDULE_TRACE_VERSION = "performance_schedule_trace.v5";
 
 export type CompiledSemanticAxisSource = "semantic_axis" | "relation_graph";
 

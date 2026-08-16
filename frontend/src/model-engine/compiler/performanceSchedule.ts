@@ -27,6 +27,7 @@ export interface PerformanceSchedule {
   readonly phrases: readonly PerformancePhraseSlot[];
   readonly semanticSteps: readonly PerformanceSemanticStepSlot[];
   readonly estimatedAlignments: readonly PerformancePhraseStepAlignment[];
+  readonly semanticReversalStepIndices: readonly number[];
   readonly hesitationWindows: readonly PerformanceHesitationWindow[];
   readonly decisions: readonly string[];
   readonly events: readonly PerformanceTimingEventTrace[];
@@ -101,7 +102,6 @@ interface PerformanceTrackTimingPolicy {
   transitionOffsetMs: number;
   transitionMs: number;
   preferredHoldMs: number;
-  residualMs: number;
 }
 
 export type PerformancePartTrackStrategy = "semantic" | "gaze" | "face";
@@ -188,7 +188,6 @@ interface FinalizePartTrackTimingOptions {
     PerformanceTimingEventTrace["timingSource"],
     "gaze_schedule_policy" | "face_schedule_policy"
   >;
-  minimumFinalHoldMs: number;
   staggered: boolean;
 }
 
@@ -244,6 +243,9 @@ export function compilePerformanceSchedule(options: {
   }
   const textSource = text ? "assistant_text" : "duration_only";
   const semanticSteps = semanticStepsResult.semanticSteps;
+  const semanticReversalStepIndices = resolveSemanticReversalStepIndices(
+    options.sequenceSteps,
+  );
   const estimatedAlignments = textSource === "assistant_text"
     ? estimatePhraseStepAlignments(phrases, semanticSteps, options.durationMs)
     : [];
@@ -253,6 +255,7 @@ export function compilePerformanceSchedule(options: {
     phrases,
     semanticSteps,
     estimatedAlignments,
+    semanticReversalStepIndices,
     hesitationWindows: [],
     decisions: [],
     events: [],
@@ -261,7 +264,6 @@ export function compilePerformanceSchedule(options: {
   const hesitationResult = compileHesitationWindows(
     schedule,
     options.intentTags ?? [],
-    options.sequenceSteps,
   );
   if (!hesitationResult.ok) {
     return {
@@ -301,9 +303,8 @@ export function buildPerformanceScheduleTrace(
 function compileHesitationWindows(
   schedule: PerformanceSchedule,
   intentTags: readonly string[],
-  sequenceSteps: readonly PerformanceSequenceStepInput[] | undefined,
 ): PerformanceScheduleMutationResult<readonly PerformanceHesitationWindow[]> {
-  const candidates = collectHesitationCandidates(schedule, intentTags, sequenceSteps);
+  const candidates = collectHesitationCandidates(schedule, intentTags);
   const legalCandidates: PerformanceHesitationCandidate[] = [];
   for (const candidate of candidates) {
     if (
@@ -379,8 +380,15 @@ export function compileSemanticTrackTiming(options: {
   semanticAxisId: string;
   semanticGroup: string;
   changedStepIndices: readonly number[];
+  blendOutMs: number;
 }): PerformanceScheduleMutationResult<PerformancePartTrackTiming> {
-  const { schedule, semanticAxisId, semanticGroup, changedStepIndices } = options;
+  const {
+    schedule,
+    semanticAxisId,
+    semanticGroup,
+    changedStepIndices,
+    blendOutMs,
+  } = options;
   const normalizedGroup = semanticGroup.trim().toLowerCase();
   if (normalizedGroup === "gaze" || isFaceSemanticGroup(normalizedGroup)) {
     return {
@@ -393,6 +401,9 @@ export function compileSemanticTrackTiming(options: {
   }
   if (
     !semanticAxisId
+    || !Number.isInteger(blendOutMs)
+    || blendOutMs < 0
+    || blendOutMs > schedule.durationMs
     || changedStepIndices.length < 2
     || changedStepIndices[0] !== 0
     || changedStepIndices.some((stepIndex, index) => (
@@ -456,9 +467,6 @@ export function compileSemanticTrackTiming(options: {
       : resolveTransitionWindow(availableWindowMs, policy);
     compressed ||= transition.compressed;
     const transitionEndMs = atMs + transition.transitionMs;
-    const residualMs = position === transitionStarts.length - 1
-      ? policy.residualMs
-      : 0;
     events.push({
       id: buildSemanticEventId(semanticAxisId, stepIndex),
       kind: "semantic_transition",
@@ -472,7 +480,7 @@ export function compileSemanticTrackTiming(options: {
         0,
         (nextAtMs ?? schedule.durationMs) - transitionEndMs,
       ),
-      residualMs,
+      residualMs: 0,
       transitionOffsetMs: policy.transitionOffsetMs,
       compressed: transition.compressed,
       compressionReason: transition.compressed
@@ -481,6 +489,26 @@ export function compileSemanticTrackTiming(options: {
       stepIndex,
     });
     finalTransitionEndMs = transitionEndMs;
+  }
+
+  if (finalTransitionEndMs + blendOutMs > MAX_MOTION_DURATION_MS) {
+    const requiredDurationMs = finalTransitionEndMs + blendOutMs;
+    return {
+      ok: false,
+      value: null,
+      reason: `performance_schedule_semantic_track_duration_exceeded:${semanticAxisId}:${requiredDurationMs}`,
+    };
+  }
+
+  const residualMs = resolvePerformanceResidualMs(
+    schedule,
+    semanticGroup,
+    "semantic",
+    Math.max(0, MAX_MOTION_DURATION_MS - blendOutMs - finalTransitionEndMs),
+  );
+  const finalEvent = events[events.length - 1];
+  if (finalEvent) {
+    events[events.length - 1] = { ...finalEvent, residualMs };
   }
 
   const registerResult = registerPerformanceTimingEvents(schedule, events);
@@ -494,9 +522,9 @@ export function compileSemanticTrackTiming(options: {
       strategy: "semantic",
       events,
       parameterEvents: events,
-      requiredOwnedUntilMs: finalTransitionEndMs + policy.residualMs,
+      requiredOwnedUntilMs: finalTransitionEndMs + residualMs,
       staggered: policy.transitionOffsetMs !== 0,
-      residual: policy.residualMs > 0,
+      residual: residualMs > 0,
       compressed,
     },
   };
@@ -609,7 +637,6 @@ export function compileGazeTrackTiming(options: {
     releaseKind: "gaze_release",
     source: "gaze_strategy",
     timingSource: "gaze_schedule_policy",
-    minimumFinalHoldMs: GAZE_MIN_DWELL_MS,
     staggered: transferDrafts.length > 0,
   });
 }
@@ -710,7 +737,6 @@ export function compileFaceTrackTiming(options: {
     releaseKind: "face_release",
     source: "face_strategy",
     timingSource: "face_schedule_policy",
-    minimumFinalHoldMs: FACE_RESIDUAL_MS,
     staggered: transferDrafts.length > 0,
   });
 }
@@ -729,7 +755,6 @@ function finalizePartTrackTiming(
     releaseKind,
     source,
     timingSource,
-    minimumFinalHoldMs,
     staggered,
   } = options;
   const sortedDrafts = [...trackDrafts].sort(
@@ -751,6 +776,21 @@ function finalizePartTrackTiming(
 
   let releaseAtMs = baseReleaseAtMs;
   const finalDraft = normalizedDrafts[normalizedDrafts.length - 1];
+  const residualMs = finalDraft
+    ? resolvePerformanceResidualMs(
+        schedule,
+        semanticGroup,
+        strategy,
+        Math.max(
+          0,
+          (allowTailExtension
+            ? MAX_MOTION_DURATION_MS - blendOutMs
+            : baseReleaseAtMs)
+            - finalDraft.desiredAtMs
+            - finalDraft.preferredTransitionMs,
+        ),
+      )
+    : 0;
   if (allowTailExtension && finalDraft) {
     releaseAtMs = Math.min(
       MAX_MOTION_DURATION_MS - blendOutMs,
@@ -758,7 +798,7 @@ function finalizePartTrackTiming(
         releaseAtMs,
         finalDraft.desiredAtMs
           + finalDraft.preferredTransitionMs
-          + minimumFinalHoldMs,
+          + residualMs,
       ),
     );
   }
@@ -782,7 +822,7 @@ function finalizePartTrackTiming(
       atMs: draft.desiredAtMs,
       transitionMs,
       holdMs: Math.max(0, nextAtMs - draft.desiredAtMs - transitionMs),
-      residualMs: 0,
+      residualMs: index === normalizedDrafts.length - 1 ? residualMs : 0,
       transitionOffsetMs: draft.transitionOffsetMs,
       compressed: eventCompressed,
       compressionReason: eventCompressed ? "transition_window_short" : undefined,
@@ -1189,7 +1229,6 @@ function resolveTrackTimingPolicy(semanticGroup: string): PerformanceTrackTiming
       transitionOffsetMs: 0,
       transitionMs: 110,
       preferredHoldMs: 55,
-      residualMs: 70,
     };
   }
   if (group === "body" || group === "torso" || group === "shoulder") {
@@ -1197,15 +1236,84 @@ function resolveTrackTimingPolicy(semanticGroup: string): PerformanceTrackTiming
       transitionOffsetMs: 110,
       transitionMs: 140,
       preferredHoldMs: 70,
-      residualMs: 150,
     };
   }
   return {
     transitionOffsetMs: 0,
     transitionMs: 100,
     preferredHoldMs: 50,
-    residualMs: 60,
   };
+}
+
+function resolvePerformanceResidualMs(
+  schedule: PerformanceSchedule,
+  semanticGroup: string,
+  strategy: PerformancePartTrackStrategy,
+  tailBudgetMs: number,
+): number {
+  const group = semanticGroup.trim().toLowerCase();
+  const baseMs = strategy === "gaze"
+    ? GAZE_MIN_DWELL_MS
+    : strategy === "face"
+      ? FACE_RESIDUAL_MS
+      : group === "body" || group === "torso" || group === "shoulder"
+        ? 150
+        : group === "head"
+          ? 70
+          : 60;
+  const lastPhrase = schedule.phrases[schedule.phrases.length - 1];
+  const finalText = lastPhrase?.text ?? "";
+  const reasons: string[] = [];
+  let multiplier = 1;
+  if (/[?？]\s*$/u.test(finalText)) {
+    multiplier += strategy === "gaze" || strategy === "face" ? 0.25 : 0.12;
+    reasons.push("question");
+  } else if (/[!！]\s*$/u.test(finalText)) {
+    multiplier -= 0.12;
+    reasons.push("emphasis_release");
+  } else if (lastPhrase?.boundary === "soft") {
+    multiplier += 0.12;
+    reasons.push("soft_boundary");
+  }
+  if ((lastPhrase?.emphasis ?? 1) > 1.1) {
+    multiplier -= 0.08;
+    reasons.push("emphasis");
+  }
+  if (schedule.hesitationWindows.length > 0) {
+    multiplier += 0.12;
+    reasons.push("hesitation");
+  }
+  const finalSemanticStepIndex = schedule.semanticSteps.length - 1;
+  if (
+    finalSemanticStepIndex > 0
+    && schedule.semanticReversalStepIndices.includes(finalSemanticStepIndex)
+  ) {
+    multiplier += 0.10;
+    reasons.push("semantic_reversal");
+  }
+  const desiredMs = clampInteger(
+    Math.round(baseMs * multiplier),
+    20,
+    strategy === "semantic" && (group === "body" || group === "torso" || group === "shoulder")
+      ? 260
+      : strategy === "gaze"
+        ? 180
+        : strategy === "face"
+          ? 160
+          : 180,
+  );
+  const residualMs = Math.min(desiredMs, Math.max(0, Math.round(tailBudgetMs)));
+  recordPerformanceDecision(
+    schedule,
+    `residual_selected:${strategy}:${group || "unknown"}:${residualMs}:${reasons.join("+") || "base"}:${Math.max(0, Math.round(tailBudgetMs))}`,
+  );
+  return residualMs;
+}
+
+function recordPerformanceDecision(schedule: PerformanceSchedule, decision: string): void {
+  if (!schedule.decisions.includes(decision)) {
+    mutableDecisions(schedule).push(decision);
+  }
 }
 
 function resolvePrimaryPhraseIndices(
@@ -1221,7 +1329,6 @@ function resolvePrimaryPhraseIndices(
 function collectHesitationCandidates(
   schedule: PerformanceSchedule,
   intentTags: readonly string[],
-  sequenceSteps: readonly PerformanceSequenceStepInput[] | undefined,
 ): PerformanceHesitationCandidate[] {
   const candidates: PerformanceHesitationCandidate[] = [];
   for (let index = 0; index < schedule.phrases.length - 1; index += 1) {
@@ -1263,7 +1370,7 @@ function collectHesitationCandidates(
     }
   }
 
-  for (const stepIndex of resolveSemanticReversalStepIndices(sequenceSteps)) {
+  for (const stepIndex of schedule.semanticReversalStepIndices) {
     const step = schedule.semanticSteps[stepIndex];
     const afterPhraseIndex = resolvePhraseIndexBeforeAtMs(schedule, step.startMs);
     candidates.push({

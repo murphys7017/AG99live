@@ -488,6 +488,7 @@ function resolvePartTrackTiming(
         semanticAxisId: axis.id,
         semanticGroup: axis.semantic_group,
         changedStepIndices,
+        blendOutMs,
       });
   if (timing.ok) {
     timingsByAxis.set(axis.id, timing.value);
