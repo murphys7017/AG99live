@@ -36,7 +36,12 @@ export async function resetConnectionRuntimeState(
     }
   };
 
-  await resetStep("microphone cleanup", () => deps.stopMicrophoneCapture(reason));
+  await resetStep("microphone cleanup", async () => {
+    const stopped = await deps.stopMicrophoneCapture(reason);
+    if (!stopped) {
+      throw new Error("microphone_cleanup_failed");
+    }
+  });
   await resetStep("audio and timeline cleanup", () => deps.stopAudioAndSettleAll(reason));
   await resetStep("history reset", () => deps.historyAdapter?.resetHistoryState());
   await resetStep("connection state reset", () => {

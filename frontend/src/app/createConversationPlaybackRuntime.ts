@@ -26,6 +26,7 @@ type PlaybackTimelineMotionRuntime = ReturnType<
 export interface ConversationPlaybackRuntime {
   adapter: AdapterConnectionInstance;
   playbackTimeline: PlaybackTimelineWiringPort;
+  dispose: () => Promise<void>;
   bindMotionTimelineRuntime: (
     motionRuntime: PlaybackTimelineMotionRuntime,
   ) => void;
@@ -74,15 +75,20 @@ export function createConversationPlaybackRuntime(options: {
   });
 
   onScopeDispose(() => {
-    void adapter.dispose().catch((error) => {
+    void dispose().catch((error) => {
       console.error("[ConversationPlaybackRuntime] adapter dispose failed.", error);
     });
-    motionRuntime = null;
   });
+
+  async function dispose(): Promise<void> {
+    await adapter.dispose();
+    motionRuntime = null;
+  }
 
   return {
     adapter,
     playbackTimeline,
+    dispose,
     bindMotionTimelineRuntime(nextRuntime) {
       if (motionRuntime) {
         throw new Error("ModelEngine motion runtime may only be bound once.");

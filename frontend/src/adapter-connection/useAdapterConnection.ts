@@ -567,9 +567,28 @@ export function createAdapterConnection(
           state.statusMessage = state.lastError;
           pushHistory("error", state.lastError);
           console.error("[useAdapterConnection] fatal inbound message handler error:", error);
-          stopAudioAndSettleAll("inbound_runtime_failure");
-          failUnresolvedSessions("inbound_runtime_failure");
-          nextSocket.close();
+          const cleanupErrors: unknown[] = [];
+          runConnectionCleanupStep(
+            "fatal audio and timeline cleanup",
+            () => stopAudioAndSettleAll("inbound_runtime_failure"),
+            cleanupErrors,
+          );
+          runConnectionCleanupStep(
+            "fatal session failure projection",
+            () => failUnresolvedSessions("inbound_runtime_failure"),
+            cleanupErrors,
+          );
+          runConnectionCleanupStep(
+            "fatal websocket close",
+            () => nextSocket.close(),
+            cleanupErrors,
+          );
+          if (cleanupErrors.length > 0) {
+            console.error(
+              "[useAdapterConnection] fatal inbound cleanup completed with errors.",
+              cleanupErrors,
+            );
+          }
         });
       },
       onError: (nextSocket, opened) => {

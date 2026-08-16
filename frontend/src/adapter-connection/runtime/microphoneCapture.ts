@@ -52,6 +52,7 @@ registerProcessor("${MIC_AUDIO_WORKLET_PROCESSOR_NAME}", Ag99liveMicrophoneCaptu
 `;
 
 let microphoneRuntime: MicrophoneCaptureRuntime | NativeMicrophoneCaptureRuntime | null = null;
+let microphoneStopPromise: Promise<void> | null = null;
 
 export function isMicrophoneCaptureRuntimeActive(): boolean {
   return Boolean(microphoneRuntime);
@@ -60,8 +61,11 @@ export function isMicrophoneCaptureRuntimeActive(): boolean {
 export async function startMicrophoneCaptureRuntime(
   options: StartMicrophoneCaptureOptions,
 ): Promise<void> {
+  if (microphoneStopPromise) {
+    await microphoneStopPromise;
+  }
   if (microphoneRuntime) {
-    return;
+    throw new Error("microphone_capture_already_active");
   }
 
   let mediaStream: MediaStream | null = null;
@@ -186,19 +190,37 @@ function isNativeMicrophoneDeviceId(value: string): boolean {
   return value.startsWith("@device_") || value.startsWith("native:");
 }
 
-export async function stopMicrophoneCaptureRuntime(): Promise<boolean> {
-  const runtime = microphoneRuntime;
-  if (!runtime) {
-    return false;
+export function stopMicrophoneCaptureRuntime(): Promise<void> {
+  if (microphoneStopPromise) {
+    return microphoneStopPromise;
   }
 
-  microphoneRuntime = null;
+  const stopPromise = stopMicrophoneCaptureRuntimeInternal();
+  const trackedStopPromise = stopPromise.finally(() => {
+    if (microphoneStopPromise === trackedStopPromise) {
+      microphoneStopPromise = null;
+    }
+  });
+  microphoneStopPromise = trackedStopPromise;
+  return trackedStopPromise;
+}
+
+async function stopMicrophoneCaptureRuntimeInternal(): Promise<void> {
+  const runtime = microphoneRuntime;
+  if (!runtime) {
+    return;
+  }
+
   if (runtime.kind === "native") {
     runtime.detachChunkListener();
     runtime.detachEndedListener();
     runtime.detachErrorListener();
-    await window.ag99desktop?.stopNativeMicrophoneCapture?.(runtime.sessionId);
-    return true;
+    const stopped = await window.ag99desktop?.stopNativeMicrophoneCapture?.(runtime.sessionId);
+    if (stopped !== true) {
+      throw new Error("native_microphone_stop_failed");
+    }
+    microphoneRuntime = null;
+    return;
   }
 
   runtime.sourceNode.disconnect();
@@ -207,8 +229,7 @@ export async function stopMicrophoneCaptureRuntime(): Promise<boolean> {
   runtime.mediaStream.getTracks().forEach((track) => track.stop());
 
   await runtime.audioContext.close();
-
-  return true;
+  microphoneRuntime = null;
 }
 
 async function tryStartNativeMicrophoneCaptureRuntime(

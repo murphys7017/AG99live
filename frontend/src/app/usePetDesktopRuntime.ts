@@ -455,7 +455,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     bilibiliLive.start();
   });
 
-  onBeforeUnmount(() => {
+  onBeforeUnmount(async () => {
     const cleanupErrors: unknown[] = [];
     const cleanupSteps: Array<readonly [string, () => void]> = [
       ["MotionLab reconnect watch stop", stopMotionLabReconnectWatch],
@@ -487,6 +487,12 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
         console.error(`[PetDesktopRuntime] ${step} failed.`, error);
         cleanupErrors.push(error);
       }
+    }
+    try {
+      await conversationPlayback.dispose();
+    } catch (error) {
+      console.error("[PetDesktopRuntime] adapter dispose failed.", error);
+      cleanupErrors.push(error);
     }
     if (cleanupErrors.length > 0) {
       throw cleanupErrors[0];

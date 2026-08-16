@@ -385,7 +385,7 @@ export function createAdapterMicrophoneRuntime(
     if (!isMicrophoneCaptureRuntimeActive()) {
       deps.state.micCapturing = false;
       clearMicCaptureSession();
-      return false;
+      return true;
     }
 
     deps.state.micCapturing = false;
