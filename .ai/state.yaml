@@ -1,9 +1,9 @@
 task:
   class: feature
   risk: medium
-  phase: phase_b_b4_dynamic_residual_complete
+  phase: phase_b_review_corrections_complete
   status: source_review_complete
-  scope: "Derive bounded semantic, gaze, and face residual timing from the shared PerformanceSchedule and feed the result into existing track ownership and graph duration without changing external protocols or runtime ownership."
+  scope: "Finalize one truthful V3 plan release from all track ownership requirements, apply hesitation cumulatively across downstream events, and enforce strict PerformanceSchedule event validation without changing external motion protocols."
 
 context:
   confidence: high
@@ -52,6 +52,9 @@ context:
     - Component disposal must attempt every owned cleanup even when one motion stop fails; disposal must not turn an error into idle.
     - Hesitation is an internal scheduling window, not a new semantic target, Stage, clock, player, mixer source, WebSDK branch, or protocol field.
     - Candidate legality is evaluated before strongest-candidate selection, so an illegal high-priority candidate cannot suppress a legal lower-priority window.
+    - `engine.parameter_plan.v3` has one global blend-out. Part tracks may request different minimum ownership windows, but they cannot claim independent runtime release without a protocol and ParameterMixer ownership-envelope change.
+    - The sequence track graph owns finalizing the one actual V3 release after all per-axis requirements are known; gaze/face release trace events must match that global blend start.
+    - Hesitation delays are cumulative after the selected window. A downstream event that cannot retain legal ordering and fit before its fixed release fails compilation instead of being compressed or truncated.
 
 documentation:
   authorities:
@@ -74,13 +77,20 @@ verification:
     - Automated tests are low-confidence input/output smoke checks; do not run the full suite.
     - Live AstrBot, Electron, TTS, and Live2D behavior remains user-led runtime acceptance.
   current:
-    - Phase-B batch B4 is complete: semantic, gaze, and face residual timing is derived from final punctuation, phrase emphasis and boundary, hesitation, final semantic reversal, part response characteristics, blend-out, and the legal tail budget.
-    - Dynamic residual feeds the existing requiredOwnedUntilMs, staged-part release, and graph duration paths only; it does not create another stage, player, clock, mixer source, WebSDK policy, or Cubism business rule.
+    - Phase-B review corrections are complete: each track declares a minimum ownership requirement, the sequence graph finalizes one actual V3 release, and gaze/face release trace events match the global ParameterMixer blend start.
+    - Final semantic transitions retain their full response duration and extend the legal plan tail when necessary instead of being compressed against the original audio duration.
+    - Hesitation delay is cumulative for all downstream semantic steps, phrase transfers, and SpeechPose points; SpeechPose overflow is an explicit `performance_schedule_speech_hesitation_window_exceeded` compile failure.
+    - Performance event registration now rejects duplicate IDs, reversed batch order, invalid step/phrase references, malformed local/window times, and event spans beyond MAX_MOTION_DURATION_MS.
+    - The internal PerformanceSchedule trace is v6; old v5 Motion Lab records are intentionally incompatible with the corrected release semantics and must be regenerated.
+    - `npm run typecheck:renderer` and `git diff --check` pass after the review corrections.
+    - A temporary basic runtime smoke compile could not run because `tsconfig.test.json` first exposes existing strict-type and missing-Core-global errors inside the frozen Cubism Framework; no compiler relaxation or SDK workaround was added, and the temporary output was removed.
+    - Phase-B review corrections finalize one global V3 plan release from semantic, gaze, and face minimum ownership requirements; per-part release events no longer disagree with the ParameterMixer ownership envelope.
+    - Dynamic residual feeds the existing requiredOwnedUntilMs and graph duration paths only; it does not create another stage, player, clock, mixer source, WebSDK policy, or Cubism business rule.
     - Semantic timing rejects a transition whose owned window plus blend-out exceeds MAX_MOTION_DURATION_MS; staged-part tail extension remains capped before blend-out, and non-extending pose tracks record only residual that fits before their existing release.
-    - The internal PerformanceSchedule trace is now v5; engine.motion_intent.v4 and engine.parameter_plan.v3 remain unchanged.
+    - The internal PerformanceSchedule trace is now v6; engine.motion_intent.v4 and engine.parameter_plan.v3 remain unchanged.
     - `npm run typecheck:renderer` and `git diff --check` pass for the B4 source and documentation changes.
     - Phase-B batch B3 is complete: ellipsis, dash, transition, consecutive soft-boundary, hesitation-tag, and semantic-reversal signals produce at most one strongest legal hesitation hold/resume window in the shared PerformanceSchedule.
-    - Semantic, gaze, face, and SpeechPose timing consume the same hesitation window; no extra parameter keyframe or random target is generated.
+    - Semantic, gaze, face, and SpeechPose timing consume the same cumulative absolute hesitation delay; no extra parameter keyframe or random target is generated, and insufficient SpeechPose space is an explicit compile failure.
     - Insufficient candidates remain visible through performance-schedule decisions, while registered invalid events still fail compilation instead of falling back.
     - Motion Lab reports hesitation and residual decisions from the shared PerformanceSchedule trace.
     - Phase-B batch B2 is complete: active eye, brow, mouth, and face Direct Plan axes now receive a scheduled enter, optional settle, semantic transfer, and ownership-release lifecycle through the existing PerformanceSchedule.

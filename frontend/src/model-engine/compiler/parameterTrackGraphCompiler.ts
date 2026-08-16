@@ -13,6 +13,7 @@ import {
 } from "../constants.js";
 import {
   compileFaceTrackTiming,
+  finalizePerformancePlanRelease,
   compileGazeTrackTiming,
   compileSemanticTrackTiming,
   registerPerformanceParameterNodes,
@@ -219,6 +220,20 @@ export function compileParameterSequenceTrackGraph(
       ...baseParameter,
       keyframes: keyframes.points,
     });
+  }
+
+  const releaseResult = finalizePerformancePlanRelease({
+    schedule,
+    releaseAtMs: graphDurationMs - firstPlan.timing.blend_out_ms,
+    blendOutMs: firstPlan.timing.blend_out_ms,
+  });
+  if (!releaseResult.ok) {
+    return {
+      ok: false,
+      reason: releaseResult.reason,
+      code: "parameter_track_graph_plan_release_invalid",
+      stepIndex: stepPlans.length - 1,
+    };
   }
 
   const warnings = [

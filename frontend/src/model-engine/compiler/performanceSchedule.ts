@@ -211,7 +211,11 @@ export function compilePerformanceSchedule(options: {
   intentTags?: readonly string[];
   sequenceSteps?: readonly PerformanceSequenceStepInput[];
 }): PerformanceScheduleCompileResult {
-  if (!Number.isFinite(options.durationMs) || options.durationMs <= 0) {
+  if (
+    !Number.isInteger(options.durationMs)
+    || options.durationMs <= 0
+    || options.durationMs > MAX_MOTION_DURATION_MS
+  ) {
     return {
       ok: false,
       schedule: null,
@@ -421,6 +425,7 @@ export function compileSemanticTrackTiming(options: {
   }
 
   const policy = resolveTrackTimingPolicy(semanticGroup);
+  const baseReleaseAtMs = Math.max(1, schedule.durationMs - blendOutMs);
   const transitionStarts: number[] = [];
   let previousAtMs = 0;
   for (let position = 1; position < changedStepIndices.length; position += 1) {
@@ -462,7 +467,7 @@ export function compileSemanticTrackTiming(options: {
     const availableWindowMs = nextAtMs === undefined
       ? Math.max(0, schedule.durationMs - atMs)
       : nextAtMs - atMs;
-    const transition = nextAtMs === undefined && availableWindowMs === 0
+    const transition = nextAtMs === undefined
       ? { transitionMs: policy.transitionMs, compressed: false }
       : resolveTransitionWindow(availableWindowMs, policy);
     compressed ||= transition.compressed;
@@ -502,13 +507,25 @@ export function compileSemanticTrackTiming(options: {
 
   const residualMs = resolvePerformanceResidualMs(
     schedule,
+    semanticAxisId,
     semanticGroup,
     "semantic",
     Math.max(0, MAX_MOTION_DURATION_MS - blendOutMs - finalTransitionEndMs),
   );
+  const requiredOwnedUntilMs = Math.max(
+    baseReleaseAtMs,
+    finalTransitionEndMs + residualMs,
+  );
   const finalEvent = events[events.length - 1];
   if (finalEvent) {
-    events[events.length - 1] = { ...finalEvent, residualMs };
+    events[events.length - 1] = {
+      ...finalEvent,
+      holdMs: Math.max(
+        0,
+        requiredOwnedUntilMs - finalTransitionEndMs - residualMs,
+      ),
+      residualMs,
+    };
   }
 
   const registerResult = registerPerformanceTimingEvents(schedule, events);
@@ -522,7 +539,7 @@ export function compileSemanticTrackTiming(options: {
       strategy: "semantic",
       events,
       parameterEvents: events,
-      requiredOwnedUntilMs: finalTransitionEndMs + residualMs,
+      requiredOwnedUntilMs,
       staggered: policy.transitionOffsetMs !== 0,
       residual: residualMs > 0,
       compressed,
@@ -779,6 +796,7 @@ function finalizePartTrackTiming(
   const residualMs = finalDraft
     ? resolvePerformanceResidualMs(
         schedule,
+        semanticAxisId,
         semanticGroup,
         strategy,
         Math.max(
@@ -811,6 +829,7 @@ function finalizePartTrackTiming(
     const availableTransitionMs = Math.max(0, nextAtMs - draft.desiredAtMs);
     const transitionMs = Math.min(draft.preferredTransitionMs, availableTransitionMs);
     const eventCompressed = transitionMs < draft.preferredTransitionMs;
+    const eventResidualMs = index === normalizedDrafts.length - 1 ? residualMs : 0;
     compressed ||= eventCompressed;
     parameterEvents.push({
       id: buildPartTrackEventId(strategy, semanticAxisId, draft.kind, index),
@@ -821,8 +840,11 @@ function finalizePartTrackTiming(
       semanticGroup,
       atMs: draft.desiredAtMs,
       transitionMs,
-      holdMs: Math.max(0, nextAtMs - draft.desiredAtMs - transitionMs),
-      residualMs: index === normalizedDrafts.length - 1 ? residualMs : 0,
+      holdMs: Math.max(
+        0,
+        nextAtMs - draft.desiredAtMs - transitionMs - eventResidualMs,
+      ),
+      residualMs: eventResidualMs,
       transitionOffsetMs: draft.transitionOffsetMs,
       compressed: eventCompressed,
       compressionReason: eventCompressed ? "transition_window_short" : undefined,
@@ -939,22 +961,28 @@ export function compileSpeechTrackTiming(options: {
     const onsetRatio = bodyLayer
       ? 0.12 + performanceUnitInterval(seed) * 0.14
       : 0.05 + performanceUnitInterval(seed) * 0.12;
+    const baseCandidateAtMs = windowStartMs
+      + Math.round(Math.max(1, windowEndMs - windowStartMs) * onsetRatio);
     const hesitationDelayMs = resolveHesitationDelayForPhraseGroup(
       schedule,
       phrase.phraseIndices,
+      followDelayMs + baseCandidateAtMs,
     );
-    const candidateAtMs = windowStartMs
-      + Math.round(Math.max(1, windowEndMs - windowStartMs) * onsetRatio)
-      + Math.round(hesitationDelayMs * availableMs / schedule.durationMs);
-    const latestAtMs = Math.max(
-      previousAtMs + 1,
-      Math.min(settleAtMs - 1, windowEndMs - 1),
-    );
-    const localAtMs = clampInteger(
-      candidateAtMs,
-      previousAtMs + 1,
-      latestAtMs,
-    );
+    const adjustedWindowStartMs = windowStartMs + hesitationDelayMs;
+    const adjustedWindowEndMs = windowEndMs + hesitationDelayMs;
+    const candidateAtMs = baseCandidateAtMs + hesitationDelayMs;
+    const localAtMs = Math.max(candidateAtMs, previousAtMs + 1);
+    const effectiveWindowEndMs = Math.min(settleAtMs, adjustedWindowEndMs);
+    if (
+      adjustedWindowStartMs >= settleAtMs
+      || localAtMs >= effectiveWindowEndMs
+    ) {
+      return {
+        ok: false,
+        value: null,
+        reason: `performance_schedule_speech_hesitation_window_exceeded:${channelId}:${index}:${hesitationDelayMs}`,
+      };
+    }
     phraseEvents.push({
       id: buildSpeechEventId(channelId, "phrase", index),
       kind: "speech_phrase",
@@ -964,12 +992,12 @@ export function compileSpeechTrackTiming(options: {
       semanticGroup,
       atMs: followDelayMs + localAtMs,
       localAtMs,
-      windowStartMs: followDelayMs + windowStartMs,
-      windowEndMs: followDelayMs + windowEndMs,
+      windowStartMs: followDelayMs + adjustedWindowStartMs,
+      windowEndMs: followDelayMs + effectiveWindowEndMs,
       transitionMs: 0,
       holdMs: 0,
       residualMs: 0,
-      transitionOffsetMs: localAtMs - windowStartMs,
+      transitionOffsetMs: localAtMs - adjustedWindowStartMs,
       compressed: false,
       phraseIndices: [...phrase.phraseIndices],
       channelId,
@@ -1098,6 +1126,95 @@ export function registerPerformanceParameterNodes(
   return { ok: true, value: nodes, reason: "" };
 }
 
+export function finalizePerformancePlanRelease(options: {
+  schedule: PerformanceSchedule;
+  releaseAtMs: number;
+  blendOutMs: number;
+}): PerformanceScheduleMutationResult<number> {
+  const { schedule, releaseAtMs, blendOutMs } = options;
+  if (
+    !Number.isInteger(releaseAtMs)
+    || releaseAtMs < 0
+    || !Number.isInteger(blendOutMs)
+    || blendOutMs < 0
+    || releaseAtMs + blendOutMs > MAX_MOTION_DURATION_MS
+  ) {
+    return {
+      ok: false,
+      value: null,
+      reason: `performance_schedule_plan_release_invalid:${releaseAtMs}:${blendOutMs}`,
+    };
+  }
+
+  const events = mutableEvents(schedule);
+  const finalParameterEventByAxis = new Map<string, PerformanceTimingEventTrace>();
+  for (const event of events) {
+    if (
+      event.source !== "semantic_step"
+      && event.source !== "gaze_strategy"
+      && event.source !== "face_strategy"
+    ) {
+      continue;
+    }
+    if (event.kind === "gaze_release" || event.kind === "face_release") {
+      continue;
+    }
+    const existing = finalParameterEventByAxis.get(event.semanticAxisId);
+    if (!existing || event.atMs > existing.atMs) {
+      finalParameterEventByAxis.set(event.semanticAxisId, event);
+    }
+  }
+
+  const updatedEvents = new Map<string, PerformanceTimingEventTrace>();
+  for (const event of finalParameterEventByAxis.values()) {
+    const requestedReleaseAtMs = event.atMs
+      + event.transitionMs
+      + event.holdMs
+      + event.residualMs;
+    if (requestedReleaseAtMs > releaseAtMs) {
+      return {
+        ok: false,
+        value: null,
+        reason: `performance_schedule_plan_release_precedes_track:${event.semanticAxisId}:${requestedReleaseAtMs}:${releaseAtMs}`,
+      };
+    }
+    updatedEvents.set(event.id, {
+      ...event,
+      holdMs: event.holdMs + releaseAtMs - requestedReleaseAtMs,
+    });
+  }
+
+  const baseReleaseAtMs = Math.max(1, schedule.durationMs - blendOutMs);
+  for (const event of events) {
+    if (event.kind !== "gaze_release" && event.kind !== "face_release") {
+      continue;
+    }
+    updatedEvents.set(event.id, {
+      ...event,
+      atMs: releaseAtMs,
+      transitionMs: blendOutMs,
+      transitionOffsetMs: releaseAtMs - baseReleaseAtMs,
+    });
+  }
+  for (const event of updatedEvents.values()) {
+    const invalidReason = validatePerformanceTimingEvent(schedule, event);
+    if (invalidReason) {
+      return { ok: false, value: null, reason: invalidReason };
+    }
+  }
+  for (let index = 0; index < events.length; index += 1) {
+    const updated = updatedEvents.get(events[index].id);
+    if (updated) {
+      events[index] = updated;
+    }
+  }
+  recordPerformanceDecision(
+    schedule,
+    `plan_release_finalized:${baseReleaseAtMs}->${releaseAtMs}`,
+  );
+  return { ok: true, value: releaseAtMs, reason: "" };
+}
+
 export function hashPerformanceIdentity(value: string): number {
   let hash = 2166136261;
   for (let index = 0; index < value.length; index += 1) {
@@ -1117,35 +1234,113 @@ function registerPerformanceTimingEvents(
 ): PerformanceScheduleMutationResult<readonly PerformanceTimingEventTrace[]> {
   const existingIds = new Set(schedule.events.map((event) => event.id));
   const incomingIds = new Set<string>();
+  let previousAtMs = -1;
   for (const event of events) {
-    if (
-      !event.id
-      || !event.semanticAxisId
-      || !event.semanticGroup
-      || !Number.isFinite(event.atMs)
-      || event.atMs < 0
-      || !Number.isFinite(event.transitionMs)
-      || event.transitionMs < 0
-      || !Number.isFinite(event.holdMs)
-      || event.holdMs < 0
-      || !Number.isFinite(event.residualMs)
-      || event.residualMs < 0
-      || existingIds.has(event.id)
-      || incomingIds.has(event.id)
-    ) {
+    const invalidReason = validatePerformanceTimingEvent(schedule, event);
+    if (invalidReason) {
+      return { ok: false, value: null, reason: invalidReason };
+    }
+    if (existingIds.has(event.id) || incomingIds.has(event.id)) {
       return {
         ok: false,
         value: null,
-        reason: `performance_schedule_event_invalid:${event.id || "unknown_event"}`,
+        reason: `performance_schedule_event_id_duplicate:${event.id}`,
+      };
+    }
+    if (event.atMs < previousAtMs) {
+      return {
+        ok: false,
+        value: null,
+        reason: `performance_schedule_event_order_invalid:${event.id}:${event.atMs}:${previousAtMs}`,
       };
     }
     incomingIds.add(event.id);
+    previousAtMs = event.atMs;
   }
   mutableEvents(schedule).push(...events.map((event) => ({
     ...event,
     phraseIndices: event.phraseIndices ? [...event.phraseIndices] : undefined,
   })));
   return { ok: true, value: events, reason: "" };
+}
+
+function validatePerformanceTimingEvent(
+  schedule: PerformanceSchedule,
+  event: PerformanceTimingEventTrace,
+): string | null {
+  const eventEndMs = event.atMs
+    + event.transitionMs
+    + event.holdMs
+    + event.residualMs;
+  if (
+    !event.id
+    || !event.semanticAxisId
+    || !event.semanticGroup
+    || !Number.isInteger(event.atMs)
+    || event.atMs < 0
+    || !Number.isInteger(event.transitionMs)
+    || event.transitionMs < 0
+    || !Number.isInteger(event.holdMs)
+    || event.holdMs < 0
+    || !Number.isInteger(event.residualMs)
+    || event.residualMs < 0
+    || !Number.isInteger(event.transitionOffsetMs)
+    || !Number.isFinite(eventEndMs)
+    || eventEndMs > MAX_MOTION_DURATION_MS
+  ) {
+    return `performance_schedule_event_invalid:${event.id || "unknown_event"}`;
+  }
+  if (
+    event.stepIndex !== undefined
+    && (
+      !Number.isInteger(event.stepIndex)
+      || event.stepIndex < 0
+      || event.stepIndex >= schedule.semanticSteps.length
+    )
+  ) {
+    return `performance_schedule_event_step_invalid:${event.id}:${event.stepIndex}`;
+  }
+  if (event.phraseIndices !== undefined) {
+    const uniquePhraseIndices = new Set(event.phraseIndices);
+    if (
+      event.phraseIndices.length === 0
+      || uniquePhraseIndices.size !== event.phraseIndices.length
+      || event.phraseIndices.some((phraseIndex) => (
+        !Number.isInteger(phraseIndex)
+        || phraseIndex < 0
+        || phraseIndex >= schedule.phrases.length
+      ))
+    ) {
+      return `performance_schedule_event_phrase_invalid:${event.id}`;
+    }
+  }
+  if (
+    event.localAtMs !== undefined
+    && (!Number.isInteger(event.localAtMs) || event.localAtMs < 0)
+  ) {
+    return `performance_schedule_event_local_time_invalid:${event.id}`;
+  }
+  const hasWindowStart = event.windowStartMs !== undefined;
+  const hasWindowEnd = event.windowEndMs !== undefined;
+  if (hasWindowStart !== hasWindowEnd) {
+    return `performance_schedule_event_window_invalid:${event.id}`;
+  }
+  if (hasWindowStart && hasWindowEnd) {
+    const windowStartMs = event.windowStartMs!;
+    const windowEndMs = event.windowEndMs!;
+    if (
+      !Number.isInteger(windowStartMs)
+      || !Number.isInteger(windowEndMs)
+      || windowStartMs < 0
+      || windowEndMs < windowStartMs
+      || windowEndMs > MAX_MOTION_DURATION_MS
+      || event.atMs < windowStartMs
+      || event.atMs > windowEndMs
+    ) {
+      return `performance_schedule_event_window_invalid:${event.id}`;
+    }
+  }
+  return null;
 }
 
 function mutableEvents(schedule: PerformanceSchedule): PerformanceTimingEventTrace[] {
@@ -1247,6 +1442,7 @@ function resolveTrackTimingPolicy(semanticGroup: string): PerformanceTrackTiming
 
 function resolvePerformanceResidualMs(
   schedule: PerformanceSchedule,
+  semanticAxisId: string,
   semanticGroup: string,
   strategy: PerformancePartTrackStrategy,
   tailBudgetMs: number,
@@ -1305,7 +1501,7 @@ function resolvePerformanceResidualMs(
   const residualMs = Math.min(desiredMs, Math.max(0, Math.round(tailBudgetMs)));
   recordPerformanceDecision(
     schedule,
-    `residual_selected:${strategy}:${group || "unknown"}:${residualMs}:${reasons.join("+") || "base"}:${Math.max(0, Math.round(tailBudgetMs))}`,
+    `residual_selected:${strategy}:${semanticAxisId}:${group || "unknown"}:${residualMs}:${reasons.join("+") || "base"}:${Math.max(0, Math.round(tailBudgetMs))}`,
   );
   return residualMs;
 }
@@ -1486,8 +1682,13 @@ function resolveHesitationAdjustedStepAtMs(
   stepIndex: number,
   desiredAtMs: number,
 ): number {
-  const window = schedule.hesitationWindows.find((item) => item.stepIndex === stepIndex);
-  return desiredAtMs + (window?.holdMs ?? 0);
+  const delayMs = schedule.hesitationWindows.reduce((sum, item) => (
+    desiredAtMs >= item.startMs
+      || (item.stepIndex !== undefined && item.stepIndex <= stepIndex)
+      ? sum + item.holdMs
+      : sum
+  ), 0);
+  return desiredAtMs + delayMs;
 }
 
 function resolveHesitationAdjustedPhraseAtMs(
@@ -1495,21 +1696,37 @@ function resolveHesitationAdjustedPhraseAtMs(
   afterPhraseIndex: number,
   desiredAtMs: number,
 ): number {
-  const window = schedule.hesitationWindows.find(
-    (item) => item.afterPhraseIndex === afterPhraseIndex,
-  );
-  return desiredAtMs + (window?.holdMs ?? 0);
+  const delayMs = schedule.hesitationWindows.reduce((sum, item) => (
+    desiredAtMs >= item.startMs
+      || (
+        item.afterPhraseIndex !== undefined
+        && item.afterPhraseIndex <= afterPhraseIndex
+      )
+      ? sum + item.holdMs
+      : sum
+  ), 0);
+  return desiredAtMs + delayMs;
 }
 
 function resolveHesitationDelayForPhraseGroup(
   schedule: PerformanceSchedule,
   phraseIndices: readonly number[],
+  baseAtMs: number,
 ): number {
-  const window = schedule.hesitationWindows.find((item) => (
-    item.afterPhraseIndex !== undefined
-    && phraseIndices.includes(item.afterPhraseIndex + 1)
-  ));
-  return window?.holdMs ?? 0;
+  let delayMs = 0;
+  for (const item of schedule.hesitationWindows) {
+    const afterPhraseIndex = item.afterPhraseIndex;
+    if (
+      baseAtMs >= item.startMs
+      || (
+        afterPhraseIndex !== undefined
+        && phraseIndices.some((phraseIndex) => phraseIndex > afterPhraseIndex)
+      )
+    ) {
+      delayMs += item.holdMs;
+    }
+  }
+  return delayMs;
 }
 
 function resolveGazePhraseTransfer(
