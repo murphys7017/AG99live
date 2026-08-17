@@ -55,6 +55,7 @@ context:
     - `engine.parameter_plan.v3` has one global blend-out. Part tracks may request different minimum ownership windows, but they cannot claim independent runtime release without a protocol and ParameterMixer ownership-envelope change.
     - The sequence track graph owns finalizing the one actual V3 release after all per-axis requirements are known; gaze/face release trace events must match that global blend start.
     - Hesitation delays are cumulative after the selected window. A downstream event that cannot retain legal ordering and fit before its fixed release fails compilation instead of being compressed or truncated.
+    - B5-pre is split at the real process boundary: AstrBot now owns Provider-neutral `speech_cues` generation, normalization, and the post-result hook; AG99 transport and existing PerformanceSchedule mapping remain pending and must not create a TTS text transformer, private clock, new mixer source, or provider-specific motion path.
 
 documentation:
   authorities:
@@ -100,7 +101,7 @@ verification:
     - The obsolete generic eye/brow/mouth/face timing-policy branch and gaze-only pose projection names are removed; staged-part strategy classification has one source in performanceSchedule.ts.
     - Phase-B batch B1 is complete: semantic and gaze return one PerformancePartTrackTiming shape, sequence compilation uses one per-axis timing cache and one scheduled-track projection entry, and release events remain excluded from parameter keyframe projection.
     - The unified part-track boundary rejects an axis strategy mismatch and any mismatch between projectable timing events and compiled parameter nodes instead of relying on array-index assumptions.
-    - Phase-B source planning is documented in five rollback-safe batches: shared part-track compilation, face lifecycle, hesitation events, dynamic residual/part timing, and later bounded speech-energy coupling.
+    - Phase-B source planning is documented in six rollback-safe batches: shared part-track compilation, face lifecycle, hesitation events, dynamic residual/part timing, provider-neutral speech cues, and later bounded speech-energy coupling.
     - The phase-B plan keeps engine.motion_intent.v4 and engine.parameter_plan.v3 stable, reuses PerformanceSchedule and existing parameter tracks, and forbids a second clock, mixer, WebSDK semantic policy, or Cubism business logic.
     - Architecture documentation distinguishes AG99 `frontend/src/live2d/WebSDK/src/` runtime code from official Cubism `Framework/Core`.
     - Motion replacement now settles the tracked Direct Plan or Catalog Motion before starting the candidate; a stop failure rejects the replacement and cannot publish a new started run.
