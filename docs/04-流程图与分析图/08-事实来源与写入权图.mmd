@@ -21,7 +21,7 @@ flowchart LR
     subgraph STORE[TurnPlaybackSessionStore：协议槽位与稳定投影]
         TURN[turn identity / created]:::fact
         BACK[backend turnStarted / synthFinished / turnFinished]:::fact
-        MATERIAL[text/audio/motion material state]:::fact
+        MATERIAL[text/audio/motion/speech material state]:::fact
         READY[session ready / playing / settling / completed / failed]:::fact
         RELEASE[text/audio/motion released]:::fact
         AUDIO[audio duration / started / terminal]:::fact

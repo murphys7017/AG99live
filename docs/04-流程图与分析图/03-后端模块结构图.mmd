@@ -30,7 +30,7 @@ flowchart TB
 
     subgraph RUNTIME[runtime：轮次和输出编排]
         COORD[TurnCoordinator<br/>turn identity / physical parts / close]:::runtime
-        SEG[PendingOutputSegment<br/>原子 text/audio/motion/images 聚合]:::runtime
+        SEG[PendingOutputSegment<br/>原子 text/audio/motion/speech/images 聚合]:::runtime
         SESSION[SessionState + TurnIdentityMap]:::runtime
         MSG[message_utils.py<br/>AstrBot 组件分类]:::runtime
         STATE[state.py / plugin_runtime.py<br/>运行配置与共享能力]:::runtime

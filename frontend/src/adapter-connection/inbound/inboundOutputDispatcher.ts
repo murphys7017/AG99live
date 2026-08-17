@@ -99,6 +99,7 @@ function applyOutputSegment(
         motion: payload.motion.state === "present"
           ? { state: "present", payload: normalizedMotion as NormalizedMotionPayload }
           : payload.motion,
+        speech: payload.speech,
       };
 
   // SessionStore is the sole owner of the complete segment material.

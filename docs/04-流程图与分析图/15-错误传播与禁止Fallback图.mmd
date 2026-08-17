@@ -26,7 +26,7 @@ flowchart TD
         BFAIL[拒绝 motion 或输出段<br/>记录明确 reason]:::failure
         MFAILED[motion.state=failed<br/>保留 schedule / resolution reason]:::failure
         MABSENT[motion.state=absent<br/>协议明确未安排动作]:::terminal
-        SEG[output.segment.v3]:::terminal
+        SEG[output.segment.v4]:::terminal
 
         MODELINFO -->|是| EXPECT
         EXPECT -->|否| MABSENT --> SEG

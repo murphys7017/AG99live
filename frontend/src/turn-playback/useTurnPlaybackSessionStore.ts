@@ -356,6 +356,11 @@ export function useTurnPlaybackSessionStore() {
       segment.motion.reason = material.motion.reason;
     }
 
+    if (material.speech.state === "present") {
+      segment.speech.cues = material.speech.cues.map((cue) => ({ ...cue }));
+      segment.speech.receivedAtMs = receivedAtMs;
+    }
+
     session.segments.set(segmentId, segment);
     session.segmentOrder.push(segmentId);
     if (session.phase === "collecting") {
@@ -368,6 +373,8 @@ export function useTurnPlaybackSessionStore() {
       textState: material.text.state,
       audioState: material.audio.state,
       motionState: material.motion.state,
+      speechState: material.speech.state,
+      speechCueCount: material.speech.state === "present" ? material.speech.cues.length : 0,
     });
     return { status: "committed" };
   }

@@ -54,7 +54,7 @@ flowchart TB
         FLIVE --> FSDK
     end
 
-    BPORT <-->|output.segment.v3 / control / input| FPORT
+    BPORT <-->|output.segment.v4 / control / input| FPORT
 
     subgraph NO[禁止的反向依赖]
         N1[ModelEngine -> SessionStore<br/>禁止直接写播放事实]:::forbidden

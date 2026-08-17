@@ -54,7 +54,7 @@
 - 虚线箭头表示事件、回调、异步通知或观察关系。
 - 红色节点表示失败终点或禁止路径，不表示可用 fallback。
 - `turn_id + message_id` 是正式播放段的统一身份。
-- `output.segment.v3` 是前后端正式回复的唯一原子消息。
+- `output.segment.v4` 是前后端正式回复的唯一原子消息，speech slot 携带可选 provider-neutral 语音 cue。
 - `engine.motion_intent.v4` 是 Persona Effect 主动作协议。
 - 正式动作输入与官方 `<@anim>` 兼容入口统一使用 v4；手动预览从本地 `CompiledSemanticMotion` 直接进入第二阶段编译。
 - SessionStore 是协议槽位和稳定生命周期投影事实源，PlaybackTimeline 是 required sink

@@ -6,7 +6,7 @@ AG99live 的 AstrBot 插件侧实现。该目录负责协议桥接、Turn 生命
 ## 核心职责
 
 - 接收前端 `input.*` 消息并转为 AstrBot 事件。
-- 发送 `output.segment.v3 / control.* / system.*` 消息回前端；正式回复动作只存在于原子段的 motion slot。
+- 发送 `output.segment.v4 / control.* / system.*` 消息回前端；正式回复动作只存在于原子段的 motion slot，语音 cue 只存在于 speech slot。
 - 管理 turn 生命周期，保证文本/语音/动作消息在同一轮次可追踪。
 - 扫描 Live2D 资源并产出结构化能力信息。
 - 生成并下发动作用载荷；统一走 AstrBot 交互中间件主链路，由 `ag99live.motion` Persona Effect 产出动作并通过 `client_objects` 下发。
@@ -90,7 +90,7 @@ astrbot_plugin_ag99live_adapter/
 ## 与前端协同的关键点
 
 - 每条交互消息都带 `turn_id`，前后端只按这一个轮次 ID 做会话协调。
-- 每个 assistant segment 由非空 `turn_id + message_id` 标识；Adapter 先把 Plain、Record.text 与 semantic text 归一化为唯一 canonical text，再聚合音频、图片和 motion client object，发送一个 `output.segment.v3`。
+- 每个 assistant segment 由非空 `turn_id + message_id` 标识；Adapter 先把 Plain、Record.text 与 semantic text 归一化为唯一 canonical text，再聚合音频、图片、motion client object 与 speech cue，发送一个 `output.segment.v4`。
 - 隐藏动作传输标记在回复进入 TTS 前的输出规范化阶段清洗；原文只供官方 `<@anim>` 兼容解析。增强版 Core 只读监听 AstrBot TTS 生成状态并可下发 `audio.state=failed`；官方 Core 只依据最终 `Record` 投影音频成功，不模拟不存在的生命周期。
 - 正式动作位于 `output.segment.motion.payload`；前端原子提交完整段后，由 ModelEngine 把 intent 编译为 `engine.parameter_plan.v3`。
 - `system.server_info` 携带完整 schema manifest；前端只有在 manifest 与本地契约完全一致后才处理后续消息。

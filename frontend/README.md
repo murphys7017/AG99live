@@ -7,7 +7,7 @@ Live2D 参数执行和创作工具，不负责对话模型、TTS 生成或后端
 
 ```text
 Adapter WebSocket v2
--> output.segment.v3 严格校验
+-> output.segment.v4 严格校验
 -> TurnPlaybackSessionStore 原子提交协议事实
 -> PlaybackTimeline 管理字幕、音频、动作和口型生命周期
 -> ModelEngine 编译 engine.motion_intent.v4

@@ -38,9 +38,9 @@ flowchart TB
         PLAY -->|WebSocket 断开| FAIL
     end
 
-    subgraph SEG[每个 output.segment.v3 的槽位事实]
+    subgraph SEG[每个 output.segment.v4 的槽位事实]
         SNEW[segment 尚未提交]:::slot
-        PRE[协议预校验<br/>text/audio/motion/images 全部构造]:::event
+        PRE[协议预校验<br/>text/audio/motion/speech/images 全部构造]:::event
         COMMIT[commitOutputSegment<br/>一次性写入 Map]:::slot
         REJECT[整段拒绝<br/>无 Store 副作用]:::failure
         SNEW --> PRE

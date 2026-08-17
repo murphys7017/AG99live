@@ -1,9 +1,9 @@
 task:
   class: feature
   risk: medium
-  phase: phase_b_review_corrections_complete
+  phase: phase_b5_pre_transport_complete
   status: source_review_complete
-  scope: "Finalize one truthful V3 plan release from all track ownership requirements, apply hesitation cumulatively across downstream events, and enforce strict PerformanceSchedule event validation without changing external motion protocols."
+  scope: "Complete the AG99 B5-pre boundary: receive provider-neutral speech_cues from the enhanced AstrBot hook, transport them once through output.segment.v4, and retain them in the frontend SessionStore without compiling them into performance events yet."
 
 context:
   confidence: high
@@ -55,7 +55,7 @@ context:
     - `engine.parameter_plan.v3` has one global blend-out. Part tracks may request different minimum ownership windows, but they cannot claim independent runtime release without a protocol and ParameterMixer ownership-envelope change.
     - The sequence track graph owns finalizing the one actual V3 release after all per-axis requirements are known; gaze/face release trace events must match that global blend start.
     - Hesitation delays are cumulative after the selected window. A downstream event that cannot retain legal ordering and fit before its fixed release fails compilation instead of being compressed or truncated.
-    - B5-pre is split at the real process boundary: AstrBot now owns Provider-neutral `speech_cues` generation, normalization, and the post-result hook; AG99 transport and existing PerformanceSchedule mapping remain pending and must not create a TTS text transformer, private clock, new mixer source, or provider-specific motion path.
+    - B5-pre is split at the real process boundary: AstrBot owns Provider-neutral `speech_cues` generation, normalization, and the post-result hook; AG99 now transports the cues through output.segment.v4 and retains them in the frontend SessionStore, while existing PerformanceSchedule mapping remains pending and must not create a TTS text transformer, private clock, new mixer source, or provider-specific motion path.
 
 documentation:
   authorities:
@@ -78,6 +78,10 @@ verification:
     - Automated tests are low-confidence input/output smoke checks; do not run the full suite.
     - Live AstrBot, Electron, TTS, and Live2D behavior remains user-led runtime acceptance.
   current:
+    - AG99 B5-pre transport is source-reviewed: enhanced AstrBot Persona results hand off normalized speech_cues through one-shot event state, output.segment.v4 carries a strict speech slot, and the frontend SessionStore retains the cues without compiling them into motion.
+    - speech.state=present requires 1..8 cues on both producer and parser boundaries; an empty cue list is represented only by speech.state=absent.
+    - The one-shot Persona-to-contributor handoff is cleared when consumed, so a later output in the same Turn cannot inherit stale speech cues.
+    - `python scripts/check_protocol_schema_manifest.py`, `python -m compileall -q astrbot_plugin_ag99live_adapter`, `npm run typecheck:renderer`, and `git diff --check` pass for B5-pre.
     - Phase-B review corrections are complete: each track declares a minimum ownership requirement, the sequence graph finalizes one actual V3 release, and gaze/face release trace events match the global ParameterMixer blend start.
     - Final semantic transitions retain their full response duration and extend the legal plan tail when necessary instead of being compressed against the original audio duration.
     - Hesitation delay is cumulative for all downstream semantic steps, phrase transfers, and SpeechPose points; SpeechPose overflow is an explicit `performance_schedule_speech_hesitation_window_exceeded` compile failure.

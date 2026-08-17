@@ -47,7 +47,7 @@ flowchart TD
         MOTIONRESOLVE{动作预期与 payload 结果}:::backend
         MOTIONFAILSLOT[motion.state=failed<br/>保留明确 reason]:::failure
         MOTIONABSENTSLOT[motion.state=absent<br/>明确未安排动作]:::backend
-        SEGMENT[output.segment.v3<br/>唯一 text + audio URL + motion]:::protocol
+        SEGMENT[output.segment.v4<br/>唯一 text + audio URL + motion + speech cues]:::protocol
         SYNTH[control.synth_finished<br/>所有段发送完成后]:::protocol
 
         INPUT --> TURN
@@ -85,7 +85,7 @@ flowchart TD
     subgraph I[前端协议入口与原子提交]
         STARTIN[Inbound Dispatcher<br/>control.turn_started]:::protocol
         CREATE[创建 TurnPlaybackSession]:::state
-        SEGIN[Inbound Dispatcher<br/>握手后接收 output.segment.v3]:::protocol
+        SEGIN[Inbound Dispatcher<br/>握手后接收 output.segment.v4]:::protocol
         PARSE[信封与 slot parser]:::protocol
         SCHEMA{信封、身份与 slot<br/>结构是否合法？}:::protocol
         PARSEREJECT[parser 拒绝<br/>不写 SessionStore]:::failure

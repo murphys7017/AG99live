@@ -55,7 +55,7 @@ flowchart TD
     end
 
     subgraph TRANSPORT[4. 原子消息与前端入站]
-        SEG[output.segment.v3.motion<br/>与 canonical text/audio 同段]:::contract
+        SEG[output.segment.v4.motion + speech<br/>与 canonical text/audio 同段]:::contract
         PARSE[Frontend motion parser<br/>schema/profile/finite fields]:::runtime
         FVALID{前端 DTO 合法？}:::runtime
         REJECTSEG[拒绝整个原子 segment<br/>零队列副作用]:::failure

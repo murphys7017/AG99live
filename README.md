@@ -121,7 +121,7 @@ AG99live 会保留从模型原始九级输出到最终参数计划的关键阶�
 
 ### 3. Adapter 建立原子回复段
 
-Adapter 使用 `turn_id + message_id` 聚合文本、TTS、动作和其他输出。前端收到的是一个完整的 `output.segment.v3`，而不是几条彼此无法确认归属的独立事件。
+Adapter 使用 `turn_id + message_id` 聚合文本、TTS、动作、speech cues 和其他输出。前端收到的是一个完整的 `output.segment.v4`，而不是几条彼此无法确认归属的独立事件。
 
 ### 4. ModelEngine 编译参数
 
@@ -207,8 +207,8 @@ Profile Editor 不是普通的参数面板，而是模型能力和动作语义�
 ```mermaid
 flowchart LR
     U["文字 / 麦克风 / 直播弹幕"] --> A["AstrBot"]
-    A --> P["主模型：文本 + ag99live.motion"]
-    P --> S["output.segment.v3"]
+    A --> P["主模型：文本 + speech_cues + ag99live.motion"]
+    P --> S["output.segment.v4"]
     S --> T["PlaybackTimeline"]
     T --> AU["音频与字幕"]
     T --> M["ModelEngine"]

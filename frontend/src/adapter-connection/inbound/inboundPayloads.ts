@@ -15,11 +15,15 @@ import type {
   SystemServerInfoPayload,
 } from "../../types/protocol.js";
 import {
+  SPEECH_CUE_KINDS,
+  SPEECH_CUE_POSITIONS,
+} from "../../types/protocol.js";
+import {
   PROTOCOL_SCHEMA_MANIFEST,
   PROTOCOL_VERSION,
   SCHEMA_CATALOG_MOTION_V1,
   SCHEMA_MOTION_INTENT_V4,
-  SCHEMA_OUTPUT_SEGMENT_V3,
+  SCHEMA_OUTPUT_SEGMENT_V4,
 } from "../../types/protocolSchema.generated.js";
 import {
   asRecord,
@@ -61,14 +65,14 @@ export function parseOutputSegmentPayload(
 ): PayloadParseResult<OutputSegmentPayload> {
   const record = parseObjectPayload(envelope);
   if (!record.ok) return record;
-  if (record.payload.schema_version !== SCHEMA_OUTPUT_SEGMENT_V3) {
-    return invalidPayload(envelope.type, "payload.schema_version", SCHEMA_OUTPUT_SEGMENT_V3);
+  if (record.payload.schema_version !== SCHEMA_OUTPUT_SEGMENT_V4) {
+    return invalidPayload(envelope.type, "payload.schema_version", SCHEMA_OUTPUT_SEGMENT_V4);
   }
   const rootKeys = validateExactKeys(
     envelope.type,
     "payload",
     record.payload,
-    ["schema_version", "text", "audio", "motion", "images", "speaker_name", "avatar"],
+    ["schema_version", "text", "audio", "motion", "speech", "images", "speaker_name", "avatar"],
   );
   if (!rootKeys.ok) return rootKeys;
   const text = parseSegmentTextSlot(envelope.type, record.payload.text);
@@ -84,6 +88,8 @@ export function parseOutputSegmentPayload(
   }
   const motion = parseSegmentMotionSlot(envelope.type, record.payload.motion);
   if (!motion.ok) return motion;
+  const speech = parseSegmentSpeechSlot(envelope.type, record.payload.speech);
+  if (!speech.ok) return speech;
   const images = record.payload.images;
   if (!Array.isArray(images) || !images.every((item) => typeof item === "string")) {
     return invalidPayload(envelope.type, "payload.images", "string[]");
@@ -96,10 +102,11 @@ export function parseOutputSegmentPayload(
   return {
     ok: true,
     payload: {
-      schema_version: SCHEMA_OUTPUT_SEGMENT_V3,
+      schema_version: SCHEMA_OUTPUT_SEGMENT_V4,
       text: text.payload,
       audio: audio.payload,
       motion: motion.payload,
+      speech: speech.payload,
       images,
       speaker_name: optionalString(record.payload.speaker_name) ?? "",
       avatar: optionalString(record.payload.avatar) ?? "",
@@ -204,6 +211,81 @@ function parseSegmentMotionSlot(type: string, value: unknown): PayloadParseResul
     };
   }
   return invalidPayload(type, "payload.motion", "valid tagged motion slot");
+}
+
+function parseSegmentSpeechSlot(
+  type: string,
+  value: unknown,
+): PayloadParseResult<OutputSegmentPayload["speech"]> {
+  const slot = asRecord(value);
+  if (!slot) return invalidPayload(type, "payload.speech", "segment speech slot");
+  if (slot.state === "absent") {
+    const keys = validateExactKeys(type, "payload.speech", slot, ["state"]);
+    return keys.ok ? { ok: true, payload: { state: "absent" } } : keys;
+  }
+  if (slot.state !== "present" || !Array.isArray(slot.cues)) {
+    return invalidPayload(type, "payload.speech", "valid tagged speech slot");
+  }
+  const rootKeys = validateExactKeys(type, "payload.speech", slot, ["state", "cues"]);
+  if (!rootKeys.ok) return rootKeys;
+  if (slot.cues.length === 0 || slot.cues.length > 8) {
+    return invalidPayload(type, "payload.speech.cues", "between 1 and 8 cues");
+  }
+
+  const cues: Extract<OutputSegmentPayload["speech"], { state: "present" }> = {
+    state: "present",
+    cues: [],
+  };
+  for (let index = 0; index < slot.cues.length; index += 1) {
+    const cue = asRecord(slot.cues[index]);
+    if (!cue) {
+      return invalidPayload(type, `payload.speech.cues[${index}]`, "object");
+    }
+    const keys = validateExactKeys(
+      type,
+      `payload.speech.cues[${index}]`,
+      cue,
+      ["kind", "phrase_index", "position"],
+    );
+    if (!keys.ok) return keys;
+    if (
+      typeof cue.kind !== "string"
+      || !(SPEECH_CUE_KINDS as readonly string[]).includes(cue.kind)
+    ) {
+      return invalidPayload(
+        type,
+        `payload.speech.cues[${index}].kind`,
+        "supported speech cue kind",
+      );
+    }
+    if (
+      typeof cue.phrase_index !== "number"
+      || !Number.isInteger(cue.phrase_index)
+      || cue.phrase_index < 0
+    ) {
+      return invalidPayload(
+        type,
+        `payload.speech.cues[${index}].phrase_index`,
+        "non-negative integer",
+      );
+    }
+    if (
+      typeof cue.position !== "string"
+      || !(SPEECH_CUE_POSITIONS as readonly string[]).includes(cue.position)
+    ) {
+      return invalidPayload(
+        type,
+        `payload.speech.cues[${index}].position`,
+        "before or after",
+      );
+    }
+    cues.cues.push({
+      kind: cue.kind as typeof SPEECH_CUE_KINDS[number],
+      phrase_index: cue.phrase_index,
+      position: cue.position as typeof SPEECH_CUE_POSITIONS[number],
+    });
+  }
+  return { ok: true, payload: cues };
 }
 
 export function parseOutputTranscriptionPayload(

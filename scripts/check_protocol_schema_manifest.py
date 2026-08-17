@@ -19,7 +19,7 @@ EXPORT_NAMES = {
     "model_info": "SCHEMA_MODEL_INFO_V3",
     "motion_intent": "SCHEMA_MOTION_INTENT_V4",
     "motion_tuning_sample": "SCHEMA_MOTION_TUNING_SAMPLE_V2",
-    "output_segment": "SCHEMA_OUTPUT_SEGMENT_V3",
+    "output_segment": "SCHEMA_OUTPUT_SEGMENT_V4",
     "parameter_action_library": "SCHEMA_PARAMETER_ACTION_LIBRARY_V2",
     "parameter_plan": "SCHEMA_PARAMETER_PLAN_V3",
     "performance_curve_hint": "SCHEMA_PERFORMANCE_CURVE_HINT_V1",

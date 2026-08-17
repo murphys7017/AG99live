@@ -7,7 +7,7 @@ export {
   SCHEMA_MODEL_INFO_V3,
   SCHEMA_MOTION_INTENT_V4,
   SCHEMA_MOTION_TUNING_SAMPLE_V2,
-  SCHEMA_OUTPUT_SEGMENT_V3,
+  SCHEMA_OUTPUT_SEGMENT_V4,
   SCHEMA_PARAMETER_ACTION_LIBRARY_V2,
   SCHEMA_PARAMETER_PLAN_V3,
   SCHEMA_PERFORMANCE_CURVE_HINT_V1,
@@ -22,7 +22,7 @@ import {
   SCHEMA_MODEL_INFO_V3,
   SCHEMA_MOTION_INTENT_V4,
   SCHEMA_MOTION_TUNING_SAMPLE_V2,
-  SCHEMA_OUTPUT_SEGMENT_V3,
+  SCHEMA_OUTPUT_SEGMENT_V4,
   SCHEMA_PARAMETER_ACTION_LIBRARY_V2,
   SCHEMA_PARAMETER_PLAN_V3,
   SCHEMA_PERFORMANCE_CURVE_HINT_V1,
@@ -71,11 +71,33 @@ export type OutputSegmentMotionSlot =
   | { state: "absent" }
   | { state: "failed"; reason: string };
 
+export const SPEECH_CUE_KINDS = [
+  "breath",
+  "sigh",
+  "laugh",
+  "chuckle",
+  "hesitate",
+  "emphasis",
+] as const;
+
+export const SPEECH_CUE_POSITIONS = ["before", "after"] as const;
+
+export type OutputSegmentSpeechCue = {
+  kind: typeof SPEECH_CUE_KINDS[number];
+  phrase_index: number;
+  position: typeof SPEECH_CUE_POSITIONS[number];
+};
+
+export type OutputSegmentSpeechSlot =
+  | { state: "present"; cues: OutputSegmentSpeechCue[] }
+  | { state: "absent" };
+
 export interface OutputSegmentPayload {
-  schema_version: typeof SCHEMA_OUTPUT_SEGMENT_V3;
+  schema_version: typeof SCHEMA_OUTPUT_SEGMENT_V4;
   text: OutputSegmentTextSlot;
   audio: OutputSegmentAudioSlot;
   motion: OutputSegmentMotionSlot;
+  speech: OutputSegmentSpeechSlot;
   images: string[];
   speaker_name: string;
   avatar: string;

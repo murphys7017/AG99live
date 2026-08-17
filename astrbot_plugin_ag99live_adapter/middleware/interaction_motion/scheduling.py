@@ -34,6 +34,7 @@ from ...motion.output_sanitizer import (
     contains_hidden_output_markup,
     sanitize_assistant_output_text,
 )
+from ...protocol.speech_cues import normalize_speech_cues
 
 @dataclass(slots=True)
 class _InteractionReplyPlanSnapshot:
@@ -86,18 +87,19 @@ class AG99liveMotionResultContributor:
         del plugin_context
         event.set_extra("_ag99live_pending_performance_curve", None)
         event.set_extra("ag99live_raw_reply_text", None)
+        speech_cues = _take_pending_speech_cues(event)
 
         attempt = await _schedule_motion_from_interaction_result(event, view)
-        if attempt is None:
+        if attempt is None and not speech_cues:
             return None
 
         client_objects = []
         raw_assistant_text = _extract_raw_assistant_text(view)
         final_text_override = None
-        if contains_hidden_output_markup(raw_assistant_text):
+        if raw_assistant_text and contains_hidden_output_markup(raw_assistant_text):
             event.set_extra("ag99live_raw_reply_text", raw_assistant_text)
             final_text_override = sanitize_assistant_output_text(raw_assistant_text)
-        if attempt.motion_payload is not None:
+        if attempt is not None and attempt.motion_payload is not None:
             client_objects.append(
                 {
                     "type": "ag99live.motion_payload",
@@ -107,13 +109,28 @@ class AG99liveMotionResultContributor:
                 }
             )
             _defer_optional_performance_curve_request(event, attempt=attempt)
+        platform_extras = {}
+        if speech_cues:
+            platform_extras["ag99live_speech_cues"] = speech_cues
         return InteractionResultContribution(
             plugin_id=self.plugin_id,
+            platform_extras=platform_extras,
             final_text_override=final_text_override,
             client_objects=client_objects,
-            metadata={"ag99live_motion_schedule": attempt.to_metadata()},
+            metadata=(
+                {"ag99live_motion_schedule": attempt.to_metadata()}
+                if attempt is not None
+                else {}
+            ),
             priority=self.priority,
         )
+
+
+def _take_pending_speech_cues(event: Any) -> list[dict[str, Any]]:
+    value = event.get_extra("_ag99live_pending_speech_cues")
+    event.set_extra("_ag99live_pending_speech_cues", None)
+    return normalize_speech_cues(value)
+
 
 def _defer_optional_performance_curve_request(
     event: Any,

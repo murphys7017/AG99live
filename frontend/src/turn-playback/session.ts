@@ -20,6 +20,7 @@
  */
 
 import type { NormalizedMotionPayload } from "../types/motion.js";
+import type { OutputSegmentSpeechCue } from "../types/protocol.js";
 
 // ── Phase ──────────────────────────────────────────────────────────
 
@@ -136,6 +137,11 @@ export interface TurnPlaybackSessionMotion {
   reason: string;
 }
 
+export interface TurnPlaybackSessionSpeech {
+  cues: OutputSegmentSpeechCue[];
+  receivedAtMs: number | null;
+}
+
 export type OutputSegmentTextMaterial =
   | { state: "present"; content: string }
   | { state: "absent" }
@@ -151,6 +157,10 @@ export type OutputSegmentMotionMaterial =
   | { state: "absent" }
   | { state: "failed"; reason: string };
 
+export type OutputSegmentSpeechMaterial =
+  | { state: "present"; cues: OutputSegmentSpeechCue[] }
+  | { state: "absent" };
+
 /**
  * output.segment 的原子提交结果。accepted 携带完整播放材料；rejected 表示
  * 整段在入站领域校验阶段被拒绝，不能释放其中任何单项材料。
@@ -161,6 +171,7 @@ export type OutputSegmentMaterial =
       text: OutputSegmentTextMaterial;
       audio: OutputSegmentAudioMaterial;
       motion: OutputSegmentMotionMaterial;
+      speech: OutputSegmentSpeechMaterial;
     }
   | {
       state: "rejected";
@@ -195,6 +206,7 @@ export interface TurnPlaybackSegment {
   text: TurnPlaybackSessionText;
   audio: TurnPlaybackSessionAudio;
   motion: TurnPlaybackSessionMotion;
+  speech: TurnPlaybackSessionSpeech;
 }
 
 export interface TurnPlaybackSession {
@@ -264,6 +276,13 @@ export function createEmptyMotionState(): TurnPlaybackSessionMotion {
   };
 }
 
+export function createEmptySpeechState(): TurnPlaybackSessionSpeech {
+  return {
+    cues: [],
+    receivedAtMs: null,
+  };
+}
+
 /**
  * 新建一份空白段（text/audio/motion 子状态都为初始值）。
  */
@@ -280,6 +299,7 @@ export function createTurnPlaybackSegment(
     text: createEmptyTextState(),
     audio: createEmptyAudioState(),
     motion: createEmptyMotionState(),
+    speech: createEmptySpeechState(),
   };
 }
 

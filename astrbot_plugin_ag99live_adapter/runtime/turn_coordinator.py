@@ -398,6 +398,11 @@ class TurnCoordinator:
             ):
                 segment.bind_performance_curve_request(tts_state["request_id"])
 
+        if "ag99live_speech_cues" in platform_extras_dict:
+            segment.merge_speech_cues(
+                platform_extras_dict.get("ag99live_speech_cues")
+            )
+
         motion_candidate, motion_resolution_failure = (
             self._resolve_output_segment_motion(
                 platform_extras=platform_extras_dict,
@@ -558,6 +563,15 @@ class TurnCoordinator:
             }
 
         motion_slot = self._build_output_segment_motion_slot(segment)
+        speech_slot = (
+            {"state": "present", "cues": segment.speech_cues}
+            if segment.speech_cues
+            else {"state": "absent"}
+        )
+        if segment.speech_cues and not segment.text:
+            raise ValueError(
+                f"output_segment_speech_cues_text_missing:{segment.message_id}"
+            )
         if segment.audio_failure_reason:
             audio_slot = {
                 "state": "failed",
@@ -575,6 +589,7 @@ class TurnCoordinator:
                 text=text_slot,
                 audio=audio_slot,
                 motion=motion_slot,
+                speech=speech_slot,
                 images=segment.images,
                 speaker_name=self.speaker_name,
                 avatar="",

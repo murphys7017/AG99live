@@ -23,7 +23,7 @@ function makeEnvelope<TPayload>(
 
 function buildOutputSegment() {
   return {
-    schema_version: "output.segment.v3",
+    schema_version: "output.segment.v4",
     text: { state: "present", content: "hello" },
     audio: { state: "present", url: "https://example.com/audio.wav" },
     motion: {
@@ -40,6 +40,10 @@ function buildOutputSegment() {
         intent_tags: ["happy"],
         axis_levels: { head_yaw: 2 },
       },
+    },
+    speech: {
+      state: "present",
+      cues: [{ kind: "emphasis", phrase_index: 0, position: "before" }],
     },
     images: [],
     speaker_name: "assistant",
@@ -61,6 +65,7 @@ function testMapsAtomicOutputSegment(): void {
   assert.equal(event.messageId, "message-1");
   assert.equal(event.payload.audio.state, "present");
   assert.equal(event.payload.motion.state, "present");
+  assert.equal(event.payload.speech.state, "present");
 }
 
 function testRejectsOutputSegmentWithoutTurnIdentity(): void {

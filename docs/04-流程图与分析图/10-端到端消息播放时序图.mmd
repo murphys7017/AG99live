@@ -85,7 +85,7 @@ sequenceDiagram
     end
 
     loop 每个完整逻辑段
-        Buffer->>Inbound: output.segment.v3<br/>唯一 text / audio URL / motion / images 完整 slots
+        Buffer->>Inbound: output.segment.v4<br/>唯一 text / audio URL / motion / speech / images 完整 slots
         Inbound->>Inbound: parser 校验信封、身份与 slot 结构
         alt 信封或 slot 结构非法
             Inbound--xStore: parser 拒绝，不写 SessionStore

@@ -4,6 +4,8 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
 
+from ..protocol.speech_cues import normalize_speech_cues
+
 
 class OutputSegmentConflictError(ValueError):
     pass
@@ -26,6 +28,7 @@ class PendingOutputSegment:
     motion_mode: str = "preview"
     motion_source: str = ""
     performance_curve_request_id: str = ""
+    speech_cues: list[dict[str, Any]] = field(default_factory=list)
 
     def merge_text(self, value: str) -> None:
         self.text = _merge_unique_text(self.text, value, "text")
@@ -84,6 +87,16 @@ class PendingOutputSegment:
             normalized = str(value or "").strip()
             if normalized and normalized not in self.images:
                 self.images.append(normalized)
+
+    def merge_speech_cues(self, value: object) -> None:
+        candidate = normalize_speech_cues(value)
+        if not candidate:
+            return
+        if self.speech_cues and self.speech_cues != candidate:
+            raise OutputSegmentConflictError(
+                f"output_segment_speech_cues_conflict:{self.message_id}"
+            )
+        self.speech_cues = deepcopy(candidate)
 
     def merge_motion(
         self,

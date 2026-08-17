@@ -25,6 +25,17 @@ def _optional_tts_state_hook():
     return _identity
 
 
+def _optional_persona_expression_hook():
+    hook = getattr(filter, "on_persona_expression_result", None)
+    if callable(hook):
+        return hook()
+
+    def _identity(handler):
+        return handler
+
+    return _identity
+
+
 class MyPlugin(Star):
     def __init__(self, context: Context, config: dict | None = None):
         super().__init__(context)
@@ -127,6 +138,32 @@ class MyPlugin(Star):
                 tts_request_id=state.tts_request_id,
                 external_correlation_id=state.external_correlation_id,
             )
+
+    @_optional_persona_expression_hook()
+    async def handle_persona_expression_result(
+        self,
+        event: AstrMessageEvent,
+        result: Any,
+    ) -> None:
+        if self._official_core_compatibility:
+            return
+        if str(event.get_platform_name() or "").strip() != "olv_pet_adapter":
+            return
+
+        from .protocol.speech_cues import normalize_speech_cues
+
+        raw_cues = getattr(result, "speech_cues", None)
+        try:
+            speech_cues = normalize_speech_cues(raw_cues)
+        except ValueError as exc:
+            speech_cues = []
+            logger.warning(
+                "WIRING speech_cues rejected turn_id=%s reason=%s",
+                event.get_extra("_turn_id") or "<missing>",
+                exc,
+            )
+        event.set_extra("_ag99live_pending_speech_cues", speech_cues)
+
 
 def _configure_noisy_loggers() -> None:
     for logger_name in (

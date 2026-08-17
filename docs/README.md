@@ -7,7 +7,7 @@
 | 边界 | 当前版本 |
 | --- | --- |
 | WebSocket 信封 | `v2` |
-| 原子输出段 | `output.segment.v3` |
+| 原子输出段 | `output.segment.v4` |
 | 语义动作意图 | `engine.motion_intent.v4` |
 | 模型参数计划 | `engine.parameter_plan.v3` |
 | Catalog motion | `engine.catalog_motion.v1` |

@@ -42,7 +42,7 @@ flowchart LR
     CORE -->|调用| PROVIDER
     PROVIDER -->|回复 / 音频| CORE
     CORE -->|事件、Persona hooks、MessageChain| AG99
-    AG99 -->|WebSocket v2<br/>server_info manifest<br/>live2d_scan.v3<br/>output.segment.v3| RENDERER
+    AG99 -->|WebSocket v2<br/>server_info manifest<br/>live2d_scan.v3<br/>output.segment.v4| RENDERER
     RENDERER -->|input / control / profile / Motion Lab| AG99
 
     ELECTRON <--> RENDERER
