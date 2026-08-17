@@ -34,7 +34,7 @@ from ...motion.output_sanitizer import (
     contains_hidden_output_markup,
     sanitize_assistant_output_text,
 )
-from ...protocol.speech_cues import normalize_speech_cues
+
 
 @dataclass(slots=True)
 class _InteractionReplyPlanSnapshot:
@@ -42,11 +42,13 @@ class _InteractionReplyPlanSnapshot:
     should_emit_immediate_reply: bool | None
     source: str
 
+
 @dataclass(slots=True)
 class _MotionSchedulePolicy:
     should_schedule: bool
     source: str | None
     reason: str
+
 
 @dataclass(slots=True)
 class _MotionScheduleAttempt:
@@ -129,7 +131,11 @@ class AG99liveMotionResultContributor:
 def _take_pending_speech_cues(event: Any) -> list[dict[str, Any]]:
     value = event.get_extra("_ag99live_pending_speech_cues")
     event.set_extra("_ag99live_pending_speech_cues", None)
-    return normalize_speech_cues(value)
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise TypeError("ag99live_pending_speech_cues_internal_contract_invalid")
+    return value
 
 
 def _defer_optional_performance_curve_request(

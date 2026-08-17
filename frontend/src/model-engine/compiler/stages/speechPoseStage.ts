@@ -11,10 +11,12 @@ import type {
 } from "../modelParameterCompileContext.js";
 import {
   compileSpeechTrackTiming,
-  hashPerformanceIdentity,
-  performanceUnitInterval,
   resolveSpeechPhraseGroup,
 } from "../performanceSchedule.js";
+import {
+  hashPerformanceIdentity,
+  performanceUnitInterval,
+} from "../performanceDeterminism.js";
 
 type SpeechGesturePreset = NonNullable<
   SemanticParameterPlan["parameters"][number]["modulation"]

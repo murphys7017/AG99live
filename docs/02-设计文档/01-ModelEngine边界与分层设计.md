@@ -69,7 +69,10 @@ ModelEngine 不负责：
 | `compiler/compileParameterMotionIntent.ts` | 参数动作 compiler 主入口与两阶段结果收口 |
 | `compiler/compileContext.ts` | stage 共享 state |
 | `compiler/registry.ts` | 实例级 stage registry |
-| `compiler/performanceSchedule.ts` | 整段 pose/sequence 的 phrase、step、部位事件和来源诊断 |
+| `compiler/performanceSchedule.ts` | 整段 pose/sequence 的部位事件、轨道时序、释放和来源诊断 |
+| `compiler/performanceScheduleText.ts` | canonical text 的 phrase 分段、step 时间窗和 estimated alignment |
+| `compiler/performanceScheduleTypes.ts` | PerformanceSchedule 内部 DTO 与编译结果契约 |
+| `compiler/performanceDeterminism.ts` | Schedule 与 SpeechPose 共用的确定性采样基础函数 |
 | `compiler/parameterTrackGraphCompiler.ts` | 将 Schedule 事件投影为 sequence keyframe，并处理必要的计划尾部延长 |
 | `compiler/stages/` | 各阶段的唯一实现 |
 | `runtime/motionRuntimeScheduler.ts` | pending ownership 与启动条件 |
