@@ -115,9 +115,10 @@ flowchart TD
     subgraph SDK[8. AG99 Runtime + Cubism 逐帧表现]
         PLAYER[PreviewMotionPlayer<br/>runId 与 terminal ownership]:::runtime
         BASE[Cubism Motion / EyeBlink / Expression / drag / breath<br/>base parameter snapshot]:::engine
-        DIRECT[direct plan source<br/>parameter track / speech modulation / presentation dynamics]:::engine
+        DIRECT[direct plan raw source<br/>parameter track / speech modulation target]:::engine
         LIP[Lip-sync source<br/>active ownership + RMS intensity<br/>静音帧明确闭嘴]:::engine
-        MIX[AG99 Parameter Mixer<br/>base + direct plan + lip sync<br/>稳定优先级 / 一次最终裁剪]:::engine
+        MIX[AG99 ActiveParameterMixer<br/>base + raw direct plan + lip sync<br/>final target / ownership release]:::engine
+        PRESENT[ParameterPresentation<br/>非口型最终目标的一次 response pass<br/>settled 后才完成 release]:::engine
         WRITE[AG99 Runtime / LAppModel<br/>唯一 active parameter write]:::engine
         PHYS[Official Cubism Physics / Pose / Renderer]:::engine
         MODEL[最终可见 Live2D 表现]:::engine
@@ -130,7 +131,8 @@ flowchart TD
         BASE --> MIX
         DIRECT --> MIX
         LIP --> MIX
-        MIX --> WRITE --> PHYS --> MODEL
+        MIX --> PRESENT --> WRITE --> PHYS --> MODEL
+        MIX -->|lip-sync immediate output| WRITE
     end
 
     TRACE -.Motion Lab observation.-> LAB[Motion Lab SQLite]:::runtime

@@ -196,14 +196,17 @@ sequenceDiagram
 
             opt 已启动语义动作 / speech-only 动作
                 loop 每个渲染帧
-                    SDK->>SDK: 曲线采样、动力学、冲突解析和参数写入
+                    SDK->>SDK: Mixer 收集 raw contributions 并合成最终目标
+                    SDK->>SDK: ParameterPresentation 对非口型目标响应一次；lip-sync 保持即时
+                    SDK->>SDK: 唯一主动参数写入
                 end
             end
 
             opt audio.state = present
                 Audio->>Lip: 实时 RMS / 口型值与 source 活跃状态
                 Lip->>SDK: 提交 source-scoped 口型信号
-                SDK->>SDK: SpeechSignalRuntime -> ActiveParameterMixer<br/>统一解析并写入口型参数
+                SDK->>SDK: SpeechSignalRuntime -> ActiveParameterMixer<br/>融合 raw direct target 与 lip-sync，口型即时输出
+                SDK->>SDK: ParameterPresentation 仅追踪 direct-only target，不被口型污染
                 Audio-->>Timeline: completed / failed / interrupted
                 Lip-->>Timeline: completed / failed / interrupted<br/>可选 sink 终态
             end

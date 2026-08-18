@@ -1,9 +1,9 @@
 task:
   class: refactor
   risk: medium
-  phase: dynamics_active_parameter_smoothing
+  phase: dynamics_unified_parameter_response
   status: validation_partial
-  scope: "Make ParameterPresentation the single active response layer by removing duplicate easing from parameter track sampling, without adding a clock, player, mixer source, protocol branch, semantic direction, mouth path, Physics path, or official Cubism changes."
+  scope: "Make ActiveParameterMixer the single final target and response boundary: collect raw direct-plan and lip-sync contributions, synthesize one final target, apply ParameterPresentation once for non-lip parameters, and keep Physics as the downstream driver."
 
 context:
   confidence: high
@@ -66,6 +66,9 @@ context:
     - B5 spectral emphasis is a bounded ratio from the existing audio analyser, not a new audio clock or predictive timeline; it may supplement emphasis only and must be ignored while not voiced.
     - Dynamics deepening starts with active parameter response cleanup; speech signal and Cubism Physics remain separate owners.
     - Parameter track sampling provides a time-positioned target path, while ParameterPresentation owns active target following and response dynamics.
+    - Part response policy remains an internal ModelEngine mapping in this batch; model/profile-authored response policy is a later contract decision, not an implicit protocol extension.
+    - ActiveParameterMixer owns the final target synthesis and the single active response pass; direct-plan collection must not pre-drive a parameter before source fusion.
+    - Lip-sync contributions remain immediate and bypass active response dynamics when they participate in a parameter group.
 
 documentation:
   authorities:
@@ -88,8 +91,13 @@ verification:
     - Automated tests are low-confidence input/output smoke checks; do not run the full suite.
     - Live AstrBot, Electron, TTS, and Live2D behavior remains user-led runtime acceptance.
   current:
-    - The first dynamics batch changes parameter track transitions to linear target interpolation and removes generic default entry easing; explicit curve presets, ownership release blending, and spring/bounded response policies remain intact for runtime acceptance.
-    - `npm run typecheck:websdk` and `git diff --check` pass for the dynamics cleanup.
+    - The previous dynamics batch changes parameter track transitions to linear target interpolation and removes generic default entry easing; explicit curve presets, ownership release blending, and spring/bounded response policies remain intact.
+    - The current dynamics batch gives gaze, eye, brow, and face groups distinct spring policies while preserving existing head/body values and bounded fallback; mouth groups remain bounded.
+    - ActiveParameterMixer now receives raw direct-plan targets, applies ownership release during source fusion, then runs ParameterPresentation once on the fused target; the old per-direct-contribution pre-smoothing path is removed.
+    - ParameterPresentation no longer owns direct-plan ownership weight or terminal release state; it only advances the final target response, while the Mixer owns release eligibility and completion.
+    - After plan totalMs, direct-plan ownership reaches zero and the presentation nodes continue toward the current base snapshot until settled; the existing clock tail remains the only continuation mechanism.
+    - Lip-sync remains an immediate high-priority contribution and prevents active response dynamics from delaying mouth output; presentation nodes track direct-only targets instead of lip-sync-contaminated values.
+    - `npm run typecheck:renderer`, `npm run typecheck:websdk`, and `git diff --check` pass for the unified response batch.
     - The targeted active-parameter smoke test could not execute because the existing test tsconfig exposes frozen Cubism Framework strict-type and missing-Core-global errors, and the emitted ESM imports are not resolvable by the repository's current Node invocation; no test workaround or source fallback was added.
     - B5-pre Schedule mapping is complete: emphasis/laugh/chuckle adjust the existing phrase emphasis, while hesitate/breath/sigh participate only in the existing strongest-legal hesitation candidate selection.
     - PerformanceSchedule trace v7 records source phrase indices, cue mappings, mapped internal phrase indices, and cue scheduling or rejection decisions; output.segment.v4, engine.motion_intent.v4, and engine.parameter_plan.v3 remain unchanged.

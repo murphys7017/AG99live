@@ -71,7 +71,7 @@ flowchart TB
         PREVIEW[usePreviewMotionPlayer<br/>run ownership / watchdog]:::sdk
         ADAPTER[Live2D adapter<br/>start plan / catalog motion]:::sdk
         LIPLIVE[lipSyncTimelineSink<br/>WebAudio RMS / mouth write]:::sdk
-        WEBSDK[AG99 Live2D Runtime<br/>ParameterPresentation / ActiveParameterMixer]:::sdk
+        WEBSDK[AG99 Live2D Runtime<br/>ActiveParameterMixer -> ParameterPresentation<br/>one final active response pass]:::sdk
         CUBISM[Official Cubism Framework/Core<br/>Model / Physics / Renderer]:::sdk
         PREVIEW --> ADAPTER --> WEBSDK --> CUBISM
         LIPLIVE --> WEBSDK

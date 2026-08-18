@@ -81,9 +81,10 @@ sequenceDiagram
 
         loop 每个渲染帧
             Clock-->>Engine: 可用的 segment-scoped 时间上下文
-            SDK->>SDK: 采样 plan / speech gesture / dynamics
+            SDK->>SDK: Mixer 采样 plan / speech gesture raw target 并合成最终目标
+            SDK->>SDK: ParameterPresentation 对非口型目标执行一次 dynamics
             Lip->>SDK: 同一音频 source 的 active state + RMS mouth value
-            SDK->>SDK: ActiveParameterMixer 统一写入口型；零值保持闭嘴 ownership
+            SDK->>SDK: ActiveParameterMixer 以即时路径写入口型；direct-only response state 不被污染
         end
 
         alt Audio ended
