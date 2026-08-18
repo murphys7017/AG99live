@@ -146,25 +146,58 @@ function mapSemanticBindingDynamics(
   };
 }
 
+type ParameterResponsePolicy = NonNullable<
+  SemanticParameterPlan["parameters"][number]["dynamics"]
+>["response"];
+
+const RESPONSE_POLICY_BY_GROUP: Record<string, ParameterResponsePolicy> = {
+  head: {
+    kind: "spring",
+    frequency_hz: 2.4,
+    damping_ratio: 0.78,
+  },
+  body: {
+    kind: "spring",
+    frequency_hz: 1,
+    damping_ratio: 0.85,
+  },
+  torso: {
+    kind: "spring",
+    frequency_hz: 1,
+    damping_ratio: 0.85,
+  },
+  shoulder: {
+    kind: "spring",
+    frequency_hz: 1.05,
+    damping_ratio: 0.84,
+  },
+  gaze: {
+    kind: "spring",
+    frequency_hz: 3.4,
+    damping_ratio: 0.82,
+  },
+  eye: {
+    kind: "spring",
+    frequency_hz: 4,
+    damping_ratio: 0.88,
+  },
+  brow: {
+    kind: "spring",
+    frequency_hz: 3.2,
+    damping_ratio: 0.82,
+  },
+  face: {
+    kind: "spring",
+    frequency_hz: 3,
+    damping_ratio: 0.84,
+  },
+};
+
 function mapParameterResponsePolicy(
   semanticGroup: string,
-): NonNullable<SemanticParameterPlan["parameters"][number]["dynamics"]>["response"] {
+): ParameterResponsePolicy {
   const group = semanticGroup.trim().toLowerCase();
-  if (group === "head") {
-    return {
-      kind: "spring",
-      frequency_hz: 2.4,
-      damping_ratio: 0.78,
-    };
-  }
-  if (group === "body" || group === "torso" || group === "shoulder") {
-    return {
-      kind: "spring",
-      frequency_hz: 1,
-      damping_ratio: 0.85,
-    };
-  }
-  return { kind: "bounded" };
+  return RESPONSE_POLICY_BY_GROUP[group] ?? { kind: "bounded" };
 }
 
 function mapSemanticBindingValue(
