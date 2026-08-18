@@ -1,9 +1,9 @@
 task:
   class: feature
   risk: medium
-  phase: phase_b5_pre_schedule_mapping
+  phase: phase_b5_speech_energy_activity
   status: validation_complete
-  scope: "Complete B5-pre by mapping provider-neutral speech_cues into the existing PerformanceSchedule phrase emphasis and hesitation policies without adding a clock, player, mixer source, protocol branch, or WebSDK behavior."
+  scope: "Complete the first B5 runtime step by coupling existing SpeechPose modulation to bounded SpeechSignalRuntime activity without adding a clock, player, mixer source, protocol branch, semantic direction, mouth path, Physics path, or official Cubism changes."
 
 context:
   confidence: high
@@ -61,6 +61,7 @@ context:
     - B5-pre transport now carries the canonical segment speech cues through both queued semantic motion and speech-only preparation paths; prepared-motion cache identity includes the cue sequence.
     - Speech cue phrase_index addresses the canonical punctuation-level source phrase, not the internal phrase array after the existing 18-effective-character subdivision; one source phrase may map to multiple internal phrase indices.
     - Speech cues without canonical text are not consumed. Out-of-range cues and cues without a legal timing window remain explicit trace decisions rather than being clamped, shifted, or reinterpreted.
+    - B5 runtime coupling is limited to the existing SpeechPose modulation gain. SpeechSignalRuntime may preserve a bounded activity floor while voiced, but it must not choose semantic direction, write parameters, modify mouth contribution, or alter Cubism Physics output.
 
 documentation:
   authorities:
@@ -90,6 +91,7 @@ verification:
     - The structural cleanup preserves the existing PerformanceSchedule facade while moving phrase/step analysis to performanceScheduleText.ts, internal DTOs to performanceScheduleTypes.ts, and shared deterministic helpers to performanceDeterminism.ts.
     - The redundant contributor-level speech_cues normalization is removed; Persona result normalization and PendingOutputSegment boundary validation remain intact.
     - `npm run typecheck:renderer`, `python -m compileall -q astrbot_plugin_ag99live_adapter`, and `git diff --check` pass for the cleanup batch.
+    - B5-1 adds head/body activity floors to the existing SpeechSignalRuntime gain only; `npm run typecheck:websdk` and `git diff --check` pass, and the direct call chain remains LAppModel -> ActiveParameterMixer -> existing speech modulation gain.
     - The B5-pre compile-input transport batch passes `npm run typecheck:renderer` and `git diff --check`; cue behavior remains owned by the later Schedule mapping batch.
     - AG99 B5-pre transport is source-reviewed: enhanced AstrBot Persona results hand off normalized speech_cues through one-shot event state, output.segment.v4 carries a strict speech slot, and the frontend SessionStore retains the cues without compiling them into motion.
     - speech.state=present requires 1..8 cues on both producer and parser boundaries; an empty cue list is represented only by speech.state=absent.

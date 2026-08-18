@@ -16,9 +16,11 @@ const SPEECH_HEAD_ENVELOPE_ATTACK_PER_SECOND = 8.0;
 const SPEECH_HEAD_ENVELOPE_RELEASE_PER_SECOND = 3.0;
 const SPEECH_BODY_ENVELOPE_ATTACK_PER_SECOND = 4.0;
 const SPEECH_BODY_ENVELOPE_RELEASE_PER_SECOND = 1.8;
+const SPEECH_HEAD_ACTIVITY_FLOOR = 0.32;
 const SPEECH_AUDIO_GAIN_SPAN = 1.18;
 const SPEECH_AUDIO_GAIN_MAX = 1.5;
 const SPEECH_AUDIO_PITCH_GAIN_MAX = 1.15;
+const SPEECH_BODY_ACTIVITY_FLOOR = 0.22;
 const SPEECH_BODY_GAIN_SPAN = 0.78;
 const SPEECH_BODY_GAIN_MAX = 1.0;
 const SPEECH_VOICED_ENTER_THRESHOLD = 0.04;
@@ -195,15 +197,22 @@ export class SpeechSignalRuntime {
     const channelName = axisId.startsWith("voice_following.")
       ? axisId.slice("voice_following.".length).split("|")[0]
       : axisId;
+    const activityFloor = this.speechVoiced
+      ? channelName.startsWith("body_")
+        ? SPEECH_BODY_ACTIVITY_FLOOR
+        : SPEECH_HEAD_ACTIVITY_FLOOR
+      : 0;
     const rawGain = channelName.startsWith("body_")
       ? Math.min(
           SPEECH_BODY_GAIN_MAX,
-          this.speechBodyEnvelope * SPEECH_BODY_GAIN_SPAN
+          activityFloor
+            + this.speechBodyEnvelope * SPEECH_BODY_GAIN_SPAN
             + this.speechEmphasisEnvelope * SPEECH_BODY_EMPHASIS_GAIN,
         )
       : Math.min(
           SPEECH_AUDIO_GAIN_MAX,
-          this.speechHeadEnvelope * SPEECH_AUDIO_GAIN_SPAN
+          activityFloor
+            + this.speechHeadEnvelope * SPEECH_AUDIO_GAIN_SPAN
             + this.speechEmphasisEnvelope * SPEECH_HEAD_EMPHASIS_GAIN,
         );
     return channelName.includes("pitch")
