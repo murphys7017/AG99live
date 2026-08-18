@@ -3,6 +3,7 @@ import type { CubismModel } from "@framework/model/cubismmodel";
 import type { csmVector } from "@framework/type/csmvector";
 import type { DirectParameterExecutionPlan } from "./directparameterplan";
 import {
+  resolveParameterOwnershipWeight,
   resolveParameterPresentationFrame,
   resolveParameterPresentationTrack,
   type ParameterPresentationNode,
@@ -62,6 +63,11 @@ export interface ParameterContribution {
   value: number;
   weight: number;
   priority: number;
+  presentation?: {
+    node: ParameterPresentationNode;
+    elapsedMs: number;
+    timing: DirectParameterExecutionPlan["timing"];
+  };
 }
 
 export type ParameterBaseSnapshot =
@@ -102,6 +108,7 @@ export type ActiveParameterMixerResolution =
   | {
       ok: true;
       parameters: ResolvedParameterFrameEntry[];
+      presentationSettled: boolean;
     }
   | {
       ok: false;
@@ -113,6 +120,7 @@ export interface DirectPlanContributionCollection {
   contributions: ParameterContribution[];
   failure: string | null;
   shouldLogFrame: boolean;
+  releaseEligible: boolean;
   released: boolean;
 }
 
@@ -140,8 +148,8 @@ export type ActiveParameterFrameExecution =
     };
 
 /**
- * Owns active contribution collection, one frozen Cubism base snapshot,
- * deterministic mixing, and the final pre-Physics parameter write.
+ * Owns raw contribution collection, final target synthesis, one response pass,
+ * one frozen Cubism base snapshot, and the final pre-Physics parameter write.
  */
 export class ActiveParameterMixer {
   public resolveActiveFrame(
@@ -177,6 +185,11 @@ export class ActiveParameterMixer {
       };
     }
 
+    const directPlanExecution = {
+      ...directPlan,
+      released: directPlan.releaseEligible && resolution.presentationSettled,
+    };
+
     for (const parameter of resolution.parameters) {
       model.setParameterValueById(parameter.parameterId, parameter.value);
       const readbackValue = model.getParameterValueByIndex(parameter.parameterIndex);
@@ -192,7 +205,7 @@ export class ActiveParameterMixer {
     return {
       ok: true,
       parameters: resolution.parameters,
-      directPlan,
+      directPlan: directPlanExecution,
       lipSyncContributionCount: lipSyncContributions.length,
     };
   }
@@ -239,6 +252,7 @@ export class ActiveParameterMixer {
     }
 
     const parameters: ResolvedParameterFrameEntry[] = [];
+    let presentationSettled = true;
     const orderedGroups = [...grouped.entries()]
       .sort(([leftIndex], [rightIndex]) => leftIndex - rightIndex);
     for (const [parameterIndex, group] of orderedGroups) {
@@ -283,7 +297,8 @@ export class ActiveParameterMixer {
         };
       }
 
-      let unclampedValue = baseValue;
+      let mixedTargetValue = baseValue;
+      let directOnlyTargetValue = baseValue;
       const resolvedContributions: ResolvedParameterContribution[] = [];
       const orderedContributions = group.contributions.sort((left, right) => {
         const priorityOrder = left.priority - right.priority;
@@ -294,7 +309,7 @@ export class ActiveParameterMixer {
         return sourceOrder !== 0 ? sourceOrder : left.sequence - right.sequence;
       });
       for (const contribution of orderedContributions) {
-        const resolvedValue = resolveContributionValue(unclampedValue, contribution);
+        const resolvedValue = resolveContributionValue(mixedTargetValue, contribution);
         resolvedContributions.push({
           owner: contribution.owner,
           source: contribution.source,
@@ -303,9 +318,36 @@ export class ActiveParameterMixer {
           priority: contribution.priority,
           resolvedValue,
         });
-        unclampedValue = resolvedValue;
+        mixedTargetValue = resolvedValue;
+        if (contribution.owner !== "lip_sync") {
+          directOnlyTargetValue = resolveContributionValue(
+            directOnlyTargetValue,
+            contribution,
+          );
+        }
       }
-      const value = clamp(unclampedValue, minValue, maxValue);
+      // Lip sync is intentionally immediate; active response dynamics only
+      // apply after all non-lip contributions have been synthesized.
+      const hasLipSyncContribution = orderedContributions.some(
+        (contribution) => contribution.owner === "lip_sync",
+      );
+      const presentationContribution = orderedContributions.find(
+        (contribution) => contribution.owner !== "lip_sync" && contribution.presentation,
+      );
+      let presentedValue = directOnlyTargetValue;
+      if (presentationContribution?.presentation) {
+        const presentationFrame = resolveParameterPresentationFrame(
+          presentationContribution.presentation.node,
+          directOnlyTargetValue,
+          presentationContribution.presentation.elapsedMs,
+          presentationContribution.presentation.timing,
+        );
+        presentedValue = presentationFrame.drivenValue;
+        presentationSettled = presentationSettled && presentationFrame.settled;
+      }
+      // Keep the active response state current, but never delay lip-sync output.
+      const finalValue = hasLipSyncContribution ? mixedTargetValue : presentedValue;
+      const value = clamp(finalValue, minValue, maxValue);
 
       parameters.push({
         parameterId: snapshot.parameterId,
@@ -313,14 +355,14 @@ export class ActiveParameterMixer {
         parameterIndex,
         owner,
         baseValue,
-        unclampedValue,
+        unclampedValue: finalValue,
         value,
-        clamped: value !== unclampedValue,
+        clamped: value !== finalValue,
         contributions: resolvedContributions,
       });
     }
 
-    return { ok: true, parameters };
+    return { ok: true, parameters, presentationSettled };
   }
 
   private collectDirectPlanContributions(
@@ -332,6 +374,7 @@ export class ActiveParameterMixer {
         contributions: [],
         failure: null,
         shouldLogFrame: false,
+        releaseEligible: false,
         released: false,
       };
     }
@@ -342,12 +385,12 @@ export class ActiveParameterMixer {
         contributions: [],
         failure: "parameter_plan_clock_unavailable",
         shouldLogFrame: false,
+        releaseEligible: false,
         released: false,
       };
     }
 
     const shouldLogFrame = planState.diagnosticFrameCount < 2;
-    let presentationReleased = true;
     const contributions: ParameterContribution[] = [];
     for (const item of planState.semanticBindings) {
       const rawFrameTargetValue = resolveDirectBindingTargetValue(
@@ -356,21 +399,19 @@ export class ActiveParameterMixer {
         item.targetValue,
         getSpeechAudioGain,
       );
-      const presentationFrame = resolveParameterPresentationFrame(
-        item.presentation,
-        rawFrameTargetValue,
-        elapsedMs,
-        planState.timing,
-      );
-      presentationReleased = presentationReleased && presentationFrame.released;
       contributions.push({
         parameterIdRaw: item.parameterIdRaw,
         parameterIndex: item.parameterIndex,
         owner: "direct_plan",
         source: `direct_plan:${item.axisId}`,
-        value: presentationFrame.drivenValue,
-        weight: item.weight * presentationFrame.ownershipWeight,
+        value: rawFrameTargetValue,
+        weight: item.weight * resolveParameterOwnershipWeight(elapsedMs, planState.timing),
         priority: PARAMETER_MIX_PRIORITY.directPlan,
+        presentation: {
+          node: item.presentation,
+          elapsedMs,
+          timing: planState.timing,
+        },
       });
     }
 
@@ -378,7 +419,8 @@ export class ActiveParameterMixer {
       contributions,
       failure: null,
       shouldLogFrame,
-      released: elapsedMs >= planState.timing.totalMs && presentationReleased,
+      releaseEligible: elapsedMs >= planState.timing.totalMs,
+      released: false,
     };
   }
 
