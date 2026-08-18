@@ -103,7 +103,7 @@ export function resolveParameterPresentationTrack(
       return interpolate(
         previous.value,
         next.value,
-        smoothstep((elapsedMs - next.atMs) / next.transitionMs),
+        clampUnit((elapsedMs - next.atMs) / next.transitionMs),
       );
     }
     previous = next;
@@ -148,7 +148,9 @@ function resolveTrajectoryEnvelope(
         Math.min(1.08, easeOutBack(progress)),
       );
     }
-    return interpolate(node.initialValue, frameTargetValue, smoothstep(progress));
+    // Standard entry is solved by the response policy below. Only explicit
+    // curve presets are allowed to shape the target trajectory here.
+    return frameTargetValue;
   }
 
   if (elapsed < blendInMs + holdMs) {

@@ -163,12 +163,6 @@ function resolveTimelineTargetDurationMs(
   );
 }
 
-function resolveMotionTargetDurationMs(
-  context: StartPayloadContext,
-): number | null {
-  return resolveTimelineTargetDurationMs(context);
-}
-
 function isSpeechActiveForPayload(
   context: StartPayloadContext,
 ): boolean {
@@ -231,7 +225,7 @@ function prepareCompilableMotionPayload(
     );
   }
   state.setState("compiling", "正在编译动作意图...", null);
-  let targetDurationMs = resolveMotionTargetDurationMs(context);
+  let targetDurationMs = resolveTimelineTargetDurationMs(context);
   let speechActive = isSpeechActiveForPayload(context);
   let intent = resolveCompilerIntent(payload);
   if (isMotionResourceIntent(intent)) {
