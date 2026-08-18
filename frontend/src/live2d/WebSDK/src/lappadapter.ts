@@ -118,7 +118,11 @@ export class LAppAdapter {
 
   public writeExternalAudioSignalSource(
     sourceId: string,
-    values: { lipSyncIntensity?: number; speechEnergyValue?: number },
+    values: {
+      lipSyncIntensity?: number;
+      speechEnergyValue?: number;
+      speechEmphasisValue?: number;
+    },
   ): void {
     const model = this.getModel();
     if (!model) {

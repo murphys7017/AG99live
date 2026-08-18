@@ -53,7 +53,11 @@ declare global {
       ) => void;
       writeExternalAudioSignalSource?: (
         sourceId: string,
-        values: { lipSyncIntensity?: number; speechEnergyValue?: number },
+        values: {
+          lipSyncIntensity?: number;
+          speechEnergyValue?: number;
+          speechEmphasisValue?: number;
+        },
       ) => void;
       endExternalAudioSignalSource?: (sourceId: string) => void;
       hasConfiguredLipSyncParameters?: () => boolean;

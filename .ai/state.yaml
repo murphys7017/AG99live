@@ -1,9 +1,9 @@
 task:
   class: feature
   risk: medium
-  phase: phase_b5_speech_emphasis_stability
+  phase: phase_b5_spectral_emphasis
   status: validation_complete
-  scope: "Complete the second B5 runtime step by deriving speech emphasis from the existing smoothed head activity envelope without adding a clock, player, mixer source, protocol branch, semantic direction, mouth path, Physics path, or official Cubism changes."
+  scope: "Complete the third B5 runtime step by deriving an optional speech emphasis fact from the existing AnalyserNode frequency bands and consuming it through the existing SpeechSignalRuntime emphasis envelope without adding a clock, player, mixer source, protocol branch, semantic direction, mouth path, Physics path, or official Cubism changes."
 
 context:
   confidence: high
@@ -63,6 +63,7 @@ context:
     - Speech cues without canonical text are not consumed. Out-of-range cues and cues without a legal timing window remain explicit trace decisions rather than being clamped, shifted, or reinterpreted.
     - B5 runtime coupling is limited to the existing SpeechPose modulation gain. SpeechSignalRuntime may preserve a bounded activity floor while voiced, but it must not choose semantic direction, write parameters, modify mouth contribution, or alter Cubism Physics output.
     - B5 emphasis stability derives rise from the existing head activity envelope; raw RMS frame deltas must not directly create emphasis spikes or a second smoothing path.
+    - B5 spectral emphasis is a bounded ratio from the existing audio analyser, not a new audio clock or predictive timeline; it may supplement emphasis only and must be ignored while not voiced.
 
 documentation:
   authorities:
@@ -94,6 +95,7 @@ verification:
     - `npm run typecheck:renderer`, `python -m compileall -q astrbot_plugin_ag99live_adapter`, and `git diff --check` pass for the cleanup batch.
     - B5-1 adds head/body activity floors to the existing SpeechSignalRuntime gain only; `npm run typecheck:websdk` and `git diff --check` pass, and the direct call chain remains LAppModel -> ActiveParameterMixer -> existing speech modulation gain.
     - B5-2 removes the duplicate raw-energy history and derives emphasis from the existing smoothed head envelope; `npm run typecheck:websdk` and `git diff --check` pass.
+    - B5-3 derives a bounded upper-speech-band ratio from the existing AnalyserNode, carries it through the existing frontend AG99 audio bridge, and merges it in SpeechSignalRuntime; `npm run typecheck:websdk`, `npm run typecheck:renderer`, and `git diff --check` pass.
     - The B5-pre compile-input transport batch passes `npm run typecheck:renderer` and `git diff --check`; cue behavior remains owned by the later Schedule mapping batch.
     - AG99 B5-pre transport is source-reviewed: enhanced AstrBot Persona results hand off normalized speech_cues through one-shot event state, output.segment.v4 carries a strict speech slot, and the frontend SessionStore retains the cues without compiling them into motion.
     - speech.state=present requires 1..8 cues on both producer and parser boundaries; an empty cue list is represented only by speech.state=absent.

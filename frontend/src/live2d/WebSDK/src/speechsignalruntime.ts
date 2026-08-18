@@ -1,6 +1,7 @@
 export interface ExternalAudioSignalValues {
   lipSyncIntensity?: number;
   speechEnergyValue?: number;
+  speechEmphasisValue?: number;
 }
 
 export interface ExternalAudioSignalSourceOptions {
@@ -30,6 +31,7 @@ const SPEECH_EMPHASIS_RISE_GAIN = 0.09;
 const SPEECH_EMPHASIS_ATTACK_PER_SECOND = 18.0;
 const SPEECH_EMPHASIS_RELEASE_PER_SECOND = 7.0;
 const SPEECH_EMPHASIS_MAX = 0.42;
+const SPEECH_AUDIO_EMPHASIS_MAX = 0.18;
 const SPEECH_HEAD_EMPHASIS_GAIN = 0.34;
 const SPEECH_BODY_EMPHASIS_GAIN = 0.18;
 const LIP_SYNC_DIAGNOSTIC_FRAME_LIMIT = 2;
@@ -43,6 +45,7 @@ export class SpeechSignalRuntime {
   private activeSourceId: string | null = null;
   private lipSyncIntensity = 0;
   private speechEnergyValue = 0;
+  private speechEmphasisValue = 0;
   private speechHeadEnvelope = 0;
   private speechBodyEnvelope = 0;
   private speechEmphasisEnvelope = 0;
@@ -61,6 +64,7 @@ export class SpeechSignalRuntime {
     this.activeSourceId = normalizedSourceId;
     this.lipSyncIntensity = 0;
     this.speechEnergyValue = 0;
+    this.speechEmphasisValue = 0;
     this.speechEmphasisEnvelope = 0;
     this.speechVoiced = false;
     this.lipSyncDiagnosticFrameCount = 0;
@@ -84,6 +88,12 @@ export class SpeechSignalRuntime {
       this.speechEnergyValue = validateNormalizedSignal(
         values.speechEnergyValue,
         "speech_signal_invalid_energy_value",
+      );
+    }
+    if (values.speechEmphasisValue !== undefined) {
+      this.speechEmphasisValue = validateNormalizedSignal(
+        values.speechEmphasisValue,
+        "speech_signal_invalid_emphasis_value",
       );
     }
   }
@@ -160,12 +170,16 @@ export class SpeechSignalRuntime {
     const positiveHeadEnvelopeRise = deltaTimeSeconds > 0
       ? positiveHeadEnvelopeDelta / deltaTimeSeconds
       : 0;
+    const envelopeEmphasisTarget = clamp(
+      (positiveHeadEnvelopeRise - SPEECH_EMPHASIS_RISE_THRESHOLD_PER_SECOND)
+        * SPEECH_EMPHASIS_RISE_GAIN,
+      0,
+      SPEECH_EMPHASIS_MAX,
+    );
     const emphasisTarget = this.speechVoiced
-      ? clamp(
-          (positiveHeadEnvelopeRise - SPEECH_EMPHASIS_RISE_THRESHOLD_PER_SECOND)
-            * SPEECH_EMPHASIS_RISE_GAIN,
-          0,
-          SPEECH_EMPHASIS_MAX,
+      ? Math.max(
+          envelopeEmphasisTarget,
+          this.speechEmphasisValue * SPEECH_AUDIO_EMPHASIS_MAX,
         )
       : 0;
     this.speechEmphasisEnvelope = advanceEnvelope(
@@ -252,6 +266,7 @@ export class SpeechSignalRuntime {
     this.activeSourceFailureHandler = null;
     this.lipSyncIntensity = 0;
     this.speechEnergyValue = 0;
+    this.speechEmphasisValue = 0;
     this.speechEmphasisEnvelope = 0;
     this.speechVoiced = false;
     this.lipSyncDiagnosticFrameCount = 0;

@@ -2,6 +2,12 @@ import type {
   PlaybackTimelineLipSyncSink,
 } from "../playback-timeline/lipSyncSink.js";
 
+const SPEECH_ANALYSIS_BAND_MIN_HZ = 160;
+const SPEECH_ANALYSIS_BAND_MAX_HZ = 4200;
+const SPEECH_EMPHASIS_BAND_MIN_HZ = 900;
+const SPEECH_EMPHASIS_RATIO_FLOOR = 0.24;
+const SPEECH_EMPHASIS_RATIO_SPAN = 0.24;
+
 interface LiveLipSyncRuntime {
   resume: () => Promise<string | null>;
   stop: () => void;
@@ -203,6 +209,7 @@ function startLiveLipSync(
     analyser.connect(audioContext.destination);
 
     const samples = new Uint8Array(analyser.fftSize);
+    const frequencyBins = new Uint8Array(analyser.frequencyBinCount);
     let animationFrameId: number | null = null;
     let stopped = false;
     let resumeFallback: LiveLipSyncRuntime | null = null;
@@ -213,6 +220,7 @@ function startLiveLipSync(
         return;
       }
       analyser.getByteTimeDomainData(samples);
+      analyser.getByteFrequencyData(frequencyBins);
       let squareSum = 0;
       for (const sample of samples) {
         const centered = (sample - 128) / 128;
@@ -221,10 +229,15 @@ function startLiveLipSync(
       const rms = Math.sqrt(squareSum / samples.length);
       const lipSyncIntensity = Math.max(0, Math.min(1, (rms - 0.012) * 30));
       const speechEnergyValue = Math.max(0, Math.min(1, (rms - 0.008) * 5.5));
+      const speechEmphasisValue = resolveSpeechEmphasisValue(
+        frequencyBins,
+        audioContext.sampleRate,
+      );
       try {
         writeAudioSignalSource(sourceId, {
           lipSyncIntensity,
           speechEnergyValue,
+          speechEmphasisValue,
         });
         if (!firstFrameLogged) {
           firstFrameLogged = true;
@@ -232,6 +245,7 @@ function startLiveLipSync(
             hasLipSyncParameters,
             lipSyncIntensity,
             speechEnergyValue,
+            speechEmphasisValue,
           });
         }
       } catch (error) {
@@ -326,6 +340,59 @@ function reportLipSyncFailure(
 ): LiveLipSyncStartResult {
   console.error("[Live2D] lip sync failed.", { reason, error });
   return { runtime, failureReason: reason };
+}
+
+function resolveSpeechEmphasisValue(
+  frequencyBins: Uint8Array,
+  sampleRate: number,
+): number {
+  if (frequencyBins.length === 0 || !Number.isFinite(sampleRate) || sampleRate <= 0) {
+    return 0;
+  }
+  const binWidthHz = sampleRate / (frequencyBins.length * 2);
+  const speechBandEnergy = resolveFrequencyBandEnergy(
+    frequencyBins,
+    binWidthHz,
+    SPEECH_ANALYSIS_BAND_MIN_HZ,
+    SPEECH_ANALYSIS_BAND_MAX_HZ,
+  );
+  if (speechBandEnergy <= 0) {
+    return 0;
+  }
+  const upperSpeechBandEnergy = resolveFrequencyBandEnergy(
+    frequencyBins,
+    binWidthHz,
+    SPEECH_EMPHASIS_BAND_MIN_HZ,
+    SPEECH_ANALYSIS_BAND_MAX_HZ,
+  );
+  const upperBandRatio = upperSpeechBandEnergy / speechBandEnergy;
+  return Math.max(
+    0,
+    Math.min(
+      1,
+      (upperBandRatio - SPEECH_EMPHASIS_RATIO_FLOOR)
+        / SPEECH_EMPHASIS_RATIO_SPAN,
+    ),
+  );
+}
+
+function resolveFrequencyBandEnergy(
+  frequencyBins: Uint8Array,
+  binWidthHz: number,
+  minFrequencyHz: number,
+  maxFrequencyHz: number,
+): number {
+  const minBin = Math.max(0, Math.ceil(minFrequencyHz / binWidthHz));
+  const maxBin = Math.min(
+    frequencyBins.length - 1,
+    Math.floor(maxFrequencyHz / binWidthHz),
+  );
+  let energy = 0;
+  for (let index = minBin; index <= maxBin; index += 1) {
+    const normalizedMagnitude = frequencyBins[index] / 255;
+    energy += normalizedMagnitude * normalizedMagnitude;
+  }
+  return energy;
 }
 
 function createRandomLipSyncRuntime(
