@@ -785,6 +785,16 @@ function appendPerformanceScheduleDiagnostics(
   lines.push(
     `事件来源: semantic ${semanticEventCount}, gaze ${gazeEventCount}, face ${faceEventCount}, hesitation ${hesitationEventCount}, speech ${speechEventCount}; 参数节点: keyframe ${keyframeNodeCount}, modulation ${speechNodeCount}`,
   );
+  appendList(
+    lines,
+    "语音提示映射",
+    schedule.speechCueMappings.map((mapping) => {
+      const targets = mapping.targetPhraseIndices.length > 0
+        ? mapping.targetPhraseIndices.map((index) => index + 1).join("/")
+        : "无";
+      return `#${mapping.cueIndex + 1} ${mapping.kind} ${mapping.position} source ${mapping.sourcePhraseIndex + 1} -> phrase ${targets} (${mapping.status}: ${mapping.reason})`;
+    }),
+  );
   appendList(lines, "编排决策", schedule.decisions);
   const nodesByEventId = new Map<string, typeof schedule.parameterNodes>();
   for (const node of schedule.parameterNodes) {

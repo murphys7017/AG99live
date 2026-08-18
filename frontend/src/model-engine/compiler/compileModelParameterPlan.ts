@@ -33,6 +33,7 @@ export function compileModelParameterPlan(
 ): CompileResult {
   const performanceScheduleResult = compilePerformanceSchedule({
     assistantText: options.assistantText,
+    speechCues: options.speechCues,
     durationMs: semanticMotion.timing.timing.duration_ms,
     intentTags: semanticMotion.intentTags,
     sequenceSteps: semanticMotion.kind === "sequence"

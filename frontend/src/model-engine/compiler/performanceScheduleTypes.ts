@@ -2,17 +2,29 @@ import type {
   PerformanceParameterNodeTrace,
   PerformanceTimingEventTrace,
 } from "../../types/compiledSemanticMotion.js";
+import type { OutputSegmentSpeechCue } from "../../types/protocol.js";
 
 export type PerformancePhraseBoundary = "strong" | "soft" | "none";
 
 export interface PerformancePhraseSlot {
   readonly index: number;
+  readonly sourcePhraseIndex: number;
   readonly text: string;
   readonly boundary: PerformancePhraseBoundary;
   readonly weight: number;
   readonly emphasis: number;
   readonly startRatio: number;
   readonly endRatio: number;
+}
+
+export interface PerformanceSpeechCueMapping {
+  readonly cueIndex: number;
+  readonly kind: OutputSegmentSpeechCue["kind"];
+  readonly sourcePhraseIndex: number;
+  readonly position: OutputSegmentSpeechCue["position"];
+  readonly targetPhraseIndices: readonly number[];
+  readonly status: "mapped" | "ignored";
+  readonly reason: string;
 }
 
 export interface PerformanceSemanticStepSlot {
@@ -62,6 +74,7 @@ export interface PerformanceSchedule {
   readonly durationMs: number;
   readonly textSource: "assistant_text" | "duration_only";
   readonly phrases: readonly PerformancePhraseSlot[];
+  readonly speechCueMappings: readonly PerformanceSpeechCueMapping[];
   readonly semanticSteps: readonly PerformanceSemanticStepSlot[];
   readonly estimatedAlignments: readonly PerformancePhraseStepAlignment[];
   readonly semanticReversalStepIndices: readonly number[];

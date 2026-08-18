@@ -4,6 +4,7 @@ import {
   type PerformanceScheduleTrace,
   type PerformanceTimingEventTrace,
 } from "../../types/compiledSemanticMotion.js";
+import type { OutputSegmentSpeechCue } from "../../types/protocol.js";
 import {
   MAX_MOTION_DURATION_MS,
   MAX_PARAMETER_KEYFRAME_COUNT,
@@ -18,6 +19,7 @@ import {
   coalesceSpeechPhrases,
   compileSemanticStepSlots,
   estimatePhraseStepAlignments,
+  applySpeechCuesToPhrases,
   resolveGesturePhraseLimit,
   segmentAssistantText,
 } from "./performanceScheduleText.js";
@@ -31,6 +33,7 @@ import type {
   PerformanceScheduleCompileResult,
   PerformanceScheduleMutationResult,
   PerformanceSequenceStepInput,
+  PerformanceSpeechCueMapping,
   PerformanceSpeechPhraseGroup,
   PerformanceSpeechTrackTiming,
   PerformanceStagedPartTrackStrategy,
@@ -48,6 +51,7 @@ export type {
   PerformanceSemanticStepSlot,
   PerformanceSpeechPhraseGroup,
   PerformanceSpeechTrackTiming,
+  PerformanceSpeechCueMapping,
   PerformanceStagedPartTrackStrategy,
 } from "./performanceScheduleTypes.js";
 
@@ -59,6 +63,7 @@ interface PerformanceHesitationCandidate {
   stepIndex?: number;
   afterPhraseIndex?: number;
   phraseIndices?: readonly number[];
+  speechCueIndex?: number;
 }
 
 interface PerformanceTrackTimingPolicy {
@@ -135,6 +140,7 @@ export function resolvePerformancePartTrackStrategy(
 
 export function compilePerformanceSchedule(options: {
   assistantText?: string;
+  speechCues?: readonly OutputSegmentSpeechCue[];
   durationMs: number;
   intentTags?: readonly string[];
   sequenceSteps?: readonly PerformanceSequenceStepInput[];
@@ -153,6 +159,7 @@ export function compilePerformanceSchedule(options: {
   const text = typeof options.assistantText === "string"
     ? options.assistantText.trim()
     : "";
+  const textSource = text ? "assistant_text" : "duration_only";
   const drafts = segmentAssistantText(text);
   const totalWeight = drafts.reduce((sum, phrase) => sum + phrase.weight, 0);
   let elapsedWeight = 0;
@@ -166,6 +173,10 @@ export function compilePerformanceSchedule(options: {
       endRatio: elapsedWeight / totalWeight,
     };
   });
+  const speechCueResult = textSource === "assistant_text"
+    ? applySpeechCuesToPhrases(phrases, options.speechCues)
+    : { phrases, mappings: [] };
+  const resolvedPhrases = speechCueResult.phrases;
   const semanticStepsResult = compileSemanticStepSlots(
     options.sequenceSteps?.map((step) => step.durationWeight),
     options.durationMs,
@@ -173,18 +184,18 @@ export function compilePerformanceSchedule(options: {
   if (!semanticStepsResult.ok) {
     return semanticStepsResult;
   }
-  const textSource = text ? "assistant_text" : "duration_only";
   const semanticSteps = semanticStepsResult.semanticSteps;
   const semanticReversalStepIndices = resolveSemanticReversalStepIndices(
     options.sequenceSteps,
   );
   const estimatedAlignments = textSource === "assistant_text"
-    ? estimatePhraseStepAlignments(phrases, semanticSteps, options.durationMs)
+    ? estimatePhraseStepAlignments(resolvedPhrases, semanticSteps, options.durationMs)
     : [];
   const schedule: PerformanceSchedule = {
     durationMs: options.durationMs,
     textSource,
-    phrases,
+    phrases: resolvedPhrases,
+    speechCueMappings: speechCueResult.mappings,
     semanticSteps,
     estimatedAlignments,
     semanticReversalStepIndices,
@@ -223,6 +234,10 @@ export function buildPerformanceScheduleTrace(
     estimatedAlignments: schedule.estimatedAlignments.map((alignment) => ({
       ...alignment,
     })),
+    speechCueMappings: schedule.speechCueMappings.map((mapping) => ({
+      ...mapping,
+      targetPhraseIndices: [...mapping.targetPhraseIndices],
+    })),
     decisions: [...schedule.decisions],
     events: schedule.events.map((event) => ({
       ...event,
@@ -245,7 +260,9 @@ function compileHesitationWindows(
         > schedule.durationMs - HESITATION_MIN_REMAINING_MS
     ) {
       mutableDecisions(schedule).push(
-        `hesitation_not_scheduled:insufficient_window:${candidate.reason}:${candidate.anchorAtMs}`,
+        candidate.speechCueIndex === undefined
+          ? `hesitation_not_scheduled:insufficient_window:${candidate.reason}:${candidate.anchorAtMs}`
+          : `speech_cue_not_scheduled:${candidate.speechCueIndex}:insufficient_window:${candidate.anchorAtMs}`,
       );
       continue;
     }
@@ -256,6 +273,23 @@ function compileHesitationWindows(
   ))[0];
   if (!selected) {
     return { ok: true, value: [], reason: "" };
+  }
+  for (const candidate of legalCandidates) {
+    if (
+      candidate.speechCueIndex !== undefined
+      && candidate !== selected
+    ) {
+      recordPerformanceDecision(
+        schedule,
+        `speech_cue_not_scheduled:${candidate.speechCueIndex}:competing_window`,
+      );
+    }
+  }
+  if (selected.speechCueIndex !== undefined) {
+    recordPerformanceDecision(
+      schedule,
+      `speech_cue_scheduled:${selected.speechCueIndex}:${selected.anchorAtMs}->${selected.anchorAtMs + selected.holdMs}`,
+    );
   }
 
   const window: PerformanceHesitationWindow = {
@@ -1524,6 +1558,59 @@ function collectHesitationCandidates(
         stepIndex: 1,
       });
     }
+  }
+
+  for (const mapping of schedule.speechCueMappings) {
+    if (
+      mapping.status !== "mapped"
+      || (mapping.kind !== "hesitate"
+        && mapping.kind !== "breath"
+        && mapping.kind !== "sigh")
+    ) {
+      continue;
+    }
+    const firstTarget = mapping.targetPhraseIndices[0];
+    const lastTarget = mapping.targetPhraseIndices[mapping.targetPhraseIndices.length - 1];
+    if (firstTarget === undefined || lastTarget === undefined) {
+      continue;
+    }
+    const afterPhraseIndex = mapping.position === "after"
+      ? lastTarget
+      : firstTarget > 0 ? firstTarget - 1 : undefined;
+    const stepIndex = afterPhraseIndex === undefined
+      ? undefined
+      : resolveStepIndexAfterPhrase(schedule, afterPhraseIndex);
+    const anchorPhraseIndex = mapping.position === "after"
+      ? lastTarget
+      : firstTarget;
+    const phrase = schedule.phrases[anchorPhraseIndex];
+    const anchorAtMs = stepIndex === undefined
+      ? Math.round(
+          ((mapping.position === "after"
+            ? phrase?.endRatio
+            : phrase?.startRatio) ?? 0) * schedule.durationMs,
+        )
+      : schedule.semanticSteps[stepIndex].startMs;
+    candidates.push({
+      reason: "speech_cue",
+      anchorAtMs,
+      holdMs: mapping.kind === "hesitate"
+        ? 140
+        : mapping.kind === "sigh"
+          ? 110
+          : 80,
+      priority: mapping.kind === "hesitate"
+        ? 115
+        : mapping.kind === "sigh"
+          ? 75
+          : 65,
+      stepIndex,
+      afterPhraseIndex,
+      phraseIndices: afterPhraseIndex === undefined
+        ? undefined
+        : [afterPhraseIndex],
+      speechCueIndex: mapping.cueIndex,
+    });
   }
 
   return candidates;

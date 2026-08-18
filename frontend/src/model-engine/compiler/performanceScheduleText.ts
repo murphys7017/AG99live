@@ -5,10 +5,13 @@ import type {
   PerformancePhraseStepAlignment,
   PerformanceScheduleCompileResult,
   PerformanceSemanticStepSlot,
+  PerformanceSpeechCueMapping,
   PerformanceSpeechPhraseGroup,
 } from "./performanceScheduleTypes.js";
+import type { OutputSegmentSpeechCue } from "../../types/protocol.js";
 
 interface PerformancePhraseDraft {
+  sourcePhraseIndex: number;
   text: string;
   boundary: PerformancePhraseBoundary;
   weight: number;
@@ -19,11 +22,12 @@ const MAX_EFFECTIVE_PHRASE_LENGTH = 18;
 
 export function segmentAssistantText(text: string): PerformancePhraseDraft[] {
   if (!text) {
-    return [createPhrase("", "none")];
+    return [createPhrase("", "none", 0)];
   }
 
   const phrases: PerformancePhraseDraft[] = [];
   let buffer = "";
+  let sourcePhraseIndex = 0;
   const characters = Array.from(text);
   for (let index = 0; index < characters.length; index += 1) {
     const character = characters[index];
@@ -38,11 +42,65 @@ export function segmentAssistantText(text: string): PerformancePhraseDraft[] {
     if (boundary === "none") {
       continue;
     }
-    appendSplitPhrase(phrases, buffer, boundary);
+    appendSplitPhrase(phrases, buffer, boundary, sourcePhraseIndex);
     buffer = "";
+    sourcePhraseIndex += 1;
   }
-  appendSplitPhrase(phrases, buffer, "none");
-  return phrases.length > 0 ? phrases : [createPhrase("", "none")];
+  appendSplitPhrase(phrases, buffer, "none", sourcePhraseIndex);
+  return phrases.length > 0 ? phrases : [createPhrase("", "none", 0)];
+}
+
+export function applySpeechCuesToPhrases(
+  phrases: readonly PerformancePhraseSlot[],
+  cues: readonly OutputSegmentSpeechCue[] | undefined,
+): {
+  phrases: PerformancePhraseSlot[];
+  mappings: PerformanceSpeechCueMapping[];
+} {
+  let nextPhrases = phrases.map((phrase) => ({ ...phrase }));
+  const mappings: PerformanceSpeechCueMapping[] = [];
+  const inputCues = cues ?? [];
+  for (let cueIndex = 0; cueIndex < inputCues.length; cueIndex += 1) {
+    const cue = inputCues[cueIndex];
+    const targetPhraseIndices = nextPhrases
+      .filter((phrase) => phrase.sourcePhraseIndex === cue.phrase_index)
+      .map((phrase) => phrase.index);
+    if (targetPhraseIndices.length === 0) {
+      mappings.push({
+        cueIndex,
+        kind: cue.kind,
+        sourcePhraseIndex: cue.phrase_index,
+        position: cue.position,
+        targetPhraseIndices: [],
+        status: "ignored",
+        reason: "speech_cue_source_phrase_not_found",
+      });
+      continue;
+    }
+
+    const emphasisMultiplier = resolveSpeechCueEmphasisMultiplier(cue.kind);
+    if (emphasisMultiplier !== 1) {
+      const targetSet = new Set(targetPhraseIndices);
+      nextPhrases = nextPhrases.map((phrase) => (
+        targetSet.has(phrase.index)
+          ? {
+              ...phrase,
+              emphasis: Math.min(1.24, phrase.emphasis * emphasisMultiplier),
+            }
+          : phrase
+      ));
+    }
+    mappings.push({
+      cueIndex,
+      kind: cue.kind,
+      sourcePhraseIndex: cue.phrase_index,
+      position: cue.position,
+      targetPhraseIndices,
+      status: "mapped",
+      reason: resolveSpeechCueMappingReason(cue.kind),
+    });
+  }
+  return { phrases: nextPhrases, mappings };
 }
 
 export function compileSemanticStepSlots(
@@ -181,6 +239,7 @@ function appendSplitPhrase(
   target: PerformancePhraseDraft[],
   text: string,
   boundary: PerformancePhraseBoundary,
+  sourcePhraseIndex: number,
 ): void {
   const normalizedText = text.trim();
   if (!normalizedText) {
@@ -188,7 +247,7 @@ function appendSplitPhrase(
   }
   const characters = Array.from(normalizedText);
   if (!characters.some(isEffectiveSpeechCharacter)) {
-    appendPhrase(target, normalizedText, boundary);
+    appendPhrase(target, normalizedText, boundary, sourcePhraseIndex);
     return;
   }
   let chunk = "";
@@ -203,17 +262,18 @@ function appendSplitPhrase(
     if (effectiveLength < MAX_EFFECTIVE_PHRASE_LENGTH || !hasMore) {
       continue;
     }
-    appendPhrase(target, chunk, "none");
+    appendPhrase(target, chunk, "none", sourcePhraseIndex);
     chunk = "";
     effectiveLength = 0;
   }
-  appendPhrase(target, chunk, boundary);
+  appendPhrase(target, chunk, boundary, sourcePhraseIndex);
 }
 
 function appendPhrase(
   target: PerformancePhraseDraft[],
   text: string,
   boundary: PerformancePhraseBoundary,
+  sourcePhraseIndex: number,
 ): void {
   const normalizedText = text.trim();
   if (!normalizedText) {
@@ -224,19 +284,25 @@ function appendPhrase(
     if (!previous) {
       return;
     }
-    const merged = createPhrase(previous.text + normalizedText, boundary);
+    const merged = createPhrase(
+      previous.text + normalizedText,
+      boundary,
+      previous.sourcePhraseIndex,
+    );
+    previous.sourcePhraseIndex = merged.sourcePhraseIndex;
     previous.text = merged.text;
     previous.boundary = merged.boundary;
     previous.weight = merged.weight;
     previous.emphasis = merged.emphasis;
     return;
   }
-  target.push(createPhrase(normalizedText, boundary));
+  target.push(createPhrase(normalizedText, boundary, sourcePhraseIndex));
 }
 
 function createPhrase(
   text: string,
   boundary: PerformancePhraseBoundary,
+  sourcePhraseIndex: number,
 ): PerformancePhraseDraft {
   const effectiveLength = Math.max(
     1,
@@ -250,11 +316,42 @@ function createPhrase(
     emphasis = 1.08;
   }
   return {
+    sourcePhraseIndex,
     text,
     boundary,
     weight: effectiveLength + pauseWeight,
     emphasis,
   };
+}
+
+function resolveSpeechCueEmphasisMultiplier(
+  kind: OutputSegmentSpeechCue["kind"],
+): number {
+  switch (kind) {
+    case "laugh":
+      return 1.12;
+    case "chuckle":
+      return 1.08;
+    case "emphasis":
+      return 1.08;
+    default:
+      return 1;
+  }
+}
+
+function resolveSpeechCueMappingReason(
+  kind: OutputSegmentSpeechCue["kind"],
+): string {
+  switch (kind) {
+    case "breath":
+    case "sigh":
+    case "hesitate":
+      return "speech_cue_hesitation_candidate";
+    case "laugh":
+    case "chuckle":
+    case "emphasis":
+      return "speech_cue_phrase_emphasis";
+  }
 }
 
 function resolvePhraseBoundary(character: string): PerformancePhraseBoundary {

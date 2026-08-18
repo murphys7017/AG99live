@@ -6,7 +6,7 @@ import type {
 } from "./protocol.js";
 
 export const SEMANTIC_MOTION_TRANSFORM_VERSION = "semantic_motion_transform.v5";
-export const PERFORMANCE_SCHEDULE_TRACE_VERSION = "performance_schedule_trace.v6";
+export const PERFORMANCE_SCHEDULE_TRACE_VERSION = "performance_schedule_trace.v7";
 
 export type CompiledSemanticAxisSource = "semantic_axis" | "relation_graph";
 
@@ -112,6 +112,7 @@ export interface PerformanceScheduleTrace {
   textSource: "assistant_text" | "duration_only";
   phrases: Array<{
     index: number;
+    sourcePhraseIndex: number;
     text: string;
     boundary: "strong" | "soft" | "none";
     weight: number;
@@ -135,6 +136,15 @@ export interface PerformanceScheduleTrace {
     phraseCoverageRatio: number;
     stepCoverageRatio: number;
     primaryForPhrase: boolean;
+  }>;
+  speechCueMappings: Array<{
+    cueIndex: number;
+    kind: "breath" | "sigh" | "laugh" | "chuckle" | "hesitate" | "emphasis";
+    sourcePhraseIndex: number;
+    position: "before" | "after";
+    targetPhraseIndices: number[];
+    status: "mapped" | "ignored";
+    reason: string;
   }>;
   decisions: string[];
   events: PerformanceTimingEventTrace[];
@@ -194,7 +204,8 @@ export interface PerformanceTimingEventTrace {
     | "transition"
     | "soft_boundary"
     | "intent_tag"
-    | "semantic_reversal";
+    | "semantic_reversal"
+    | "speech_cue";
 }
 
 export interface PerformanceParameterNodeTrace {

@@ -1,9 +1,9 @@
 task:
-  class: refactor
+  class: feature
   risk: medium
-  phase: phase_b5_pre_schedule_transport
+  phase: phase_b5_pre_schedule_mapping
   status: validation_complete
-  scope: "Complete the B5-pre compile-input boundary: project the existing SessionStore speech_cues through SegmentJob, PlaybackTimeline motion context, ModelEngine scheduling, and prepared-motion cache identity without compiling cue behavior yet."
+  scope: "Complete B5-pre by mapping provider-neutral speech_cues into the existing PerformanceSchedule phrase emphasis and hesitation policies without adding a clock, player, mixer source, protocol branch, or WebSDK behavior."
 
 context:
   confidence: high
@@ -55,10 +55,12 @@ context:
     - `engine.parameter_plan.v3` has one global blend-out. Part tracks may request different minimum ownership windows, but they cannot claim independent runtime release without a protocol and ParameterMixer ownership-envelope change.
     - The sequence track graph owns finalizing the one actual V3 release after all per-axis requirements are known; gaze/face release trace events must match that global blend start.
     - Hesitation delays are cumulative after the selected window. A downstream event that cannot retain legal ordering and fit before its fixed release fails compilation instead of being compressed or truncated.
-    - B5-pre is split at the real process boundary: AstrBot owns Provider-neutral `speech_cues` generation, normalization, and the post-result hook; AG99 now transports the cues through output.segment.v4 and retains them in the frontend SessionStore, while existing PerformanceSchedule mapping remains pending and must not create a TTS text transformer, private clock, new mixer source, or provider-specific motion path.
+    - B5-pre is split at the real process boundary: AstrBot owns Provider-neutral `speech_cues` generation, normalization, and the post-result hook; AG99 transports the cues through output.segment.v4 and maps them only inside the existing PerformanceSchedule without creating a TTS text transformer, private clock, new mixer source, or provider-specific motion path.
     - PerformanceSchedule remains the single compile-time scheduling owner, while canonical text segmentation, shared DTOs, and deterministic sampling helpers live in focused internal compiler modules behind the existing performanceSchedule.ts facade.
     - Enhanced-Core speech cues are normalized when the Persona result enters AG99 and validated again when platform extras enter PendingOutputSegment; the one-shot contributor handoff only consumes the private normalized value and must not add a third normalization pass.
     - B5-pre transport now carries the canonical segment speech cues through both queued semantic motion and speech-only preparation paths; prepared-motion cache identity includes the cue sequence.
+    - Speech cue phrase_index addresses the canonical punctuation-level source phrase, not the internal phrase array after the existing 18-effective-character subdivision; one source phrase may map to multiple internal phrase indices.
+    - Speech cues without canonical text are not consumed. Out-of-range cues and cues without a legal timing window remain explicit trace decisions rather than being clamped, shifted, or reinterpreted.
 
 documentation:
   authorities:
@@ -81,10 +83,14 @@ verification:
     - Automated tests are low-confidence input/output smoke checks; do not run the full suite.
     - Live AstrBot, Electron, TTS, and Live2D behavior remains user-led runtime acceptance.
   current:
+    - B5-pre Schedule mapping is complete: emphasis/laugh/chuckle adjust the existing phrase emphasis, while hesitate/breath/sigh participate only in the existing strongest-legal hesitation candidate selection.
+    - PerformanceSchedule trace v7 records source phrase indices, cue mappings, mapped internal phrase indices, and cue scheduling or rejection decisions; output.segment.v4, engine.motion_intent.v4, and engine.parameter_plan.v3 remain unchanged.
+    - Motion Lab's existing performance diagnostics render the cue mapping target and reason without adding another history or persistence path.
+    - `npm run typecheck:renderer` and `git diff --check` pass for the B5-pre Schedule mapping batch.
     - The structural cleanup preserves the existing PerformanceSchedule facade while moving phrase/step analysis to performanceScheduleText.ts, internal DTOs to performanceScheduleTypes.ts, and shared deterministic helpers to performanceDeterminism.ts.
     - The redundant contributor-level speech_cues normalization is removed; Persona result normalization and PendingOutputSegment boundary validation remain intact.
     - `npm run typecheck:renderer`, `python -m compileall -q astrbot_plugin_ag99live_adapter`, and `git diff --check` pass for the cleanup batch.
-    - The B5-pre compile-input transport batch passes `npm run typecheck:renderer` and `git diff --check`; no cue-to-schedule behavior is enabled yet.
+    - The B5-pre compile-input transport batch passes `npm run typecheck:renderer` and `git diff --check`; cue behavior remains owned by the later Schedule mapping batch.
     - AG99 B5-pre transport is source-reviewed: enhanced AstrBot Persona results hand off normalized speech_cues through one-shot event state, output.segment.v4 carries a strict speech slot, and the frontend SessionStore retains the cues without compiling them into motion.
     - speech.state=present requires 1..8 cues on both producer and parser boundaries; an empty cue list is represented only by speech.state=absent.
     - The one-shot Persona-to-contributor handoff is cleared when consumed, so a later output in the same Turn cannot inherit stale speech cues.
@@ -93,13 +99,13 @@ verification:
     - Final semantic transitions retain their full response duration and extend the legal plan tail when necessary instead of being compressed against the original audio duration.
     - Hesitation delay is cumulative for all downstream semantic steps, phrase transfers, and SpeechPose points; SpeechPose overflow is an explicit `performance_schedule_speech_hesitation_window_exceeded` compile failure.
     - Performance event registration now rejects duplicate IDs, reversed batch order, invalid step/phrase references, malformed local/window times, and event spans beyond MAX_MOTION_DURATION_MS.
-    - The internal PerformanceSchedule trace is v6; old v5 Motion Lab records are intentionally incompatible with the corrected release semantics and must be regenerated.
+    - The internal PerformanceSchedule trace is v7; older Motion Lab records are intentionally incompatible with the current cue mapping and release semantics and must be regenerated.
     - `npm run typecheck:renderer` and `git diff --check` pass after the review corrections.
     - A temporary basic runtime smoke compile could not run because `tsconfig.test.json` first exposes existing strict-type and missing-Core-global errors inside the frozen Cubism Framework; no compiler relaxation or SDK workaround was added, and the temporary output was removed.
     - Phase-B review corrections finalize one global V3 plan release from semantic, gaze, and face minimum ownership requirements; per-part release events no longer disagree with the ParameterMixer ownership envelope.
     - Dynamic residual feeds the existing requiredOwnedUntilMs and graph duration paths only; it does not create another stage, player, clock, mixer source, WebSDK policy, or Cubism business rule.
     - Semantic timing rejects a transition whose owned window plus blend-out exceeds MAX_MOTION_DURATION_MS; staged-part tail extension remains capped before blend-out, and non-extending pose tracks record only residual that fits before their existing release.
-    - The internal PerformanceSchedule trace is now v6; engine.motion_intent.v4 and engine.parameter_plan.v3 remain unchanged.
+    - The internal PerformanceSchedule trace is now v7; engine.motion_intent.v4 and engine.parameter_plan.v3 remain unchanged.
     - `npm run typecheck:renderer` and `git diff --check` pass for the B4 source and documentation changes.
     - Phase-B batch B3 is complete: ellipsis, dash, transition, consecutive soft-boundary, hesitation-tag, and semantic-reversal signals produce at most one strongest legal hesitation hold/resume window in the shared PerformanceSchedule.
     - Semantic, gaze, face, and SpeechPose timing consume the same cumulative absolute hesitation delay; no extra parameter keyframe or random target is generated, and insufficient SpeechPose space is an explicit compile failure.
