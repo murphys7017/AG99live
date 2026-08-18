@@ -14,6 +14,7 @@ import type {
 import type { NormalizedMotionPayload } from "../types/motion.js";
 import type {
   MotionPlanPayload,
+  OutputSegmentSpeechCue,
 } from "../types/protocol.js";
 import type {
   CompileDiagnostics,
@@ -43,6 +44,12 @@ import {
 } from "./runtime/motionStart.js";
 import { createModelEngineStageRegistry } from "./compiler/registry.js";
 
+function buildSpeechCueKey(cues: readonly OutputSegmentSpeechCue[]): string {
+  return cues
+    .map((cue) => `${cue.kind}:${cue.phrase_index}:${cue.position}`)
+    .join("|");
+}
+
 export function useModelEngine(dependencies: ModelEngineDependencies) {
   const stageRegistry = createModelEngineStageRegistry();
   const state = reactive({
@@ -58,6 +65,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
   const preparedSemanticMotions = new Map<string, {
     durationMs: number;
     assistantText: string;
+    speechCueKey: string;
     prepared: PreparedSemanticMotionPayload;
   }>();
 
@@ -143,6 +151,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
       const cached = preparedSemanticMotions.get(key);
       const prepared = payload.kind === "semantic_intent"
         && cached?.assistantText === context.assistantText
+        && cached.speechCueKey === buildSpeechCueKey(context.speechCues)
         ? cached.prepared
         : null;
       preparedSemanticMotions.delete(key);
@@ -200,6 +209,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     playbackClock: MotionPlaybackClockContext,
     playbackClockReader: MotionPlaybackClockReader,
     assistantText: string,
+    speechCues: readonly OutputSegmentSpeechCue[],
   ): boolean {
     const queuedMotionStarted =
       runtimeScheduler.handlePlaybackTimelineStarted(playbackClock);
@@ -233,6 +243,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     const key = buildSegmentKey(playbackClock.turnId, normalizedMessageId);
     const cached = preparedSemanticMotions.get(key);
     const prepared = cached?.assistantText === assistantText
+      && cached.speechCueKey === buildSpeechCueKey(speechCues)
       ? cached.prepared
       : null;
     preparedSemanticMotions.delete(key);
@@ -242,6 +253,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
         messageId: normalizedMessageId,
         turnId: playbackClock.turnId,
         assistantText,
+        speechCues,
         playbackTurnId: playbackClock.turnId,
         playbackOrigin: "conversation",
         startReason: "speech_only",
@@ -270,6 +282,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
   function preparePlaybackTimeline(
     playbackClock: MotionPlaybackClockContext,
     assistantText: string,
+    speechCues: readonly OutputSegmentSpeechCue[],
   ): MotionTimelinePreparationResult {
     const audioDurationMs = typeof playbackClock.durationMs === "number"
       && Number.isFinite(playbackClock.durationMs)
@@ -310,6 +323,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
       context = {
         ...preparation.context,
         assistantText,
+        speechCues,
       };
       source = "queued_motion";
     } else {
@@ -331,6 +345,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
         messageId: normalizedMessageId,
         turnId: playbackClock.turnId,
         assistantText,
+        speechCues,
         playbackTurnId: playbackClock.turnId,
         playbackOrigin: "conversation",
         startReason: "speech_only_preparing",
@@ -344,10 +359,12 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     const selectedModelPath = selectedModel?.model_path.trim() ?? "";
     const selectedProfile = selectedModel?.semantic_axis_profile ?? null;
     const cached = preparedSemanticMotions.get(key);
+    const speechCueKey = buildSpeechCueKey(speechCues);
     if (
       cached
       && cached.durationMs === durationMs
       && cached.assistantText === assistantText
+      && cached.speechCueKey === speechCueKey
       && cached.prepared.modelPath === selectedModelPath
       && selectedProfile !== null
       && cached.prepared.profileId === selectedProfile.profile_id
@@ -396,7 +413,12 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
         source,
       };
     }
-    preparedSemanticMotions.set(key, { durationMs, assistantText, prepared });
+    preparedSemanticMotions.set(key, {
+      durationMs,
+      assistantText,
+      speechCueKey,
+      prepared,
+    });
     return { status: "prepared", source };
   }
 

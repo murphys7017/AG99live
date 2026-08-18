@@ -12,6 +12,7 @@ export interface PendingInboundMotionPayload {
   messageId: string;
   turnId: string;
   assistantText: string;
+  speechCues: InboundPayloadContext["speechCues"];
   playbackTurnId: string | null;
   receivedAtMs: number;
   playbackClock: MotionPlaybackClockContext | null;
@@ -23,6 +24,7 @@ export interface StartPayloadContext {
   messageId: string;
   turnId: string | null;
   assistantText: string;
+  speechCues: InboundPayloadContext["speechCues"];
   playbackTurnId: string | null;
   playbackOrigin: ModelEnginePlaybackOrigin;
   startReason: string;
@@ -111,6 +113,7 @@ export function createMotionRuntimeScheduler(
       playbackTurnId: entry.playbackTurnId,
       messageId: entry.messageId,
       assistantText: entry.assistantText,
+      speechCues: entry.speechCues,
       playbackOrigin: "conversation",
       startReason,
       queuedDelayMs: Math.max(0, Math.round(performance.now() - entry.receivedAtMs)),
@@ -214,6 +217,7 @@ export function createMotionRuntimeScheduler(
         messageId: context.messageId,
         turnId: null,
         assistantText: context.assistantText,
+        speechCues: context.speechCues,
         playbackTurnId: normalizedPlaybackTurnId,
         playbackOrigin: "conversation",
         startReason: "motion_turn_id_missing",
@@ -238,6 +242,7 @@ export function createMotionRuntimeScheduler(
       messageId: context.messageId,
       turnId: normalizedTurnId,
       assistantText: context.assistantText,
+      speechCues: context.speechCues,
       playbackTurnId: normalizedPlaybackTurnId,
       receivedAtMs: context.receivedAtMs,
       playbackClock: context.playbackClock ?? null,
@@ -250,6 +255,7 @@ export function createMotionRuntimeScheduler(
         messageId: entry.messageId,
         turnId: entry.turnId,
         assistantText: entry.assistantText,
+        speechCues: entry.speechCues,
         playbackTurnId: entry.playbackTurnId,
         playbackOrigin: "conversation",
         startReason: "playback_timeline_identity_mismatch",

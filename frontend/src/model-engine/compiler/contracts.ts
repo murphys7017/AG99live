@@ -1,6 +1,7 @@
 import type {
   ModelSummary,
   MotionPlanPayload,
+  OutputSegmentSpeechCue,
 } from "../../types/protocol.js";
 import type {
   CompileDiagnostics,
@@ -18,6 +19,7 @@ export type MotionAxisValueSource =
 export interface CompileOptions {
   model: ModelSummary;
   assistantText?: string;
+  speechCues?: readonly OutputSegmentSpeechCue[];
   targetDurationMs?: number | null;
   speechActive?: boolean;
   source?: string;

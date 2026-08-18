@@ -1,9 +1,9 @@
 task:
   class: refactor
   risk: medium
-  phase: phase_b5_pre_structure_cleanup
+  phase: phase_b5_pre_schedule_transport
   status: validation_complete
-  scope: "Reduce structural debt before B5-pre schedule mapping: separate PerformanceSchedule text analysis, DTOs, and deterministic helpers while preserving the facade and behavior; remove one redundant internal speech_cues normalization without weakening producer or output-boundary validation."
+  scope: "Complete the B5-pre compile-input boundary: project the existing SessionStore speech_cues through SegmentJob, PlaybackTimeline motion context, ModelEngine scheduling, and prepared-motion cache identity without compiling cue behavior yet."
 
 context:
   confidence: high
@@ -58,6 +58,7 @@ context:
     - B5-pre is split at the real process boundary: AstrBot owns Provider-neutral `speech_cues` generation, normalization, and the post-result hook; AG99 now transports the cues through output.segment.v4 and retains them in the frontend SessionStore, while existing PerformanceSchedule mapping remains pending and must not create a TTS text transformer, private clock, new mixer source, or provider-specific motion path.
     - PerformanceSchedule remains the single compile-time scheduling owner, while canonical text segmentation, shared DTOs, and deterministic sampling helpers live in focused internal compiler modules behind the existing performanceSchedule.ts facade.
     - Enhanced-Core speech cues are normalized when the Persona result enters AG99 and validated again when platform extras enter PendingOutputSegment; the one-shot contributor handoff only consumes the private normalized value and must not add a third normalization pass.
+    - B5-pre transport now carries the canonical segment speech cues through both queued semantic motion and speech-only preparation paths; prepared-motion cache identity includes the cue sequence.
 
 documentation:
   authorities:
@@ -83,6 +84,7 @@ verification:
     - The structural cleanup preserves the existing PerformanceSchedule facade while moving phrase/step analysis to performanceScheduleText.ts, internal DTOs to performanceScheduleTypes.ts, and shared deterministic helpers to performanceDeterminism.ts.
     - The redundant contributor-level speech_cues normalization is removed; Persona result normalization and PendingOutputSegment boundary validation remain intact.
     - `npm run typecheck:renderer`, `python -m compileall -q astrbot_plugin_ag99live_adapter`, and `git diff --check` pass for the cleanup batch.
+    - The B5-pre compile-input transport batch passes `npm run typecheck:renderer` and `git diff --check`; no cue-to-schedule behavior is enabled yet.
     - AG99 B5-pre transport is source-reviewed: enhanced AstrBot Persona results hand off normalized speech_cues through one-shot event state, output.segment.v4 carries a strict speech slot, and the frontend SessionStore retains the cues without compiling them into motion.
     - speech.state=present requires 1..8 cues on both producer and parser boundaries; an empty cue list is represented only by speech.state=absent.
     - The one-shot Persona-to-contributor handoff is cleared when consumed, so a later output in the same Turn cannot inherit stale speech cues.

@@ -1,4 +1,5 @@
 import type { PlaybackTimelineMotionContext } from "./motionTypes.js";
+import type { OutputSegmentSpeechCue } from "../types/protocol.js";
 
 export interface PlaybackTimelineSegmentJob<TMotionPayload = unknown> {
   messageId: string;
@@ -16,6 +17,9 @@ export interface PlaybackTimelineSegmentJob<TMotionPayload = unknown> {
   motion: {
     payload: TMotionPayload | null;
     receivedAtMs: number | null;
+  };
+  speech: {
+    cues: readonly OutputSegmentSpeechCue[];
   };
 }
 

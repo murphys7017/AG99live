@@ -1,4 +1,5 @@
 import type { NormalizedMotionPayload } from "../types/motion.js";
+import type { OutputSegmentSpeechCue } from "../types/protocol.js";
 import type { AdapterPlaybackCompositionPort } from "../adapter-connection/useAdapterConnection.js";
 import type { MotionTimelinePreparationResult } from "../model-engine/runtime/playbackClock.js";
 import type { PlaybackTimelineAudioSink } from "../playback-timeline/audioSink.js";
@@ -25,11 +26,13 @@ export interface PlaybackTimelineMotionEnginePort {
   preparePlaybackTimeline(
     playbackTimeline: ReturnType<typeof projectMotionPlaybackClock>,
     assistantText: string,
+    speechCues: readonly OutputSegmentSpeechCue[],
   ): MotionTimelinePreparationResult;
   handlePlaybackTimelineStarted(
     playbackTimeline: ReturnType<typeof projectMotionPlaybackClock>,
     playbackClockReader: ReturnType<typeof projectMotionPlaybackClockReader>,
     assistantText: string,
+    speechCues: readonly OutputSegmentSpeechCue[],
   ): boolean | void;
 }
 
@@ -114,6 +117,10 @@ export function configurePlaybackTimelineMotionRuntime(options: {
     turnId: string | null,
     messageId: string,
   ) => string;
+  getCanonicalSpeechCues: (
+    turnId: string | null,
+    messageId: string,
+  ) => readonly OutputSegmentSpeechCue[];
 }): {
   motionTimelineSink: PlaybackTimelineMotionSink;
   handleAudioTimelineStarted: (
@@ -132,6 +139,7 @@ export function configurePlaybackTimelineMotionRuntime(options: {
     motionEngine,
     onMissingPlaybackTimeline,
     getCanonicalAssistantText,
+    getCanonicalSpeechCues,
   } = options;
 
   function handleAudioTimelineStarted(
@@ -167,6 +175,7 @@ export function configurePlaybackTimelineMotionRuntime(options: {
       projectMotionPlaybackClock(currentTimeline),
       projectMotionPlaybackClockReader(timelineClockReader),
       getCanonicalAssistantText(normalizedTurnId, normalizedMessageId),
+      getCanonicalSpeechCues(normalizedTurnId, normalizedMessageId),
     );
   }
 
@@ -187,6 +196,7 @@ export function configurePlaybackTimelineMotionRuntime(options: {
     const result = motionEngine.preparePlaybackTimeline(
       projectMotionPlaybackClock(preparedTimeline),
       getCanonicalAssistantText(turnId, messageId),
+      getCanonicalSpeechCues(turnId, messageId),
     );
     if (result.status === "not_applicable") {
       return;

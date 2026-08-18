@@ -106,6 +106,9 @@ export function useTurnPlaybackOrchestrator(
         payload: releaseMotion ? segment.motion.payload : null,
         receivedAtMs,
       },
+      speech: {
+        cues: segment.speech.cues,
+      },
     });
   }
 
@@ -129,6 +132,7 @@ export function useTurnPlaybackOrchestrator(
           motionAbsent: segment.motion.absent,
           motionFailed: segment.motion.failed,
           motionCompleted: segment.motion.completed,
+          speechCues: segment.speech.cues,
         } : null;
       }),
     })),

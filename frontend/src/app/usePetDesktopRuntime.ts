@@ -121,6 +121,10 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     turnId: string | null,
     messageId: string,
   ): string => sessionStore.getSession(turnId)?.segments.get(messageId)?.text.content ?? "";
+  const getCanonicalSpeechCues = (
+    turnId: string | null,
+    messageId: string,
+  ) => sessionStore.getSession(turnId)?.segments.get(messageId)?.speech.cues ?? [];
   const playbackCoordinator = usePlaybackCompletionCoordinator({
     sessionStore,
     playbackAck,
@@ -278,6 +282,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     playbackTimeline,
     motionEngine: modelEngine,
     getCanonicalAssistantText,
+    getCanonicalSpeechCues,
     onMissingPlaybackTimeline: (turnId, messageId) => {
       console.error("[AG99live] audio timeline started without matching playback timeline.", {
         turnId,

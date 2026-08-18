@@ -1,9 +1,11 @@
 import type { PlaybackTimelineSnapshot } from "./contracts.js";
+import type { OutputSegmentSpeechCue } from "../types/protocol.js";
 
 export interface PlaybackTimelineMotionContext {
   messageId: string;
   turnId: string | null;
   assistantText: string;
+  speechCues: readonly OutputSegmentSpeechCue[];
   receivedAtMs: number;
   playbackTimeline?: PlaybackTimelineSnapshot | null;
   timelineMode?: "audio" | "motion_only";
