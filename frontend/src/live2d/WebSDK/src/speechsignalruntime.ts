@@ -25,8 +25,8 @@ const SPEECH_BODY_GAIN_SPAN = 0.78;
 const SPEECH_BODY_GAIN_MAX = 1.0;
 const SPEECH_VOICED_ENTER_THRESHOLD = 0.04;
 const SPEECH_VOICED_EXIT_THRESHOLD = 0.018;
-const SPEECH_EMPHASIS_SLOPE_THRESHOLD_PER_SECOND = 1.5;
-const SPEECH_EMPHASIS_SLOPE_GAIN = 0.09;
+const SPEECH_EMPHASIS_RISE_THRESHOLD_PER_SECOND = 1.5;
+const SPEECH_EMPHASIS_RISE_GAIN = 0.09;
 const SPEECH_EMPHASIS_ATTACK_PER_SECOND = 18.0;
 const SPEECH_EMPHASIS_RELEASE_PER_SECOND = 7.0;
 const SPEECH_EMPHASIS_MAX = 0.42;
@@ -46,7 +46,6 @@ export class SpeechSignalRuntime {
   private speechHeadEnvelope = 0;
   private speechBodyEnvelope = 0;
   private speechEmphasisEnvelope = 0;
-  private previousSpeechEnergy = 0;
   private speechVoiced = false;
   private lipSyncDiagnosticFrameCount = 0;
   private activeSourceFailureHandler: ((reason: string) => void) | null = null;
@@ -63,7 +62,6 @@ export class SpeechSignalRuntime {
     this.lipSyncIntensity = 0;
     this.speechEnergyValue = 0;
     this.speechEmphasisEnvelope = 0;
-    this.previousSpeechEnergy = 0;
     this.speechVoiced = false;
     this.lipSyncDiagnosticFrameCount = 0;
     this.activeSourceFailureHandler = typeof options.onFailed === "function"
@@ -140,19 +138,7 @@ export class SpeechSignalRuntime {
       this.speechVoiced = speechEnergy >= SPEECH_VOICED_ENTER_THRESHOLD;
     }
     const speechTargetEnergy = this.speechVoiced ? speechEnergy : 0;
-    const positiveEnergyDelta = Math.max(0, speechTargetEnergy - this.previousSpeechEnergy);
-    const positiveEnergySlope = deltaTimeSeconds > 0
-      ? positiveEnergyDelta / deltaTimeSeconds
-      : 0;
-    this.previousSpeechEnergy = speechTargetEnergy;
-    const emphasisTarget = this.speechVoiced
-      ? clamp(
-          (positiveEnergySlope - SPEECH_EMPHASIS_SLOPE_THRESHOLD_PER_SECOND)
-            * SPEECH_EMPHASIS_SLOPE_GAIN,
-          0,
-          SPEECH_EMPHASIS_MAX,
-        )
-      : 0;
+    const previousSpeechHeadEnvelope = this.speechHeadEnvelope;
     this.speechHeadEnvelope = advanceEnvelope(
       this.speechHeadEnvelope,
       speechTargetEnergy,
@@ -167,6 +153,21 @@ export class SpeechSignalRuntime {
       SPEECH_BODY_ENVELOPE_ATTACK_PER_SECOND,
       SPEECH_BODY_ENVELOPE_RELEASE_PER_SECOND,
     );
+    const positiveHeadEnvelopeDelta = Math.max(
+      0,
+      this.speechHeadEnvelope - previousSpeechHeadEnvelope,
+    );
+    const positiveHeadEnvelopeRise = deltaTimeSeconds > 0
+      ? positiveHeadEnvelopeDelta / deltaTimeSeconds
+      : 0;
+    const emphasisTarget = this.speechVoiced
+      ? clamp(
+          (positiveHeadEnvelopeRise - SPEECH_EMPHASIS_RISE_THRESHOLD_PER_SECOND)
+            * SPEECH_EMPHASIS_RISE_GAIN,
+          0,
+          SPEECH_EMPHASIS_MAX,
+        )
+      : 0;
     this.speechEmphasisEnvelope = advanceEnvelope(
       this.speechEmphasisEnvelope,
       emphasisTarget,
@@ -252,7 +253,6 @@ export class SpeechSignalRuntime {
     this.lipSyncIntensity = 0;
     this.speechEnergyValue = 0;
     this.speechEmphasisEnvelope = 0;
-    this.previousSpeechEnergy = 0;
     this.speechVoiced = false;
     this.lipSyncDiagnosticFrameCount = 0;
   }
