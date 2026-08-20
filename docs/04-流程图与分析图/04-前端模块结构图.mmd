@@ -11,7 +11,7 @@ flowchart TB
     UI[views + components<br/>交互、字幕、设置、实验室]:::root
 
     subgraph CONNECTION[adapter-connection：网络与协议适配]
-        CONN[useAdapterConnection.ts<br/>连接 facade]:::boundary
+        CONN[createAdapterConnection()<br/>adapter-connection 组合模块]:::boundary
         TRANS[core/transport<br/>WebSocket 生命周期]:::boundary
         INBOUND[inbound/**<br/>manifest 握手 / 严格解析 / 原子提交]:::boundary
         ARUN[runtime/**<br/>audio execution adapter / settlement / UI projection]:::boundary

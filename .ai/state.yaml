@@ -1,13 +1,14 @@
 task:
-  class: bugfix
-  risk: high
-  phase: project_review_followup
+  class: refactor
+  risk: medium
+  phase: adapter_lifecycle_cleanup
   status: validation_partial
-  scope: "Resolve the source-confirmed project review findings: explicitly gate unrestricted Remote Operator targets, serialize audio-cache cleanup, decouple speech energy from LipSync capability, make Live2D Core loading retryable, move Physics response scaling out of Cubism Framework, and keep one playback disposal owner."
+  scope: "Remove the unused Vue AdapterConnection lifecycle wrapper and align the adapter ownership documentation with the createAdapterConnection composition path."
 
 context:
   confidence: high
   assumptions:
+    - createConversationPlaybackRuntime is the only active AdapterConnection composition owner; no caller should recreate the removed useAdapterConnection lifecycle wrapper.
     - Remote Operator remains an intentionally autonomous trusted-machine feature; targets must explicitly confirm unrestricted access before they can be registered or executed.
     - Speech audio analysis is owned by the active audio source and must continue when model LipSync parameters are absent or rejected.
     - Physics response scaling belongs to AG99 LAppModel and applies only to terminal Physics output deltas, excluding Physics inputs and semantic protected parameters.

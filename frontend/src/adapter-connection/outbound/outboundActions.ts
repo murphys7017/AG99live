@@ -36,7 +36,7 @@ export interface MotionLabRawEventPayload {
 /**
  * 出站动作共享的轻量状态视图。
  *
- * 由 useAdapterConnection 持有真实对象，函数只读取/写回，不创建新实例。
+ * 由组合根创建并持有真实 AdapterConnection，函数只读取/写回，不创建新实例。
  */
 export interface OutboundActionState {
   currentTurnId: string | null;

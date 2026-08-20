@@ -1,4 +1,4 @@
-import { onScopeDispose, readonly } from "vue";
+import { readonly } from "vue";
 import type {
   DeepReadonly,
 } from "vue";
@@ -365,7 +365,7 @@ export function createAdapterConnection(
         detachPttHookStatusListener?.();
         detachPttHookStatusListener = window.ag99desktop?.onPttHookStatus?.(applyPttHookStatus) ?? null;
         void window.ag99desktop?.getPttHookStatus?.().then(applyPttHookStatus).catch((error: unknown) => {
-          console.warn("[useAdapterConnection] failed to read PTT hook status:", error);
+          console.warn("[AdapterConnection] failed to read PTT hook status:", error);
         });
         // 同步持久化的 PTT 模式到主进程 hook
         window.ag99desktop?.setPttMode?.(state.pttModeEnabled, { ...state.pttKeyBinding });
@@ -419,7 +419,7 @@ export function createAdapterConnection(
     try {
       action();
     } catch (error) {
-      console.error(`[useAdapterConnection] ${step} failed.`, error);
+      console.error(`[AdapterConnection] ${step} failed.`, error);
       errors.push(error);
     }
   }
@@ -432,7 +432,7 @@ export function createAdapterConnection(
     try {
       await action();
     } catch (error) {
-      console.error(`[useAdapterConnection] ${step} failed.`, error);
+      console.error(`[AdapterConnection] ${step} failed.`, error);
       errors.push(error);
     }
   }
@@ -566,7 +566,7 @@ export function createAdapterConnection(
           state.lastError = `入站消息处理失败，连接已关闭：${details}`;
           state.statusMessage = state.lastError;
           pushHistory("error", state.lastError);
-          console.error("[useAdapterConnection] fatal inbound message handler error:", error);
+          console.error("[AdapterConnection] fatal inbound message handler error:", error);
           const cleanupErrors: unknown[] = [];
           runConnectionCleanupStep(
             "fatal audio and timeline cleanup",
@@ -585,7 +585,7 @@ export function createAdapterConnection(
           );
           if (cleanupErrors.length > 0) {
             console.error(
-              "[useAdapterConnection] fatal inbound cleanup completed with errors.",
+              "[AdapterConnection] fatal inbound cleanup completed with errors.",
               cleanupErrors,
             );
           }
@@ -898,24 +898,4 @@ export function createAdapterConnection(
       initializeAudioRuntime,
     },
   };
-}
-
-export function useAdapterConnection(
-  sessionStore: SessionStore,
-  modelSync: ModelSyncInstance,
-  normalizeMotionPayload: MotionPayloadNormalizer,
-): AdapterConnectionInstance {
-  const connection = createAdapterConnection({
-    sessionStore,
-    modelSync,
-    normalizeMotionPayload,
-  });
-
-  onScopeDispose(() => {
-    void connection.dispose().catch((error) => {
-      console.error("[useAdapterConnection] adapter dispose failed.", error);
-    });
-  });
-
-  return connection;
 }
