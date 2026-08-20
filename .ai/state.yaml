@@ -91,11 +91,15 @@ verification:
     - Automated tests are low-confidence input/output smoke checks; do not run the full suite.
     - Live AstrBot, Electron, TTS, and Live2D behavior remains user-led runtime acceptance.
   current:
+    - Motion rejection now always forwards the existing segment interruption to the ModelEngine motion sink before settling the session projection, so pending inbound payloads and prepared semantic motions cannot survive a pre-start rejection; no second cleanup owner was added.
+    - Timeline Clock reports `audio_pending` until the Timeline itself starts, and its attached audio time is monotonic; Catalog Motion keeps its prior elapsed-time baseline when the playback reader regresses instead of advancing from the rollback.
+    - `npm run typecheck:renderer`, `npm run typecheck:websdk`, and `git diff --check` pass for the playback rejection and monotonic-clock correction; live Electron, audio, and Live2D acceptance remains user-led.
     - The previous dynamics batch changes parameter track transitions to linear target interpolation and removes generic default entry easing; explicit curve presets, ownership release blending, and spring/bounded response policies remain intact.
     - The current dynamics batch gives gaze, eye, brow, and face groups distinct spring policies while preserving existing head/body values and bounded fallback; mouth groups remain bounded.
     - ActiveParameterMixer now receives raw direct-plan targets, applies ownership release during source fusion, then runs ParameterPresentation once on the fused target; the old per-direct-contribution pre-smoothing path is removed.
     - ParameterPresentation no longer owns direct-plan ownership weight or terminal release state; it only advances the final target response, while the Mixer owns release eligibility and completion.
-    - After plan totalMs, direct-plan ownership reaches zero and the presentation nodes continue toward the current base snapshot until settled; the existing clock tail remains the only continuation mechanism.
+    - ParameterPresentation advances the direct-plan offset relative to the current Cubism base. After plan totalMs, ownership reaches zero and the stable zero-offset target guarantees release convergence without freezing ambient motion or adding a timeout.
+    - A non-increasing playback clock freezes the existing presentation offset, velocity, and last effective elapsed time; pause frames no longer erase spring inertia.
     - Lip-sync remains an immediate high-priority contribution and prevents active response dynamics from delaying mouth output; presentation nodes track direct-only targets instead of lip-sync-contaminated values.
     - `npm run typecheck:renderer`, `npm run typecheck:websdk`, and `git diff --check` pass for the unified response batch.
     - The targeted active-parameter smoke test could not execute because the existing test tsconfig exposes frozen Cubism Framework strict-type and missing-Core-global errors, and the emitted ESM imports are not resolvable by the repository's current Node invocation; no test workaround or source fallback was added.

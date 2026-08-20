@@ -114,7 +114,7 @@ function testHeadAndBodySpringResponsesAreDistinct(): void {
     maxVelocity: 132,
     maxAcceleration: 720,
     response: { kind: "spring", frequency_hz: 2.4, damping_ratio: 0.78 },
-    drivenValue: null,
+    drivenOffset: null,
     velocity: 0,
     lastElapsedMs: null,
   };
@@ -126,7 +126,7 @@ function testHeadAndBodySpringResponsesAreDistinct(): void {
     maxVelocity: 28,
     maxAcceleration: 320,
     response: { kind: "spring", frequency_hz: 1, damping_ratio: 0.85 },
-    drivenValue: null,
+    drivenOffset: null,
     velocity: 0,
     lastElapsedMs: null,
   }, 8, timing, 2000);
@@ -139,15 +139,20 @@ function testHeadAndBodySpringResponsesAreDistinct(): void {
 
   const stalledHeadNode: ParameterPresentationNode = {
     ...headNode,
-    drivenValue: null,
+    drivenOffset: null,
     velocity: 0,
     lastElapsedMs: null,
   };
-  resolveParameterPresentationFrame(stalledHeadNode, 25, 0, timing);
-  resolveParameterPresentationFrame(stalledHeadNode, 25, 200, timing);
+  resolveParameterPresentationFrame(stalledHeadNode, 25, 0, 0, timing);
+  resolveParameterPresentationFrame(stalledHeadNode, 25, 0, 200, timing);
+  const velocityBeforePausedFrame = stalledHeadNode.velocity;
+  resolveParameterPresentationFrame(stalledHeadNode, 25, 0, 200, timing);
+  assert.equal(stalledHeadNode.velocity, velocityBeforePausedFrame);
+  assert.equal(stalledHeadNode.lastElapsedMs, 200);
   const resumedFrame = resolveParameterPresentationFrame(
     stalledHeadNode,
     25,
+    0,
     700,
     timing,
   );
@@ -157,14 +162,14 @@ function testHeadAndBodySpringResponsesAreDistinct(): void {
 function simulateSpringResponse(
   node: ParameterPresentationNode,
   targetValue: number,
-  timing: Parameters<typeof resolveParameterPresentationFrame>[3],
+  timing: Parameters<typeof resolveParameterPresentationFrame>[4],
   durationMs: number,
 ): { maximum: number; valueAt400Ms: number; finalValue: number } {
   let maximum = node.initialValue;
   let valueAt400Ms = node.initialValue;
   let finalValue = node.initialValue;
   for (let elapsedMs = 0; elapsedMs <= durationMs; elapsedMs += 1000 / 60) {
-    const frame = resolveParameterPresentationFrame(node, targetValue, elapsedMs, timing);
+    const frame = resolveParameterPresentationFrame(node, targetValue, 0, elapsedMs, timing);
     maximum = Math.max(maximum, frame.drivenValue);
     finalValue = frame.drivenValue;
     if (elapsedMs >= 400 && valueAt400Ms === node.initialValue) {

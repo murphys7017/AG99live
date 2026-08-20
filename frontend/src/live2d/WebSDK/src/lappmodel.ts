@@ -1039,8 +1039,11 @@ export class LAppModel extends CubismUserModel {
       return 0;
     }
     const previousElapsedMs = this._activeCatalogMotionClockElapsedMs ?? elapsedMs;
+    if (elapsedMs <= previousElapsedMs) {
+      return 0;
+    }
     this._activeCatalogMotionClockElapsedMs = elapsedMs;
-    return Math.max(0, (elapsedMs - previousElapsedMs) / 1000);
+    return (elapsedMs - previousElapsedMs) / 1000;
   }
 
   private completeActiveCatalogMotionIfFinished(): void {
@@ -1684,7 +1687,7 @@ export class LAppModel extends CubismUserModel {
           maxVelocity: Number(item.dynamics.max_velocity),
           maxAcceleration: Number(item.dynamics.max_acceleration),
           response: item.dynamics.response,
-          drivenValue: null,
+          drivenOffset: null,
           velocity: 0,
           lastElapsedMs: null,
         },

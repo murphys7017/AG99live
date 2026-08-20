@@ -14,7 +14,8 @@ export interface ParameterPresentationNode {
   maxVelocity: number;
   maxAcceleration: number;
   response: DirectParameterResponsePolicy;
-  drivenValue: number | null;
+  // Keep response state independent from ambient Motion, drag, and breath.
+  drivenOffset: number | null;
   velocity: number;
   lastElapsedMs: number | null;
 }
@@ -28,54 +29,54 @@ export interface ParameterPresentationTrackPoint {
 export function resolveParameterPresentationFrame(
   node: ParameterPresentationNode,
   frameTargetValue: number,
+  baseValue: number,
   elapsedMs: number,
   timing: DirectParameterExecutionPlan["timing"],
 ): { drivenValue: number; settled: boolean } {
-  const targetValue = resolveTrajectoryEnvelope(node, frameTargetValue, elapsedMs, timing);
-  const previousValue = node.drivenValue ?? node.initialValue;
+  const envelopedTargetValue = resolveTrajectoryEnvelope(
+    node,
+    frameTargetValue,
+    elapsedMs,
+    timing,
+  );
+  const targetOffset = envelopedTargetValue - baseValue;
+  const previousOffset = node.drivenOffset ?? 0;
   const previousElapsedMs = node.lastElapsedMs;
-  node.lastElapsedMs = elapsedMs;
 
-  if (previousElapsedMs === null || elapsedMs <= previousElapsedMs) {
-    node.drivenValue = previousValue;
+  if (previousElapsedMs === null) {
+    node.lastElapsedMs = elapsedMs;
+    node.drivenOffset = previousOffset;
     node.velocity = 0;
     return {
-      drivenValue: node.drivenValue,
-      settled: isParameterPresentationSettled(node.drivenValue, targetValue, node.velocity),
+      drivenValue: baseValue + previousOffset,
+      settled: isParameterPresentationSettled(previousOffset, targetOffset, node.velocity),
     };
   }
 
+  if (elapsedMs <= previousElapsedMs) {
+    return {
+      drivenValue: baseValue + previousOffset,
+      settled: isParameterPresentationSettled(previousOffset, targetOffset, node.velocity),
+    };
+  }
+
+  node.lastElapsedMs = elapsedMs;
   const deltaSeconds = (elapsedMs - previousElapsedMs) / 1000;
   const next = advanceParameterDynamics(
-    previousValue,
-    targetValue,
+    previousOffset,
+    targetOffset,
     node.velocity,
     deltaSeconds,
     node.maxVelocity,
     node.maxAcceleration,
     node.response,
   );
-  node.drivenValue = next.value;
+  node.drivenOffset = next.value;
   node.velocity = next.velocity;
   return {
-    drivenValue: next.value,
-    settled: isParameterPresentationSettled(next.value, targetValue, next.velocity),
+    drivenValue: baseValue + next.value,
+    settled: isParameterPresentationSettled(next.value, targetOffset, next.velocity),
   };
-}
-
-export function resolveParameterOwnershipWeight(
-  elapsedMs: number,
-  timing: DirectParameterExecutionPlan["timing"],
-): number {
-  const blendOutMs = Math.max(0, timing.blendOutMs);
-  const releaseStartMs = Math.max(0, timing.totalMs - blendOutMs);
-  if (elapsedMs < releaseStartMs) {
-    return 1;
-  }
-  if (blendOutMs === 0 || elapsedMs >= timing.totalMs) {
-    return 0;
-  }
-  return smoothstep(1 - (elapsedMs - releaseStartMs) / blendOutMs);
 }
 
 export function resolveParameterPresentationTrack(
@@ -334,11 +335,6 @@ function resolveDampedSpringVelocity(
 
 function interpolate(start: number, end: number, progress: number): number {
   return start + (end - start) * progress;
-}
-
-function smoothstep(value: number): number {
-  const x = clampUnit(value);
-  return x * x * (3 - 2 * x);
 }
 
 function easeOutBack(value: number): number {

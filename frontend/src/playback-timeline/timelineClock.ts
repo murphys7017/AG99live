@@ -28,6 +28,7 @@ export function createTimelineClock(
   let stoppedAtMs: number | null = null;
   let pausedOffsetMs = 0;
   let audioClock: AudioPlaybackClock | null = null;
+  let lastAudioCurrentTimeMs: number | null = null;
   let audioTailStartedAtMs: number | null = null;
   let audioTailElapsedMs: number | null = null;
   let expectedDurationMs: number | null = null;
@@ -43,6 +44,24 @@ export function createTimelineClock(
     return Math.max(0, effectiveNowMs - startedAtMs - pausedOffsetMs);
   }
 
+  function readMonotonicAudioCurrentTimeMs(): number | null {
+    if (!audioClock) {
+      return null;
+    }
+    const currentTimeMs = audioClock.getCurrentTimeMs();
+    if (currentTimeMs === null || !Number.isFinite(currentTimeMs)) {
+      return null;
+    }
+    const normalizedCurrentTimeMs = Math.max(0, currentTimeMs);
+    if (
+      lastAudioCurrentTimeMs === null
+      || normalizedCurrentTimeMs >= lastAudioCurrentTimeMs
+    ) {
+      lastAudioCurrentTimeMs = normalizedCurrentTimeMs;
+    }
+    return lastAudioCurrentTimeMs;
+  }
+
   function getAudioSnapshot(): PlaybackClockSnapshot | null {
     if (pausedAtMs !== null || stoppedAtMs !== null) {
       return null;
@@ -50,7 +69,7 @@ export function createTimelineClock(
     if (!audioClock) {
       return null;
     }
-    const currentTimeMs = audioClock.getCurrentTimeMs();
+    const currentTimeMs = readMonotonicAudioCurrentTimeMs();
     if (currentTimeMs === null) {
       return null;
     }
@@ -59,7 +78,7 @@ export function createTimelineClock(
       currentTimeMs: Math.max(0, currentTimeMs),
       durationMs: audioClock.getDurationMs() ?? expectedDurationMs,
       playbackRate: audioClock.getPlaybackRate(),
-      clockSource: "audio",
+      clockSource: startedAtMs === null ? "audio_pending" : "audio",
       paused: !audioClock.isPlaying(),
       stopped: stoppedAtMs !== null,
     };
@@ -72,6 +91,7 @@ export function createTimelineClock(
       stoppedAtMs = null;
       pausedOffsetMs = 0;
       audioClock = null;
+      lastAudioCurrentTimeMs = null;
       audioTailStartedAtMs = null;
       audioTailElapsedMs = null;
       expectedDurationMs = null;
@@ -82,6 +102,7 @@ export function createTimelineClock(
       pausedAtMs = null;
       stoppedAtMs = null;
       pausedOffsetMs = 0;
+      lastAudioCurrentTimeMs = null;
       audioTailStartedAtMs = null;
       audioTailElapsedMs = null;
     },
@@ -107,12 +128,13 @@ export function createTimelineClock(
     },
     attachAudioClock(clock) {
       audioClock = clock;
+      lastAudioCurrentTimeMs = null;
       audioTailStartedAtMs = null;
       audioTailElapsedMs = null;
     },
     detachAudioClock() {
       if (audioClock) {
-        const elapsedMs = audioClock.getCurrentTimeMs();
+        const elapsedMs = readMonotonicAudioCurrentTimeMs();
         if (elapsedMs !== null && Number.isFinite(elapsedMs)) {
           audioTailElapsedMs = Math.max(0, elapsedMs);
           audioTailStartedAtMs = now();

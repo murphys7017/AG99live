@@ -3,7 +3,6 @@ import type { CubismModel } from "@framework/model/cubismmodel";
 import type { csmVector } from "@framework/type/csmvector";
 import type { DirectParameterExecutionPlan } from "./directparameterplan";
 import {
-  resolveParameterOwnershipWeight,
   resolveParameterPresentationFrame,
   resolveParameterPresentationTrack,
   type ParameterPresentationNode,
@@ -339,6 +338,7 @@ export class ActiveParameterMixer {
         const presentationFrame = resolveParameterPresentationFrame(
           presentationContribution.presentation.node,
           directOnlyTargetValue,
+          baseValue,
           presentationContribution.presentation.elapsedMs,
           presentationContribution.presentation.timing,
         );
@@ -588,4 +588,24 @@ function resolveContributionValue(
 
 function clamp(value: number, minValue: number, maxValue: number): number {
   return Math.max(minValue, Math.min(maxValue, value));
+}
+
+function resolveParameterOwnershipWeight(
+  elapsedMs: number,
+  timing: DirectParameterExecutionPlan["timing"],
+): number {
+  const blendOutMs = Math.max(0, timing.blendOutMs);
+  const releaseStartMs = Math.max(0, timing.totalMs - blendOutMs);
+  if (elapsedMs < releaseStartMs) {
+    return 1;
+  }
+  if (blendOutMs === 0 || elapsedMs >= timing.totalMs) {
+    return 0;
+  }
+  return smoothstep(1 - (elapsedMs - releaseStartMs) / blendOutMs);
+}
+
+function smoothstep(value: number): number {
+  const x = Math.max(0, Math.min(1, value));
+  return x * x * (3 - 2 * x);
 }

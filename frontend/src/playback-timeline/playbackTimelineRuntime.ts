@@ -474,6 +474,12 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     if (!sessionProjection.claimMotionRejection(key)) {
       return;
     }
+    const errors: unknown[] = [];
+    runTimelineCleanupStep(
+      "motion owner rejection",
+      () => deps.segmentExecution.motionSink.interrupt(turnId, messageId, reason),
+      errors,
+    );
     const timeline = getTimeline(turnId, messageId);
     if (timeline) {
       const motionSink = timeline.engine.getSnapshot()?.sinks.find(
@@ -481,21 +487,29 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
       );
       if (motionSink && !isTerminalSinkValue(motionSink.terminal)) {
         markMotionTimelineTerminal(turnId, messageId, "failed", reason);
-        return;
+      } else if (motionSink || !timeline.projectsMotionSession) {
+        if (errors.length === 0) {
+          return;
+        }
+      } else {
+        sessionProjection.markMotionTerminal(
+          turnId,
+          messageId,
+          "failed",
+          reason,
+        );
       }
-      if (motionSink) {
-        return;
-      }
-      if (!timeline.projectsMotionSession) {
-        return;
-      }
+    } else {
+      sessionProjection.markMotionTerminal(
+        turnId,
+        messageId,
+        "failed",
+        reason,
+      );
     }
-    sessionProjection.markMotionTerminal(
-      turnId,
-      messageId,
-      "failed",
-      reason,
-    );
+    if (errors.length > 0) {
+      throw errors[0];
+    }
   }
 
   function startTimelineSink(
