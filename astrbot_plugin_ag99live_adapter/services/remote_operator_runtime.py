@@ -44,6 +44,7 @@ class RemoteOperatorTarget:
     model: str
     variant: str
     description: str
+    allow_unrestricted_access: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -377,7 +378,7 @@ class CodexAppServerClient:
             )
         )
         logger.info(
-            "Remote operator auto-approved app-server request for development testing: method=%s",
+            "Remote operator auto-approved request for explicitly trusted target: method=%s",
             method,
         )
         return True
@@ -584,8 +585,14 @@ class RemoteOperatorRuntime:
                 status="failed",
                 error="remote_operator_profile_unavailable",
             )
+        target = config.targets[request.computer]
+        logger.info(
+            "Remote operator execution started: computer=%s backend=%s profile=%s",
+            request.computer,
+            target.backend,
+            request.profile,
+        )
         try:
-            target = config.targets[request.computer]
             output = await self._client_for_target(target).execute(
                 request.prompt,
                 model=profile.model,
@@ -593,6 +600,13 @@ class RemoteOperatorRuntime:
             )
         except Exception as exc:  # noqa: BLE001
             mark_remote_operator_computer_offline(request.computer)
+            logger.warning(
+                "Remote operator execution failed: computer=%s backend=%s profile=%s error=%s",
+                request.computer,
+                target.backend,
+                request.profile,
+                exc,
+            )
             return RemoteOperatorExecutionResult(
                 computer=request.computer,
                 profile=request.profile,
@@ -601,6 +615,12 @@ class RemoteOperatorRuntime:
                 error=str(exc),
             )
         mark_remote_operator_computer_online(request.computer)
+        logger.info(
+            "Remote operator execution completed: computer=%s backend=%s profile=%s",
+            request.computer,
+            target.backend,
+            request.profile,
+        )
         return RemoteOperatorExecutionResult(
             computer=request.computer,
             profile=request.profile,
@@ -610,6 +630,8 @@ class RemoteOperatorRuntime:
         )
 
     def _client_for_target(self, target: RemoteOperatorTarget) -> Any:
+        if not target.allow_unrestricted_access:
+            raise RuntimeError("remote_operator_unrestricted_access_not_confirmed")
         if target.backend == "opencode":
             return self._opencode_client_factory(target)
         return self._client_factory(target.endpoint)
@@ -717,7 +739,16 @@ def _resolve_target_entries(config: Mapping[str, Any]) -> dict[str, RemoteOperat
             endpoint = _normalize_text(item.get("endpoint"))
             backend = _normalize_backend(item.get("backend"))
             enabled = _normalize_bool(item.get("enabled"), default=True)
-            if not enabled or not key or not label:
+            allow_unrestricted_access = _normalize_bool(
+                item.get("allow_unrestricted_access"),
+                default=False,
+            )
+            if (
+                not enabled
+                or not allow_unrestricted_access
+                or not key
+                or not label
+            ):
                 continue
             if backend == "codex_app_server" and not endpoint:
                 continue
@@ -732,6 +763,7 @@ def _resolve_target_entries(config: Mapping[str, Any]) -> dict[str, RemoteOperat
                 model=_normalize_text(item.get("model")),
                 variant=_normalize_text(item.get("variant")),
                 description=_normalize_text(item.get("description")),
+                allow_unrestricted_access=allow_unrestricted_access,
             )
     return targets
 
@@ -763,6 +795,7 @@ def _target_probe_identity(target: RemoteOperatorTarget) -> str:
             target.workdir,
             target.model,
             target.variant,
+            str(target.allow_unrestricted_access),
         )
     )
 

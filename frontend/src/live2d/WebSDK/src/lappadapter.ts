@@ -107,7 +107,11 @@ export class LAppAdapter {
 
   public beginExternalAudioSignalSource(
     sourceId: string,
-    options?: { onFailed?: (reason: string) => void },
+    options?: {
+      lipSyncEnabled?: boolean;
+      onFailed?: (reason: string) => void;
+      onLipSyncUnavailable?: (reason: string) => void;
+    },
   ): void {
     const model = this.getModel();
     if (!model) {

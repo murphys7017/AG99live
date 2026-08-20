@@ -1,4 +1,3 @@
-import { onScopeDispose } from "vue";
 import {
   createAdapterConnection,
   type AdapterConnectionCompositionInstance,
@@ -72,12 +71,6 @@ export function createConversationPlaybackRuntime(options: {
         timeline,
       );
     },
-  });
-
-  onScopeDispose(() => {
-    void dispose().catch((error) => {
-      console.error("[ConversationPlaybackRuntime] adapter dispose failed.", error);
-    });
   });
 
   async function dispose(): Promise<void> {

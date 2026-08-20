@@ -23,6 +23,7 @@ import {
   FinishedMotionCallback,
 } from "@framework/motion/acubismmotion";
 import { CubismMotion } from "@framework/motion/cubismmotion";
+import { CubismPhysicsJson } from "@framework/physics/cubismphysicsjson";
 import {
   CubismMotionQueueEntryHandle,
   InvalidMotionQueueEntryHandleValue,
@@ -327,10 +328,12 @@ export class LAppModel extends CubismUserModel {
         this.fetchRequiredArrayBuffer(`${this._modelHomeDir}${physicsFileName}`)
           .then((arrayBuffer) => {
             this.loadPhysics(arrayBuffer, arrayBuffer.byteLength);
-            this._physics?.setTerminalOutputResponseScale(
-              LAppDefine.PHYSICS_RESPONSE_SCALE
+            this.configurePhysicsResponseParameterIds(
+              arrayBuffer,
+              arrayBuffer.byteLength,
             );
-            this._physics?.setTerminalOutputResponseProtectedParameterIds(
+            this.setPhysicsResponseScale(LAppDefine.PHYSICS_RESPONSE_SCALE);
+            this.setPhysicsResponseProtectedParameterIds(
               LAppDefine.PHYSICS_RESPONSE_PROTECTED_PARAMETER_IDS,
             );
 
@@ -736,14 +739,20 @@ export class LAppModel extends CubismUserModel {
       ) {
         this.stopDirectParameterPlan(parameterMixerFailure.reason, "failed");
       }
-      if (parameterMixerFailure.owner !== "direct_plan") {
+      if (parameterMixerFailure.owner === "lip_sync") {
+        this._speechSignalRuntime.disableLipSync(parameterMixerFailure.reason);
+      } else if (parameterMixerFailure.owner === "mixed") {
         this._speechSignalRuntime.failActiveSource(parameterMixerFailure.reason);
       }
     }
 
     // 物理演算の設定
     if (this._physics != null) {
+      const scalePhysicsResponse = this.capturePhysicsResponseBaseline();
       this._physics.evaluate(this._model, deltaTimeSeconds);
+      if (scalePhysicsResponse) {
+        this.applyPhysicsResponseScale();
+      }
     }
 
     // ポーズの設定
@@ -755,13 +764,125 @@ export class LAppModel extends CubismUserModel {
   }
 
   public setPhysicsResponseScale(scale: number): void {
-    this._physics?.setTerminalOutputResponseScale(scale);
+    if (!Number.isFinite(scale) || scale <= 0) {
+      throw new RangeError("physics_response_scale_invalid");
+    }
+    this._physicsResponseScale = scale;
   }
 
   public setPhysicsResponseProtectedParameterIds(
     parameterIds: readonly string[],
   ): void {
-    this._physics?.setTerminalOutputResponseProtectedParameterIds(parameterIds);
+    this._physicsResponseProtectedParameterIds = new Set(
+      parameterIds
+        .filter((parameterId) => typeof parameterId === "string")
+        .map((parameterId) => parameterId.trim())
+        .filter(Boolean),
+    );
+    this.refreshPhysicsResponseParameterIndices();
+  }
+
+  private configurePhysicsResponseParameterIds(
+    physicsJsonBuffer: ArrayBuffer,
+    size: number,
+  ): void {
+    const physicsJson = new CubismPhysicsJson(physicsJsonBuffer, size);
+    const inputParameterIds = new Set<string>();
+    const outputParameterIds = new Set<string>();
+    try {
+      for (
+        let settingIndex = 0;
+        settingIndex < physicsJson.getSubRigCount();
+        settingIndex += 1
+      ) {
+        for (
+          let inputIndex = 0;
+          inputIndex < physicsJson.getInputCount(settingIndex);
+          inputIndex += 1
+        ) {
+          inputParameterIds.add(
+            physicsJson.getInputSourceId(settingIndex, inputIndex).getString().s,
+          );
+        }
+        for (
+          let outputIndex = 0;
+          outputIndex < physicsJson.getOutputCount(settingIndex);
+          outputIndex += 1
+        ) {
+          outputParameterIds.add(
+            physicsJson.getOutputDestinationId(settingIndex, outputIndex).getString().s,
+          );
+        }
+      }
+    } finally {
+      physicsJson.release();
+    }
+    this._physicsInputParameterIds = inputParameterIds;
+    this._physicsOutputParameterIds = outputParameterIds;
+    this.refreshPhysicsResponseParameterIndices();
+  }
+
+  private refreshPhysicsResponseParameterIndices(): void {
+    if (!this._model) {
+      this._physicsResponseParameterIndices = [];
+      this._physicsResponseBaselineValues = new Float32Array(0);
+      return;
+    }
+
+    const idManager = CubismFramework.getIdManager();
+    const indices: number[] = [];
+    for (const parameterId of this._physicsOutputParameterIds) {
+      if (
+        this._physicsInputParameterIds.has(parameterId)
+        || this._physicsResponseProtectedParameterIds.has(parameterId)
+      ) {
+        continue;
+      }
+      const parameterIndex = this._model.getParameterIndex(
+        idManager.getId(parameterId),
+      );
+      if (this.isParameterIndexWritable(parameterIndex)) {
+        indices.push(parameterIndex);
+      }
+    }
+    this._physicsResponseParameterIndices = indices;
+    this._physicsResponseBaselineValues = new Float32Array(indices.length);
+  }
+
+  private capturePhysicsResponseBaseline(): boolean {
+    if (
+      this._physicsResponseScale === 1
+      || this._physicsResponseParameterIndices.length === 0
+    ) {
+      return false;
+    }
+    for (
+      let index = 0;
+      index < this._physicsResponseParameterIndices.length;
+      index += 1
+    ) {
+      this._physicsResponseBaselineValues[index] = this._model.getParameterValueByIndex(
+        this._physicsResponseParameterIndices[index],
+      );
+    }
+    return true;
+  }
+
+  private applyPhysicsResponseScale(): void {
+    for (
+      let index = 0;
+      index < this._physicsResponseParameterIndices.length;
+      index += 1
+    ) {
+      const parameterIndex = this._physicsResponseParameterIndices[index];
+      const valueBeforePhysics = this._physicsResponseBaselineValues[index];
+      const valueAfterPhysics = this._model.getParameterValueByIndex(parameterIndex);
+      this._model.setParameterValueByIndex(
+        parameterIndex,
+        valueBeforePhysics
+          + (valueAfterPhysics - valueBeforePhysics) * this._physicsResponseScale,
+      );
+    }
   }
 
   public stopAmbientMotion(): void {
@@ -2021,6 +2142,12 @@ export class LAppModel extends CubismUserModel {
     this._motionStartError = "";
     this._parameterMixer = new ActiveParameterMixer();
     this._speechSignalRuntime = new SpeechSignalRuntime();
+    this._physicsResponseScale = 1;
+    this._physicsResponseProtectedParameterIds = new Set<string>();
+    this._physicsInputParameterIds = new Set<string>();
+    this._physicsOutputParameterIds = new Set<string>();
+    this._physicsResponseParameterIndices = [];
+    this._physicsResponseBaselineValues = new Float32Array(0);
   }
 
   _modelSetting: ICubismModelSetting; // モデルセッティング情報
@@ -2055,4 +2182,10 @@ export class LAppModel extends CubismUserModel {
   _motionStartError: string;
   private _parameterMixer: ActiveParameterMixer;
   private _speechSignalRuntime: SpeechSignalRuntime;
+  private _physicsResponseScale: number;
+  private _physicsResponseProtectedParameterIds: Set<string>;
+  private _physicsInputParameterIds: Set<string>;
+  private _physicsOutputParameterIds: Set<string>;
+  private _physicsResponseParameterIndices: number[];
+  private _physicsResponseBaselineValues: Float32Array;
 }

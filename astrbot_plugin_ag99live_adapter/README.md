@@ -129,7 +129,7 @@ AG99live 远程执行器只在具备 Interaction Prompt/Result contributor 的�
 
 当前关键边界：
 
-- `_conf_schema.json` 的 `remote_operator_computer_entries` 配置执行器 key、用户可读名称、后端类型和固定执行参数。
+- `_conf_schema.json` 的 `remote_operator_computer_entries` 配置执行器 key、用户可读名称、后端类型和固定执行参数。执行器只有在 `allow_unrestricted_access=true` 时才会上线；该开关表示明确允许绕过沙箱并自动批准命令、文件修改和权限申请，只能用于完全信任的电脑。
 - `backend=codex_app_server` 用于 Windows 桌面、应用、浏览器和 Computer Use 操作，endpoint 填 Codex app-server WebSocket 地址。
 - `backend=opencode` 用于代码、文件、命令、日志和项目开发任务；`model`、`variant`、`workdir` 均由配置锁定，不由聊天模型决定。
 - Adapter 会 probe endpoint 并只向 prompt 注入在线电脑。

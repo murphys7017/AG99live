@@ -75,7 +75,6 @@ export class CubismPhysics {
    */
   public parse(physicsJson: ArrayBuffer, size: number): void {
     this._physicsRig = new CubismPhysicsRig();
-    this._physicsInputParameterIds.clear();
 
     let json: CubismPhysicsJson = new CubismPhysicsJson(physicsJson, size);
 
@@ -166,9 +165,8 @@ export class CubismPhysics {
 
         this._physicsRig.inputs.at(inputIndex + j).source.targetType =
           CubismPhysicsTargetType.CubismPhysicsTargetType_Parameter;
-        const sourceId = json.getInputSourceId(i, j);
-        this._physicsRig.inputs.at(inputIndex + j).source.id = sourceId;
-        this._physicsInputParameterIds.add(sourceId.getString().s);
+        this._physicsRig.inputs.at(inputIndex + j).source.id =
+          json.getInputSourceId(i, j);
       }
       inputIndex += this._physicsRig.settings.at(i).inputCount;
 
@@ -718,16 +716,6 @@ export class CubismPhysics {
 
         const destinationParameterIndex: number =
           currentOutputs[i].destinationParameterIndex;
-        const destinationParameterId =
-          currentOutputs[i].destination.id.getString().s;
-        const responseScale = this._physicsInputParameterIds.has(
-          destinationParameterId
-        )
-          || this._terminalOutputResponseProtectedParameterIds.has(
-            destinationParameterId
-          )
-          ? 1.0
-          : this._terminalOutputResponseScale;
         const outParameterValues: Float32Array =
           !Float32Array.prototype.slice && 'subarray' in Float32Array.prototype
             ? JSON.parse(
@@ -744,8 +732,7 @@ export class CubismPhysics {
           this._previousRigOutputs.at(settingIndex).outputs.at(i) *
             (1 - weight) +
             this._currentRigOutputs.at(settingIndex).outputs.at(i) * weight,
-          currentOutputs[i],
-          responseScale
+          currentOutputs[i]
         );
 
         // 値を反映
@@ -776,24 +763,6 @@ export class CubismPhysics {
     return this._options;
   }
 
-  public setTerminalOutputResponseScale(scale: number): void {
-    if (!Number.isFinite(scale) || scale <= 0) {
-      throw new RangeError('physics_terminal_output_response_scale_invalid');
-    }
-    this._terminalOutputResponseScale = scale;
-  }
-
-  public setTerminalOutputResponseProtectedParameterIds(
-    parameterIds: readonly string[],
-  ): void {
-    this._terminalOutputResponseProtectedParameterIds = new Set(
-      parameterIds
-        .filter((parameterId) => typeof parameterId === "string")
-        .map((parameterId) => parameterId.trim())
-        .filter(Boolean),
-    );
-  }
-
   /**
    * コンストラクタ
    */
@@ -811,9 +780,6 @@ export class CubismPhysics {
     this._currentRemainTime = 0.0;
     this._parameterCaches = null;
     this._parameterInputCaches = null;
-    this._terminalOutputResponseScale = 1.0;
-    this._physicsInputParameterIds = new Set<string>();
-    this._terminalOutputResponseProtectedParameterIds = new Set<string>();
   }
 
   /**
@@ -885,9 +851,6 @@ export class CubismPhysics {
 
   _parameterCaches: Float32Array; ///< Evaluateで利用するパラメータのキャッシュ
   _parameterInputCaches: Float32Array; ///< UpdateParticlesが動くときの入力をキャッシュ
-  _terminalOutputResponseScale: number; ///< Terminal Physics response multiplier.
-  _physicsInputParameterIds: Set<string>; ///< Outputs reused as Physics inputs are not presentation-scaled.
-  _terminalOutputResponseProtectedParameterIds: Set<string>; ///< Semantic outputs excluded from presentation scaling.
 }
 
 /**
@@ -1267,10 +1230,8 @@ function updateOutputParameterValue(
   parameterValueMinimum: number,
   parameterValueMaximum: number,
   translation: number,
-  output: CubismPhysicsOutput,
-  responseScale = 1.0
+  output: CubismPhysicsOutput
 ): void {
-  const valueBeforePhysics = parameterValue[0];
   let value: number;
   const outputScale: number = output.getScale(
     output.translationScale,
@@ -1302,12 +1263,6 @@ function updateOutputParameterValue(
     parameterValue[0] = value;
   }
 
-  const scaledValue = valueBeforePhysics
-    + (parameterValue[0] - valueBeforePhysics) * responseScale;
-  parameterValue[0] = CubismMath.max(
-    parameterValueMinimum,
-    CubismMath.min(parameterValueMaximum, scaledValue)
-  );
 }
 
 function normalizeParameterValue(

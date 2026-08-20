@@ -1,13 +1,17 @@
 task:
-  class: refactor
-  risk: medium
-  phase: dynamics_unified_parameter_response
+  class: bugfix
+  risk: high
+  phase: project_review_followup
   status: validation_partial
-  scope: "Make ActiveParameterMixer the single final target and response boundary: collect raw direct-plan and lip-sync contributions, synthesize one final target, apply ParameterPresentation once for non-lip parameters, and keep Physics as the downstream driver."
+  scope: "Resolve the source-confirmed project review findings: explicitly gate unrestricted Remote Operator targets, serialize audio-cache cleanup, decouple speech energy from LipSync capability, make Live2D Core loading retryable, move Physics response scaling out of Cubism Framework, and keep one playback disposal owner."
 
 context:
   confidence: high
   assumptions:
+    - Remote Operator remains an intentionally autonomous trusted-machine feature; targets must explicitly confirm unrestricted access before they can be registered or executed.
+    - Speech audio analysis is owned by the active audio source and must continue when model LipSync parameters are absent or rejected.
+    - Physics response scaling belongs to AG99 LAppModel and applies only to terminal Physics output deltas, excluding Physics inputs and semantic protected parameters.
+    - PetDesktopRuntime is the sole composition owner for ConversationPlaybackRuntime disposal.
     - Phase one feature scope remains complete, but this does not imply that the current source is defect-free.
     - Only source-confirmed unresolved defects belong in the active defect register; resolved, invalid, speculative, and historical findings are removed.
     - Performance work must distinguish existing foundations from remaining implementation instead of describing completed capabilities as future work.

@@ -5,7 +5,9 @@ export interface ExternalAudioSignalValues {
 }
 
 export interface ExternalAudioSignalSourceOptions {
+  lipSyncEnabled?: boolean;
   onFailed?: (reason: string) => void;
+  onLipSyncUnavailable?: (reason: string) => void;
 }
 
 export interface SpeechAudioFrame {
@@ -50,8 +52,10 @@ export class SpeechSignalRuntime {
   private speechBodyEnvelope = 0;
   private speechEmphasisEnvelope = 0;
   private speechVoiced = false;
+  private lipSyncEnabled = false;
   private lipSyncDiagnosticFrameCount = 0;
   private activeSourceFailureHandler: ((reason: string) => void) | null = null;
+  private activeLipSyncUnavailableHandler: ((reason: string) => void) | null = null;
 
   public beginSource(
     sourceId: string,
@@ -67,10 +71,15 @@ export class SpeechSignalRuntime {
     this.speechEmphasisValue = 0;
     this.speechEmphasisEnvelope = 0;
     this.speechVoiced = false;
+    this.lipSyncEnabled = options.lipSyncEnabled !== false;
     this.lipSyncDiagnosticFrameCount = 0;
     this.activeSourceFailureHandler = typeof options.onFailed === "function"
       ? options.onFailed
       : null;
+    this.activeLipSyncUnavailableHandler =
+      typeof options.onLipSyncUnavailable === "function"
+        ? options.onLipSyncUnavailable
+        : null;
   }
 
   public writeSource(
@@ -126,6 +135,26 @@ export class SpeechSignalRuntime {
       failureHandler(normalizedReason);
     } catch (error) {
       console.error("[SpeechSignalRuntime] source failure callback failed.", {
+        reason: normalizedReason,
+        error,
+      });
+    }
+  }
+
+  public disableLipSync(reason: string): void {
+    const normalizedReason = normalizeFailureReason(reason);
+    if (this.activeSourceId === null || !this.lipSyncEnabled) {
+      return;
+    }
+
+    this.lipSyncEnabled = false;
+    this.lipSyncIntensity = 0;
+    const unavailableHandler = this.activeLipSyncUnavailableHandler;
+    this.activeLipSyncUnavailableHandler = null;
+    try {
+      unavailableHandler?.(normalizedReason);
+    } catch (error) {
+      console.error("[SpeechSignalRuntime] lip sync unavailable callback failed.", {
         reason: normalizedReason,
         error,
       });
@@ -199,7 +228,9 @@ export class SpeechSignalRuntime {
       this.speechEmphasisEnvelope = 0;
     }
 
-    const lipSyncActive = includeLipSync && this.activeSourceId !== null;
+    const lipSyncActive = includeLipSync
+      && this.activeSourceId !== null
+      && this.lipSyncEnabled;
     return {
       lipSyncActive,
       lipSyncIntensity: lipSyncActive
@@ -264,6 +295,8 @@ export class SpeechSignalRuntime {
   private clearActiveSource(): void {
     this.activeSourceId = null;
     this.activeSourceFailureHandler = null;
+    this.activeLipSyncUnavailableHandler = null;
+    this.lipSyncEnabled = false;
     this.lipSyncIntensity = 0;
     this.speechEnergyValue = 0;
     this.speechEmphasisValue = 0;

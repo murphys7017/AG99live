@@ -19,6 +19,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import threading
 import time
 from urllib.parse import unquote
 from uuid import uuid4
@@ -71,6 +72,7 @@ class MediaService:
         self.image_cache_dir = image_cache_dir
         self._audio_buffer_chunks_by_segment: dict[str, list[np.ndarray]] = {}
         self._audio_buffer_lock = asyncio.Lock()
+        self._audio_cache_cleanup_lock = threading.Lock()
 
         self._prepare_audio_cache_dir()
         self._cleanup_audio_cache()
@@ -230,49 +232,54 @@ class MediaService:
         文件按 mtime 排序，剔除超过 AUDIO_CACHE_MAX_FILES（120）个老文件，但
         AUDIO_CACHE_TRIM_PROTECTION_SECONDS（10m）内的新文件不受数量限制保留。
         """
-        self._prepare_audio_cache_dir()
-        now = time.time()
-        cached_files = [
-            entry
-            for entry in self.audio_cache_dir.iterdir()
-            if entry.is_file()
-        ]
+        with self._audio_cache_cleanup_lock:
+            self._prepare_audio_cache_dir()
+            now = time.time()
+            cached_files = self._snapshot_audio_cache_files()
 
-        for entry in cached_files:
+            for entry, modified_at in cached_files:
+                if now - modified_at <= AUDIO_CACHE_MAX_AGE_SECONDS:
+                    continue
+
+                try:
+                    entry.unlink(missing_ok=True)
+                except OSError as exc:
+                    logger.warning(
+                        "Failed to remove expired audio cache file `%s`: %s",
+                        entry,
+                        exc,
+                    )
+
+            protected_cutoff = now - AUDIO_CACHE_TRIM_PROTECTION_SECONDS
+            trimmable_files = sorted(
+                (
+                    (entry, modified_at)
+                    for entry, modified_at in self._snapshot_audio_cache_files()
+                    if modified_at <= protected_cutoff
+                ),
+                key=lambda item: item[1],
+                reverse=True,
+            )
+
+            for entry, _modified_at in trimmable_files[AUDIO_CACHE_MAX_FILES:]:
+                try:
+                    entry.unlink(missing_ok=True)
+                except OSError as exc:
+                    logger.warning(
+                        "Failed to trim audio cache file `%s`: %s",
+                        entry,
+                        exc,
+                    )
+
+    def _snapshot_audio_cache_files(self) -> list[tuple[Path, float]]:
+        files: list[tuple[Path, float]] = []
+        for entry in self.audio_cache_dir.iterdir():
             try:
-                age_seconds = now - entry.stat().st_mtime
+                if entry.is_file():
+                    files.append((entry, entry.stat().st_mtime))
             except OSError:
                 continue
-
-            if age_seconds <= AUDIO_CACHE_MAX_AGE_SECONDS:
-                continue
-
-            try:
-                entry.unlink(missing_ok=True)
-            except OSError as exc:
-                logger.warning("Failed to remove expired audio cache file `%s`: %s", entry, exc)
-
-        remaining_files = [
-            entry
-            for entry in self.audio_cache_dir.iterdir()
-            if entry.is_file()
-        ]
-        protected_cutoff = now - AUDIO_CACHE_TRIM_PROTECTION_SECONDS
-        trimmable_files = sorted(
-            (
-                entry
-                for entry in remaining_files
-                if entry.stat().st_mtime <= protected_cutoff
-            ),
-            key=lambda item: item.stat().st_mtime,
-            reverse=True,
-        )
-
-        for entry in trimmable_files[AUDIO_CACHE_MAX_FILES:]:
-            try:
-                entry.unlink(missing_ok=True)
-            except OSError as exc:
-                logger.warning("Failed to trim audio cache file `%s`: %s", entry, exc)
+        return files
 
     def _save_frontend_image_payload_to_local_path(
         self,

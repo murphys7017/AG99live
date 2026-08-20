@@ -44,6 +44,11 @@
             "type": "bool",
             "default": true
           },
+          "allow_unrestricted_access": {
+            "description": "明确允许该执行器绕过沙箱并自动批准命令、文件修改和权限申请。仅可对完全信任的电脑启用；未启用时该执行器不会上线。",
+            "type": "bool",
+            "default": false
+          },
           "backend": {
             "description": "执行后端。codex_app_server 用于 Codex app-server + Computer Use 桌面控制；opencode 用于 OpenCode 代码、文件、命令和项目任务。",
             "type": "string",

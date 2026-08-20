@@ -36,7 +36,7 @@ export function createLive2DLipSyncTimelineSink(): PlaybackTimelineLipSyncSink {
     attachAudio(options) {
       stop();
       const serial = attachmentSerial;
-      const sourceId = `lip-sync:${serial}`;
+      const sourceId = `speech-audio:${serial}`;
       let started = false;
       let terminalUnavailable = false;
       const isActiveAttachment = () =>
@@ -66,7 +66,7 @@ export function createLive2DLipSyncTimelineSink(): PlaybackTimelineLipSyncSink {
         markUnavailable,
       );
       liveRuntime = result.runtime;
-      console.info("[Live2D] lip sync attachment evaluated.", {
+      console.info("[Live2D] speech audio attachment evaluated.", {
         audioUrl: options.audioUrl,
         runtimeAvailable: result.runtime !== null,
         failureReason: result.failureReason,
@@ -129,7 +129,7 @@ function startLiveLipSync(
     return reportLipSyncFailure("lip_sync_model_unavailable", error);
   }
 
-  console.info("[Live2D] lip sync model capability checked.", {
+  console.info("[Live2D] speech audio model capability checked.", {
     hasLipSyncParameters,
     hasAudioContext: Boolean(
       window.AudioContext
@@ -137,15 +137,15 @@ function startLiveLipSync(
     ),
   });
 
-  if (!hasLipSyncParameters) {
-    return reportLipSyncFailure("lip_sync_parameters_unconfigured");
-  }
-
   try {
     beginAudioSignalSource(sourceId, {
+      lipSyncEnabled: hasLipSyncParameters,
       onFailed: (reason) => {
         sourceRuntime?.stop();
         onRuntimeFailure(reason, false);
+      },
+      onLipSyncUnavailable: (reason) => {
+        onRuntimeFailure(reason, true);
       },
     });
   } catch (error) {
@@ -184,10 +184,14 @@ function startLiveLipSync(
   const AudioContextCtor = window.AudioContext
     ?? (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
   if (!AudioContextCtor) {
+    const fallbackRuntime = degradedRuntime();
+    if (!fallbackRuntime) {
+      endSignalSource();
+    }
     return reportLipSyncFailure(
       "lip_sync_audio_context_unavailable",
       undefined,
-      degradedRuntime(),
+      fallbackRuntime,
     );
   }
 
@@ -235,13 +239,13 @@ function startLiveLipSync(
       );
       try {
         writeAudioSignalSource(sourceId, {
-          lipSyncIntensity,
+          ...(hasLipSyncParameters ? { lipSyncIntensity } : {}),
           speechEnergyValue,
           speechEmphasisValue,
         });
         if (!firstFrameLogged) {
           firstFrameLogged = true;
-          console.info("[Live2D] lip sync first frame written.", {
+          console.info("[Live2D] speech audio first frame written.", {
             hasLipSyncParameters,
             lipSyncIntensity,
             speechEnergyValue,
@@ -325,10 +329,14 @@ function startLiveLipSync(
       failureReason: hasLipSyncParameters ? null : "lip_sync_parameters_unconfigured",
     };
   } catch (error) {
+    const fallbackRuntime = degradedRuntime();
+    if (!fallbackRuntime) {
+      endSignalSource();
+    }
     return reportLipSyncFailure(
       "lip_sync_analyser_failed",
       error,
-      degradedRuntime(),
+      fallbackRuntime,
     );
   }
 }

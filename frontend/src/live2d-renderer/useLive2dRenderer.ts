@@ -71,7 +71,16 @@ function ensureLive2DCoreLoaded(): Promise<void> {
       }
       resolve();
     };
-    const handleReject = () => reject(new Error("Failed to load Live2D Cubism Core."));
+    const handleReject = () => {
+      const failedScript = document.getElementById(
+        LIVE2D_CORE_SCRIPT_ID,
+      ) as HTMLScriptElement | null;
+      if (failedScript?.dataset.loaded !== "true") {
+        failedScript?.remove();
+      }
+      live2dCorePromise = null;
+      reject(new Error("Failed to load Live2D Cubism Core."));
+    };
 
     if (existingScript) {
       existingScript.addEventListener("load", handleResolve, { once: true });
@@ -249,6 +258,12 @@ export function useLive2dRenderer(
       await nextTick();
       if (!isCurrentModelRequest(requestVersion, model.model_url)) {
         return;
+      }
+      const adapter = window.getLAppAdapter?.();
+      if (adapter?.applyRuntimeEffectsSettings) {
+        adapter.applyRuntimeEffectsSettings(
+          selectLive2dRuntimeEffectsSettings(settings.value, model),
+        );
       }
       const didResizeCanvas = syncCanvasSize();
       resizeLive2D.value = () => LAppDelegate.getInstance().onResize();

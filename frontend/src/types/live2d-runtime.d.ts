@@ -49,7 +49,11 @@ declare global {
       getDirectParameterPlanError?: () => string;
       beginExternalAudioSignalSource?: (
         sourceId: string,
-        options?: { onFailed?: (reason: string) => void },
+        options?: {
+          lipSyncEnabled?: boolean;
+          onFailed?: (reason: string) => void;
+          onLipSyncUnavailable?: (reason: string) => void;
+        },
       ) => void;
       writeExternalAudioSignalSource?: (
         sourceId: string,
