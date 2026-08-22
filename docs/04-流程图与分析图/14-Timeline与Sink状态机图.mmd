@@ -3,9 +3,9 @@ stateDiagram-v2
 
     [*] --> Missing
     Missing --> Preparing: startSegmentJob(turn_id,message_id)
-    Preparing --> Ready: required sinks registered
+    Preparing --> Ready: 所有 requiredForStart sinks 已接受
     Preparing --> Failed: preparation invariant failed
-    Ready --> Running: engine.start / first required sink started
+    Ready --> Running: engine.start / all requiredForStart sinks accepted
     Ready --> Failed: required sink start failed
     Running --> Running: duration / clock / optional sink events
     Running --> Completed: all required sinks completed or absent
@@ -58,6 +58,9 @@ stateDiagram-v2
         HTMLAudioElement clock only after playing.
         Motion-only uses an explicitly declared
         synthetic clock, never an audio fallback.
+        required 表示结束前必须结算；
+        requiredForStart=false 的 motion sink
+        可以在 Timeline playing 后才真正启动。
     end note
 
     note right of Running

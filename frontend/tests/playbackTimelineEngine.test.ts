@@ -38,6 +38,32 @@ function testRequiredSinkFailureFailsTimeline(): void {
   assert.equal(engine.getPhase(), "failed");
 }
 
+function testExecutionSinkDoesNotBlockTimelineStart(): void {
+  const engine = createPlaybackTimelineEngine();
+  engine.load(
+    { turnId: "turn-1", messageId: "message-1" },
+    [
+      { id: "audio", required: true },
+      { id: "motion", required: true, requiredForStart: false },
+    ],
+  );
+
+  engine.markSinkStarted("audio");
+  assert.equal(engine.getPhase(), "ready");
+
+  engine.start(100);
+  assert.equal(engine.getPhase(), "playing");
+  assert.equal(
+    engine.getSnapshot()?.sinks.find((sink) => sink.id === "motion")?.terminal,
+    "idle",
+  );
+
+  engine.markSinkTerminal("audio", "completed", "audio_completed");
+  assert.equal(engine.getPhase(), "playing");
+  engine.markSinkTerminal("motion", "completed", "motion_completed");
+  assert.equal(engine.getPhase(), "completed");
+}
+
 function testInterruptReachesActiveSinks(): void {
   const interrupted: string[] = [];
   const engine = createPlaybackTimelineEngine();
@@ -68,5 +94,6 @@ function testInterruptReachesActiveSinks(): void {
 
 testCompletesAfterRequiredSinksComplete();
 testRequiredSinkFailureFailsTimeline();
+testExecutionSinkDoesNotBlockTimelineStart();
 testInterruptReachesActiveSinks();
 console.log("playbackTimelineEngine smoke tests passed");

@@ -49,6 +49,12 @@ export interface PlaybackClockSnapshot {
 export interface PlaybackTimelineSinkDefinition {
   id: string;
   required: boolean;
+  /**
+   * Whether this sink must be accepted before the shared timeline can start.
+   * Defaults to `required`; sinks that are driven by the timeline clock can
+   * remain open for completion without blocking the clock itself.
+   */
+  requiredForStart?: boolean;
   initialTerminal?: Exclude<SinkTerminal, "started">;
   start?: () => boolean | void;
   onInterrupt?: (reason: string) => void;

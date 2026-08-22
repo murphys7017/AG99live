@@ -1,9 +1,9 @@
 task:
-  class: refactor
+  class: bugfix
   risk: medium
-  phase: adapter_lifecycle_cleanup
+  phase: playback_timeline_motion_start_gate
   status: validation_partial
-  scope: "Remove the unused Vue AdapterConnection lifecycle wrapper and align the adapter ownership documentation with the createAdapterConnection composition path."
+  scope: "Remove the PlaybackTimeline and ModelEngine startup deadlock that prevents audio-backed motion from reaching MotionPlayer and WebSDK, without changing timing policy or module ownership."
 
 context:
   confidence: high
@@ -74,6 +74,7 @@ context:
     - Part response policy remains an internal ModelEngine mapping in this batch; model/profile-authored response policy is a later contract decision, not an implicit protocol extension.
     - ActiveParameterMixer owns the final target synthesis and the single active response pass; direct-plan collection must not pre-drive a parameter before source fusion.
     - Lip-sync contributions remain immediate and bypass active response dynamics when they participate in a parameter group.
+    - PlaybackTimeline sink `required` controls terminal settlement, while optional `requiredForStart` controls whether an idle sink may block the shared clock from entering playing; audio-backed motion remains required for settlement but does not block audio startup.
 
 documentation:
   authorities:
@@ -96,6 +97,9 @@ verification:
     - Automated tests are low-confidence input/output smoke checks; do not run the full suite.
     - Live AstrBot, Electron, TTS, and Live2D behavior remains user-led runtime acceptance.
   current:
+    - Audio-backed motion sinks now remain required for terminal settlement but no longer block the shared Timeline from entering `playing`; the real audio-start callback therefore delivers an `audio / playing` clock to ModelEngine instead of leaving motion pending behind an aggregate startup deadlock.
+    - MotionRuntimeScheduler again consumes pending motion only from an authoritative `audio / playing` or `paused` Timeline snapshot; it no longer accepts an audio-preparing callback as a startup shortcut.
+    - `npm run typecheck:renderer`, `npm run typecheck:websdk`, and `git diff --check` pass for the Timeline startup-gate correction. The existing PlaybackTimeline smoke command remains blocked by pre-existing strict-type errors in the frozen Cubism Framework test compilation; no test workaround was added.
     - Motion rejection now always forwards the existing segment interruption to the ModelEngine motion sink before settling the session projection, so pending inbound payloads and prepared semantic motions cannot survive a pre-start rejection; no second cleanup owner was added.
     - Timeline Clock reports `audio_pending` until the Timeline itself starts, and its attached audio time is monotonic; Catalog Motion keeps its prior elapsed-time baseline when the playback reader regresses instead of advancing from the rollback.
     - `npm run typecheck:renderer`, `npm run typecheck:websdk`, and `git diff --check` pass for the playback rejection and monotonic-clock correction; live Electron, audio, and Live2D acceptance remains user-led.

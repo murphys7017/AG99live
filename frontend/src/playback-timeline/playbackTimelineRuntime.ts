@@ -726,6 +726,7 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
       engine.registerSink({
         id: MOTION_TIMELINE_SINK_ID,
         required: true,
+        requiredForStart: false,
         start: options.start,
         onInterrupt: options.onInterrupt,
       });
@@ -733,6 +734,7 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
       engine.registerSink({
         id: MOTION_TIMELINE_SINK_ID,
         required: true,
+        requiredForStart: false,
         start: options.start,
         onInterrupt: options.onInterrupt,
       });

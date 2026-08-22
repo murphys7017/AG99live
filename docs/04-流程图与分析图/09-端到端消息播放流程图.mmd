@@ -132,7 +132,7 @@ flowchart TD
         DURATION[loadedmetadata / duration ready]:::timeline
         PREPARE[ModelEngine 预编译<br/>semantic intent / internal speech_only request]:::engine
         PREPRESULT{动作准备结果}:::engine
-        REGSINK[仅 prepared 时注册<br/>required motion sink]:::timeline
+        REGSINK[仅 prepared 时注册<br/>required motion sink<br/>requiredForStart=false]:::timeline
         PREPFAIL[显式动作准备失败<br/>写入 motion failed]:::failure
         PLAYING[Audio playing<br/>事件携带本段 AudioElement clock]:::timeline
         SUBTITLE[若 text present<br/>释放 canonical subtitle]:::timeline

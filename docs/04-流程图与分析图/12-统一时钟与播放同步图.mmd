@@ -24,7 +24,7 @@ sequenceDiagram
     alt audio.state = present
         TL->>TL: 创建 segment timeline，注册 audio required sink
         opt motion payload 已声明
-            TL->>TL: 注册 motion required sink
+            TL->>TL: 注册 motion required sink<br/>requiredForStart=false
         end
         TL->>Sinks: release segment audio URL
         Sinks->>Audio: 创建 AudioElement，load/play
@@ -43,7 +43,7 @@ sequenceDiagram
             Engine->>Engine: 在编译边界适配为 parameter plan
             Engine-->>TL: prepared / not_applicable / failure
             opt prepared
-                TL->>TL: 升级并注册 required motion sink
+                TL->>TL: 升级并注册 required motion sink<br/>requiredForStart=false
             end
         end
 
@@ -54,6 +54,7 @@ sequenceDiagram
         Clock-->>TL: currentTime/duration/playbackRate/playing
         TL->>Projection: markAudioStarted(startedAt,duration)
         Projection->>Store: audio.started
+        TL->>TL: 音频 sink 已 started，Timeline 进入 playing<br/>motion sink 仍可保持 pending
 
         par 同一个 playing 事实释放字幕
             TL->>Sinks: release segment canonical subtitle

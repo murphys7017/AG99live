@@ -130,7 +130,7 @@ sequenceDiagram
                     Note over Timeline,Engine: 不创建动作计划，也不伪造默认动作
                 end
                 opt 动作准备结果 = prepared
-                    Timeline->>Timeline: 注册 required motion sink
+                    Timeline->>Timeline: 注册 required motion sink<br/>requiredForStart=false
                 end
                 Audio->>Timeline: playing + 本 AudioElement 绑定的真实 clock
                 opt text.state = present
@@ -145,7 +145,7 @@ sequenceDiagram
                     end
                 end
                 Timeline->>Lip: 在同一 AudioElement 上启动 WebAudio RMS
-                opt required motion sink 已注册且仍为 idle
+                opt required motion sink 已注册且仍为 idle<br/>不阻塞 Timeline 进入 playing
                     Timeline->>Engine: 立即启动已准备计划<br/>视觉入场由 performance curve 控制
                 end
             else audio.state = absent 且 motion.state = present

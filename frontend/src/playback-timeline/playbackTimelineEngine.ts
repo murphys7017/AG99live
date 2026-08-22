@@ -100,7 +100,9 @@ export function createPlaybackTimelineEngine(
       return false;
     }
     for (const sink of sinks.values()) {
-      if (sink.definition.required && sink.state.terminal === "idle") {
+      const requiredForStart = sink.definition.requiredForStart
+        ?? sink.definition.required;
+      if (requiredForStart && sink.state.terminal === "idle") {
         return false;
       }
     }
@@ -212,7 +214,7 @@ export function createPlaybackTimelineEngine(
         throw new Error(`Playback timeline cannot start from phase: ${phase}`);
       }
       if (!isReady()) {
-        throw new Error("Playback timeline cannot start before required sinks are ready");
+        throw new Error("Playback timeline cannot start before start-required sinks are ready");
       }
       clock.start(startedAtMs);
       phase = "playing";
