@@ -96,9 +96,6 @@ const api = {
   minimizeCurrentWindow: () => {
     ipcRenderer.send("desktop:minimize-current-window");
   },
-  setOverlayContentHeight: (height: number) => {
-    ipcRenderer.send("desktop:set-overlay-content-height", height);
-  },
   setPttMode: (enabled: boolean, binding?: DesktopPttKeyBinding) => {
     ipcRenderer.send("desktop:set-ptt-mode", enabled, binding);
   },

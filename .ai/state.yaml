@@ -1,9 +1,9 @@
 task:
   class: bugfix
   risk: medium
-  phase: playback_timeline_motion_start_gate
+  phase: overlay_and_motion_terminal_repair
   status: validation_partial
-  scope: "Remove the PlaybackTimeline and ModelEngine startup deadlock that prevents audio-backed motion from reaching MotionPlayer and WebSDK, without changing timing policy or module ownership."
+  scope: "Restore reliable Electron overlay startup and close motion-start failures through the existing PlaybackTimeline terminal path, without adding queues, fallback behavior, or changing module ownership."
 
 context:
   confidence: high
@@ -97,6 +97,10 @@ verification:
     - Automated tests are low-confidence input/output smoke checks; do not run the full suite.
     - Live AstrBot, Electron, TTS, and Live2D behavior remains user-led runtime acceptance.
   current:
+    - Electron pet and overlay windows now carry their renderer role through the URL/query boundary and remain hidden until their own renderer has finished loading; overlay display also requires the pet window to be visible.
+    - Overlay content height is fixed at the window boundary; the ResizeObserver -> IPC -> BrowserWindow resize handshake was removed, so input rendering no longer depends on a post-mount transparent-window resize.
+    - Motion sink start rejection, synchronous start exceptions, invalid motion release timestamps, and timeline preparation failures now all enter the existing motion rejection and required-sink terminal path; a confirmed start is marked released only after the sink accepts it.
+    - `npm run typecheck:renderer`, `npm run typecheck:node`, `npm run typecheck:websdk`, and `git diff --check` remain required for this batch; live Electron, audio, and Live2D acceptance is still user-led.
     - Audio-backed motion sinks now remain required for terminal settlement but no longer block the shared Timeline from entering `playing`; the real audio-start callback therefore delivers an `audio / playing` clock to ModelEngine instead of leaving motion pending behind an aggregate startup deadlock.
     - MotionRuntimeScheduler again consumes pending motion only from an authoritative `audio / playing` or `paused` Timeline snapshot; it no longer accepts an audio-preparing callback as a startup shortcut.
     - `npm run typecheck:renderer`, `npm run typecheck:websdk`, and `git diff --check` pass for the Timeline startup-gate correction. The existing PlaybackTimeline smoke command remains blocked by pre-existing strict-type errors in the frozen Cubism Framework test compilation; no test workaround was added.

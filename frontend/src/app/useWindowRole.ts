@@ -7,6 +7,10 @@ export function getWindowRole(): DesktopWindowRole {
 
   const params = new URLSearchParams(window.location.search);
   const value = params.get("window");
+  if (value === null) {
+    console.warn("[WindowRole] missing window query parameter; defaulting to pet.");
+    return "pet";
+  }
   if (
     value === "pet" ||
     value === "overlay" ||
@@ -18,5 +22,6 @@ export function getWindowRole(): DesktopWindowRole {
     return value;
   }
 
+  console.error(`[WindowRole] unsupported window role '${value}'; defaulting to pet.`);
   return "pet";
 }

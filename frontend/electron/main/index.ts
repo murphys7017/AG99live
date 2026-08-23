@@ -369,14 +369,6 @@ function watchWindowShortcuts(window: BrowserWindow): void {
       },
     );
 
-    window.webContents.on(
-      "did-fail-load",
-      (_event, errorCode, errorDescription, validatedURL) => {
-        console.error(
-          `[renderer] load failed: ${errorCode} ${errorDescription} ${validatedURL}`,
-        );
-      },
-    );
   }
 
   window.webContents.on("before-input-event", (event, input) => {
@@ -426,13 +418,6 @@ function setupIpc(): void {
 
   ipcMain.on("desktop:minimize-current-window", (event) => {
     windowManager.minimizeCurrentWindow(BrowserWindow.fromWebContents(event.sender));
-  });
-
-  ipcMain.on("desktop:set-overlay-content-height", (event, height) => {
-    windowManager.setOverlayContentHeight(
-      BrowserWindow.fromWebContents(event.sender),
-      Number(height),
-    );
   });
 
   ipcMain.on("desktop:set-ignore-mouse-events", (event, ignore) => {

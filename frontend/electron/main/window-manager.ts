@@ -42,9 +42,8 @@ const PET_WINDOW_HEIGHT = 820;
 const PET_WINDOW_TITLE = "AG99live Live2D";
 const PET_WINDOW_MARGIN = 24;
 const PET_OVERLAY_WIDTH = 420;
+const PET_OVERLAY_HEIGHT = 168;
 const PET_OVERLAY_WINDOW_TITLE = "AG99live Input";
-const PET_OVERLAY_MIN_HEIGHT = 112;
-const PET_OVERLAY_MAX_HEIGHT = 168;
 const PET_OVERLAY_GAP = 16;
 const OVERLAY_DRAG_DETACH_THRESHOLD_PX = 12;
 const APP_ICON_PATH = path.resolve(__dirname, "../../resources/app-icon.png");
@@ -72,13 +71,12 @@ function isSafeExternalLink(url: string): boolean {
 export class WindowManager {
   private isAppQuitting = false;
   private overlayVisiblePreference = true;
-  private overlayWindowHeight = PET_OVERLAY_MIN_HEIGHT;
   private overlayFollowsPet = true;
-  private overlayResizeManagedByHeightSync = false;
   private overlayDragOrigin: OverlayDragOrigin | null = null;
   private activeDragState: WindowDragState | null = null;
   private pendingTransparentWindowRecoveryReason: string | null = null;
   private petWindowIgnoreMouseEvents = true;
+  private readonly rendererReadyWindows = new WeakSet<BrowserWindow>();
 
   private windows: ManagedWindowMap = {
     pet: null,
@@ -96,10 +94,12 @@ export class WindowManager {
     this.windows.history = this.ensureAuxWindow("history");
     this.windows.action_lab = this.ensureAuxWindow("action_lab");
     this.windows.profile_editor = this.ensureAuxWindow("profile_editor");
-    this.windows.pet?.show();
-    if (this.overlayVisiblePreference) {
-      this.windows.overlay?.show();
-    }
+    this.showWindowWhenReady(this.windows.pet, () => {
+      this.windows.pet?.show();
+    });
+    this.showWindowWhenReady(this.windows.overlay, () => {
+      this.showOverlayIfReady();
+    });
     this.broadcastWindowState();
   }
 
@@ -171,8 +171,16 @@ export class WindowManager {
       if (this.overlayFollowsPet) {
         this.positionOverlayWindow();
       }
-      target.show();
-      target.focus();
+      this.showWindowWhenReady(target, () => {
+        if (
+          !this.overlayVisiblePreference
+          || target.isDestroyed()
+        ) {
+          return;
+        }
+        target.show();
+        target.focus();
+      });
     }
 
     this.broadcastWindowState();
@@ -207,34 +215,6 @@ export class WindowManager {
 
   minimizeCurrentWindow(targetWindow: BrowserWindow | null): void {
     targetWindow?.minimize();
-  }
-
-  setOverlayContentHeight(targetWindow: BrowserWindow | null, height: number): void {
-    const overlayWindow = this.windows.overlay;
-    if (!Number.isFinite(height)) {
-      return;
-    }
-
-    if (
-      !targetWindow
-      || !overlayWindow
-      || targetWindow !== overlayWindow
-      || targetWindow.isDestroyed()
-      || overlayWindow.isDestroyed()
-    ) {
-      return;
-    }
-
-    const nextHeight = Math.min(
-      PET_OVERLAY_MAX_HEIGHT,
-      Math.max(PET_OVERLAY_MIN_HEIGHT, Math.ceil(height)),
-    );
-    if (nextHeight === this.overlayWindowHeight) {
-      return;
-    }
-
-    this.overlayWindowHeight = nextHeight;
-    this.resizeOverlayWindowPreservingPosition(nextHeight);
   }
 
   setIgnoreMouseEvents(targetWindow: BrowserWindow | null, ignore: boolean): void {
@@ -296,7 +276,9 @@ export class WindowManager {
         : bounds.width;
     const lockedHeight = role === "pet"
       ? PET_WINDOW_HEIGHT
-      : bounds.height;
+      : role === "overlay"
+        ? PET_OVERLAY_HEIGHT
+        : bounds.height;
     this.activeDragState = {
       targetWindow,
       role,
@@ -477,9 +459,7 @@ export class WindowManager {
       this.petWindowIgnoreMouseEvents = true;
       petWindow.setIgnoreMouseEvents(true, { forward: true });
       this.keepPetWindowPassive(petWindow);
-      if (this.overlayVisiblePreference) {
-        this.windows.overlay?.show();
-      }
+      this.showOverlayIfReady();
       if (this.overlayFollowsPet) {
         this.positionOverlayWindow();
       }
@@ -520,7 +500,7 @@ export class WindowManager {
     const workArea = screen.getPrimaryDisplay().workArea;
     const overlayWindow = new BrowserWindow({
       width: PET_OVERLAY_WIDTH,
-      height: this.overlayWindowHeight,
+      height: PET_OVERLAY_HEIGHT,
       icon: APP_ICON_PATH,
       title: PET_OVERLAY_WINDOW_TITLE,
       frame: false,
@@ -550,7 +530,7 @@ export class WindowManager {
     overlayWindow.setMenuBarVisibility(false);
     overlayWindow.setPosition(
       Math.max(workArea.x + workArea.width - PET_OVERLAY_WIDTH - PET_WINDOW_MARGIN, workArea.x + PET_WINDOW_MARGIN),
-      Math.max(workArea.y + workArea.height - this.overlayWindowHeight - PET_WINDOW_MARGIN, workArea.y + PET_WINDOW_MARGIN),
+      Math.max(workArea.y + workArea.height - PET_OVERLAY_HEIGHT - PET_WINDOW_MARGIN, workArea.y + PET_WINDOW_MARGIN),
     );
 
     overlayWindow.on("show", () => {
@@ -572,9 +552,6 @@ export class WindowManager {
     overlayWindow.on("resize", () => {
       this.normalizeTransparentWindowSize(overlayWindow, "overlay");
       if (this.activeDragState?.targetWindow === overlayWindow) {
-        return;
-      }
-      if (this.overlayResizeManagedByHeightSync) {
         return;
       }
       if (this.overlayFollowsPet) {
@@ -676,16 +653,68 @@ export class WindowManager {
   }
 
   private loadWindow(targetWindow: BrowserWindow, role: DesktopWindowRole): void {
+    targetWindow.webContents.once("did-finish-load", () => {
+      this.rendererReadyWindows.add(targetWindow);
+      console.info(`[renderer] ready role=${role}`);
+    });
+    targetWindow.webContents.on(
+      "did-fail-load",
+      (_event, errorCode, errorDescription, validatedURL) => {
+        console.error(
+          `[renderer] load failed role=${role}: ${errorCode} ${errorDescription} ${validatedURL}`,
+        );
+      },
+    );
+
     if (isDevelopment() && process.env.ELECTRON_RENDERER_URL) {
       const url = new URL(process.env.ELECTRON_RENDERER_URL);
       url.searchParams.set("window", role);
-      void targetWindow.loadURL(url.toString());
+      void targetWindow.loadURL(url.toString()).catch((error: unknown) => {
+        console.error(`[renderer] failed to load role=${role}.`, error);
+      });
       return;
     }
 
     void targetWindow.loadFile(path.resolve(__dirname, "../renderer/index.html"), {
-      search: `window=${role}`,
+      query: { window: role },
+    }).catch((error: unknown) => {
+      console.error(`[renderer] failed to load role=${role}.`, error);
     });
+  }
+
+  private showWindowWhenReady(
+    targetWindow: BrowserWindow | null,
+    show: () => void,
+  ): void {
+    if (!targetWindow || targetWindow.isDestroyed()) {
+      return;
+    }
+
+    if (this.rendererReadyWindows.has(targetWindow)) {
+      show();
+      return;
+    }
+
+    targetWindow.webContents.once("did-finish-load", show);
+  }
+
+  private showOverlayIfReady(): void {
+    const petWindow = this.windows.pet;
+    const overlayWindow = this.windows.overlay;
+    if (
+      !this.overlayVisiblePreference
+      || !petWindow
+      || petWindow.isDestroyed()
+      || !petWindow.isVisible()
+      || !overlayWindow
+      || overlayWindow.isDestroyed()
+      || !this.rendererReadyWindows.has(overlayWindow)
+    ) {
+      return;
+    }
+
+    this.positionOverlayWindow();
+    overlayWindow.show();
   }
 
   private findRole(targetWindow: BrowserWindow): DesktopWindowRole | null {
@@ -745,7 +774,9 @@ export class WindowManager {
     }
 
     if (snapshot.petVisible) {
-      petWindow.show();
+      this.showWindowWhenReady(petWindow, () => {
+        petWindow.show();
+      });
     } else {
       petWindow.hide();
     }
@@ -755,7 +786,9 @@ export class WindowManager {
       && snapshot.overlayVisiblePreference;
 
     if (shouldShowOverlay) {
-      overlayWindow.show();
+      this.showWindowWhenReady(overlayWindow, () => {
+        this.showOverlayIfReady();
+      });
     } else {
       overlayWindow.hide();
     }
@@ -774,7 +807,7 @@ export class WindowManager {
     const workArea = display.workArea;
     const overlayBounds = overlayWindow.getBounds();
     const overlayWidth = PET_OVERLAY_WIDTH;
-    const overlayHeight = this.overlayWindowHeight;
+    const overlayHeight = PET_OVERLAY_HEIGHT;
 
     let x = petBounds.x + (petBounds.width - overlayWidth) / 2;
 
@@ -816,42 +849,6 @@ export class WindowManager {
     }
   }
 
-  private resizeOverlayWindowPreservingPosition(nextHeight: number): void {
-    const overlayWindow = this.windows.overlay;
-    if (!overlayWindow || overlayWindow.isDestroyed()) {
-      return;
-    }
-
-    const bounds = overlayWindow.getBounds();
-    if (bounds.height === nextHeight) {
-      return;
-    }
-
-    this.overlayResizeManagedByHeightSync = true;
-    try {
-      overlayWindow.setBounds(
-        {
-          ...bounds,
-          height: nextHeight,
-        },
-        false,
-      );
-    } finally {
-      this.overlayResizeManagedByHeightSync = false;
-    }
-
-    if (this.activeDragState?.targetWindow === overlayWindow) {
-      this.activeDragState.lockedHeight = nextHeight;
-      this.invalidateTransparentWindowSurface(overlayWindow);
-      return;
-    }
-
-    if (this.overlayFollowsPet) {
-      this.positionOverlayWindow();
-    }
-    this.invalidateTransparentWindowSurface(overlayWindow);
-  }
-
   private translateOverlayWindow(deltaX: number, deltaY: number): void {
     const overlayWindow = this.windows.overlay;
     if (
@@ -877,7 +874,7 @@ export class WindowManager {
 
     const bounds = targetWindow.getBounds();
     const expectedWidth = role === "pet" ? PET_WINDOW_WIDTH : PET_OVERLAY_WIDTH;
-    const expectedHeight = role === "pet" ? PET_WINDOW_HEIGHT : this.overlayWindowHeight;
+    const expectedHeight = role === "pet" ? PET_WINDOW_HEIGHT : PET_OVERLAY_HEIGHT;
 
     if (bounds.width === expectedWidth && bounds.height === expectedHeight) {
       return false;

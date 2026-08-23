@@ -41,7 +41,6 @@ export interface Ag99DesktopApi {
   toggleAuxWindow: (target: DesktopAuxWindowRole) => void;
   closeCurrentWindow: () => void;
   minimizeCurrentWindow: () => void;
-  setOverlayContentHeight: (height: number) => void;
   setPttMode: (enabled: boolean, binding?: DesktopPttKeyBinding) => void;
   getPttHookStatus: () => Promise<DesktopPttHookStatus>;
   reportPttEventAck: (ack: DesktopPttEventAck) => void;

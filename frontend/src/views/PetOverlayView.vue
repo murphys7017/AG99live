@@ -1,16 +1,11 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref } from "vue";
 import { useDesktopBridge } from "../desktop-bridge/useDesktopBridge";
 
 const bridge = useDesktopBridge();
 const draft = ref("");
-const overlayCardRef = ref<HTMLElement | null>(null);
 const activePointerId = ref<number | null>(null);
 const isDragging = ref(false);
-const isPointerInteracting = ref(false);
-let resizeObserver: ResizeObserver | null = null;
-let heightSyncFrameId = 0;
-let lastSyncedOverlayHeight = 0;
 
 const aiStateLabel = computed(() => {
   switch (bridge.state.snapshot.aiState) {
@@ -67,36 +62,6 @@ function handleMicrophoneToggle(): void {
   bridge.sendCommand({ type: "toggle_mic_capture" });
 }
 
-function syncOverlayContentHeight(): void {
-  if (isDragging.value || isPointerInteracting.value) {
-    return;
-  }
-
-  const overlayCard = overlayCardRef.value;
-  if (!overlayCard) {
-    return;
-  }
-
-  const nextHeight = Math.ceil(overlayCard.offsetHeight);
-  if (!Number.isFinite(nextHeight) || nextHeight <= 0 || nextHeight === lastSyncedOverlayHeight) {
-    return;
-  }
-
-  lastSyncedOverlayHeight = nextHeight;
-  window.ag99desktop?.setOverlayContentHeight(nextHeight);
-}
-
-function scheduleOverlayContentHeightSync(): void {
-  if (heightSyncFrameId) {
-    return;
-  }
-
-  heightSyncFrameId = window.requestAnimationFrame(() => {
-    heightSyncFrameId = 0;
-    syncOverlayContentHeight();
-  });
-}
-
 function showContextMenu(event: MouseEvent): void {
   window.ag99desktop?.showContextMenu({
     x: event.clientX,
@@ -125,7 +90,6 @@ function isInteractiveTarget(target: EventTarget | null): boolean {
 }
 
 function finishWindowDrag(): void {
-  isPointerInteracting.value = false;
   if (activePointerId.value === null) {
     return;
   }
@@ -133,11 +97,9 @@ function finishWindowDrag(): void {
   activePointerId.value = null;
   isDragging.value = false;
   window.ag99desktop?.endWindowDrag();
-  void nextTick(scheduleOverlayContentHeightSync);
 }
 
 function handlePointerDown(event: PointerEvent): void {
-  isPointerInteracting.value = true;
   const target = event.target;
   const dragHandle =
     target instanceof HTMLElement
@@ -164,9 +126,7 @@ function handlePointerMove(event: PointerEvent): void {
 }
 
 function handlePointerUp(event: PointerEvent): void {
-  isPointerInteracting.value = false;
   if (activePointerId.value !== event.pointerId) {
-    void nextTick(scheduleOverlayContentHeightSync);
     return;
   }
 
@@ -174,36 +134,14 @@ function handlePointerUp(event: PointerEvent): void {
 }
 
 function handlePointerCancel(event: PointerEvent): void {
-  isPointerInteracting.value = false;
   if (activePointerId.value !== event.pointerId) {
-    void nextTick(scheduleOverlayContentHeightSync);
     return;
   }
 
   finishWindowDrag();
 }
 
-onMounted(() => {
-  resizeObserver = new ResizeObserver(() => {
-    scheduleOverlayContentHeightSync();
-  });
-  if (overlayCardRef.value) {
-    resizeObserver.observe(overlayCardRef.value);
-  }
-  void nextTick(scheduleOverlayContentHeightSync);
-});
-
-watch(previewText, () => {
-  void nextTick(scheduleOverlayContentHeightSync);
-});
-
 onBeforeUnmount(() => {
-  resizeObserver?.disconnect();
-  resizeObserver = null;
-  if (heightSyncFrameId) {
-    window.cancelAnimationFrame(heightSyncFrameId);
-    heightSyncFrameId = 0;
-  }
   finishWindowDrag();
 });
 </script>
@@ -214,7 +152,6 @@ onBeforeUnmount(() => {
     @contextmenu.prevent="showContextMenu"
   >
     <section
-      ref="overlayCardRef"
       class="overlay-card"
       :class="{ 'overlay-card--dragging': isDragging }"
       @pointerdown="handlePointerDown"

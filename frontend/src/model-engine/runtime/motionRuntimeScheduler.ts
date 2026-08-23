@@ -181,10 +181,37 @@ export function createMotionRuntimeScheduler(
     if (playbackClock && matchesPlaybackTimeline(entry, playbackClock)) {
       entry.playbackClock = playbackClock;
     }
+    const context = buildStartContext(entry, startReason);
+    let started = false;
+    let startFailure: unknown = null;
+    try {
+      started = hooks.onStartPayload(entry.payload, context);
+    } catch (error) {
+      startFailure = error;
+    }
+
     pendingInboundMotionPayloads.delete(key);
     syncPendingState();
-    const context = buildStartContext(entry, startReason);
-    const started = hooks.onStartPayload(entry.payload, context);
+
+    if (startFailure) {
+      const failureContext = buildStartContext(
+        entry,
+        startFailure instanceof Error && startFailure.message.trim()
+          ? `motion_start_exception:${startFailure.message.trim()}`
+          : "motion_start_exception",
+      );
+      console.error("[ModelEngine] motion payload start threw.", startFailure);
+      try {
+        hooks.onStartFailed?.(failureContext);
+      } catch (failureProjectionError) {
+        console.error(
+          "[ModelEngine] motion start failure projection threw.",
+          failureProjectionError,
+        );
+      }
+      return false;
+    }
+
     if (!started) {
       hooks.onStartFailed?.(context);
     }

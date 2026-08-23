@@ -5,6 +5,13 @@ import type {
 
 type PlaybackTimelineSinkStartCallback = () => boolean | void;
 
+function describeMotionStartFailure(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) {
+    return `motion_sink_start_failed:${error.message.trim()}`;
+  }
+  return "motion_sink_start_failed";
+}
+
 export interface PlaybackTimelineDeferredTextRelease {
   release: () => boolean;
   fail: (reason: string) => boolean;
@@ -171,70 +178,89 @@ export function executePlaybackTimelineSegmentJob<TMotionPayload>(
   if (job.motion.payload !== null) {
     const motionPayload = job.motion.payload;
     const receivedAtMs = job.motion.receivedAtMs;
-    if (
-      receivedAtMs === null
-      || !Number.isFinite(receivedAtMs)
-      || receivedAtMs < 0
-    ) {
-      throw new Error("Motion segment release requires a valid receivedAtMs.");
-    }
     const timelineMode = job.audio.noAudioConfirmed && !job.audio.release
       ? "motion_only"
       : "audio";
-    const startMotion = () => ports.motionSink.start(
-      motionPayload,
-      {
-        turnId: job.turnId,
-        messageId: job.messageId,
-        assistantText: job.text.content ?? "",
-        speechCues: job.speech.cues,
-        receivedAtMs,
-        timelineMode,
-      },
-    );
     const interruptMotion = (reason: string) => ports.motionSink.interrupt(
       job.turnId,
       job.messageId,
       reason,
     );
-    if (!releasedAudio && timelineMode === "motion_only") {
-      const prepared = timeline.ensureMotionOnlyTimeline(
-        job.turnId,
-        job.messageId,
-        startMotion,
-        interruptMotion,
+    let motionStarted = false;
+    try {
+      if (
+        receivedAtMs === null
+        || !Number.isFinite(receivedAtMs)
+        || receivedAtMs < 0
+      ) {
+        throw new Error("Motion segment release requires a valid receivedAtMs.");
+      }
+      const startMotion = () => ports.motionSink.start(
+        motionPayload,
+        {
+          turnId: job.turnId,
+          messageId: job.messageId,
+          assistantText: job.text.content ?? "",
+          speechCues: job.speech.cues,
+          receivedAtMs,
+          timelineMode,
+        },
       );
-      if (!prepared) {
-        timeline.rejectMotionBeforeStart(
+
+      if (!releasedAudio && timelineMode === "motion_only") {
+        const prepared = timeline.ensureMotionOnlyTimeline(
           job.turnId,
           job.messageId,
-          "motion_only_timeline_unavailable",
+          startMotion,
+          interruptMotion,
         );
-        return;
-      }
-    } else {
-      const prepared = timeline.ensureMotionTimelineSink(
-        job.turnId,
-        job.messageId,
-        startMotion,
-        interruptMotion,
-      );
-      if (!prepared) {
-        timeline.rejectMotionBeforeStart(
+        if (!prepared) {
+          timeline.rejectMotionBeforeStart(
+            job.turnId,
+            job.messageId,
+            "motion_only_timeline_unavailable",
+          );
+          return;
+        }
+      } else {
+        const prepared = timeline.ensureMotionTimelineSink(
           job.turnId,
           job.messageId,
-          "motion_timeline_unavailable",
+          startMotion,
+          interruptMotion,
         );
-        return;
+        if (!prepared) {
+          timeline.rejectMotionBeforeStart(
+            job.turnId,
+            job.messageId,
+            "motion_timeline_unavailable",
+          );
+          return;
+        }
       }
-    }
-    const motionStarted = timeline.startMotionSink(
-      job.turnId,
-      job.messageId,
-    ) === true;
-    if (!motionStarted) {
+
+      motionStarted = timeline.startMotionSink(
+        job.turnId,
+        job.messageId,
+      ) === true;
+    } catch (error) {
+      timeline.rejectMotionBeforeStart(
+        job.turnId,
+        job.messageId,
+        describeMotionStartFailure(error),
+      );
       return;
     }
+
+    if (!motionStarted) {
+      timeline.rejectMotionBeforeStart(
+        job.turnId,
+        job.messageId,
+        "motion_sink_start_rejected",
+      );
+      return;
+    }
+
     ports.session.markMotionReleased(job.turnId, job.messageId);
     ports.session.markPhase(job.turnId, "playing");
   }
