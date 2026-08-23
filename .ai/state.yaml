@@ -1,9 +1,9 @@
 task:
-  class: bugfix
+  class: feature
   risk: medium
-  phase: overlay_and_motion_terminal_repair
+  phase: performance_b6_active_dynamics
   status: validation_partial
-  scope: "Restore reliable Electron overlay startup and close motion-start failures through the existing PlaybackTimeline terminal path, without adding queues, fallback behavior, or changing module ownership."
+  scope: "Deepen active motion dynamics through the existing ModelEngine response-policy mapping, without changing protocol, timeline, mixer ownership, Cubism Physics ownership, or adding a second smoothing path."
 
 context:
   confidence: high
@@ -71,6 +71,8 @@ context:
     - B5 spectral emphasis is a bounded ratio from the existing audio analyser, not a new audio clock or predictive timeline; it may supplement emphasis only and must be ignored while not voiced.
     - Dynamics deepening starts with active parameter response cleanup; speech signal and Cubism Physics remain separate owners.
     - Parameter track sampling provides a time-positioned target path, while ParameterPresentation owns active target following and response dynamics.
+    - B6-1 keeps the existing dynamics contract and adjusts only the ModelEngine semantic-group response profiles: head/gaze are more responsive with limited underdamping, body groups follow more slowly, face groups remain fast but controlled, and unknown groups retain bounded response.
+    - B6-1 adjusts only response-profile frequency and damping while preserving max_velocity/max_acceleration from existing axis dynamics and binding conversion; it does not add a runtime smoothing layer or reinterpret semantic groups in WebSDK.
     - Part response policy remains an internal ModelEngine mapping in this batch; model/profile-authored response policy is a later contract decision, not an implicit protocol extension.
     - ActiveParameterMixer owns the final target synthesis and the single active response pass; direct-plan collection must not pre-drive a parameter before source fusion.
     - Lip-sync contributions remain immediate and bypass active response dynamics when they participate in a parameter group.
@@ -105,16 +107,16 @@ verification:
     - MotionRuntimeScheduler again consumes pending motion only from an authoritative `audio / playing` or `paused` Timeline snapshot; it no longer accepts an audio-preparing callback as a startup shortcut.
     - `npm run typecheck:renderer`, `npm run typecheck:websdk`, and `git diff --check` pass for the Timeline startup-gate correction. The existing PlaybackTimeline smoke command remains blocked by pre-existing strict-type errors in the frozen Cubism Framework test compilation; no test workaround was added.
     - Motion rejection now always forwards the existing segment interruption to the ModelEngine motion sink before settling the session projection, so pending inbound payloads and prepared semantic motions cannot survive a pre-start rejection; no second cleanup owner was added.
-    - Timeline Clock reports `audio_pending` until the Timeline itself starts, and its attached audio time is monotonic; Catalog Motion keeps its prior elapsed-time baseline when the playback reader regresses instead of advancing from the rollback.
+    - Timeline Clock reports `audio_pending` until the Timeline itself starts, and its attached audio time is monotonic; motion resources keep their prior elapsed-time baseline when the playback reader regresses instead of advancing from the rollback.
     - `npm run typecheck:renderer`, `npm run typecheck:websdk`, and `git diff --check` pass for the playback rejection and monotonic-clock correction; live Electron, audio, and Live2D acceptance remains user-led.
     - The previous dynamics batch changes parameter track transitions to linear target interpolation and removes generic default entry easing; explicit curve presets, ownership release blending, and spring/bounded response policies remain intact.
-    - The current dynamics batch gives gaze, eye, brow, and face groups distinct spring policies while preserving existing head/body values and bounded fallback; mouth groups remain bounded.
+    - The current dynamics batch gives gaze, eye, brow, and face groups distinct spring policies while preserving bounded fallback; B6-1 gives head/gaze/body/torso/shoulder/face different response frequency and damping profiles while preserving existing-plan velocity and acceleration limits.
     - ActiveParameterMixer now receives raw direct-plan targets, applies ownership release during source fusion, then runs ParameterPresentation once on the fused target; the old per-direct-contribution pre-smoothing path is removed.
     - ParameterPresentation no longer owns direct-plan ownership weight or terminal release state; it only advances the final target response, while the Mixer owns release eligibility and completion.
     - ParameterPresentation advances the direct-plan offset relative to the current Cubism base. After plan totalMs, ownership reaches zero and the stable zero-offset target guarantees release convergence without freezing ambient motion or adding a timeout.
     - A non-increasing playback clock freezes the existing presentation offset, velocity, and last effective elapsed time; pause frames no longer erase spring inertia.
     - Lip-sync remains an immediate high-priority contribution and prevents active response dynamics from delaying mouth output; presentation nodes track direct-only targets instead of lip-sync-contaminated values.
-    - `npm run typecheck:renderer`, `npm run typecheck:websdk`, and `git diff --check` pass for the unified response batch.
+    - `npm run typecheck:renderer`, `npm run typecheck:websdk`, `npm run typecheck:node`, and `git diff --check` pass for the B6-1 response-policy batch.
     - The targeted active-parameter smoke test could not execute because the existing test tsconfig exposes frozen Cubism Framework strict-type and missing-Core-global errors, and the emitted ESM imports are not resolvable by the repository's current Node invocation; no test workaround or source fallback was added.
     - B5-pre Schedule mapping is complete: emphasis/laugh/chuckle adjust the existing phrase emphasis, while hesitate/breath/sigh participate only in the existing strongest-legal hesitation candidate selection.
     - PerformanceSchedule trace v7 records source phrase indices, cue mappings, mapped internal phrase indices, and cue scheduling or rejection decisions; output.segment.v4, engine.motion_intent.v4, and engine.parameter_plan.v3 remain unchanged.
@@ -157,7 +159,7 @@ verification:
     - Phase-B source planning is documented in six rollback-safe batches: shared part-track compilation, face lifecycle, hesitation events, dynamic residual/part timing, provider-neutral speech cues, and later bounded speech-energy coupling.
     - The phase-B plan keeps engine.motion_intent.v4 and engine.parameter_plan.v3 stable, reuses PerformanceSchedule and existing parameter tracks, and forbids a second clock, mixer, WebSDK semantic policy, or Cubism business logic.
     - Architecture documentation distinguishes AG99 `frontend/src/live2d/WebSDK/src/` runtime code from official Cubism `Framework/Core`.
-    - Motion replacement now settles the tracked Direct Plan or Catalog Motion before starting the candidate; a stop failure rejects the replacement and cannot publish a new started run.
+    - Motion replacement now settles the tracked Direct Plan or motion resource before starting the candidate; a stop failure rejects the replacement and cannot publish a new started run.
     - ModelEngine stop and segment interruption release local run ownership in finally, retain failed state on downstream errors, and rethrow the original error.
     - MotionPlayer no longer registers a duplicate Vue Scope cleanup; PetDesktopRuntime remains the single component-disposal owner and isolates each cleanup step.
     - `npm run typecheck:renderer` passes after the playback ownership changes.
@@ -176,12 +178,12 @@ verification:
     - Static HTTP API handler exceptions remain isolated at the request boundary, but now retain a server traceback and no longer expose internal exception text to clients.
     - Live2D manager update and draw failures are no longer reclassified as Direct Parameter Plan failures merely because a plan was active at frame start; ParameterMixer remains the precise owner of plan-frame rejection.
     - Playback execution-state subscribers are notified after the current owner stack unwinds; state changes raised during delivery schedule a later microtask instead of synchronously re-entering the Orchestrator or being discarded.
-    - Catalog motions are a ready-model, preloaded-cache execution path. Runtime cache misses and model-not-ready states are explicit rejections; there is no second asynchronous fetch or preparing-run lifecycle, and a rejected request cannot clear another run's clock or lend it a stale start error.
+    - Motion resources are a ready-model, preloaded-cache execution path. Runtime cache misses and model-not-ready states are explicit rejections; there is no second asynchronous fetch or preparing-run lifecycle, and a rejected request cannot clear another run's clock or lend it a stale start error.
     - Live2D renderer selection changes now use one serialized lifecycle: empty model sync, replacement, initialization failure, and component unmount all release the WebSDK instance through its public teardown owner; superseded loads cannot publish ready/error state for the current selection.
     - Live2D teardown clears singleton ownership before invoking release work, completes all owned cleanup steps even when terminal callbacks fail, logs every cleanup failure, and rethrows the original first failure after cleanup.
-    - Catalog motion candidates are preflighted before replacement; once replacement begins, the tracked old run is settled first, so a runtime-rejected candidate leaves no new formal run. Natural completion remains tracked by the per-run handle rather than a callback stored on the shared preloaded motion object.
+    - Motion resource candidates are preflighted before replacement; once replacement begins, the tracked old run is settled first, so a runtime-rejected candidate leaves no new formal run. Natural completion remains tracked by the per-run handle rather than a callback stored on the shared preloaded motion object.
     - ModelEngine public execution state belongs to the active playback run; pending, compile, and start failures from replacement candidates remain diagnostics and cannot overwrite a still-playing run.
-    - Direct Parameter Plan and Catalog Motion starts return the same structured started/rejected result; ModelEngine receives the actual rejection reason instead of inferring errors from mutable player display text.
+    - Direct Parameter Plan and motion-resource starts return the same structured started/rejected result; ModelEngine receives the actual rejection reason instead of inferring errors from mutable player display text.
     - Motion lifecycle fan-out isolates ModelEngine, Timeline, recorder, caller, and desktop-bridge observers; RunTracker and recorder commit their own ownership transitions before invoking downstream projections so one observer failure cannot strand another owner.
     - PlaybackTimelineEngine stop, interrupt, and fail transitions always settle every open sink and the Timeline phase before propagating the first clock or sink callback error.
     - PlaybackTimelineRuntime interruption and failure cleanup attempts deferred text, SessionStore projection, engine termination, and timeline removal independently; bulk stop continues through every registered Timeline before propagating the first error.
@@ -189,8 +191,8 @@ verification:
     - Adapter disconnect and dispose release pending microphone work, every unresolved Session, audio/Timeline state, synchronized model state, listeners, and socket ownership independently; a cleanup error cannot keep the socket owned or suppress later reset steps.
     - Adapter lifecycle cleanup is awaited and serialized through commit `71eed4`; repeated dispose calls share the in-flight cleanup Promise instead of reporting completion early.
     - PlaybackTimeline execution-state fan-out isolates Orchestrator and CompletionCoordinator subscribers; one asynchronous observer failure is logged and cannot suppress the other owner.
-    - MotionPlayer stop attempts Direct Parameter Plan and Catalog Motion independently; one stop failure cannot suppress cleanup of the other execution owner, and a real stop error leaves the player failed instead of projecting idle.
-    - WebSDK motion lifecycle callbacks are observers rather than execution owners: Catalog Motion start/terminal callbacks and Direct Plan terminal callbacks are logged and isolated from startup transactions and frame updates, while real expression cleanup failures still propagate.
+    - MotionPlayer stop attempts Direct Parameter Plan and motion-resource playback independently; one stop failure cannot suppress cleanup of the other execution owner, and a real stop error leaves the player failed instead of projecting idle.
+    - WebSDK motion lifecycle callbacks are observers rather than execution owners: motion-resource start/terminal callbacks and Direct Plan terminal callbacks are logged and isolated from startup transactions and frame updates, while real expression cleanup failures still propagate.
     - PetDesktopRuntime unmount attempts every owned teardown step independently and propagates the first error only after MotionLab, input runtimes, playback observers, ModelEngine, bridge listeners, and snapshot publication have all been released.
     - Audio stop releases LipSync, the browser audio sink, the segment Timeline, and the connection playback flag independently; failures remain visible only after every owner has attempted its transition.
     - LipSync runtime lifecycle callbacks are observers; their failures are logged without suppressing terminal settlement or sink stop, while real sink errors continue to propagate.

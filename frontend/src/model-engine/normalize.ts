@@ -1,5 +1,4 @@
 import type {
-  CatalogMotionPayload,
   PerformanceCurveHint,
   MotionAxisLevel,
   MotionAxisLevelMap,
@@ -7,7 +6,6 @@ import type {
   SemanticMotionIntent,
 } from "../types/protocol.js";
 import {
-  SCHEMA_CATALOG_MOTION_V1,
   SCHEMA_MOTION_INTENT_V4,
   SCHEMA_PERFORMANCE_CURVE_HINT_V1,
 } from "../types/protocol.js";
@@ -301,75 +299,6 @@ function normalizeEnum<T extends string>(
   return allowed.includes(normalized as T) ? normalized as T : undefined;
 }
 
-function parseCatalogMotionPayload(value: unknown): ParseResult<CatalogMotionPayload> {
-  if (!isObject(value)) {
-    return { ok: false, reason: "catalog_motion_v1_not_object" };
-  }
-  if (normalizeText(value.schema_version) !== SCHEMA_CATALOG_MOTION_V1) {
-    return { ok: false, reason: "catalog_motion_v1.invalid_schema_version" };
-  }
-
-  const modelId = normalizeText(value.model_id);
-  const motionId = normalizeText(value.motion_id);
-  if (typeof value.group !== "string") {
-    return { ok: false, reason: "catalog_motion_v1.group_invalid" };
-  }
-  const group = value.group.trim();
-  const file = normalizeText(value.file);
-  if (!modelId) {
-    return { ok: false, reason: "catalog_motion_v1.model_id_empty" };
-  }
-  if (!motionId) {
-    return { ok: false, reason: "catalog_motion_v1.motion_id_empty" };
-  }
-  if (!file) {
-    return { ok: false, reason: "catalog_motion_v1.file_empty" };
-  }
-  if (!isFiniteNumber(value.index) || value.index < 0) {
-    return { ok: false, reason: "catalog_motion_v1.index_invalid" };
-  }
-
-  let durationMs: number | null = null;
-  if (value.duration_ms !== undefined && value.duration_ms !== null) {
-    if (!isFiniteNumber(value.duration_ms)) {
-      return { ok: false, reason: "catalog_motion_v1.duration_ms_not_number" };
-    }
-    durationMs = Math.round(value.duration_ms);
-    if (durationMs < MIN_MOTION_DURATION_MS || durationMs > MAX_MOTION_DURATION_MS) {
-      return { ok: false, reason: "catalog_motion_v1.duration_ms_out_of_range" };
-    }
-  }
-
-  let priority = 3;
-  if (value.priority !== undefined && value.priority !== null) {
-    if (!isFiniteNumber(value.priority)) {
-      return { ok: false, reason: "catalog_motion_v1.priority_invalid" };
-    }
-    priority = Math.max(1, Math.min(5, Math.round(value.priority)));
-  }
-
-  return {
-    ok: true,
-    value: {
-      schema_version: SCHEMA_CATALOG_MOTION_V1,
-      model_id: modelId,
-      motion_id: motionId,
-      group,
-      index: Math.round(value.index),
-      file,
-      label: normalizeText(value.label),
-      emotion_label: normalizeText(value.emotion_label) || normalizeText(value.label) || motionId,
-      duration_ms: durationMs,
-      priority,
-      summary: isObject(value.summary)
-        ? {
-          source: normalizeText(value.summary.source) || undefined,
-        }
-        : undefined,
-    },
-  };
-}
-
 export function normalizeMotionPayload(
   value: unknown,
 ): MotionPayloadNormalizationResult {
@@ -379,15 +308,6 @@ export function normalizeMotionPayload(
   }
 
   const schemaVersion = normalizeText(value.schema_version);
-  if (schemaVersion === SCHEMA_CATALOG_MOTION_V1) {
-    const motion = parseCatalogMotionPayload(value);
-    if (!motion.ok) {
-      warnNormalizeFailure(motion.reason, value);
-      return { ok: false, reason: motion.reason };
-    }
-    return { ok: true, payload: { kind: "catalog_motion", motion: motion.value } };
-  }
-
   if (schemaVersion === SCHEMA_MOTION_INTENT_V4) {
     const intent = parseSemanticMotionIntent(value);
     if (!intent.ok) {

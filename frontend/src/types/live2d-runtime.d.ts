@@ -13,7 +13,7 @@ export type MotionPlaybackStartResult =
   | { status: "rejected"; reason: string }
   | { status: "started"; runId: string };
 
-export interface CatalogMotionLifecycleCallbacks {
+export interface MotionResourceLifecycleCallbacks {
   playbackClockReader?: { getElapsedMs: () => number | null };
   onStarted?: () => void;
   onFinished?: () => void;
@@ -32,7 +32,7 @@ declare global {
         group: string,
         no: number,
         priority: number,
-        callbacks?: CatalogMotionLifecycleCallbacks,
+        callbacks?: MotionResourceLifecycleCallbacks,
       ) => unknown;
       stopMotion?: (reason?: string) => void;
       getMotionStartError?: () => string;

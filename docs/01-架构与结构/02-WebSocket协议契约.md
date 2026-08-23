@@ -249,7 +249,7 @@ Motion Lab 事件采用 at-least-once 交付：前端必须先把事件写入 In
 - 省略轴表示本轮不控制，`0` 表示明确回到中性。
 - v4 出现 `axes`、非法等级、未知轴或缺失 profile 锚点时直接失败，不降级为 v3。
 - ModelEngine 使用 `SemanticAxisProfile.level_anchors` 转换等级，再进入关系图约束。
-- 自动动作链路不允许输出 `choice`、`motion_id`、catalog motion、motion3、exp3 或旧播放文件引用。
+- 自动动作链路不允许输出 `choice`、`motion_id`、`engine.catalog_motion.v1` 直接 payload、motion3、exp3 或旧播放文件引用。
 - LLM 输出契约不包含 `mode`；Adapter 归一化后会补 `mode: "expressive"` 给现有 ModelEngine 编译链路使用。
 - `idle` 是前端/运行时本底能力，不属于 LLM 本轮动作输出。
 - `emotion_label`、`summary` 只属于系统派生字段，不是 LLM 输出目标。

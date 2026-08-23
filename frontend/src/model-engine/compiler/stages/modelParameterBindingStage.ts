@@ -138,66 +138,70 @@ function mapSemanticBindingDynamics(
   const inputSpan = Math.abs(binding.input_range[1] - binding.input_range[0]);
   const outputSpan = Math.abs(binding.output_range[1] - binding.output_range[0]);
   const outputPerInput = inputSpan > 0 ? outputSpan / inputSpan : 0;
+  const responseProfile = mapParameterResponseProfile(axis.semantic_group);
   return {
     max_velocity: axis.dynamics.max_velocity * outputPerInput,
     max_acceleration: axis.dynamics.max_acceleration * outputPerInput,
     max_speech_offset: outputSpan * axis.dynamics.max_speech_offset_ratio,
-    response: mapParameterResponsePolicy(axis.semantic_group),
+    response: responseProfile,
   };
 }
 
-type ParameterResponsePolicy = NonNullable<
+type ParameterResponseProfile = NonNullable<
   SemanticParameterPlan["parameters"][number]["dynamics"]
 >["response"];
 
-const RESPONSE_POLICY_BY_GROUP: Record<string, ParameterResponsePolicy> = {
+// The track graph establishes when a part should move. These profiles only
+// describe how the final fused target is followed at runtime: head and gaze
+// stay responsive, while body parts arrive later without copying head speed.
+const RESPONSE_PROFILE_BY_GROUP: Record<string, ParameterResponseProfile> = {
   head: {
     kind: "spring",
-    frequency_hz: 2.4,
-    damping_ratio: 0.78,
+    frequency_hz: 2.6,
+    damping_ratio: 0.76,
   },
   body: {
     kind: "spring",
-    frequency_hz: 1,
-    damping_ratio: 0.85,
+    frequency_hz: 0.9,
+    damping_ratio: 0.88,
   },
   torso: {
     kind: "spring",
-    frequency_hz: 1,
-    damping_ratio: 0.85,
+    frequency_hz: 0.88,
+    damping_ratio: 0.9,
   },
   shoulder: {
     kind: "spring",
-    frequency_hz: 1.05,
-    damping_ratio: 0.84,
+    frequency_hz: 0.95,
+    damping_ratio: 0.88,
   },
   gaze: {
     kind: "spring",
-    frequency_hz: 3.4,
-    damping_ratio: 0.82,
+    frequency_hz: 3.8,
+    damping_ratio: 0.78,
   },
   eye: {
     kind: "spring",
-    frequency_hz: 4,
-    damping_ratio: 0.88,
+    frequency_hz: 4.2,
+    damping_ratio: 0.9,
   },
   brow: {
     kind: "spring",
-    frequency_hz: 3.2,
+    frequency_hz: 3.6,
     damping_ratio: 0.82,
   },
   face: {
     kind: "spring",
-    frequency_hz: 3,
-    damping_ratio: 0.84,
+    frequency_hz: 3.3,
+    damping_ratio: 0.82,
   },
 };
 
-function mapParameterResponsePolicy(
+function mapParameterResponseProfile(
   semanticGroup: string,
-): ParameterResponsePolicy {
+): ParameterResponseProfile {
   const group = semanticGroup.trim().toLowerCase();
-  return RESPONSE_POLICY_BY_GROUP[group] ?? { kind: "bounded" };
+  return RESPONSE_PROFILE_BY_GROUP[group] ?? { kind: "bounded" };
 }
 
 function mapSemanticBindingValue(

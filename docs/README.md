@@ -10,7 +10,7 @@
 | 原子输出段 | `output.segment.v4` |
 | 语义动作意图 | `engine.motion_intent.v4` |
 | 模型参数计划 | `engine.parameter_plan.v3` |
-| Catalog motion | `engine.catalog_motion.v1` |
+| V4 motion resource | `motion_resource_id` inside `engine.motion_intent.v4` |
 | 模型能力投影 | `live2d_scan.v3` |
 | 语义轴档案 | `ag99.semantic_axis_profile.v3` |
 | 语义轴关系图 | `ag99.semantic_axis_relation_graph.v1` |

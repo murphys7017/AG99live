@@ -1,19 +1,13 @@
 from __future__ import annotations
 
 import json
-import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from astrbot.api import logger
 from astrbot.core.platform.message_session import MessageSession
 from astrbot.core.platform.message_type import MessageType
-
-INLINE_ANIM_TAG_PATTERN = re.compile(r"<@anim\s*\{[\s\S]*?\}>\s*", re.IGNORECASE)
-SYSTEM_REMINDER_PATTERN = re.compile(
-    r"<system_reminder>[\s\S]*?</system_reminder>",
-    re.IGNORECASE,
-)
+from ..motion.output_sanitizer import sanitize_assistant_output_text
 
 
 class ConversationHistoryBridge:
@@ -342,10 +336,7 @@ class ConversationHistoryBridge:
 
     @staticmethod
     def _sanitize_text(value: str) -> str:
-        text = SYSTEM_REMINDER_PATTERN.sub("", value or "")
-        text = INLINE_ANIM_TAG_PATTERN.sub("", text)
-        text = re.sub(r"\n{3,}", "\n\n", text)
-        return text.strip()
+        return sanitize_assistant_output_text(value)
 
     @staticmethod
     def _stringify_tool_arguments(value: Any) -> str:

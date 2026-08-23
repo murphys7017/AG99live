@@ -49,7 +49,6 @@ TYPE_SYSTEM_MOTION_LAB_RAW_EVENT = "system.motion_lab_raw_event"
 TYPE_SYSTEM_MOTION_LAB_RAW_EVENT_RECORDED = "system.motion_lab_raw_event_recorded"
 
 TYPE_ENGINE_MOTION_INTENT = "engine.motion_intent"
-TYPE_ENGINE_CATALOG_MOTION = "engine.catalog_motion"
 
 INPUT_TYPES = {
     TYPE_INPUT_TEXT,

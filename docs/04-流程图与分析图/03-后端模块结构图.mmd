@@ -22,7 +22,7 @@ flowchart TB
     subgraph MOTION[motion：动作领域规则]
         INTENT[motion_intent.py<br/>v4 canonical contract]:::domain
         INLINE[inline_motion.py<br/>官方 <@anim> v4 兼容解析]:::domain
-        CATALOG[catalog_motion.py + resource_catalog.py<br/>typed resource]:::domain
+        CATALOG[resource_catalog.py<br/>typed motion/expression resource]:::domain
         CURVE[performance_curve.py<br/>独立 Provider 请求生命周期]:::domain
         SANITIZE[output_sanitizer.py<br/>可见文本清理]:::domain
         DISPATCH[payload_dispatch.py<br/>动作消息构造]:::domain

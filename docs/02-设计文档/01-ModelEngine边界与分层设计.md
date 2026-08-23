@@ -53,7 +53,7 @@ ModelEngine 不负责：
 | 输出 | 用途 |
 | --- | --- |
 | parameter plan | 交给 Live2D 参数播放器 |
-| typed resource execution | 交给 expression/catalog motion player |
+| typed resource execution | 交给 expression/motion resource player |
 | compile diagnostics | 记录每阶段输入、输出与约束 |
 | started/terminal callback | 推进当前 Timeline motion sink |
 
@@ -64,7 +64,7 @@ ModelEngine 不负责：
 | 位置 | 职责 |
 | --- | --- |
 | `useModelEngine.ts` | facade 与实例组合根 |
-| `normalize.ts` | V4 motion intent 与 typed catalog motion 的严格入站解析 |
+| `normalize.ts` | V4 motion intent 的严格入站解析 |
 | `planParser.ts` | `engine.parameter_plan.v3` 严格解析 |
 | `compiler/compileParameterMotionIntent.ts` | 参数动作 compiler 主入口与两阶段结果收口 |
 | `compiler/compileContext.ts` | stage 共享 state |

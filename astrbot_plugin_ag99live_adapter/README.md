@@ -84,7 +84,7 @@ astrbot_plugin_ag99live_adapter/
 - 普通 Live2D 主要姿态默认从三级开始；四级由每轴独立 `extreme_range` 定义，用于短时夸张表演。内置七类 v4 示例和当前 profile revision 的人工筛选样本会注入 capability。
 - 可选资源使用 `expression_resource_id` 或 `motion_resource_id`，一次最多选择一个。expression 只与无参数冲突的计划叠加；motion 作为完整动作替代参数计划，但仍共享当前 segment 的统一 motion sink。
 - 正式动作输入唯一使用 `engine.motion_intent.v4`。手动预览保存并重放第一阶段的 `CompiledSemanticMotion`，直接进入模型参数编译，不经过 WebSocket 动作协议。
-- 自动动作链路不允许 LLM 输出 `choice`、`motion_id`、catalog motion、motion3、exp3 或旧播放文件引用。
+- 自动动作链路不允许 LLM 输出 `choice`、`motion_id`、`engine.catalog_motion.v1` 直接 payload、motion3、exp3 或旧播放文件引用。
 - 中间件 prompt 只暴露 profile 中的 `primary/hint` axes，禁止输出 `derived/runtime/ambient/debug` axes。
 
 ## 与前端协同的关键点
@@ -151,7 +151,7 @@ AG99live 远程执行器只在具备 Interaction Prompt/Result contributor 的�
 
 当前 Persona Effect 的参考策略：
 
-- 自动动作链路不再把旧 motion/exp3 reference templates 或 catalog motion 作为模型可选项注入。
+- 自动动作链路不再把旧 motion/exp3 reference templates 或 `engine.catalog_motion.v1` 直接 payload 作为模型可选项注入。
 - 动作 Prompt 使用当前 `SemanticAxisProfile` 轴说明、动作指令、用户手调样本形成的风格偏好和姿态参考候选。
 - fallback pose 候选只作为 Prompt 姿态参考，不修复非法输入、不替换有效等级，也不会在输入为空时生成默认 neutral pose。
 

@@ -97,7 +97,7 @@ function testPublishSnapshotStripsUncloneableRuntimeValues(): void {
         id: "motion-1",
         createdAt: "2026-06-05T00:00:00.000Z",
         source: "playback_timeline_started",
-        payloadKind: "catalog_motion",
+        payloadKind: "semantic_motion_resource",
         messageId: "message-1",
         turnId: "turn-1",
         playbackTurnId: "turn-1",
@@ -136,7 +136,6 @@ function testPublishSnapshotStripsUncloneableRuntimeValues(): void {
           },
         },
         motion: {
-          schema_version: "engine.catalog_motion.v1",
           model_id: "model-1",
           motion_id: "wave",
           group: "TapBody",

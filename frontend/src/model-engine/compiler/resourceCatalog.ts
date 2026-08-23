@@ -1,10 +1,9 @@
 import type {
-  CatalogMotionPayload,
+  MotionResourcePayload,
   ExpressionConstraint,
   ModelSummary,
   MotionConstraint,
 } from "../../types/protocol.js";
-import { SCHEMA_CATALOG_MOTION_V1 } from "../../types/protocol.js";
 
 export type ResolvedCatalogResource =
   | {
@@ -16,7 +15,7 @@ export type ResolvedCatalogResource =
   | {
     resourceId: string;
     resourceType: "motion";
-    motion: CatalogMotionPayload;
+    motion: MotionResourcePayload;
   };
 
 export function resolveCatalogResource(
@@ -89,7 +88,6 @@ function buildMotionResource(
     resourceId,
     resourceType: "motion",
     motion: {
-      schema_version: SCHEMA_CATALOG_MOTION_V1,
       model_id: model.name,
       motion_id: resourceId,
       group,

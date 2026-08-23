@@ -11,7 +11,6 @@ _SCHEMAS = _MANIFEST["schemas"]
 
 SCHEMA_MANIFEST: Final[dict[str, Any]] = _MANIFEST
 PROTOCOL_VERSION: Final[str] = _MANIFEST["protocol_version"]
-CATALOG_MOTION_SCHEMA_VERSION: Final[str] = _SCHEMAS["catalog_motion"]
 MODEL_INFO_SCHEMA_VERSION: Final[str] = _SCHEMAS["model_info"]
 MOTION_INTENT_V4_SCHEMA_VERSION: Final[str] = _SCHEMAS["motion_intent"]
 MOTION_TUNING_SAMPLE_SCHEMA_VERSION: Final[str] = _SCHEMAS["motion_tuning_sample"]

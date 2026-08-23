@@ -3,7 +3,6 @@ import type { SemanticAxisProfile } from "./semantic-axis-profile";
 export {
   PROTOCOL_SCHEMA_MANIFEST,
   PROTOCOL_SCHEMAS,
-  SCHEMA_CATALOG_MOTION_V1,
   SCHEMA_MODEL_INFO_V3,
   SCHEMA_MOTION_INTENT_V4,
   SCHEMA_MOTION_TUNING_SAMPLE_V2,
@@ -18,7 +17,6 @@ export {
 import {
   PROTOCOL_SCHEMA_MANIFEST,
   PROTOCOL_VERSION,
-  SCHEMA_CATALOG_MOTION_V1,
   SCHEMA_MODEL_INFO_V3,
   SCHEMA_MOTION_INTENT_V4,
   SCHEMA_MOTION_TUNING_SAMPLE_V2,
@@ -63,7 +61,7 @@ export type OutputSegmentAudioSlot =
 export type OutputSegmentMotionSlot =
   | {
     state: "present";
-    message_type: "engine.motion_intent" | "engine.catalog_motion";
+    message_type: "engine.motion_intent";
     mode: string;
     source: string;
     payload: Record<string, unknown>;
@@ -518,8 +516,7 @@ export type SemanticPlanResource = SemanticExpressionPlanResource;
 export type SemanticMotionIntent = NormalizedSemanticMotionIntent;
 export type MotionPlanPayload = SemanticParameterPlan;
 
-export interface CatalogMotionPayload {
-  schema_version: typeof SCHEMA_CATALOG_MOTION_V1;
+export interface MotionResourcePayload {
   model_id: string;
   motion_id: string;
   group: string;

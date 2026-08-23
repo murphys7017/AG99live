@@ -5,7 +5,7 @@ import type {
   DesktopMotionPlaybackRecord,
   DesktopPttHookStatus,
 } from "../../types/desktop.js";
-import type { CatalogMotionPayload } from "../../types/protocol.js";
+import type { MotionResourcePayload } from "../../types/protocol.js";
 import {
   buildDefaultModelEngineSettings,
   cloneModelEngineSettings,
@@ -27,7 +27,6 @@ import {
   DEFAULT_BILIBILI_LIVE_STATUS,
   type BilibiliLiveStatus,
 } from "../../types/bilibili-live.js";
-import { SCHEMA_CATALOG_MOTION_V1 } from "../../types/protocol.js";
 import { cloneJson } from "../../utils/cloneJson.js";
 import {
   isFiniteNumber,
@@ -279,14 +278,10 @@ function cloneMotionPlaybackRecord(
       ?? normalizeOptionalText((record as Record<string, unknown>).turnId)
       ?? null;
     const payloadKind = normalizeText(record.payloadKind);
-    if (payloadKind === "catalog_motion" || payloadKind === "semantic_motion_resource") {
-      const motion = cloneCatalogMotionPayload(record.motion);
+    if (payloadKind === "semantic_motion_resource") {
+      const motion = cloneMotionResourcePayload(record.motion);
       if (!motion) {
-        console.warn("[DesktopBridge] invalid catalog motion playback record ignored.", {
-          schemaVersion: isObject(record.motion)
-            ? normalizeText(record.motion.schema_version)
-            : "",
-        });
+        console.warn("[DesktopBridge] invalid motion resource playback record ignored.");
         return null;
       }
       return {
@@ -340,8 +335,8 @@ function cloneMotionPlaybackRecord(
   }
 }
 
-function cloneCatalogMotionPayload(payload: unknown): CatalogMotionPayload | null {
-  if (!isObject(payload) || normalizeText(payload.schema_version) !== SCHEMA_CATALOG_MOTION_V1) {
+function cloneMotionResourcePayload(payload: unknown): MotionResourcePayload | null {
+  if (!isObject(payload)) {
     return null;
   }
   const modelId = normalizeText(payload.model_id);
@@ -354,7 +349,6 @@ function cloneCatalogMotionPayload(payload: unknown): CatalogMotionPayload | nul
     return null;
   }
   return {
-    schema_version: SCHEMA_CATALOG_MOTION_V1,
     model_id: modelId,
     motion_id: motionId,
     group,

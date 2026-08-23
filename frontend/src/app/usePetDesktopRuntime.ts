@@ -197,7 +197,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
         handleMotionTerminal(event, options?.onFinished);
       },
     }),
-    playCatalogMotion: (motion, model, options) => motionPlayer.playCatalogMotion(motion, model, {
+    playMotionResource: (motion, model, options) => motionPlayer.playMotionResource(motion, model, {
       ...options,
       onFinished: (event) => {
         handleMotionTerminal(event, options?.onFinished);

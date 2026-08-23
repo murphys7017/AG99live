@@ -1,6 +1,6 @@
 import { reactive, readonly } from "vue";
 import type {
-  CatalogMotionPayload,
+  MotionResourcePayload,
   ModelSummary,
   SemanticParameterPlan,
 } from "../types/protocol.js";
@@ -27,10 +27,10 @@ interface PlayPlanOptions {
   onFinished?: (event: DirectParameterPlanTerminalEvent) => void;
 }
 
-interface PlayCatalogMotionOptions {
+interface PlayMotionResourceOptions {
   playbackClockReader?: MotionPlaybackClockReader | null;
   requiresPlaybackClock?: boolean;
-  onStarted?: (motion: CatalogMotionPayload, runId: string) => void;
+  onStarted?: (motion: MotionResourcePayload, runId: string) => void;
   onFinished?: (event: DirectParameterPlanTerminalEvent) => void;
 }
 
@@ -45,7 +45,7 @@ export function usePreviewMotionPlayer() {
   });
 
   let activeDirectPlanRunId = "";
-  let activeCatalogMotionRunId = "";
+  let activeMotionResourceRunId = "";
   let activeMotionStop: ((reason: string) => void) | null = null;
 
   function parseParameterPlan(plan: unknown): ParsedParameterPlan | null {
@@ -66,29 +66,29 @@ export function usePreviewMotionPlayer() {
     };
   }
 
-  function stopActiveCatalogMotion(reason: string): void {
-    if (!activeCatalogMotionRunId) {
+  function stopActiveMotionResource(reason: string): void {
+    if (!activeMotionResourceRunId) {
       if (activeMotionStop) {
-        throw new Error("catalog_motion_run_owner_missing");
+        throw new Error("motion_resource_run_owner_missing");
       }
       return;
     }
     const stop = activeMotionStop;
     if (!stop) {
-      throw new Error("catalog_motion_stop_owner_missing");
+      throw new Error("motion_resource_stop_owner_missing");
     }
     activeMotionStop = null;
     try {
       stop(reason);
     } catch (error) {
-      if (activeCatalogMotionRunId) {
+      if (activeMotionResourceRunId) {
         activeMotionStop = stop;
       }
       throw error;
     }
-    if (activeCatalogMotionRunId) {
+    if (activeMotionResourceRunId) {
       activeMotionStop = stop;
-      throw new Error("catalog_motion_stop_not_settled");
+      throw new Error("motion_resource_stop_not_settled");
     }
   }
 
@@ -111,9 +111,9 @@ export function usePreviewMotionPlayer() {
       }
     }
     try {
-      stopActiveCatalogMotion(reason);
+      stopActiveMotionResource(reason);
     } catch (error) {
-      console.error("[MotionPlayer] catalog motion stop failed.", error);
+      console.error("[MotionPlayer] motion resource stop failed.", error);
       stopErrors.push(error);
     }
     if (stopErrors.length > 0) {
@@ -137,7 +137,7 @@ export function usePreviewMotionPlayer() {
     options: PlayPlanOptions = {},
   ): MotionPlaybackStartResult {
     console.info("[MotionPlayer] playPlan called. plan type:", typeof plan, "plan:", JSON.stringify(plan)?.slice(0, 200));
-    const hadActivePlayback = Boolean(activeDirectPlanRunId || activeCatalogMotionRunId);
+    const hadActivePlayback = Boolean(activeDirectPlanRunId || activeMotionResourceRunId);
 
     const parsed = parseParameterPlan(plan);
     if (!parsed) {
@@ -259,12 +259,12 @@ export function usePreviewMotionPlayer() {
     return { status: "started", runId: playbackRunId };
   }
 
-  function playCatalogMotion(
-    motion: CatalogMotionPayload,
+  function playMotionResource(
+    motion: MotionResourcePayload,
     _model: ModelSummary | null = null,
-    options: PlayCatalogMotionOptions = {},
+    options: PlayMotionResourceOptions = {},
   ): MotionPlaybackStartResult {
-    const hadActivePlayback = Boolean(activeDirectPlanRunId || activeCatalogMotionRunId);
+    const hadActivePlayback = Boolean(activeDirectPlanRunId || activeMotionResourceRunId);
     const manualPreviewStartedAtMs = performance.now();
     const playbackClockReader = options.playbackClockReader ?? (
       options.requiresPlaybackClock
@@ -272,7 +272,7 @@ export function usePreviewMotionPlayer() {
         : { getElapsedMs: () => performance.now() - manualPreviewStartedAtMs }
     );
     if (!playbackClockReader) {
-      const reason = "现成 motion 无法执行：会话 Timeline 时钟缺失。";
+      const reason = "完整动作资源无法执行：会话 Timeline 时钟缺失。";
       if (!hadActivePlayback) {
         state.status = "failed";
         state.message = reason;
@@ -281,13 +281,13 @@ export function usePreviewMotionPlayer() {
       console.error("[MotionPlayer]", reason);
       return { status: "rejected", reason };
     }
-    const catalogDurationMs = motion.duration_ms;
+    const resourceDurationMs = motion.duration_ms;
     if (
-      typeof catalogDurationMs !== "number"
-      || !Number.isFinite(catalogDurationMs)
-      || catalogDurationMs <= 0
+      typeof resourceDurationMs !== "number"
+      || !Number.isFinite(resourceDurationMs)
+      || resourceDurationMs <= 0
     ) {
-      const reason = `现成 motion 缺少有效 duration_ms：${motion.motion_id}。`;
+      const reason = `完整动作资源缺少有效 duration_ms：${motion.motion_id}。`;
       if (!hadActivePlayback) {
         state.status = "failed";
         state.message = reason;
@@ -301,7 +301,7 @@ export function usePreviewMotionPlayer() {
       || typeof adapter.startMotion !== "function"
       || typeof adapter.stopMotion !== "function"
     ) {
-      const reason = "现成 motion 无法执行：Live2D 运行时缺少 startMotion 或 stopMotion 接口。";
+      const reason = "完整动作资源无法执行：Live2D 运行时缺少 startMotion 或 stopMotion 接口。";
       console.warn("[MotionPlayer]", reason);
       if (!hadActivePlayback) {
         state.status = "failed";
@@ -313,14 +313,14 @@ export function usePreviewMotionPlayer() {
 
     if (hadActivePlayback) {
       try {
-        stopPlan("catalog_motion_replaced");
+        stopPlan("motion_resource_replaced");
       } catch (error) {
-        console.error("[MotionPlayer] catalog motion replacement failed.", error);
+        console.error("[MotionPlayer] motion resource replacement failed.", error);
         return { status: "rejected", reason: "motion_replacement_stop_failed" };
       }
     }
 
-    const playbackRunId = `catalog-motion-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const playbackRunId = `motion-resource-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
     const getMotionStartError = (): string => (
       typeof adapter.getMotionStartError === "function"
@@ -328,26 +328,26 @@ export function usePreviewMotionPlayer() {
         : ""
     );
 
-    const failCatalogMotion = (reason: string) => {
-      if (activeCatalogMotionRunId !== playbackRunId) {
+    const failMotionResource = (reason: string) => {
+      if (activeMotionResourceRunId !== playbackRunId) {
         return;
       }
       activeMotionStop = null;
       state.status = "failed";
-      state.message = `现成 motion 执行失败：${motion.motion_id}（${reason}）。`;
+      state.message = `完整动作资源执行失败：${motion.motion_id}（${reason}）。`;
       state.finishedAt = new Date().toISOString();
-      activeCatalogMotionRunId = "";
+      activeMotionResourceRunId = "";
       options.onFinished?.({ runId: playbackRunId, status: "failed", reason });
     };
-    const completeCatalogMotion = () => {
-      if (activeCatalogMotionRunId !== playbackRunId) {
+    const completeMotionResource = () => {
+      if (activeMotionResourceRunId !== playbackRunId) {
         return;
       }
       activeMotionStop = null;
       state.status = "finished";
-      state.message = "现成 motion 执行完成。";
+      state.message = "完整动作资源执行完成。";
       state.finishedAt = new Date().toISOString();
-      activeCatalogMotionRunId = "";
+      activeMotionResourceRunId = "";
       options.onFinished?.({ runId: playbackRunId, status: "completed" });
     };
 
@@ -361,47 +361,47 @@ export function usePreviewMotionPlayer() {
         playbackClockReader,
         onStarted: () => {
           lifecycleStarted = true;
-          activeCatalogMotionRunId = playbackRunId;
+          activeMotionResourceRunId = playbackRunId;
           state.status = "playing";
-          state.message = `正在执行现成 motion（${motion.label || motion.motion_id}）...`;
+          state.message = `正在执行完整动作资源（${motion.label || motion.motion_id}）...`;
           state.startedAt = new Date().toISOString();
           activeMotionStop = (reason) => adapter.stopMotion?.(reason);
           options.onStarted?.(motion, playbackRunId);
         },
-        onFinished: completeCatalogMotion,
-        onFailed: failCatalogMotion,
+        onFinished: completeMotionResource,
+        onFailed: failMotionResource,
         onInterrupted: (reason) => {
-          if (activeCatalogMotionRunId !== playbackRunId) {
+          if (activeMotionResourceRunId !== playbackRunId) {
             return;
           }
           activeMotionStop = null;
           state.status = "idle";
-          state.message = `现成 motion 已停止（${reason}）。`;
+          state.message = `完整动作资源已停止（${reason}）。`;
           state.finishedAt = new Date().toISOString();
-          activeCatalogMotionRunId = "";
+          activeMotionResourceRunId = "";
           options.onFinished?.({ runId: playbackRunId, status: "stopped", reason });
         },
       },
     );
     if (handle === -1) {
       const motionStartError = getMotionStartError();
-      const failureReason = motionStartError || "catalog_motion_start_rejected";
+      const failureReason = motionStartError || "motion_resource_start_rejected";
       const reason = motionStartError
-        ? `现成 motion 执行失败：${motion.motion_id}（${motionStartError}）。`
-        : `现成 motion 执行失败：${motion.motion_id}。`;
+        ? `完整动作资源执行失败：${motion.motion_id}（${motionStartError}）。`
+        : `完整动作资源执行失败：${motion.motion_id}。`;
       console.warn("[MotionPlayer]", reason);
       state.status = "failed";
       state.message = reason;
       state.finishedAt = new Date().toISOString();
       return { status: "rejected", reason: failureReason };
     }
-    if (!lifecycleStarted || activeCatalogMotionRunId !== playbackRunId) {
-      const reason = "catalog_motion_started_without_lifecycle_callback";
+    if (!lifecycleStarted || activeMotionResourceRunId !== playbackRunId) {
+      const reason = "motion_resource_started_without_lifecycle_callback";
       adapter.stopMotion(reason);
       state.status = "failed";
-      state.message = `现成 motion 执行失败：${motion.motion_id}（${reason}）。`;
+      state.message = `完整动作资源执行失败：${motion.motion_id}（${reason}）。`;
       state.finishedAt = new Date().toISOString();
-      activeCatalogMotionRunId = "";
+      activeMotionResourceRunId = "";
       return { status: "rejected", reason };
     }
     return { status: "started", runId: playbackRunId };
@@ -410,7 +410,7 @@ export function usePreviewMotionPlayer() {
   return {
     state: readonly(state),
     playPlan,
-    playCatalogMotion,
+    playMotionResource,
     stopPlan,
   };
 }

@@ -4,7 +4,7 @@ import type {
   MotionPlaybackStartResult,
 } from "../../types/live2d-runtime.d.ts";
 import type {
-  CatalogMotionPayload,
+  MotionResourcePayload,
   ModelSummary,
   MotionPlanPayload,
   SemanticMotionIntent,
@@ -49,10 +49,10 @@ export interface PlayPlanOptions {
   onFinished?: (event: DirectParameterPlanTerminalEvent) => void;
 }
 
-export interface PlayCatalogMotionOptions {
+export interface PlayMotionResourceOptions {
   playbackClockReader?: MotionPlaybackClockReader | null;
   requiresPlaybackClock?: boolean;
-  onStarted: (motion: CatalogMotionPayload, runId: string) => void;
+  onStarted: (motion: MotionResourcePayload, runId: string) => void;
   onFinished?: (event: DirectParameterPlanTerminalEvent) => void;
 }
 
@@ -91,7 +91,7 @@ export type ModelEnginePlanStartedEvent =
     payloadKind: "semantic_intent";
     executionKind: "motion_resource";
     intent: SemanticMotionIntent;
-    motion: CatalogMotionPayload;
+    motion: MotionResourcePayload;
     plan?: null;
     semanticMotion?: null;
   })
@@ -102,12 +102,6 @@ export type ModelEnginePlanStartedEvent =
     semanticMotion: CompiledSemanticMotion;
     plan: MotionPlanPayload;
     motion?: null;
-  })
-  | (ModelEnginePlanStartedEventBase & {
-    payloadKind: "catalog_motion";
-    executionKind: "catalog_motion";
-    motion: CatalogMotionPayload;
-    plan?: null;
   });
 
 export type ModelEngineHistoryRole =
@@ -121,10 +115,10 @@ export interface MotionStartDependencies {
     model: ModelSummary | null,
     options: PlayPlanOptions,
   ) => MotionPlaybackStartResult;
-  playCatalogMotion: (
-    motion: CatalogMotionPayload,
+  playMotionResource: (
+    motion: MotionResourcePayload,
     model: ModelSummary | null,
-    options: PlayCatalogMotionOptions,
+    options: PlayMotionResourceOptions,
   ) => MotionPlaybackStartResult;
   getPlayerMessage?: () => string;
   onPlanStarted: (event: ModelEnginePlanStartedEvent) => void;

@@ -34,5 +34,4 @@ export const OUTBOUND_MESSAGE_TYPES = {
   SYSTEM_MOTION_TUNING_SAMPLE_DELETE: "system.motion_tuning_sample_delete",
   SYSTEM_MOTION_LAB_RAW_EVENT: "system.motion_lab_raw_event",
   ENGINE_MOTION_INTENT: "engine.motion_intent",
-  ENGINE_CATALOG_MOTION: "engine.catalog_motion",
 } as const;

@@ -53,7 +53,6 @@ from ..protocol.schema_versions import (
 )
 from ..protocol import (
     SOURCE_ADAPTER,
-    TYPE_ENGINE_CATALOG_MOTION,
     TYPE_CONTROL_INTERRUPT,
     TYPE_CONTROL_PLAYBACK_FINISHED,
     TYPE_ENGINE_MOTION_INTENT,
@@ -639,7 +638,7 @@ class TurnCoordinator:
         if _resolve_motion_payload_schema_version(payload) == MOTION_INTENT_V4_SCHEMA_VERSION:
             payload = normalize_motion_intent_payload(payload)
         message_type = _resolve_engine_motion_message_type(payload)
-        if message_type not in {TYPE_ENGINE_MOTION_INTENT, TYPE_ENGINE_CATALOG_MOTION}:
+        if message_type != TYPE_ENGINE_MOTION_INTENT:
             raise ValueError("output_segment_motion_type_invalid")
         payload = self._attach_ready_performance_curve_hint(
             motion_payload=payload,

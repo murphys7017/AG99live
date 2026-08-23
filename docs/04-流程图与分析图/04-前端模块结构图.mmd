@@ -69,7 +69,7 @@ flowchart TB
 
     subgraph LIVE[live2d + live2d-renderer：模型执行边界]
         PREVIEW[usePreviewMotionPlayer<br/>run ownership / watchdog]:::sdk
-        ADAPTER[Live2D adapter<br/>start plan / catalog motion]:::sdk
+        ADAPTER[Live2D adapter<br/>start parameter plan / motion resource]:::sdk
         LIPLIVE[lipSyncTimelineSink<br/>WebAudio RMS / mouth write]:::sdk
         WEBSDK[AG99 Live2D Runtime<br/>ActiveParameterMixer -> ParameterPresentation<br/>one final active response pass]:::sdk
         CUBISM[Official Cubism Framework/Core<br/>Model / Physics / Renderer]:::sdk

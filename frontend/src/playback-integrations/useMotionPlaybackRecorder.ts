@@ -117,14 +117,6 @@ export function useMotionPlaybackRecorder(options: MotionPlaybackRecorderOptions
           mode: event.intent.mode,
           motion: cloneJson(event.motion),
         }
-      : event.executionKind === "catalog_motion"
-      ? {
-          ...baseRecord,
-          payloadKind: "catalog_motion",
-          emotionLabel: event.motion.emotion_label || event.motion.label || event.motion.motion_id,
-          mode: "expressive",
-          motion: cloneJson(event.motion),
-        }
       : {
           ...baseRecord,
           payloadKind: event.payloadKind,
@@ -253,9 +245,6 @@ function resolveEventProfileId(event: ModelEnginePlanStartedEvent): string {
   if (event.executionKind === "motion_resource") {
     return event.intent.profile_id;
   }
-  if (event.executionKind === "catalog_motion") {
-    return "";
-  }
   return event.plan.profile_id;
 }
 
@@ -264,9 +253,6 @@ function resolveEventProfileRevision(
 ): number | undefined {
   if (event.executionKind === "motion_resource") {
     return event.intent.profile_revision;
-  }
-  if (event.executionKind === "catalog_motion") {
-    return undefined;
   }
   return event.plan.profile_revision;
 }

@@ -71,7 +71,7 @@ import {
   markLive2DModelReady,
 } from "./modelreadiness";
 
-interface CatalogMotionLifecycleCallbacks {
+interface MotionResourceLifecycleCallbacks {
   playbackClockReader?: { getElapsedMs: () => number | null };
   onStarted?: () => void;
   onFinished?: () => void;
@@ -135,11 +135,11 @@ interface ActiveParameterFrameFailure {
 export class LAppModel extends CubismUserModel {
   private readonly _loadGeneration = getLive2DModelLoadState().generation;
   private _released = false;
-  private _activeCatalogMotionStop: ((reason: string) => void) | null = null;
-  private _activeCatalogMotionHandle = InvalidMotionQueueEntryHandleValue;
-  private _activeCatalogMotionFinish: (() => void) | null = null;
-  private _activeCatalogMotionClockReader: { getElapsedMs: () => number | null } | null = null;
-  private _activeCatalogMotionClockElapsedMs: number | null = null;
+  private _activeMotionResourceStop: ((reason: string) => void) | null = null;
+  private _activeMotionResourceHandle = InvalidMotionQueueEntryHandleValue;
+  private _activeMotionResourceFinish: (() => void) | null = null;
+  private _activeMotionResourceClockReader: { getElapsedMs: () => number | null } | null = null;
+  private _activeMotionResourceClockElapsedMs: number | null = null;
 
   private failModelLoad(reason: string, error?: unknown): void {
     if (!this.isLoadActive()) {
@@ -204,7 +204,7 @@ export class LAppModel extends CubismUserModel {
     };
     releaseStep("direct parameter plan stop", () =>
       this.stopDirectParameterPlan("direct_parameter_plan_model_released", "failed"));
-    releaseStep("catalog motion stop", () => this.stopMotion("motion_model_released"));
+    releaseStep("motion resource stop", () => this.stopMotion("motion_model_released"));
     releaseStep("speech signal reset", () => this._speechSignalRuntime.reset());
     releaseStep("Cubism model release", () => super.release());
     if (releaseErrors.length > 0) {
@@ -665,14 +665,14 @@ export class LAppModel extends CubismUserModel {
         );
       }
     } else {
-      const motionDeltaTimeSeconds = this.resolveCatalogMotionDeltaTime(
+      const motionDeltaTimeSeconds = this.resolveMotionResourceDeltaTime(
         deltaTimeSeconds,
       );
       motionUpdated = this._motionManager.updateMotion(
         this._model,
         motionDeltaTimeSeconds
       ); // モーションを更新
-      this.completeActiveCatalogMotionIfFinished();
+      this.completeActiveMotionResourceIfFinished();
     }
     this._model.saveParameters(); // 状態を保存
     //--------------------------------------------------------------------------
@@ -895,12 +895,12 @@ export class LAppModel extends CubismUserModel {
   }
 
   public stopMotion(reason = "motion_stopped"): void {
-    const activeStop = this._activeCatalogMotionStop;
-    this._activeCatalogMotionStop = null;
-    this._activeCatalogMotionHandle = InvalidMotionQueueEntryHandleValue;
-    this._activeCatalogMotionFinish = null;
-    this._activeCatalogMotionClockReader = null;
-    this._activeCatalogMotionClockElapsedMs = null;
+    const activeStop = this._activeMotionResourceStop;
+    this._activeMotionResourceStop = null;
+    this._activeMotionResourceHandle = InvalidMotionQueueEntryHandleValue;
+    this._activeMotionResourceFinish = null;
+    this._activeMotionResourceClockReader = null;
+    this._activeMotionResourceClockElapsedMs = null;
     const stopErrors: unknown[] = [];
     try {
       this._motionManager.stopAllMotions();
@@ -917,7 +917,7 @@ export class LAppModel extends CubismUserModel {
     try {
       activeStop?.(reason);
     } catch (error) {
-      console.error("[LAppModel] catalog motion terminal callback failed.", error);
+      console.error("[LAppModel] motion resource terminal callback failed.", error);
       stopErrors.push(error);
     }
     if (stopErrors.length > 0) {
@@ -937,7 +937,7 @@ export class LAppModel extends CubismUserModel {
     group: string,
     no: number,
     priority: number,
-    callbacks?: CatalogMotionLifecycleCallbacks | FinishedMotionCallback
+    callbacks?: MotionResourceLifecycleCallbacks | FinishedMotionCallback
   ): CubismMotionQueueEntryHandle {
     const lifecycleCallbacks = typeof callbacks === "function"
       ? { onFinished: callbacks }
@@ -951,24 +951,24 @@ export class LAppModel extends CubismUserModel {
       try {
         notify?.();
       } catch (error) {
-        console.error(`[LAppModel] catalog motion ${phase} observer failed.`, error);
+        console.error(`[LAppModel] motion resource ${phase} observer failed.`, error);
       }
     };
-    const clearOwnedCatalogMotionState = () => {
-      if (!activeStop || this._activeCatalogMotionStop !== activeStop) {
+    const clearOwnedMotionResourceState = () => {
+      if (!activeStop || this._activeMotionResourceStop !== activeStop) {
         return;
       }
-      this._activeCatalogMotionStop = null;
-      this._activeCatalogMotionHandle = InvalidMotionQueueEntryHandleValue;
-      this._activeCatalogMotionFinish = null;
-      this.clearCatalogMotionClock();
+      this._activeMotionResourceStop = null;
+      this._activeMotionResourceHandle = InvalidMotionQueueEntryHandleValue;
+      this._activeMotionResourceFinish = null;
+      this.clearMotionResourceClock();
     };
     const finish = () => {
       if (terminalSettled) {
         return;
       }
       terminalSettled = true;
-      clearOwnedCatalogMotionState();
+      clearOwnedMotionResourceState();
       notifyLifecycle("finished", lifecycleCallbacks?.onFinished);
     };
     const fail = (reason: string) => {
@@ -976,7 +976,7 @@ export class LAppModel extends CubismUserModel {
         return;
       }
       terminalSettled = true;
-      clearOwnedCatalogMotionState();
+      clearOwnedMotionResourceState();
       notifyLifecycle("failed", () => lifecycleCallbacks?.onFailed?.(reason));
     };
     const start = () => {
@@ -987,13 +987,13 @@ export class LAppModel extends CubismUserModel {
       if (clockReader) {
         const elapsedMs = clockReader.getElapsedMs();
         if (elapsedMs === null || !Number.isFinite(elapsedMs)) {
-          fail("catalog_motion_clock_unavailable");
+          fail("motion_resource_clock_unavailable");
           this._motionManager.stopAllMotions();
           this._motionManager.setReservePriority(0);
           return;
         }
-        this._activeCatalogMotionClockReader = clockReader;
-        this._activeCatalogMotionClockElapsedMs = elapsedMs;
+        this._activeMotionResourceClockReader = clockReader;
+        this._activeMotionResourceClockElapsedMs = elapsedMs;
       }
       notifyLifecycle("started", lifecycleCallbacks?.onStarted);
     };
@@ -1012,7 +1012,7 @@ export class LAppModel extends CubismUserModel {
     if (requestedClockReader) {
       const elapsedMs = requestedClockReader.getElapsedMs();
       if (elapsedMs === null || !Number.isFinite(elapsedMs)) {
-        this._motionStartError = "catalog_motion_clock_unavailable";
+        this._motionStartError = "motion_resource_clock_unavailable";
         fail(this._motionStartError);
         return InvalidMotionQueueEntryHandleValue;
       }
@@ -1047,7 +1047,7 @@ export class LAppModel extends CubismUserModel {
         return;
       }
       terminalSettled = true;
-      clearOwnedCatalogMotionState();
+      clearOwnedMotionResourceState();
       notifyLifecycle(
         "interrupted",
         () => lifecycleCallbacks?.onInterrupted?.(reason),
@@ -1069,11 +1069,11 @@ export class LAppModel extends CubismUserModel {
       }
       fail(this._motionStartError);
     } else {
-      const previousActiveStop = this._activeCatalogMotionStop;
+      const previousActiveStop = this._activeMotionResourceStop;
       previousActiveStop?.("motion_replaced");
-      this._activeCatalogMotionStop = activeStop;
-      this._activeCatalogMotionHandle = handle;
-      this._activeCatalogMotionFinish = finish;
+      this._activeMotionResourceStop = activeStop;
+      this._activeMotionResourceHandle = handle;
+      this._activeMotionResourceFinish = finish;
       start();
     }
     return handle;
@@ -1149,27 +1149,27 @@ export class LAppModel extends CubismUserModel {
     }
   }
 
-  private resolveCatalogMotionDeltaTime(renderDeltaTimeSeconds: number): number {
-    const reader = this._activeCatalogMotionClockReader;
+  private resolveMotionResourceDeltaTime(renderDeltaTimeSeconds: number): number {
+    const reader = this._activeMotionResourceClockReader;
     if (!reader) {
       return renderDeltaTimeSeconds;
     }
     const elapsedMs = reader.getElapsedMs();
     if (elapsedMs === null || !Number.isFinite(elapsedMs)) {
-      this.stopMotion("catalog_motion_clock_unavailable");
+      this.stopMotion("motion_resource_clock_unavailable");
       return 0;
     }
-    const previousElapsedMs = this._activeCatalogMotionClockElapsedMs ?? elapsedMs;
+    const previousElapsedMs = this._activeMotionResourceClockElapsedMs ?? elapsedMs;
     if (elapsedMs <= previousElapsedMs) {
       return 0;
     }
-    this._activeCatalogMotionClockElapsedMs = elapsedMs;
+    this._activeMotionResourceClockElapsedMs = elapsedMs;
     return (elapsedMs - previousElapsedMs) / 1000;
   }
 
-  private completeActiveCatalogMotionIfFinished(): void {
-    const handle = this._activeCatalogMotionHandle;
-    const finish = this._activeCatalogMotionFinish;
+  private completeActiveMotionResourceIfFinished(): void {
+    const handle = this._activeMotionResourceHandle;
+    const finish = this._activeMotionResourceFinish;
     if (
       handle === InvalidMotionQueueEntryHandleValue
       || !finish
@@ -1180,9 +1180,9 @@ export class LAppModel extends CubismUserModel {
     finish();
   }
 
-  private clearCatalogMotionClock(): void {
-    this._activeCatalogMotionClockReader = null;
-    this._activeCatalogMotionClockElapsedMs = null;
+  private clearMotionResourceClock(): void {
+    this._activeMotionResourceClockReader = null;
+    this._activeMotionResourceClockElapsedMs = null;
   }
 
   public stopExpression(): void {

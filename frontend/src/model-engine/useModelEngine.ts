@@ -105,7 +105,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     getSelectedModel: dependencies.getSelectedModel,
     getSettings: dependencies.getSettings,
     playPlan: dependencies.playPlan,
-    playCatalogMotion: dependencies.playCatalogMotion,
+    playMotionResource: dependencies.playMotionResource,
     getPlayerMessage: dependencies.getPlayerMessage,
     onPlanStarted: (event) => {
       activePlaybackRun = {

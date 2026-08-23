@@ -21,7 +21,6 @@ import {
 import {
   PROTOCOL_SCHEMA_MANIFEST,
   PROTOCOL_VERSION,
-  SCHEMA_CATALOG_MOTION_V1,
   SCHEMA_MOTION_INTENT_V4,
   SCHEMA_OUTPUT_SEGMENT_V4,
 } from "../../types/protocolSchema.generated.js";
@@ -179,14 +178,12 @@ function parseSegmentMotionSlot(type: string, value: unknown): PayloadParseResul
   }
   const payload = asRecord(slot.payload);
   const schemaVersion = payload?.schema_version;
-  const expectedMessageType = schemaVersion === SCHEMA_CATALOG_MOTION_V1
-    ? "engine.catalog_motion"
-    : schemaVersion === SCHEMA_MOTION_INTENT_V4
-      ? "engine.motion_intent"
-      : null;
+  const expectedMessageType = schemaVersion === SCHEMA_MOTION_INTENT_V4
+    ? "engine.motion_intent"
+    : null;
   if (
     slot.state === "present"
-    && (slot.message_type === "engine.motion_intent" || slot.message_type === "engine.catalog_motion")
+    && slot.message_type === "engine.motion_intent"
     && slot.message_type === expectedMessageType
     && typeof slot.mode === "string"
     && typeof slot.source === "string"

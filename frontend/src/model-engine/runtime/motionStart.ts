@@ -11,7 +11,7 @@ import {
   type CompiledSemanticMotion,
 } from "../../types/compiledSemanticMotion.js";
 import type {
-  CatalogMotionPayload,
+  MotionResourcePayload,
   ModelSummary,
   MotionPlanPayload,
   SemanticMotionIntent,
@@ -52,7 +52,7 @@ export type PreparedSemanticMotionPayload =
     profileRevision: number;
     profileSourceHash: string;
     resourceId: string;
-    motion: CatalogMotionPayload;
+    motion: MotionResourcePayload;
     diagnostics: CompileDiagnostics;
     intent: SemanticMotionIntent;
   };
@@ -113,29 +113,13 @@ export function startNormalizedMotionPayload(
     queuedDelayMs: context.queuedDelayMs,
   });
 
-  switch (payload.kind) {
-    case "semantic_intent":
-      return startCompilableMotionPayload(
-        payload,
-        context,
-        dependencies,
-        state,
-        preparedSemanticMotion,
-      );
-    case "catalog_motion":
-      return startCatalogMotionPayload(payload, context, dependencies, state);
-    default: {
-      const unsupportedPayload: never = payload;
-      const unsupportedKind = String(
-        (unsupportedPayload as { kind?: unknown }).kind ?? "unknown",
-      );
-      const reason = `normalized_motion_payload_kind_unsupported:${unsupportedKind}`;
-      state.setLastCompileReason(reason);
-      state.setState("failed", reason, null);
-      state.pushHistory("error", `动作播放失败：${reason}`);
-      return false;
-    }
-  }
+  return startCompilableMotionPayload(
+    payload,
+    context,
+    dependencies,
+    state,
+    preparedSemanticMotion,
+  );
 }
 
 export function startSpeechOnlyMotionRequest(
@@ -469,8 +453,8 @@ function isMotionResourceIntent(
     && intent.motion_resource_id.trim().length > 0;
 }
 
-interface CatalogMotionExecutionOptions {
-  motion: CatalogMotionPayload;
+interface MotionResourceExecutionOptions {
+  motion: MotionResourcePayload;
   selectedModel: ModelSummary | null;
   context: StartPayloadContext;
   dependencies: MotionStartDependencies;
@@ -484,8 +468,8 @@ interface CatalogMotionExecutionOptions {
   ) => ModelEnginePlanStartedEvent;
 }
 
-function startCatalogMotionExecution(
-  options: CatalogMotionExecutionOptions,
+function startMotionResourceExecution(
+  options: MotionResourceExecutionOptions,
 ): boolean {
   const {
     motion,
@@ -497,7 +481,7 @@ function startCatalogMotionExecution(
   } = options;
   let notifiedStarted = false;
 
-  const startResult: MotionPlaybackStartResult = dependencies.playCatalogMotion(
+  const startResult: MotionPlaybackStartResult = dependencies.playMotionResource(
     motion,
     selectedModel,
     {
@@ -536,41 +520,6 @@ function startCatalogMotionExecution(
   return notifiedStarted
     ? true
     : rejectMotionStartWithoutRunId(state, diagnostics);
-}
-
-function startCatalogMotionPayload(
-  payload: Extract<NormalizedMotionPayload, { kind: "catalog_motion" }>,
-  context: StartPayloadContext,
-  dependencies: MotionStartDependencies,
-  state: MotionRuntimeStateController,
-): boolean {
-  const selectedModel = dependencies.getSelectedModel();
-  return startCatalogMotionExecution({
-    motion: payload.motion,
-    selectedModel,
-    context,
-    dependencies,
-    state,
-    diagnostics: null,
-    failureMessage: "现成 motion 被运行时拒绝执行。",
-    startedHistory: (successMessage) =>
-      `现成 motion 执行中（${successMessage}）。`,
-    buildStartedEvent: (runId, playerMessage) => ({
-      motion: payload.motion,
-      model: selectedModel,
-      messageId: context.messageId,
-      turnId: context.turnId,
-      playbackTurnId: context.playbackTurnId,
-      playbackOrigin: context.playbackOrigin,
-      startReason: context.startReason,
-      queuedDelayMs: context.queuedDelayMs,
-      payloadKind: payload.kind,
-      executionKind: "catalog_motion",
-      diagnostics: null,
-      playerMessage,
-      runId,
-    }),
-  });
 }
 
 function startCompilableMotionPayload(
@@ -711,7 +660,7 @@ function startMotionResourcePayload(
   state: MotionRuntimeStateController,
 ): boolean {
   const selectedModel = dependencies.getSelectedModel();
-  return startCatalogMotionExecution({
+  return startMotionResourceExecution({
     motion: prepared.motion,
     selectedModel,
     context,

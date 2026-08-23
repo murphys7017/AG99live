@@ -1,5 +1,5 @@
 import type {
-  CatalogMotionPayload,
+  MotionResourcePayload,
   MotionPlanPayload,
 } from "./protocol";
 import { SCHEMA_MOTION_TUNING_SAMPLE_V2 } from "./protocol";
@@ -219,7 +219,7 @@ interface DesktopMotionPlaybackRecordBase {
   id: string;
   createdAt: string;
   source: string;
-  payloadKind: "semantic_intent" | "semantic_motion_resource" | "catalog_motion" | "speech_only";
+  payloadKind: "semantic_intent" | "semantic_motion_resource" | "speech_only";
   messageId: string;
   turnId: string | null;
   playbackTurnId: string | null;
@@ -241,13 +241,8 @@ export type DesktopMotionPlaybackRecord =
     motion?: null;
   })
   | (DesktopMotionPlaybackRecordBase & {
-    payloadKind: "catalog_motion";
-    motion: CatalogMotionPayload;
-    plan?: null;
-  })
-  | (DesktopMotionPlaybackRecordBase & {
     payloadKind: "semantic_motion_resource";
-    motion: CatalogMotionPayload;
+    motion: MotionResourcePayload;
     plan?: null;
   });
 

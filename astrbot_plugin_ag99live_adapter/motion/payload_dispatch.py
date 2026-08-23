@@ -2,12 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..protocol import (
-    TYPE_ENGINE_CATALOG_MOTION,
-    TYPE_ENGINE_MOTION_INTENT,
-)
-from ..protocol.schema_versions import CATALOG_MOTION_SCHEMA_VERSION
-from .catalog_motion import validate_catalog_motion_payload
+from ..protocol import TYPE_ENGINE_MOTION_INTENT
 from .motion_intent import (
     MOTION_INTENT_V4_SCHEMA_VERSION,
     validate_motion_intent_payload,
@@ -24,8 +19,6 @@ def validate_motion_payload(payload: Any) -> tuple[bool, str]:
     schema_version = resolve_motion_payload_schema_version(payload)
     if schema_version == MOTION_INTENT_V4_SCHEMA_VERSION:
         return validate_motion_intent_payload(payload)
-    if schema_version == CATALOG_MOTION_SCHEMA_VERSION:
-        return validate_catalog_motion_payload(payload)
     return False, "unsupported_schema_version"
 
 
@@ -33,6 +26,4 @@ def resolve_engine_motion_message_type(payload: Any) -> str:
     schema_version = resolve_motion_payload_schema_version(payload)
     if schema_version == MOTION_INTENT_V4_SCHEMA_VERSION:
         return TYPE_ENGINE_MOTION_INTENT
-    if schema_version == CATALOG_MOTION_SCHEMA_VERSION:
-        return TYPE_ENGINE_CATALOG_MOTION
     return ""
