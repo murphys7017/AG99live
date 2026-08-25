@@ -95,6 +95,7 @@ from .output_segment import PendingOutputSegment
 
 
 MAX_REMEMBERED_TERMINAL_TURNS = 256
+MAX_PROMPT_MOTION_HISTORY = 4
 
 
 class TurnCoordinator:
@@ -151,7 +152,7 @@ class TurnCoordinator:
         self._turn_lock = asyncio.Lock()
         self._turn_timings: dict[str, dict[str, Any]] = {}
         self._events_by_turn_id: dict[str, Any] = {}
-        self._last_prompt_motion_snapshot: dict[str, Any] | None = None
+        self._prompt_motion_history: list[dict[str, Any]] = []
         self._pending_output_segments: dict[str, PendingOutputSegment] = {}
         self._closing_output_turn_ids: set[str] = set()
         self._closed_output_turn_ids: set[str] = set()
@@ -306,7 +307,7 @@ class TurnCoordinator:
             self._turn_terminal_results.clear()
             self._events_by_turn_id.clear()
             self._active_vad_turn_by_capture_turn.clear()
-            self._last_prompt_motion_snapshot = None
+            self._prompt_motion_history.clear()
 
         if cleanup_failures:
             raise RuntimeError(
@@ -1028,28 +1029,30 @@ class TurnCoordinator:
             stopped_count,
         )
 
-    def get_last_prompt_motion_snapshot(self) -> dict[str, Any] | None:
-        snapshot = getattr(self, "_last_prompt_motion_snapshot", None)
-        if not isinstance(snapshot, dict):
-            return None
-        cloned_snapshot = dict(snapshot)
-        axes = snapshot.get("axes")
-        axis_levels = snapshot.get("axis_levels")
-        motion_steps = snapshot.get("motion_steps")
-        if isinstance(axes, dict):
-            cloned_snapshot["axes"] = dict(axes)
-        if isinstance(axis_levels, dict):
-            cloned_snapshot["axis_levels"] = dict(axis_levels)
-        if isinstance(motion_steps, list):
-            cloned_snapshot["motion_steps"] = [
-                {
-                    **step,
-                    "axis_levels": dict(step.get("axis_levels") or {}),
-                }
-                for step in motion_steps
-                if isinstance(step, dict)
-            ]
-        return cloned_snapshot
+    def get_prompt_motion_history(self) -> list[dict[str, Any]]:
+        history: list[dict[str, Any]] = []
+        for snapshot in self._prompt_motion_history:
+            if not isinstance(snapshot, dict):
+                continue
+            cloned_snapshot = dict(snapshot)
+            axis_levels = snapshot.get("axis_levels")
+            motion_steps = snapshot.get("motion_steps")
+            intent_tags = snapshot.get("intent_tags")
+            if isinstance(axis_levels, dict):
+                cloned_snapshot["axis_levels"] = dict(axis_levels)
+            if isinstance(motion_steps, list):
+                cloned_snapshot["motion_steps"] = [
+                    {
+                        **step,
+                        "axis_levels": dict(step.get("axis_levels") or {}),
+                    }
+                    for step in motion_steps
+                    if isinstance(step, dict)
+                ]
+            if isinstance(intent_tags, list):
+                cloned_snapshot["intent_tags"] = list(intent_tags)
+            history.append(cloned_snapshot)
+        return history
 
     def _record_prompt_motion_snapshot(
         self,
@@ -1066,7 +1069,14 @@ class TurnCoordinator:
         motion_steps = motion_payload.get("motion_steps")
         has_levels = isinstance(axis_levels, dict) and bool(axis_levels)
         has_steps = isinstance(motion_steps, list) and bool(motion_steps)
-        if has_levels == has_steps or "axes" in motion_payload:
+        expression_resource_id = str(
+            motion_payload.get("expression_resource_id") or ""
+        ).strip()
+        motion_resource_id = str(
+            motion_payload.get("motion_resource_id") or ""
+        ).strip()
+        has_resource = bool(expression_resource_id or motion_resource_id)
+        if "axes" in motion_payload or (has_levels == has_steps and not has_resource):
             return
         normalized_levels = dict(axis_levels) if isinstance(axis_levels, dict) else {}
 
@@ -1096,12 +1106,11 @@ class TurnCoordinator:
                 if isinstance(step, dict)
             ]
         snapshot["expression_resource_id"] = str(
-            motion_payload.get("expression_resource_id") or ""
-        ).strip()
-        snapshot["motion_resource_id"] = str(
-            motion_payload.get("motion_resource_id") or ""
-        ).strip()
-        self._last_prompt_motion_snapshot = snapshot
+            expression_resource_id
+        )
+        snapshot["motion_resource_id"] = str(motion_resource_id)
+        self._prompt_motion_history.append(snapshot)
+        del self._prompt_motion_history[:-MAX_PROMPT_MOTION_HISTORY]
 
     def _record_motion_lab_raw_event(
         self,

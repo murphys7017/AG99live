@@ -28,7 +28,16 @@ from ...prompts.semantic_axis_prompt import (
     resolve_available_axis_levels,
 )
 
-PROMPT_VARIATION_AXIS_IDS = ("head_yaw", "body_yaw")
+PROMPT_VARIATION_AXIS_IDS = (
+    "head_yaw",
+    "head_roll",
+    "head_pitch",
+    "body_yaw",
+    "body_roll",
+    "body_pitch",
+    "gaze_x",
+    "gaze_y",
+)
 
 def _record_motion_prompt_reference_observation(
     *,
@@ -119,14 +128,15 @@ def _extract_motion_prompt_input_text(event: Any) -> str:
     message_obj = getattr(event, "message_obj", None)
     return _normalize_optional_string(getattr(message_obj, "message_str", None)) or ""
 
-def _build_previous_motion_variation_payload(
+def _build_motion_variation_payload(
     turn_coordinator: Any,
     *,
     runtime_state: Any,
 ) -> dict[str, Any]:
-    snapshot = _resolve_previous_motion_prompt_snapshot(turn_coordinator)
-    if not isinstance(snapshot, dict):
+    history = _resolve_prompt_motion_history(turn_coordinator)
+    if not history:
         return {}
+    snapshot = history[-1]
 
     axis_levels = snapshot.get("axis_levels")
     motion_steps = snapshot.get("motion_steps")
@@ -135,11 +145,22 @@ def _build_previous_motion_variation_payload(
         if isinstance(last_step, dict):
             axis_levels = last_step.get("axis_levels")
     axes = snapshot.get("axes")
-    if not isinstance(axis_levels, dict) and not isinstance(axes, dict):
+    expression_resource_id = str(snapshot.get("expression_resource_id") or "").strip()
+    motion_resource_id = str(snapshot.get("motion_resource_id") or "").strip()
+    has_motion_shape = bool(
+        isinstance(axis_levels, dict)
+        or isinstance(axes, dict)
+        or isinstance(motion_steps, list)
+        or expression_resource_id
+        or motion_resource_id
+    )
+    if not has_motion_shape:
         return {}
 
-    semantic_profile = resolve_selected_semantic_axis_profile(runtime_state=runtime_state)
-    axis_by_id = build_prompt_axis_lookup(semantic_profile)
+    axis_by_id = {}
+    if isinstance(axes, dict):
+        semantic_profile = resolve_selected_semantic_axis_profile(runtime_state=runtime_state)
+        axis_by_id = build_prompt_axis_lookup(semantic_profile)
 
     key_axes: list[dict[str, Any]] = []
     key_axis_levels: dict[str, int] = {}
@@ -168,11 +189,60 @@ def _build_previous_motion_variation_payload(
             }
         )
 
-    if not key_axes:
+    if not key_axes and not (motion_steps or expression_resource_id or motion_resource_id):
         return {}
+    recent_motion_history: list[dict[str, Any]] = []
+    repeated_directions: dict[tuple[str, int], int] = {}
+    sequence_count = 0
+    for history_snapshot in history:
+        history_levels = _resolve_snapshot_axis_levels(history_snapshot)
+        key_levels = {
+            axis_id: level
+            for axis_id, level in history_levels.items()
+            if axis_id in PROMPT_VARIATION_AXIS_IDS
+        }
+        directions = {
+            axis_id: 1 if level > 0 else -1
+            for axis_id, level in key_levels.items()
+            if level != 0
+        }
+        for axis_id, direction in directions.items():
+            repeated_directions[(axis_id, direction)] = (
+                repeated_directions.get((axis_id, direction), 0) + 1
+            )
+        is_sequence = isinstance(history_snapshot.get("motion_steps"), list)
+        if is_sequence:
+            sequence_count += 1
+        intent_tags = history_snapshot.get("intent_tags")
+        recent_motion_history.append(
+            {
+                "shape": "sequence" if is_sequence else (
+                    "motion_resource"
+                    if history_snapshot.get("motion_resource_id")
+                    else (
+                        "expression_resource"
+                        if history_snapshot.get("expression_resource_id")
+                        else "pose"
+                    )
+                ),
+                "axis_directions": directions,
+                "intent_tags": [
+                    str(tag).strip()
+                    for tag in intent_tags[:2]
+                    if str(tag).strip()
+                ] if isinstance(intent_tags, list) else [],
+            }
+        )
 
-    expression_resource_id = str(snapshot.get("expression_resource_id") or "").strip()
-    motion_resource_id = str(snapshot.get("motion_resource_id") or "").strip()
+    repeated_direction_summary = [
+        {
+            "axis_id": axis_id,
+            "direction": direction,
+            "count": count,
+        }
+        for (axis_id, direction), count in sorted(repeated_directions.items())
+        if count >= 2
+    ]
     previous_motion = {
         "key_axis_levels": key_axis_levels,
         "key_axes": key_axes if not key_axis_levels else [],
@@ -181,19 +251,51 @@ def _build_previous_motion_variation_payload(
         "was_sequence": bool(motion_steps),
         "guidance": "参考上一动作，但按本轮语义重新选择方向、幅度和身体重心，避免机械复刻。",
     }
-    return {
-        "previous_motion": {
+    payload: dict[str, Any] = {
+        "recent_motion_summary": {
+            "recent_actions": recent_motion_history,
+            "sequence_count": sequence_count,
+            "sample_count": len(recent_motion_history),
+            "repeated_directions": repeated_direction_summary,
+            "guidance": (
+                "优先根据本轮语义选择动作；语义允许时避免连续复用 repeated_directions 中的方向，"
+                "并在 pose 与 sequence、头部轴与身体轴之间做自然变化。不要为了多样性强行反转语义方向。"
+            ),
+        },
+    }
+    if key_axes or motion_steps or expression_resource_id or motion_resource_id:
+        payload["previous_motion"] = {
             key: value
             for key, value in previous_motion.items()
             if value not in (None, "", [], {}) or key in {"was_sequence", "guidance"}
         }
-    }
+    return payload
 
-def _resolve_previous_motion_prompt_snapshot(turn_coordinator: Any) -> dict[str, Any] | None:
-    snapshot = turn_coordinator.get_last_prompt_motion_snapshot()
-    if not isinstance(snapshot, dict):
-        return None
-    return snapshot
+def _resolve_prompt_motion_history(turn_coordinator: Any) -> list[dict[str, Any]]:
+    get_history = getattr(turn_coordinator, "get_prompt_motion_history", None)
+    if not callable(get_history):
+        return []
+    history = get_history()
+    return [snapshot for snapshot in history if isinstance(snapshot, dict)]
+
+
+def _resolve_snapshot_axis_levels(snapshot: dict[str, Any]) -> dict[str, int]:
+    axis_levels = snapshot.get("axis_levels")
+    motion_steps = snapshot.get("motion_steps")
+    if isinstance(motion_steps, list) and motion_steps:
+        last_step = motion_steps[-1]
+        if isinstance(last_step, dict):
+            axis_levels = last_step.get("axis_levels")
+    if not isinstance(axis_levels, dict):
+        return {}
+    return {
+        str(axis_id).strip(): level
+        for axis_id, level in axis_levels.items()
+        if str(axis_id).strip()
+        and isinstance(level, int)
+        and not isinstance(level, bool)
+        and -4 <= level <= 4
+    }
 
 def _summarize_semantic_profile(
     runtime_state: Any,

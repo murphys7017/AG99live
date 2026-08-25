@@ -1,9 +1,9 @@
 task:
   class: feature
   risk: medium
-  phase: performance_b6_active_dynamics
+  phase: performance_c_cross_turn_diversity
   status: validation_partial
-  scope: "Deepen active motion dynamics through the existing ModelEngine response-policy mapping, without changing protocol, timeline, mixer ownership, Cubism Physics ownership, or adding a second smoothing path."
+  scope: "Add a bounded connection-scoped recent motion summary to the existing Prompt context, so cross-Turn diversity can avoid repeated shapes and directions without changing protocol, timeline, mixer ownership, Cubism Physics ownership, or adding a second motion path."
 
 context:
   confidence: high
@@ -51,6 +51,8 @@ context:
     - Parsed output segments may be rejected without terminating the transport: domain-invalid material is committed as a settled rejected fact, while duplicate, late, or terminal-session delivery rejects only the attempted write and preserves the first segment.
     - Performance Director owns semantic performance scheduling and parameter-track compilation, but never cross-source parameter fusion.
     - ActiveParameterMixer remains in the AG99 Live2D Runtime layer; it resolves the final active parameter frame before Cubism Physics.
+    - Cross-Turn motion history is connection-scoped, bounded to the most recent four valid motion payloads, and is Prompt guidance only; it cannot override the current semantic intent or alter playback.
+    - Complete motion resources enter the same history as pose and sequence payloads, but contribute only their shape/resource usage when no semantic axis levels exist.
     - Official Cubism Framework/Core are the target frozen driver boundary; historical AG99 changes in that directory are architecture debt, not a reason to add more business logic there.
     - Motion replacement must publish started only after the previous execution owner has settled successfully and the new owner has committed.
     - A downstream stop failure must release local ModelEngine ownership in finally while keeping failed status and the original error visible.
@@ -117,6 +119,9 @@ verification:
     - A non-increasing playback clock freezes the existing presentation offset, velocity, and last effective elapsed time; pause frames no longer erase spring inertia.
     - Lip-sync remains an immediate high-priority contribution and prevents active response dynamics from delaying mouth output; presentation nodes track direct-only targets instead of lip-sync-contaminated values.
     - `npm run typecheck:renderer`, `npm run typecheck:websdk`, `npm run typecheck:node`, and `git diff --check` pass for the B6-1 response-policy batch.
+    - Cross-Turn motion diversity now replaces the single previous-motion snapshot with one bounded TurnCoordinator history; Prompt context includes recent action shapes, main axis directions, intent tags, repeated direction counts, and sequence usage.
+    - The diversity summary is advisory only: current semantic intent remains authoritative, and no protocol, timeline, parameter mixer, WebSDK, or Physics path was added.
+    - Python compile, protocol manifest, and diff checks pass for the cross-Turn diversity batch; live multi-Turn Prompt and Live2D acceptance remains user-led.
     - The targeted active-parameter smoke test could not execute because the existing test tsconfig exposes frozen Cubism Framework strict-type and missing-Core-global errors, and the emitted ESM imports are not resolvable by the repository's current Node invocation; no test workaround or source fallback was added.
     - B5-pre Schedule mapping is complete: emphasis/laugh/chuckle adjust the existing phrase emphasis, while hesitate/breath/sigh participate only in the existing strongest-legal hesitation candidate selection.
     - PerformanceSchedule trace v7 records source phrase indices, cue mappings, mapped internal phrase indices, and cue scheduling or rejection decisions; output.segment.v4, engine.motion_intent.v4, and engine.parameter_plan.v3 remain unchanged.

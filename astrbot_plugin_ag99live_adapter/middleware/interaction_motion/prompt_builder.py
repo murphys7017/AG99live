@@ -5,7 +5,7 @@ from typing import Any
 
 from .prompt_context import (
     _build_motion_runtime_reference_examples,
-    _build_previous_motion_variation_payload,
+    _build_motion_variation_payload,
     _summarize_semantic_profile,
 )
 from .prompt_references import (
@@ -260,7 +260,7 @@ def _build_motion_runtime_payload(
     if reference_examples:
         payload["reference_examples"] = reference_examples
     reference_diagnostics = reference_resolution["diagnostics"]
-    previous_motion_payload = _build_previous_motion_variation_payload(
+    previous_motion_payload = _build_motion_variation_payload(
         turn_coordinator,
         runtime_state=runtime_state,
     )

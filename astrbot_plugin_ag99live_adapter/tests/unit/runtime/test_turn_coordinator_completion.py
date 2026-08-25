@@ -136,7 +136,7 @@ def test_reset_turn_tracking_clears_connection_owned_state(
     coordinator._output_emitted_turn_ids = {"turn-1", "turn-2"}
     coordinator._turn_terminal_results = {"turn-1": (True, None)}
     coordinator._active_vad_turn_by_capture_turn = {"capture-1": "turn-1"}
-    coordinator._last_prompt_motion_snapshot = {"turn_id": "turn-1"}
+    coordinator._prompt_motion_history = [{"turn_id": "turn-1"}]
     coordinator._events_by_turn_id = {
         "turn-1": FaultyEvent(),
         "turn-2": HealthyEvent(),
@@ -154,7 +154,7 @@ def test_reset_turn_tracking_clears_connection_owned_state(
     assert coordinator._output_emitted_turn_ids == set()
     assert coordinator._turn_terminal_results == {}
     assert coordinator._active_vad_turn_by_capture_turn == {}
-    assert coordinator._last_prompt_motion_snapshot is None
+    assert coordinator._prompt_motion_history == []
 
 
 # ── proactive output turns ─────────────────────────────
