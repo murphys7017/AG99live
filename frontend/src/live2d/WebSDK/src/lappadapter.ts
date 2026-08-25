@@ -12,7 +12,7 @@ import type {
   DirectParameterPlanTerminalStatus,
 } from "./directparameterplan";
 
-export interface CatalogMotionLifecycleCallbacks {
+export interface MotionResourceLifecycleCallbacks {
   playbackClockReader?: { getElapsedMs: () => number | null };
   onStarted?: () => void;
   onFinished?: () => void;
@@ -48,7 +48,7 @@ export class LAppAdapter {
     group: string,
     no: number,
     priority: number,
-    callbacks?: CatalogMotionLifecycleCallbacks
+    callbacks?: MotionResourceLifecycleCallbacks
   ): CubismMotionQueueEntryHandle {
     return this.getModel()?.startMotion(group, no, priority, callbacks) ?? InvalidMotionQueueEntryHandleValue;
   }
