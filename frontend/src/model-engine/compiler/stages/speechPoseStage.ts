@@ -26,6 +26,13 @@ type SpeechGestureChannel = VoiceFollowingChannelProfile & {
   layer: "head" | "body";
 };
 
+type SpeechGestureLateralFamily = "yaw" | "roll";
+
+interface SpeechGestureSelection {
+  channels: SpeechGestureChannel[];
+  lateralFamily: SpeechGestureLateralFamily;
+}
+
 const PRESET_MAGNITUDE_RANGE: Record<
   SpeechGesturePreset,
   readonly [number, number]
@@ -89,11 +96,13 @@ export function runSpeechPoseStage(
   if (!Number.isFinite(durationMs) || durationMs <= 0) {
     return { ok: false, reason: "speech_gesture_timing_missing" };
   }
-  const selectedChannels = selectGestureChannels(
+  const selection = selectGestureChannels(
     voiceProfile,
     preset,
+    resolveSpeechGestureLateralFamily(context, preset),
     durationMs,
   );
+  const selectedChannels = selection.channels;
   if (selectedChannels.length === 0) {
     return { ok: false, reason: `speech_gesture_channels_unavailable:${preset}` };
   }
@@ -123,6 +132,7 @@ export function runSpeechPoseStage(
   context.state.warnings = [
     ...context.state.warnings,
     `speech_gesture_preset:${preset}`,
+    `speech_gesture_lateral_family:${selection.lateralFamily}`,
     `speech_gesture_phrase_count:${context.performanceSchedule.phrases.length}`,
     `speech_gesture_text_source:${context.performanceSchedule.textSource}`,
     ...selectedChannels.map((channel) => `speech_gesture_axis_pending:${channel.semantic_axis_id}`),
@@ -249,14 +259,20 @@ function resolveSpeechGesturePreset(context: ModelParameterCompileContext): Spee
   if (hint?.energy === "teasing") {
     return "lively_chat";
   }
-  const tags = context.semanticMotion.intentTags.join(" ").toLowerCase();
-  if (/surpris|angry|惊讶|生气|强调|激动/.test(tags)) {
+  const semanticLabels = [
+    context.semanticMotion.emotionLabel,
+    ...context.semanticMotion.intentTags,
+  ].join(" ").toLowerCase();
+  if (/(?:\b(?:surprised?|angry|excited?)\b|惊讶|生气|强调|激动)/.test(semanticLabels)) {
     return "emphatic";
   }
-  if (/comfort|sooth|gentle|安抚|温柔|理解|低落/.test(tags)) {
+  if (/(?:\b(?:comfort|soothing?|gentle|sad|tired)\b|安抚|温柔|理解|低落|悲伤|疲惫)/.test(semanticLabels)) {
     return "gentle_support";
   }
-  if (/explain|think|说明|解释|思考|认真/.test(tags)) {
+  if (/(?:\b(?:happy|joyful?|playful|teasing)\b|开心|高兴|愉快|调皮|可爱)/.test(semanticLabels)) {
+    return "lively_chat";
+  }
+  if (/(?:\b(?:explain|thinking?|serious)\b|说明|解释|思考|认真)/.test(semanticLabels)) {
     return "calm_explain";
   }
   const identity = context.options.samplingIdentity;
@@ -265,11 +281,54 @@ function resolveSpeechGesturePreset(context: ModelParameterCompileContext): Spee
     : "lively_chat";
 }
 
+function resolveSpeechGestureLateralFamily(
+  context: ModelParameterCompileContext,
+  preset: SpeechGesturePreset,
+): SpeechGestureLateralFamily {
+  const familyStrength: Record<SpeechGestureLateralFamily, number> = {
+    yaw: 0,
+    roll: 0,
+  };
+  for (const semanticAxis of context.semanticMotion.axes) {
+    const family = resolveAxisLateralFamily(semanticAxis.axisId);
+    const axis = context.state.axisById.get(semanticAxis.axisId);
+    if (!family || !axis) {
+      continue;
+    }
+    const availableSpan = Math.max(
+      Math.abs(axis.neutral - axis.value_range[0]),
+      Math.abs(axis.value_range[1] - axis.neutral),
+    );
+    if (availableSpan <= 0) {
+      continue;
+    }
+    familyStrength[family] = Math.max(
+      familyStrength[family],
+      Math.abs(semanticAxis.value - semanticAxis.neutralValue) / availableSpan,
+    );
+  }
+  if (Math.abs(familyStrength.yaw - familyStrength.roll) > 0.000001) {
+    return familyStrength.yaw > familyStrength.roll ? "yaw" : "roll";
+  }
+  return preset === "calm_explain" || preset === "emphatic" ? "yaw" : "roll";
+}
+
+function resolveAxisLateralFamily(axisId: string): SpeechGestureLateralFamily | null {
+  if (axisId === "head_yaw" || axisId === "body_yaw" || axisId === "gaze_x") {
+    return "yaw";
+  }
+  if (axisId === "head_roll" || axisId === "body_roll") {
+    return "roll";
+  }
+  return null;
+}
+
 function selectGestureChannels(
   profile: VoiceFollowingProfile,
   preset: SpeechGesturePreset,
+  lateralFamily: SpeechGestureLateralFamily,
   durationMs: number,
-): SpeechGestureChannel[] {
+): SpeechGestureSelection {
   const channels = profile.channels ?? {};
   const selected: SpeechGestureChannel[] = [];
   const available = PRESET_CHANNELS[preset]
@@ -279,33 +338,66 @@ function selectGestureChannels(
       && channel.follow_delay_ms <= durationMs - 220
     ));
   const headChannels = available.filter((channel) => channel.layer === "head");
+  const bodyChannels = available.filter((channel) => channel.layer === "body");
   const lateralHeadChannels = headChannels.filter((channel) => (
     channel.channel.includes("yaw") || channel.channel.includes("roll")
   ));
-  const emphaticPitchAvailable = preset === "emphatic"
-    && headChannels.some((channel) => channel.channel.includes("pitch"));
-  const preferredHeadChannels = emphaticPitchAvailable
-    ? headChannels
-    : lateralHeadChannels.length > 0
-      ? lateralHeadChannels
-      : headChannels;
-  const selectedHeadChannels = preferredHeadChannels.slice(
-    0,
-    emphaticPitchAvailable || lateralHeadChannels.length > 0 ? 2 : 1,
-  );
-  selected.push(...selectedHeadChannels);
-
-  const bodyChannels = available.filter((channel) => channel.layer === "body");
-  const lateralBodyChannel = bodyChannels.find((channel) => (
+  const lateralBodyChannels = bodyChannels.filter((channel) => (
     channel.channel.includes("yaw") || channel.channel.includes("roll")
   ));
+  const requestedHeadFamilyAvailable = lateralHeadChannels
+    .some((channel) => channel.channel.includes(lateralFamily));
+  const effectiveLateralFamily = requestedHeadFamilyAvailable
+    ? lateralFamily
+    : resolveChannelLateralFamily(lateralHeadChannels[0] ?? lateralBodyChannels[0])
+      ?? lateralFamily;
+  const primaryHeadChannel = lateralHeadChannels.find(
+    (channel) => channel.channel.includes(effectiveLateralFamily),
+  );
+  const secondaryHeadChannel = lateralHeadChannels.find(
+    (channel) => !channel.channel.includes(effectiveLateralFamily),
+  );
+  const emphaticPitchChannel = preset === "emphatic"
+    ? headChannels.find((channel) => channel.channel.includes("pitch"))
+    : undefined;
+  if (emphaticPitchChannel) {
+    selected.push(emphaticPitchChannel);
+  }
+  if (primaryHeadChannel) {
+    selected.push(primaryHeadChannel);
+  }
+  if (preset === "lively_chat" && selected.length < 2 && secondaryHeadChannel) {
+    selected.push(secondaryHeadChannel);
+  }
+  if (selected.length === 0) {
+    const fallbackHeadChannel = secondaryHeadChannel ?? headChannels[0];
+    if (fallbackHeadChannel) {
+      selected.push(fallbackHeadChannel);
+    }
+  }
+
+  const lateralBodyChannel = bodyChannels.find(
+    (channel) => channel.channel.includes(effectiveLateralFamily),
+  );
   if (lateralBodyChannel) {
     selected.push(lateralBodyChannel);
-  } else if (bodyChannels.length > 0) {
+  } else if (lateralHeadChannels.length === 0 && bodyChannels.length > 0) {
     selected.push(bodyChannels[0]);
   }
 
-  return selected;
+  return { channels: selected, lateralFamily: effectiveLateralFamily };
+}
+
+function resolveChannelLateralFamily(
+  channel: SpeechGestureChannel | undefined,
+): SpeechGestureLateralFamily | null {
+  if (channel?.channel.includes("yaw")) {
+    return "yaw";
+  }
+  if (channel?.channel.includes("roll")) {
+    return "roll";
+  }
+  return null;
 }
 
 function isUsableVoiceFollowingChannel(
