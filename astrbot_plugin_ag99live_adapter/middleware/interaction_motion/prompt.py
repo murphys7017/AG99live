@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from .compatibility import PromptExtension
+from ...core_compatibility import get_interaction_capabilities
 from .prompt_builder import (
     _build_motion_capability_prompt_payload,
     _build_motion_decision_contract_text,
@@ -24,6 +24,10 @@ class AG99liveMotionPromptContributor:
 
     async def collect(self, event, plugin_context, view):
         del plugin_context
+
+        capabilities = get_interaction_capabilities()
+        if capabilities is None:
+            return None
 
         bundle = _resolve_motion_runtime_bundle(event)
         if bundle is None:
@@ -51,7 +55,7 @@ class AG99liveMotionPromptContributor:
         )
 
         extensions = [
-            PromptExtension(
+            capabilities.prompt_extension(
                 plugin_id=self.plugin_id,
                 mount="system",
                 title="Live2D Motion Decision",
@@ -63,7 +67,7 @@ class AG99liveMotionPromptContributor:
                     "node_type": "ag99live_motion_decision_contract",
                 },
             ),
-            PromptExtension(
+            capabilities.prompt_extension(
                 plugin_id=self.plugin_id,
                 mount="capability",
                 title="Live2D Motion Capability",
@@ -80,7 +84,7 @@ class AG99liveMotionPromptContributor:
         ]
         if runtime_payload:
             extensions.append(
-                PromptExtension(
+                capabilities.prompt_extension(
                     plugin_id=self.plugin_id,
                     mount="context",
                     title="Live2D Motion Context",

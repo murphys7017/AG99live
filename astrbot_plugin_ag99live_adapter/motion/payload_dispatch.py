@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..protocol import TYPE_ENGINE_MOTION_INTENT
+from ..protocol.constants import TYPE_ENGINE_MOTION_INTENT
 from .motion_intent import (
     MOTION_INTENT_V4_SCHEMA_VERSION,
     validate_motion_intent_payload,

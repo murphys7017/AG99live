@@ -1,13 +1,17 @@
 sequenceDiagram
     autonumber
     actor User as 用户 / UI
-    participant Adapter as AG99 Adapter<br/>TurnCoordinator
+    participant Adapter as AG99 Adapter
+    participant Turn as TurnCoordinator<br/>Turn identity / lifecycle
     participant CoreQueue as AstrBot EventBus /<br/>Personal Runtime Queue
     participant Persona as Persona Runtime
     participant LLM as 主模型
     participant Curve as 可选 Performance Curve Provider
+    participant CurveCoord as PerformanceCurveCoordinator
     participant TTS as TTS
+    participant Segment as OutputSegmentCoordinator
     participant Buffer as PendingOutputSegment
+    participant Observations as MotionObservationRecorder
     participant Inbound as Inbound Dispatcher
     participant Store as SessionStore
     participant Sinks as Text / Audio Sinks
@@ -37,30 +41,31 @@ sequenceDiagram
     end
 
     User->>Adapter: input.text / input.audio
-    Adapter->>Inbound: control.turn_started(turn_id)
+    Turn->>Inbound: control.turn_started(turn_id)
     Inbound->>Store: 创建本轮 Session
-    Adapter->>CoreQueue: commit_event(event, output_correlation_id=turn_id)
-    Note over Adapter,CoreQueue: 不等待较早 Turn 播放完成，AG99 不维护输入 FIFO
+    Turn->>CoreQueue: commit_event(event, output_correlation_id=turn_id)
+    Note over Turn,CoreQueue: 不等待较早 Turn 播放完成，AG99 不维护输入 FIFO
     CoreQueue->>Persona: 按 AstrBot 官方队列调度
     alt 增强版 Core
         Persona->>Persona: 构建 Prompt、effect schema 与本轮上下文
         Persona->>LLM: 生成 spoken_reply + effect_calls
         LLM-->>Persona: spoken_reply + effect_calls
         Persona->>Adapter: result contributor 生成 motion_intent.v4
-        Adapter->>Adapter: 登记当前回复阶段的 pending curve input
+        Adapter->>CurveCoord: 登记当前回复阶段的 pending curve input
     else 官方 Core
         Persona->>Persona: on_llm_request 注入同一能力与 &lt;@anim&gt; V4 契约
         Persona->>LLM: 生成可见回复 + &lt;@anim&gt; V4
         LLM-->>Persona: 可见回复 + inline intent
         Note over Adapter,TTS: 官方无 TTSState；不启动可选曲线，不伪造 request ID
     end
-    Adapter->>Adapter: 写入 ag99live_motion_schedule<br/>区分未安排、成功和动作解析失败
+    Adapter->>Segment: 写入 ag99live_motion_schedule<br/>区分未安排、成功和动作解析失败
     Adapter->>Adapter: 输出规范化阶段清洗隐藏传输标记
     Persona->>TTS: materialize spoken_reply
     opt 增强版 Core
         TTS->>Adapter: on_tts_state_changed(generating, identities)
         opt 当前阶段存在 pending curve input
-            Adapter->>Curve: 后台启动曲线请求(tts_request_id)
+            Adapter->>CurveCoord: 后台启动曲线请求(tts_request_id)
+            CurveCoord->>Curve: start(request)
         end
     end
     Note over Curve,TTS: 增强版曲线与 TTS Provider 并行；TTS 与基础 motion 不等待曲线
@@ -74,18 +79,22 @@ sequenceDiagram
         TTS-->>Adapter: 最终 Record 或 Plain
     end
     Note over TTS,Adapter: 官方 Core 只以最终 Record 证明成功；<br/>无 Record 时无法区分未触发与失败，投影 audio absent
-    Note over Adapter,Buffer: AstrBot 可以将 Plain、Record、图片和 client object 物理拆分；<br/>拆分仅存在于后端内部。Plain / semantic text / Record.text 必须归一为同一 canonical text。
-    Adapter->>Buffer: 按 turn_id + message_id 合并物理组件
-    Buffer->>Buffer: 校验文本冲突、多音频、motion 与 curve
+    Note over Adapter,Segment: AstrBot 可以将 Plain、Record、图片和 client object 物理拆分；<br/>拆分仅存在于后端内部。Plain / semantic text / Record.text 必须归一为同一 canonical text。
+    Adapter->>Turn: emit_message_chain(turn_id, message_id)
+    Turn->>Segment: 委托物理组件聚合
+    Segment->>Buffer: 按 turn_id + message_id 合并物理组件
+    Segment->>Segment: 校验文本冲突、多音频、motion 与 curve
     alt 曲线在段出站前 ready
-        Curve-->>Buffer: 附加 performance_curve_hint
+        Curve-->>CurveCoord: ready(hint)
+        CurveCoord-->>Segment: 附加 performance_curve_hint
     else 曲线未启动、仍 pending 或已失败
-        Buffer-->>Curve: 取消/清理请求
-        Note over Buffer,Curve: pending 记录 skipped；失败保留 failed 事实；<br/>原 motion 直接出站，不生成默认曲线
+        Segment->>CurveCoord: 取消/清理请求
+        Note over Segment,CurveCoord: pending 记录 skipped；失败保留 failed 事实；<br/>原 motion 直接出站，不生成默认曲线
     end
 
     loop 每个完整逻辑段
-        Buffer->>Inbound: output.segment.v4<br/>唯一 text / audio URL / motion / speech / images 完整 slots
+        Segment->>Inbound: output.segment.v4<br/>唯一 text / audio URL / motion / speech / images 完整 slots
+        Segment->>Observations: 记录 assistant_output 与 motion slot
         Inbound->>Inbound: parser 校验信封、身份与 slot 结构
         alt 信封或 slot 结构非法
             Inbound--xStore: parser 拒绝，不写 SessionStore
@@ -238,7 +247,9 @@ sequenceDiagram
         CoreQueue->>CoreQueue: TurnDeliveryCoordinator<br/>分发 after_message_sent Hook
         CoreQueue->>Adapter: event.complete_visible_turn()<br/>关闭本轮 Adapter 输出队列
     end
-    Adapter->>Inbound: control.synth_finished(turn_id)<br/>所有 output.segment 发送完成后
+    Adapter->>Turn: close_turn_output_queue(turn_id)
+    Turn->>Segment: flush segments + synth_finished
+    Segment->>Inbound: control.synth_finished(turn_id)<br/>所有 output.segment 发送完成后
     Inbound->>Store: assertOutputSegmentsResolved()
     alt 存在未解析段或不完整事实
         Store--xInbound: 协议一致性错误
@@ -258,14 +269,16 @@ sequenceDiagram
         Timeline-->>Completion: no open required execution
     end
     Completion->>Adapter: control.playback_finished(success, error)
-    Adapter-->>Inbound: control.turn_finished
+    Turn-->>Inbound: control.turn_finished
     Inbound->>Store: 标记后端轮次结束
     Store-->>User: session completed / failed
 
     opt WebSocket 断开
         Inbound--xAdapter: transport disconnected
-        Adapter->>Adapter: 先 agent_stop_requested + stop_event
-        Adapter->>Adapter: 再清理 Turn / Segment / Curve / ID map
+        Turn->>Turn: 先 agent_stop_requested + stop_event
+        Turn->>Segment: 再清理 Segment
+        Turn->>CurveCoord: 清理 optional curve
+        Turn->>Turn: 清理 ID map / Turn state
         Note over Adapter,Persona: 被停止 event 的迟到输出在 OLVPetPlatformEvent.send 丢弃
         Inbound->>Timeline: stopAllTimelines(disconnect)
     end

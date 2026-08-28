@@ -36,6 +36,7 @@ from ..live2d.semantic_axis_profile import (
 )
 from ..protocol.builder import build_system_model_sync
 from ..protocol.schema_versions import MODEL_INFO_SCHEMA_VERSION
+from .plugin_runtime import get_config_value
 from .motion_state import MotionTuningStore
 from .motion_lab import MotionLabRawEventStore, MotionLabRecorder
 
@@ -147,52 +148,52 @@ class RuntimeState:
         previous_vad_config = dict(self.vad_config)
 
         self.client_uid = normalize_client_uid(
-            _plugin_config_get(self.plugin_config, "client_uid", self.client_uid),
+            get_config_value(self.plugin_config, "client_uid", self.client_uid),
             DEFAULT_CLIENT_UID,
         )
         self.client_nickname = normalize_client_nickname(
-            _plugin_config_get(
+            get_config_value(
                 self.plugin_config,
                 "client_nickname",
                 self.client_nickname,
             ),
             DEFAULT_CLIENT_NICKNAME,
         )
-        self.stt_provider_id = _plugin_config_get(self.plugin_config, "stt_provider_id", "")
-        self.performance_curve_provider_id = _plugin_config_get(
+        self.stt_provider_id = get_config_value(self.plugin_config, "stt_provider_id", "")
+        self.performance_curve_provider_id = get_config_value(
             self.plugin_config,
             "performance_curve_provider_id",
             "",
         )
         self.enable_performance_curve = bool(
-            _plugin_config_get(self.plugin_config, "enable_performance_curve", False)
+            get_config_value(self.plugin_config, "enable_performance_curve", False)
         )
-        self.vad_model = _plugin_config_get(self.plugin_config, "vad_model", "silero_vad")
+        self.vad_model = get_config_value(self.plugin_config, "vad_model", "silero_vad")
         self.vad_config = {
             "orig_sr": 16000,
             "target_sr": 16000,
             "prob_threshold": float(
-                _plugin_config_get(self.plugin_config, "vad_prob_threshold", 0.4)
+                get_config_value(self.plugin_config, "vad_prob_threshold", 0.4)
             ),
             "db_threshold": int(
-                _plugin_config_get(self.plugin_config, "vad_db_threshold", 60)
+                get_config_value(self.plugin_config, "vad_db_threshold", 60)
             ),
             "required_hits": int(
-                _plugin_config_get(self.plugin_config, "vad_required_hits", 3)
+                get_config_value(self.plugin_config, "vad_required_hits", 3)
             ),
             "required_misses": int(
-                _plugin_config_get(self.plugin_config, "vad_required_misses", 24)
+                get_config_value(self.plugin_config, "vad_required_misses", 24)
             ),
             "smoothing_window": int(
-                _plugin_config_get(self.plugin_config, "vad_smoothing_window", 5)
+                get_config_value(self.plugin_config, "vad_smoothing_window", 5)
             ),
         }
         self.image_cooldown_seconds = max(
-            int(_plugin_config_get(self.plugin_config, "image_cooldown_seconds", 0)),
+            int(get_config_value(self.plugin_config, "image_cooldown_seconds", 0)),
             0,
         )
         selected_model_name = str(
-            _plugin_config_get(self.plugin_config, "live2d_model_name", "")
+            get_config_value(self.plugin_config, "live2d_model_name", "")
         ).strip()
         base_url = f"http://{self.host}:{self.http_port}"
         live2d_dir_md5 = build_live2d_directory_md5(Path(self.live2ds_dir))
@@ -721,12 +722,3 @@ def _project_frontend_resource_constraints(value: Any) -> dict[str, Any]:
             for item in motions
         ],
     }
-
-
-def _plugin_config_get(config: Any, key: str, default: Any) -> Any:
-    if config is None:
-        return default
-    if hasattr(config, "get"):
-        value = config.get(key, default)
-        return default if value is None else value
-    return default

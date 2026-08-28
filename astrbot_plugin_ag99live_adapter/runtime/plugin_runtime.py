@@ -20,6 +20,17 @@ _default_plugin_config_paths = tuple(
 )
 
 
+def get_config_value(config: Any, key: str, default: Any) -> Any:
+    if config is None:
+        return default
+    getter = getattr(config, "get", None)
+    if callable(getter):
+        value = getter(key, default)
+        return default if value is None else value
+    value = getattr(config, key, default)
+    return default if value is None else value
+
+
 def set_plugin_context(context: Any) -> None:
     global _plugin_context
     with _state_lock:

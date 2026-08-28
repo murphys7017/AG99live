@@ -29,17 +29,22 @@ flowchart TB
     end
 
     subgraph RUNTIME[runtime：轮次和输出编排]
-        COORD[TurnCoordinator<br/>turn identity / physical parts / close]:::runtime
+        COORD[TurnCoordinator<br/>turn identity / lifecycle / input]:::runtime
+        SEGCOORD[OutputSegmentCoordinator<br/>physical parts -> atomic output]:::runtime
         SEG[PendingOutputSegment<br/>原子 text/audio/motion/speech/images 聚合]:::runtime
+        OBS[MotionObservationRecorder<br/>MotionLab observation + prompt history]:::runtime
+        CURVECOORD[PerformanceCurveCoordinator<br/>optional curve lifecycle]:::runtime
         SESSION[SessionState + TurnIdentityMap]:::runtime
         MSG[message_utils.py<br/>AstrBot 组件分类]:::runtime
         STATE[state.py / plugin_runtime.py<br/>运行配置与共享能力]:::runtime
-        LAB[Motion Lab Observation Port]:::runtime
         REC[MotionLabRecorder<br/>异步队列]:::runtime
-        COORD --> SEG
+        COORD --> SEGCOORD
+        SEGCOORD --> SEG
+        COORD --> OBS
+        COORD --> CURVECOORD
         COORD --> SESSION
-        COORD --> MSG
-        LAB --> REC
+        SEGCOORD --> MSG
+        OBS --> REC
     end
 
     subgraph SERVICES[services：用例服务]
@@ -86,13 +91,13 @@ flowchart TB
     MPAY --> CATALOG
     RESULT --> COORD
     INLINE --> INTENT
-    CURVE --> LAB
-    COORD --> INTENT
-    COORD --> INLINE
-    COORD --> CURVE
-    COORD --> SANITIZE
-    COORD --> DISPATCH
-    COORD --> LAB
+    CURVECOORD --> CURVE
+    SEGCOORD --> INTENT
+    SEGCOORD --> INLINE
+    SEGCOORD --> CURVECOORD
+    SEGCOORD --> SANITIZE
+    SEGCOORD --> DISPATCH
+    SEGCOORD --> OBS
 
     FRONT --> PROFILE
     FRONT --> TUNING
@@ -110,7 +115,7 @@ flowchart TB
     AUDIO --> BUILDER
     SPEECH --> AUDIO
 
-    RULES[后端所有权规则<br/>motion_intent 定义协议合法性<br/>middleware 定义当前模型能力<br/>TurnCoordinator 定义输出聚合<br/>protocol/transport 定义网络边界]:::entry
+    RULES[后端所有权规则<br/>motion_intent 定义协议合法性<br/>middleware 定义当前模型能力<br/>TurnCoordinator 定义 Turn 生命周期<br/>OutputSegmentCoordinator 定义输出聚合<br/>MotionObservationRecorder 定义观察投影<br/>protocol/transport 定义网络边界]:::entry
     RULES -.约束.-> INTENT
     RULES -.约束.-> MPAY
     RULES -.约束.-> COORD

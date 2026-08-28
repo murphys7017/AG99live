@@ -39,7 +39,7 @@ AG99live 的 AstrBot 插件侧实现。该目录负责协议桥接、Turn 生命
 astrbot_plugin_ag99live_adapter/
 ├─ protocol/             # 协议常量、模型、解析与构造
 ├─ transport/            # WebSocket、静态资源与路由
-├─ runtime/              # runtime state、turn 协调、session/chat 状态
+├─ runtime/              # Turn、输出段、观察记录、可选曲线与 session/chat 状态
 ├─ services/             # 媒体、消息、语音服务
 ├─ motion/               # 动作意图生成与输出清洗
 ├─ middleware/           # interaction 动作贡献、远程执行器 prompt/result 贡献

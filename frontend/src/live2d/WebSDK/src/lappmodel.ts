@@ -51,16 +51,15 @@ import {
   type DirectParameterPlanTerminalStatus,
 } from "./directparameterplan";
 import {
-  ActiveParameterMixer,
   type ActiveDirectParameterFrameState,
   type DirectSemanticParameterBinding,
-  type ParameterFrameOwner,
 } from "./parametermixer";
 import {
-  SpeechSignalRuntime,
+  ActiveParameterRuntime,
+  type ActiveParameterFrameFailure,
   type ExternalAudioSignalSourceOptions,
   type ExternalAudioSignalValues,
-} from "./speechsignalruntime";
+} from "./activeparameterruntime";
 import { TextureInfo } from "./lapptexturemanager";
 import { CubismMoc } from "@framework/model/cubismmoc";
 import {
@@ -122,11 +121,6 @@ interface DirectParameterPlanState extends ActiveDirectParameterFrameState {
 type DirectParameterPlanCandidate =
   | { ok: true; state: DirectParameterPlanState }
   | { ok: false; reason: string };
-
-interface ActiveParameterFrameFailure {
-  owner: ParameterFrameOwner;
-  reason: string;
-}
 
 /**
  * ユーザーが実際に使用するモデルの実装クラス<br>
@@ -205,7 +199,7 @@ export class LAppModel extends CubismUserModel {
     releaseStep("direct parameter plan stop", () =>
       this.stopDirectParameterPlan("direct_parameter_plan_model_released", "failed"));
     releaseStep("motion resource stop", () => this.stopMotion("motion_model_released"));
-    releaseStep("speech signal reset", () => this._speechSignalRuntime.reset());
+    releaseStep("active parameter runtime reset", () => this._activeParameterRuntime.reset());
     releaseStep("Cubism model release", () => super.release());
     if (releaseErrors.length > 0) {
       throw releaseErrors[0];
@@ -646,7 +640,7 @@ export class LAppModel extends CubismUserModel {
     this._dragManager.update(deltaTimeSeconds);
     this._dragX = this._dragManager.getX();
     this._dragY = this._dragManager.getY();
-    const audioSignals = this._speechSignalRuntime.advanceFrame(
+    const audioSignals = this._activeParameterRuntime.advanceSpeechFrame(
       deltaTimeSeconds,
       this._lipsync === true,
     );
@@ -715,11 +709,18 @@ export class LAppModel extends CubismUserModel {
 
     // All AG99 active parameters are resolved once before Physics consumes them.
     let parameterMixerFailure: ActiveParameterFrameFailure | null = null;
+    let directPlanReleased = false;
     try {
-      parameterMixerFailure = this.applyActiveParameterFrame(
-        audioSignals.lipSyncIntensity,
-        audioSignals.lipSyncActive,
-      );
+      const frameResult = this._activeParameterRuntime.applyFrame({
+        model: this._model,
+        directPlan: this._directParameterPlanState,
+        lipSyncEnabled: this._lipsync === true,
+        lipSyncActive: audioSignals.lipSyncActive,
+        lipSyncIntensity: audioSignals.lipSyncIntensity,
+        lipSyncParameterIds: this._lipSyncIds,
+      });
+      parameterMixerFailure = frameResult.failure;
+      directPlanReleased = frameResult.directPlanReleased;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       parameterMixerFailure = {
@@ -740,10 +741,14 @@ export class LAppModel extends CubismUserModel {
         this.stopDirectParameterPlan(parameterMixerFailure.reason, "failed");
       }
       if (parameterMixerFailure.owner === "lip_sync") {
-        this._speechSignalRuntime.disableLipSync(parameterMixerFailure.reason);
+        this._activeParameterRuntime.disableLipSync(parameterMixerFailure.reason);
       } else if (parameterMixerFailure.owner === "mixed") {
-        this._speechSignalRuntime.failActiveSource(parameterMixerFailure.reason);
+        this._activeParameterRuntime.failActiveSource(parameterMixerFailure.reason);
       }
+    }
+    if (directPlanReleased) {
+      console.info("[LAppModel] Direct parameter plan released after parameter mixing.");
+      this.stopDirectParameterPlan("", "completed");
     }
 
     // 物理演算の設定
@@ -1923,104 +1928,25 @@ export class LAppModel extends CubismUserModel {
     sourceId: string,
     options?: ExternalAudioSignalSourceOptions,
   ): void {
-    this._speechSignalRuntime.beginSource(sourceId, options);
+    this._activeParameterRuntime.beginExternalAudioSignalSource(sourceId, options);
   }
 
   public writeExternalAudioSignalSource(
     sourceId: string,
     values: ExternalAudioSignalValues,
   ): void {
-    this._speechSignalRuntime.writeSource(sourceId, values);
+    this._activeParameterRuntime.writeExternalAudioSignalSource(sourceId, values);
   }
 
   public endExternalAudioSignalSource(sourceId: string): void {
-    this._speechSignalRuntime.endSource(sourceId);
+    this._activeParameterRuntime.endExternalAudioSignalSource(sourceId);
   }
 
   public hasConfiguredLipSyncParameters(): boolean {
-    if (!this._model || this._lipSyncIds.getSize() === 0) {
-      return false;
-    }
-    for (let index = 0; index < this._lipSyncIds.getSize(); index += 1) {
-      const parameterIndex = this._model.getParameterIndex(this._lipSyncIds.at(index));
-      if (!this.isParameterIndexWritable(parameterIndex)) {
-        return false;
-      }
-      const minValue = this._model.getParameterMinimumValue(parameterIndex);
-      const defaultValue = this._model.getParameterDefaultValue(parameterIndex);
-      const maxValue = this._model.getParameterMaximumValue(parameterIndex);
-      if (
-        !Number.isFinite(minValue)
-        || !Number.isFinite(defaultValue)
-        || !Number.isFinite(maxValue)
-        || minValue > defaultValue
-        || defaultValue >= maxValue
-      ) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  private applyActiveParameterFrame(
-    lipSyncIntensity: number,
-    lipSyncActive: boolean,
-  ): ActiveParameterFrameFailure | null {
-    const execution = this._parameterMixer.resolveActiveFrame({
-      model: this._model,
-      directPlan: this._directParameterPlanState,
-      lipSyncEnabled: this._lipsync === true,
-      lipSyncActive,
-      lipSyncIntensity,
-      lipSyncParameterIds: this._lipSyncIds,
-      getSpeechAudioGain: (axisId) => this._speechSignalRuntime.getSpeechAudioGain(axisId),
-    });
-    if (!execution.ok) {
-      return {
-        owner: execution.owner,
-        reason: execution.reason,
-      };
-    }
-
-    const planState = this._directParameterPlanState;
-    const lipSyncDiagnosticSourceId = execution.directPlan.contributions.length === 0
-      && execution.lipSyncContributionCount > 0
-      ? this._speechSignalRuntime.getLipSyncDiagnosticSourceId()
-      : null;
-    if (execution.directPlan.shouldLogFrame && planState) {
-      console.info("[LAppModel] Active parameter frame resolved.", {
-        mode: planState.mode,
-        emotion: planState.emotionLabel,
-        parameters: execution.parameters.map((parameter) => ({
-          parameterId: parameter.parameterIdRaw,
-          baseValue: parameter.baseValue,
-          unclampedValue: parameter.unclampedValue,
-          value: parameter.value,
-          clamped: parameter.clamped,
-          contributions: parameter.contributions,
-        })),
-      });
-      planState.diagnosticFrameCount += 1;
-    } else if (lipSyncDiagnosticSourceId) {
-      console.info("[LAppModel] Active parameter frame resolved.", {
-        mode: "lip_sync",
-        audioSourceId: lipSyncDiagnosticSourceId,
-        parameters: execution.parameters.map((parameter) => ({
-          parameterId: parameter.parameterIdRaw,
-          baseValue: parameter.baseValue,
-          unclampedValue: parameter.unclampedValue,
-          value: parameter.value,
-          clamped: parameter.clamped,
-          contributions: parameter.contributions,
-        })),
-      });
-      this._speechSignalRuntime.markLipSyncDiagnosticFrameLogged(lipSyncDiagnosticSourceId);
-    }
-    if (execution.directPlan.released && planState) {
-      console.info("[LAppModel] Direct parameter plan released after parameter mixing.");
-      this.stopDirectParameterPlan("", "completed");
-    }
-    return null;
+    return this._activeParameterRuntime.hasConfiguredLipSyncParameters(
+      this._model,
+      this._lipSyncIds,
+    );
   }
 
   private resolveSpeechPoseModulation(
@@ -2168,8 +2094,7 @@ export class LAppModel extends CubismUserModel {
     this._directParameterPlanState = null;
     this._directParameterPlanError = "";
     this._motionStartError = "";
-    this._parameterMixer = new ActiveParameterMixer();
-    this._speechSignalRuntime = new SpeechSignalRuntime();
+    this._activeParameterRuntime = new ActiveParameterRuntime();
     this._physicsResponseScale = 1;
     this._physicsResponseProtectedParameterIds = new Set<string>();
     this._physicsInputParameterIds = new Set<string>();
@@ -2208,8 +2133,7 @@ export class LAppModel extends CubismUserModel {
   _directParameterPlanState: DirectParameterPlanState | null;
   _directParameterPlanError: string;
   _motionStartError: string;
-  private _parameterMixer: ActiveParameterMixer;
-  private _speechSignalRuntime: SpeechSignalRuntime;
+  private _activeParameterRuntime: ActiveParameterRuntime;
   private _physicsResponseScale: number;
   private _physicsResponseProtectedParameterIds: Set<string>;
   private _physicsInputParameterIds: Set<string>;

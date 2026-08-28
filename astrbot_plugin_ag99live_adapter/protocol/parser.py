@@ -21,7 +21,6 @@ from uuid import uuid4
 from .constants import (
     INBOUND_ALLOWED_TYPES,
     KNOWN_MESSAGE_TYPES,
-    PROTOCOL_VERSION,
     SOURCE_FRONTEND,
     TYPE_CONTROL_PLAYBACK_FINISHED,
     TYPE_INPUT_AUDIO_STREAM_END,
@@ -40,7 +39,7 @@ from .models import (
     ProtocolMessage,
     TextInputPayload,
 )
-from .schema_versions import MOTION_TUNING_SAMPLE_SCHEMA_VERSION
+from .schema_versions import MOTION_TUNING_SAMPLE_SCHEMA_VERSION, PROTOCOL_VERSION
 
 
 def parse_inbound_message(

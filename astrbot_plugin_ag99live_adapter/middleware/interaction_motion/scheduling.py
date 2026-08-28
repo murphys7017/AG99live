@@ -6,10 +6,7 @@ from typing import Any
 
 from astrbot.api import logger
 
-from .compatibility import (
-    InteractionResultContribution,
-    get_interaction_reply_plan,
-)
+from ...core_compatibility import get_interaction_capabilities
 from .effects import (
     _effect_call_get,
     _extract_ag99live_motion_effect_arguments,
@@ -87,6 +84,9 @@ class AG99liveMotionResultContributor:
 
     async def collect(self, event, plugin_context, view):
         del plugin_context
+        capabilities = get_interaction_capabilities()
+        if capabilities is None:
+            return None
         event.set_extra("_ag99live_pending_performance_curve", None)
         event.set_extra("ag99live_raw_reply_text", None)
         speech_cues = _take_pending_speech_cues(event)
@@ -114,7 +114,7 @@ class AG99liveMotionResultContributor:
         platform_extras = {}
         if speech_cues:
             platform_extras["ag99live_speech_cues"] = speech_cues
-        return InteractionResultContribution(
+        return capabilities.interaction_result_contribution(
             plugin_id=self.plugin_id,
             platform_extras=platform_extras,
             final_text_override=final_text_override,
@@ -126,6 +126,13 @@ class AG99liveMotionResultContributor:
             ),
             priority=self.priority,
         )
+
+
+def _get_interaction_reply_plan(event: Any) -> Any:
+    capabilities = get_interaction_capabilities()
+    if capabilities is None:
+        return None
+    return capabilities.get_interaction_route_decision(event)
 
 
 def _take_pending_speech_cues(event: Any) -> list[dict[str, Any]]:
@@ -175,7 +182,7 @@ def start_deferred_performance_curve_request(
             tts_request_id or "<missing>",
         )
         return None
-    request_id = bundle.turn_coordinator.start_performance_curve_request(
+    request_id = bundle.turn_coordinator.performance_curves.start_request(
         turn_id=external_correlation_id,
         tts_turn_id=turn_id,
         message_id=message_id,
@@ -423,7 +430,7 @@ def _record_motion_lab_interaction_event(
             "effect_calls": effect_calls,
             "effect_summary": _summarize_ag99live_motion_effect_arguments(event, view),
             "view_metadata": _thaw_snapshot_value(getattr(view, "metadata", None)),
-            "reply_plan": _thaw_snapshot_value(get_interaction_reply_plan(event)),
+            "reply_plan": _thaw_snapshot_value(_get_interaction_reply_plan(event)),
             "original_user_text": _call_event_method(event, "get_extra", "ag99live_original_message_str", ""),
         },
     )
@@ -575,7 +582,7 @@ def _resolve_interaction_reply_plan_snapshot(
     view: Any,
 ) -> _InteractionReplyPlanSnapshot | None:
     snapshot = _coerce_interaction_reply_plan_snapshot(
-        get_interaction_reply_plan(event),
+        _get_interaction_reply_plan(event),
         source="event_turn_state",
     )
     if snapshot is not None:

@@ -7,9 +7,7 @@ import re
 from typing import Any
 
 from astrbot.api import logger
-from astrbot.core.interaction import InteractionResultContribution
-from astrbot.core.prompt import PromptExtension
-
+from ..core_compatibility import get_interaction_capabilities
 from ..protocol.remote_operator import RemoteOperatorRequest
 from ..runtime.remote_operator_registry import (
     get_remote_operator_online_computers,
@@ -140,6 +138,10 @@ class AG99liveRemoteOperatorResultContributor:
     async def collect(self, event, plugin_context, view):
         del plugin_context
 
+        capabilities = get_interaction_capabilities()
+        if capabilities is None:
+            return None
+
         if event.get_extra("ag99live_remote_operator_scheduled"):
             return None
 
@@ -155,7 +157,7 @@ class AG99liveRemoteOperatorResultContributor:
         adapter = event.adapter
         runtime = getattr(adapter, "remote_operator_runtime", None)
         if runtime is None:
-            return InteractionResultContribution(
+            return capabilities.interaction_result_contribution(
                 plugin_id=self.plugin_id,
                 metadata={
                     "ag99live_remote_operator": {
@@ -169,7 +171,7 @@ class AG99liveRemoteOperatorResultContributor:
         event.set_extra("ag99live_remote_operator_scheduled", True)
         runtime.schedule(request)
 
-        return InteractionResultContribution(
+        return capabilities.interaction_result_contribution(
             plugin_id=self.plugin_id,
             metadata={
                 "ag99live_remote_operator": {
@@ -298,7 +300,10 @@ def collect_remote_operator_prompt_extension(
     event: Any,
     *,
     plugin_id: str,
-) -> PromptExtension | None:
+) -> Any | None:
+    capabilities = get_interaction_capabilities()
+    if capabilities is None:
+        return None
     if not _is_ag99live_event(event):
         return None
     if _is_remote_operator_result_event(event):
@@ -320,7 +325,7 @@ def collect_remote_operator_prompt_extension(
         online_config.default_computer,
         online_config.default_profile,
     )
-    return PromptExtension(
+    return capabilities.prompt_extension(
         plugin_id=plugin_id,
         mount="system",
         title="AG99live Remote Operator Routing",

@@ -13,7 +13,7 @@ flowchart TB
     TL[PlaybackTimelineRuntime<br/>单例：segment timeline registry]:::singleton
     ENGINE[ModelEngine<br/>单例：动作编译与 pending scheduler]:::engine
     PLAYER[PreviewMotionPlayer<br/>单例：当前 motion run owner]:::engine
-    RECORDER[MotionPlaybackRecorder<br/>单例：动作观察记录]:::engine
+    RECORDER[MotionPlaybackRecorder<br/>单例：前端动作观察记录]:::engine
     COMPLETE[PlaybackCompletionCoordinator<br/>单例：playback ACK]:::singleton
     MODELSYNC[ModelSync State<br/>单例：模型能力与独立缓存诊断]:::singleton
 

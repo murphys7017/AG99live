@@ -9,7 +9,7 @@ flowchart LR
 
     subgraph SOURCES[当前观察事件来源]
         INPUT[TurnCoordinator<br/>turn.input_received]:::source
-        OUTPUT[TurnCoordinator<br/>turn.assistant_output canonical text]:::source
+        OUTPUT[OutputSegmentCoordinator<br/>turn.assistant_output canonical text]:::source
         PERSONA[Persona Effect<br/>received / intent_resolved]:::source
         REFERENCES[Prompt references<br/>selected + projected]:::source
         CURVE[Performance Curve<br/>requested / resolved / failed / attached]:::source

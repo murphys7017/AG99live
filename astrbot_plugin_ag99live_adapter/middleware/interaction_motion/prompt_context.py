@@ -272,7 +272,8 @@ def _build_motion_variation_payload(
     return payload
 
 def _resolve_prompt_motion_history(turn_coordinator: Any) -> list[dict[str, Any]]:
-    get_history = getattr(turn_coordinator, "get_prompt_motion_history", None)
+    observations = getattr(turn_coordinator, "motion_observations", None)
+    get_history = getattr(observations, "get_prompt_motion_history", None)
     if not callable(get_history):
         return []
     history = get_history()

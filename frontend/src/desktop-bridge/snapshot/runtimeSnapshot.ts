@@ -266,12 +266,6 @@ function cloneMotionPlaybackRecord(
     if (!isObject(record)) {
       return null;
     }
-    if (!hasCompatiblePerformanceScheduleTrace(record.diagnostics)) {
-      console.warn("[DesktopBridge] incompatible performance schedule trace discarded.", {
-        version: resolvePerformanceScheduleTraceVersion(record.diagnostics),
-      });
-      return null;
-    }
     const diagnostics = cloneMotionCompileDiagnostics(record.diagnostics);
     const playbackTurnId =
       normalizeOptionalText((record as Record<string, unknown>).playbackTurnId)
@@ -304,6 +298,13 @@ function cloneMotionPlaybackRecord(
     ) {
       console.warn("[DesktopBridge] unknown motion playback payload kind ignored.", {
         payloadKind,
+      });
+      return null;
+    }
+    if (!hasCurrentPerformanceScheduleTrace(record.diagnostics)) {
+      console.warn("[DesktopBridge] stale parameter motion playback record discarded.", {
+        payloadKind,
+        version: resolvePerformanceScheduleTraceVersion(record.diagnostics),
       });
       return null;
     }
@@ -427,13 +428,13 @@ function cloneMotionCompileDiagnostics(
   };
 }
 
-function hasCompatiblePerformanceScheduleTrace(diagnostics: unknown): boolean {
+function hasCurrentPerformanceScheduleTrace(diagnostics: unknown): boolean {
   if (!isObject(diagnostics) || !isObject(diagnostics.transformTrace)) {
-    return true;
+    return false;
   }
   const schedule = diagnostics.transformTrace.performanceSchedule;
   if (schedule === undefined) {
-    return true;
+    return false;
   }
   if (!isObject(schedule) || schedule.version !== PERFORMANCE_SCHEDULE_TRACE_VERSION) {
     return false;

@@ -8,24 +8,7 @@ from typing import Any
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 
-try:
-    from astrbot.core.prompt import (
-        INPUT_ITEM_ANNOTATIONS_EXTRA_KEY,
-        INPUT_TEXT_ANNOTATION_KEY,
-        build_message_annotation_key,
-    )
-except ModuleNotFoundError as exc:
-    if exc.name not in {"astrbot.core", "astrbot.core.prompt"}:
-        raise
-    INPUT_ITEM_ANNOTATIONS_EXTRA_KEY = "prompt_input_item_annotations"
-    INPUT_TEXT_ANNOTATION_KEY = "input.text"
-    build_message_annotation_key = None
-except ImportError as exc:
-    if exc.name != "astrbot.core.prompt":
-        raise
-    INPUT_ITEM_ANNOTATIONS_EXTRA_KEY = "prompt_input_item_annotations"
-    INPUT_TEXT_ANNOTATION_KEY = "input.text"
-    build_message_annotation_key = None
+from .core_compatibility import get_prompt_annotation_capabilities
 
 
 class OLVPetPlatformEvent(AstrMessageEvent):
@@ -122,8 +105,9 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         return bool(self.get_extra("agent_stop_requested", False))
 
     def _attach_prompt_annotations(self, *, message_obj: Any) -> None:
+        capabilities = get_prompt_annotation_capabilities()
         annotations: dict[str, dict[str, str]] = {
-            INPUT_TEXT_ANNOTATION_KEY: {
+            capabilities.input_text_annotation_key: {
                 "semantic_type": "desktop_chat_turn",
                 "explanation": (
                     "This text comes from AG99live desktop real-time chat and should be "
@@ -136,14 +120,16 @@ class OLVPetPlatformEvent(AstrMessageEvent):
 
         desktop_snapshot_indexes = _resolve_desktop_snapshot_component_indexes(message_obj)
         components = getattr(message_obj, "message", [])
-        if isinstance(components, list) and callable(build_message_annotation_key):
+        if isinstance(components, list) and callable(
+            capabilities.build_message_annotation_key
+        ):
             for index, component in enumerate(components):
                 if index not in desktop_snapshot_indexes:
                     continue
                 component_type = str(type(component).__name__).lower()
                 if component_type != "image":
                     continue
-                annotations[build_message_annotation_key(index)] = {
+                annotations[capabilities.build_message_annotation_key(index)] = {
                     "semantic_type": "desktop_snapshot",
                     "explanation": (
                         "This image is an optional desktop snapshot captured around the same turn."
@@ -152,7 +138,7 @@ class OLVPetPlatformEvent(AstrMessageEvent):
                     "context_role": "supporting",
                 }
 
-        self.set_extra(INPUT_ITEM_ANNOTATIONS_EXTRA_KEY, annotations)
+        self.set_extra(capabilities.input_item_annotations_extra_key, annotations)
 
 
 def _resolve_desktop_snapshot_component_indexes(message_obj: Any) -> set[int]:

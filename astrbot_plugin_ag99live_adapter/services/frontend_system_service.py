@@ -22,7 +22,7 @@ from ..protocol.builder import (
     build_system_semantic_axis_profile_save_failed,
     build_system_semantic_axis_profile_saved,
 )
-from ..protocol import (
+from ..protocol.constants import (
     TYPE_SYSTEM_BACKGROUND_LIST_REQUEST,
     TYPE_SYSTEM_HEARTBEAT,
     TYPE_SYSTEM_HISTORY_CREATE,

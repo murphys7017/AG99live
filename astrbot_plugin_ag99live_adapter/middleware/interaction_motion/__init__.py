@@ -2,12 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from .compatibility import (
-    InteractionResultContribution,
-    PersonaEffectSpec,
-    PromptExtension,
-    get_interaction_reply_plan,
-)
 from .effects import _register_ag99live_motion_persona_effect
 from .prompt import (
     AG99liveMotionPromptContributor,
@@ -28,11 +22,7 @@ def register_ag99live_interaction_contributors(context: Any) -> None:
 
 
 __all__ = [
-    "InteractionResultContribution",
-    "PersonaEffectSpec",
-    "PromptExtension",
     "append_official_inline_motion_prompt",
-    "get_interaction_reply_plan",
     "register_ag99live_interaction_contributors",
     "start_deferred_performance_curve_request",
 ]

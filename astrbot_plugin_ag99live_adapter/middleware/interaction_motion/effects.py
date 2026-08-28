@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from .compatibility import PersonaEffectSpec
+from ...core_compatibility import get_interaction_capabilities
 from .shared import (
     AG99LIVE_MOTION_EFFECT_NAME,
     AG99LIVE_PLUGIN_ID,
@@ -19,7 +19,8 @@ from ...motion.payload_validation import (
 )
 
 def _register_ag99live_motion_persona_effect(context: Any) -> None:
-    if PersonaEffectSpec is None:
+    capabilities = get_interaction_capabilities()
+    if capabilities is None:
         return
 
     unregister_effects = getattr(context, "unregister_persona_effects", None)
@@ -31,7 +32,7 @@ def _register_ag99live_motion_persona_effect(context: Any) -> None:
         return
 
     register_effect(
-        PersonaEffectSpec(
+        capabilities.persona_effect_spec(
             plugin_id=AG99LIVE_PLUGIN_ID,
             name=AG99LIVE_MOTION_EFFECT_NAME,
             description=(

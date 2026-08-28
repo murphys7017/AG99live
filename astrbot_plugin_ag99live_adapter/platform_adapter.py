@@ -27,7 +27,11 @@ from .services.media_service import MediaService
 from .services.message_factory import MessageFactory
 from .services.remote_operator_runtime import RemoteOperatorRuntime
 from .transport.static_routes import build_static_routes, list_background_files
-from .runtime.plugin_runtime import get_plugin_config, get_plugin_context
+from .runtime.plugin_runtime import (
+    get_config_value,
+    get_plugin_config,
+    get_plugin_context,
+)
 from .runtime.state import RuntimeState
 from .protocol.builder import build_system_motion_tuning_samples_state
 from .runtime.session_state import SessionState
@@ -91,26 +95,26 @@ class OLVPetPlatformAdapter(Platform):
         self.settings = platform_settings or {}
 
         self.host = _require_loopback_host(
-            _config_get(self.config, "host", "127.0.0.1")
+            get_config_value(self.config, "host", "127.0.0.1")
         )
-        self.port = int(_config_get(self.config, "port", 12396))
-        self.http_port = int(_config_get(self.config, "http_port", 12397))
-        self.debug_port = int(_config_get(self.config, "debug_port", 12398))
-        self.conf_name = _config_get(self.config, "conf_name", "AG99live Desktop")
-        self.conf_uid = _config_get(self.config, "conf_uid", "ag99live-desktop")
-        self.speaker_name = _config_get(self.config, "speaker_name", "AstrBot")
-        self.auto_start_mic = bool(_config_get(self.config, "auto_start_mic", False))
+        self.port = int(get_config_value(self.config, "port", 12396))
+        self.http_port = int(get_config_value(self.config, "http_port", 12397))
+        self.debug_port = int(get_config_value(self.config, "debug_port", 12398))
+        self.conf_name = get_config_value(self.config, "conf_name", "AG99live Desktop")
+        self.conf_uid = get_config_value(self.config, "conf_uid", "ag99live-desktop")
+        self.speaker_name = get_config_value(self.config, "speaker_name", "AstrBot")
+        self.auto_start_mic = bool(get_config_value(self.config, "auto_start_mic", False))
         self._event_loop: asyncio.AbstractEventLoop | None = None
 
         self._plugin_context = get_plugin_context()
         self._plugin_config = get_plugin_config() or {}
 
         self.client_uid = normalize_client_uid(
-            _plugin_config_get(self._plugin_config, "client_uid", DEFAULT_CLIENT_UID),
+            get_config_value(self._plugin_config, "client_uid", DEFAULT_CLIENT_UID),
             DEFAULT_CLIENT_UID,
         )
         self.client_nickname = normalize_client_nickname(
-            _plugin_config_get(
+            get_config_value(
                 self._plugin_config,
                 "client_nickname",
                 DEFAULT_CLIENT_NICKNAME,
@@ -163,7 +167,7 @@ class OLVPetPlatformAdapter(Platform):
             image_cooldown_seconds_getter=lambda: self.runtime_state.image_cooldown_seconds,
         )
         self.chat_buffer = ChatBuffer(
-            maxlen=int(_plugin_config_get(self.runtime_state.plugin_config, "chat_buffer_size", 10))
+            maxlen=int(get_config_value(self.runtime_state.plugin_config, "chat_buffer_size", 10))
         )
         self.history_bridge = ConversationHistoryBridge(
             plugin_context=self._plugin_context,
@@ -515,18 +519,6 @@ class OLVPetPlatformAdapter(Platform):
         self.history_bridge.set_client_uid(self.client_uid)
 
 
-def _config_get(config: Any, key: str, default: Any) -> Any:
-    if config is None:
-        return default
-    if hasattr(config, "get"):
-        value = config.get(key, default)
-        return default if value is None else value
-    if hasattr(config, key):
-        value = getattr(config, key)
-        return default if value is None else value
-    return default
-
-
 def _require_loopback_host(value: Any) -> str:
     host = str(value or "").strip().lower()
     if host not in SUPPORTED_LOOPBACK_BIND_HOSTS:
@@ -535,12 +527,3 @@ def _require_loopback_host(value: Any) -> str:
             f"{host or '<empty>'}"
         )
     return host
-
-
-def _plugin_config_get(config: Any, key: str, default: Any) -> Any:
-    if config is None:
-        return default
-    if hasattr(config, "get"):
-        value = config.get(key, default)
-        return default if value is None else value
-    return default

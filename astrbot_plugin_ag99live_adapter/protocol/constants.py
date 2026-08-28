@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from .schema_versions import PROTOCOL_VERSION
-
 SOURCE_FRONTEND = "frontend"
 SOURCE_ADAPTER = "adapter"
 SOURCE_ASTRBOT = "astrbot"
