@@ -30,10 +30,10 @@ const PRESET_MAGNITUDE_RANGE: Record<
   SpeechGesturePreset,
   readonly [number, number]
 > = {
-  calm_explain: [0.38, 0.64],
-  lively_chat: [0.64, 0.94],
-  gentle_support: [0.30, 0.54],
-  emphatic: [0.72, 1.00],
+  calm_explain: [0.48, 0.72],
+  lively_chat: [0.70, 0.98],
+  gentle_support: [0.38, 0.62],
+  emphatic: [0.78, 1.00],
 };
 
 // Ordered capability mappings. Everyday speech favors visible lateral weight
@@ -43,7 +43,7 @@ const PRESET_CHANNELS: Record<SpeechGesturePreset, string[]> = {
   calm_explain: ["head_roll", "head_yaw", "head_pitch", "body_roll", "body_yaw"],
   lively_chat: ["head_roll", "head_yaw", "head_pitch", "body_roll", "body_yaw"],
   gentle_support: ["head_roll", "head_yaw", "head_pitch", "body_roll", "body_yaw"],
-  emphatic: ["head_pitch", "head_yaw", "head_roll", "body_pitch", "body_yaw"],
+  emphatic: ["head_pitch", "head_yaw", "head_roll", "body_yaw", "body_roll", "body_pitch"],
 };
 
 export const speechPoseStage: ModelParameterCompileStage = {
@@ -92,7 +92,6 @@ export function runSpeechPoseStage(
   const selectedChannels = selectGestureChannels(
     voiceProfile,
     preset,
-    context.options.samplingIdentity,
     durationMs,
   );
   if (selectedChannels.length === 0) {
@@ -173,10 +172,9 @@ function buildGestureTrack(
       return { ok: false, reason: `speech_gesture_phrase_event_invalid:${event.id}` };
     }
     const phraseIndex = timing.value.phraseEvents.indexOf(event);
-    const seed = hashPerformanceIdentity([
+    const phraseSeed = hashPerformanceIdentity([
       identity?.turnId ?? "",
       identity?.messageId ?? "",
-      channel.channel,
       preset,
       phraseIndex,
       phrase.text,
@@ -185,7 +183,7 @@ function buildGestureTrack(
       channel,
       preset,
       phrase,
-      seed,
+      phraseSeed,
       previousDirection,
     );
     points.push({
@@ -211,16 +209,21 @@ function resolveGestureValue(
   channel: SpeechGestureChannel,
   preset: SpeechGesturePreset,
   phrase: { emphasis: number },
-  seed: number,
+  phraseSeed: number,
   previousDirection: number,
 ): { value: number; direction: number } {
   const [minimumMagnitude, maximumMagnitude] = PRESET_MAGNITUDE_RANGE[preset];
-  const magnitudeSeed = hashPerformanceIdentity(`${seed}:magnitude`);
-  const directionSeed = hashPerformanceIdentity(`${seed}:direction`);
+  const magnitudeSeed = hashPerformanceIdentity(
+    `${phraseSeed}:${channel.channel}:magnitude`,
+  );
+  const directionSeed = hashPerformanceIdentity(`${phraseSeed}:direction`);
+  const pitchScale = channel.channel.includes("pitch") && preset !== "emphatic"
+    ? 0.78
+    : 1;
   const magnitude = (
     minimumMagnitude
     + (maximumMagnitude - minimumMagnitude) * performanceUnitInterval(magnitudeSeed)
-  ) * phrase.emphasis;
+  ) * phrase.emphasis * pitchScale;
   let direction = directionSeed % 2 === 0 ? 1 : -1;
   if (previousDirection !== 0 && directionSeed % 5 !== 0) {
     direction = -previousDirection;
@@ -265,32 +268,43 @@ function resolveSpeechGesturePreset(context: ModelParameterCompileContext): Spee
 function selectGestureChannels(
   profile: VoiceFollowingProfile,
   preset: SpeechGesturePreset,
-  identity: { turnId: string; messageId: string } | undefined,
   durationMs: number,
 ): SpeechGestureChannel[] {
   const channels = profile.channels ?? {};
-  const includeBody = preset === "emphatic" || preset === "lively_chat"
-    || hashPerformanceIdentity(`${identity?.turnId ?? ""}:${identity?.messageId ?? ""}:body`) % 3 !== 0;
   const selected: SpeechGestureChannel[] = [];
-  let headCount = 0;
-  for (const channelName of PRESET_CHANNELS[preset]) {
-    const channel = channels[channelName];
-    if (!isUsableVoiceFollowingChannel(channel) || channel.follow_delay_ms > durationMs - 220) {
-      continue;
-    }
-    if (channelName.startsWith("body_")) {
-      if (!includeBody || selected.some((item) => item.layer === "body")) {
-        continue;
-      }
-      selected.push(channel);
-      continue;
-    }
-    if (headCount >= 2) {
-      continue;
-    }
-    selected.push(channel);
-    headCount += 1;
+  const available = PRESET_CHANNELS[preset]
+    .map((channelName) => channels[channelName])
+    .filter((channel): channel is SpeechGestureChannel => (
+      isUsableVoiceFollowingChannel(channel)
+      && channel.follow_delay_ms <= durationMs - 220
+    ));
+  const headChannels = available.filter((channel) => channel.layer === "head");
+  const lateralHeadChannels = headChannels.filter((channel) => (
+    channel.channel.includes("yaw") || channel.channel.includes("roll")
+  ));
+  const emphaticPitchAvailable = preset === "emphatic"
+    && headChannels.some((channel) => channel.channel.includes("pitch"));
+  const preferredHeadChannels = emphaticPitchAvailable
+    ? headChannels
+    : lateralHeadChannels.length > 0
+      ? lateralHeadChannels
+      : headChannels;
+  const selectedHeadChannels = preferredHeadChannels.slice(
+    0,
+    emphaticPitchAvailable || lateralHeadChannels.length > 0 ? 2 : 1,
+  );
+  selected.push(...selectedHeadChannels);
+
+  const bodyChannels = available.filter((channel) => channel.layer === "body");
+  const lateralBodyChannel = bodyChannels.find((channel) => (
+    channel.channel.includes("yaw") || channel.channel.includes("roll")
+  ));
+  if (lateralBodyChannel) {
+    selected.push(lateralBodyChannel);
+  } else if (bodyChannels.length > 0) {
+    selected.push(bodyChannels[0]);
   }
+
   return selected;
 }
 
