@@ -141,7 +141,7 @@ interface ResolvePerformanceCurveTimingOptions {
   hint?: PerformanceCurveHint | null;
 }
 
-export function resolvePerformanceCurveTiming(
+function resolvePerformanceCurveTiming(
   options: ResolvePerformanceCurveTimingOptions,
 ): DirectParameterPlanTiming | null {
   const hint = options.hint;
@@ -220,7 +220,7 @@ export function resolvePerformanceCurveTiming(
   };
 }
 
-export function resolvePerformanceCurvePreset(
+function resolvePerformanceCurvePreset(
   hint: PerformanceCurveHint,
 ): PerformanceCurvePresetName {
   switch (hint.curve_family) {
