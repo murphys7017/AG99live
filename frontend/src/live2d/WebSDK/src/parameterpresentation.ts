@@ -46,7 +46,6 @@ export function resolveParameterPresentationFrame(
   if (previousElapsedMs === null) {
     node.lastElapsedMs = elapsedMs;
     node.drivenOffset = previousOffset;
-    node.velocity = 0;
     return {
       drivenValue: baseValue + previousOffset,
       settled: isParameterPresentationSettled(previousOffset, targetOffset, node.velocity),

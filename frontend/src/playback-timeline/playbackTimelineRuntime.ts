@@ -176,6 +176,7 @@ export interface PlaybackTimelineRuntime<TMotionPayload = unknown> {
   findActiveAudioTimelineSegments: () => PlaybackTimelineAudioSegment[];
   findOpenAudioTimelineSegments: () => PlaybackTimelineAudioSegment[];
   findOpenExecutionTimelineSegments: () => PlaybackTimelineExecutionSegment[];
+  findPlaybackReleaseBlockers: () => PlaybackTimelineExecutionSegment[];
 }
 
 export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
@@ -982,6 +983,30 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     return segments;
   }
 
+  function findPlaybackReleaseBlockers(): PlaybackTimelineExecutionSegment[] {
+    const segments: PlaybackTimelineExecutionSegment[] = [];
+    for (const timeline of timelines.values()) {
+      const snapshot = timeline.engine.getSnapshot();
+      if (!snapshot || isTimelineTerminalPhase(timeline)) {
+        continue;
+      }
+      const audioSink = snapshot.sinks.find((sink) => sink.id === AUDIO_TIMELINE_SINK_ID);
+      const blocksRelease = audioSink
+        ? !isTerminalSinkValue(audioSink.terminal)
+        : snapshot.sinks.some(
+            (sink) => sink.required && !isTerminalSinkValue(sink.terminal),
+          );
+      if (!blocksRelease) {
+        continue;
+      }
+      segments.push({
+        turnId: timeline.turnId,
+        messageId: timeline.messageId,
+      });
+    }
+    return segments;
+  }
+
   function findAudioTimelineSegments(
     predicate: (
       audioSink: PlaybackTimelineSnapshot["sinks"][number] | undefined,
@@ -1301,6 +1326,7 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     findActiveAudioTimelineSegments,
     findOpenAudioTimelineSegments,
     findOpenExecutionTimelineSegments,
+    findPlaybackReleaseBlockers,
   };
 }
 

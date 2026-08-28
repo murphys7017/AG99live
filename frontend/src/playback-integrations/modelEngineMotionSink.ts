@@ -211,6 +211,7 @@ export function createMotionTimelineRunTracker(options: {
   const runs = new Map<string, {
     turnId: string | null;
     messageId: string;
+    executionKind: ModelEnginePlanStartedEvent["executionKind"];
   }>();
 
   return {
@@ -221,6 +222,7 @@ export function createMotionTimelineRunTracker(options: {
       runs.set(event.runId, {
         turnId: event.turnId,
         messageId: event.messageId,
+        executionKind: event.executionKind,
       });
       options.markMotionTimelineStarted(event.turnId, event.messageId);
     },
@@ -229,10 +231,13 @@ export function createMotionTimelineRunTracker(options: {
       if (!owner) {
         return;
       }
+      const completedByHandoff = owner.executionKind === "parameter_plan"
+        && event.status === "stopped"
+        && event.reason === "direct_parameter_plan_replaced";
       options.markMotionTimelineTerminal(
         owner.turnId,
         owner.messageId,
-        event.status === "completed"
+        event.status === "completed" || completedByHandoff
           ? "completed"
           : event.status === "stopped"
             ? "interrupted"

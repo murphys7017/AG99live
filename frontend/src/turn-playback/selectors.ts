@@ -13,6 +13,34 @@ export function getActivePlaybackSegment(
   return null;
 }
 
+export function getNextPlaybackReleaseSegment(
+  session: TurnPlaybackSession,
+): TurnPlaybackSegment | null {
+  for (const segmentId of session.segmentOrder) {
+    const segment = session.segments.get(segmentId);
+    if (
+      segment
+      && !isSegmentLocallySettled(segment)
+      && !isAudioBackedMotionTail(segment)
+    ) {
+      return segment;
+    }
+  }
+  return null;
+}
+
+function isAudioBackedMotionTail(segment: TurnPlaybackSegment): boolean {
+  return (
+    segment.text.delivered
+    && segment.audio.started
+    && segment.audio.terminal === "completed"
+    && segment.motion.released
+    && segment.motion.started
+    && !segment.motion.completed
+    && !segment.motion.failed
+  );
+}
+
 /**
  * Whether the session's audio can be released (playback started).
  *

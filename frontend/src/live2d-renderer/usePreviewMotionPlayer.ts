@@ -190,9 +190,9 @@ export function usePreviewMotionPlayer() {
       return { status: "rejected", reason: "direct_parameter_plan_api_unavailable" };
     }
 
-    if (hadActivePlayback) {
+    if (activeMotionResourceRunId) {
       try {
-        stopPlan("direct_parameter_plan_replaced");
+        stopActiveMotionResource("direct_parameter_plan_replaced");
       } catch (error) {
         console.error("[MotionPlayer] direct parameter plan replacement failed.", error);
         return { status: "rejected", reason: "motion_replacement_stop_failed" };
@@ -201,6 +201,7 @@ export function usePreviewMotionPlayer() {
 
     console.info("[MotionPlayer] calling startDirectParameterPlan...");
     const playbackRunId = `motion-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const previousDirectPlanRunId = activeDirectPlanRunId;
     activeDirectPlanRunId = playbackRunId;
     const started = adapter.startDirectParameterPlan(playbackPlan.plan, {
       runId: playbackRunId,
@@ -230,7 +231,7 @@ export function usePreviewMotionPlayer() {
     console.info("[MotionPlayer] startDirectParameterPlan returned:", started);
     if (!started) {
       if (activeDirectPlanRunId === playbackRunId) {
-        activeDirectPlanRunId = "";
+        activeDirectPlanRunId = previousDirectPlanRunId;
       }
       const runtimeReason = typeof adapter.getDirectParameterPlanError === "function"
         ? normalizeText(adapter.getDirectParameterPlanError())
@@ -239,9 +240,11 @@ export function usePreviewMotionPlayer() {
         ? `动作计划执行失败：${runtimeReason}`
         : "动作计划执行失败：Direct Parameter 计划被运行时拒绝。";
       console.warn("[MotionPlayer]", reason);
-      state.status = "failed";
-      state.message = reason;
-      state.finishedAt = new Date().toISOString();
+      if (!previousDirectPlanRunId) {
+        state.status = "failed";
+        state.message = reason;
+        state.finishedAt = new Date().toISOString();
+      }
       return {
         status: "rejected",
         reason: runtimeReason || "direct_parameter_plan_rejected",

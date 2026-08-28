@@ -1,7 +1,11 @@
 import { watch } from "vue";
 import type { useTurnPlaybackSessionStore } from "./useTurnPlaybackSessionStore";
 import type { NormalizedMotionPayload } from "../types/motion.js";
-import { canReleaseAudio, canReleaseMotion, getActivePlaybackSegment } from "./selectors.js";
+import {
+  canReleaseAudio,
+  canReleaseMotion,
+  getNextPlaybackReleaseSegment,
+} from "./selectors.js";
 import type { TurnPlaybackSegment } from "./session.js";
 import type { PlaybackTimelineRuntime } from "../playback-timeline/playbackTimelineRuntime.js";
 
@@ -13,7 +17,7 @@ interface TurnPlaybackOrchestratorOptions {
     PlaybackTimelineRuntime<NormalizedMotionPayload>,
     | "startSegmentJob"
     | "rejectMotionBeforeStart"
-    | "findOpenExecutionTimelineSegments"
+    | "findPlaybackReleaseBlockers"
     | "subscribeExecutionStateChanges"
   >;
 }
@@ -22,7 +26,7 @@ export function useTurnPlaybackOrchestrator(
   options: TurnPlaybackOrchestratorOptions,
 ) {
   function scheduleReadySegments(): void {
-    if (options.timelineRuntime.findOpenExecutionTimelineSegments().length > 0) {
+    if (options.timelineRuntime.findPlaybackReleaseBlockers().length > 0) {
       return;
     }
     let segment: TurnPlaybackSegment | null = null;
@@ -30,7 +34,7 @@ export function useTurnPlaybackOrchestrator(
       if (session.phase === "completed" || session.phase === "failed") {
         continue;
       }
-      segment = getActivePlaybackSegment(session);
+      segment = getNextPlaybackReleaseSegment(session);
       if (segment) {
         break;
       }
