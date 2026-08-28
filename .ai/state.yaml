@@ -1,9 +1,9 @@
 task:
   class: feature
   risk: medium
-  phase: performance_c_cross_turn_diversity
+  phase: performance_b_motion_quality
   status: validation_partial
-  scope: "Add a bounded connection-scoped recent motion summary to the existing Prompt context, so cross-Turn diversity can avoid repeated shapes and directions without changing protocol, timeline, mixer ownership, Cubism Physics ownership, or adding a second motion path."
+  scope: "Complete the current motion performance quality work before adding Motion Lab likes: tune existing schedule, response dynamics, cross-Turn continuity, and speech-driven expression without changing protocol, timeline, mixer ownership, Cubism Physics ownership, or adding a second motion path."
 
 context:
   confidence: high
