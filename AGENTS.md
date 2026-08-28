@@ -18,6 +18,7 @@ Rules:
 - Do not expand scope without approval.
 - Do not rewrite unrelated modules.
 - Preserve architecture and user changes unless asked otherwise.
+- Do not preserve old internal paths by default: without an explicit external compatibility need, unify callers and remove superseded implementations instead of adding fallbacks, wrappers, or dual paths.
 - Validate practical checks and report skipped/failed validation.
 - Update `.ai/state.yaml` only when scope, risk, architecture impact, assumptions, or validation status would otherwise be hidden.
 - Commit only when explicitly requested.

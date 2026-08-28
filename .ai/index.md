@@ -35,6 +35,11 @@ Escalate when uncertain.
 7. Review for regressions, scope drift, ownership conflicts, and missing runtime evidence.
 8. Report what was established from source, what was only smoke-checked, and what still requires a live run.
 
+### Replacement Over Compatibility
+
+- Do not treat leaving old code untouched as inherently safer. Before editing, decide whether the old implementation should be replaced or removed.
+- For internal code without an explicit external compatibility requirement, do not add backward compatibility, fallbacks, wrappers, or parallel paths. Unify callers and delete the old path.
+
 ## Testing Policy
 
 - Automated tests are low-confidence boundary smoke checks, not evidence that the feature or end-to-end chain is correct.
