@@ -301,7 +301,10 @@ function cloneMotionPlaybackRecord(
       });
       return null;
     }
-    if (!hasCurrentPerformanceScheduleTrace(record.diagnostics)) {
+    if (
+      payloadKind === "semantic_intent"
+      && !hasCurrentPerformanceScheduleTrace(record.diagnostics)
+    ) {
       console.warn("[DesktopBridge] stale parameter motion playback record discarded.", {
         payloadKind,
         version: resolvePerformanceScheduleTraceVersion(record.diagnostics),

@@ -709,7 +709,6 @@ export class LAppModel extends CubismUserModel {
 
     // All AG99 active parameters are resolved once before Physics consumes them.
     let parameterMixerFailure: ActiveParameterFrameFailure | null = null;
-    let directPlanReleased = false;
     try {
       const frameResult = this._activeParameterRuntime.applyFrame({
         model: this._model,
@@ -720,7 +719,10 @@ export class LAppModel extends CubismUserModel {
         lipSyncParameterIds: this._lipSyncIds,
       });
       parameterMixerFailure = frameResult.failure;
-      directPlanReleased = frameResult.directPlanReleased;
+      if (frameResult.directPlanReleased) {
+        console.info("[LAppModel] Direct parameter plan released after parameter mixing.");
+        this.stopDirectParameterPlan("", "completed");
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       parameterMixerFailure = {
@@ -746,11 +748,6 @@ export class LAppModel extends CubismUserModel {
         this._activeParameterRuntime.failActiveSource(parameterMixerFailure.reason);
       }
     }
-    if (directPlanReleased) {
-      console.info("[LAppModel] Direct parameter plan released after parameter mixing.");
-      this.stopDirectParameterPlan("", "completed");
-    }
-
     // 物理演算の設定
     if (this._physics != null) {
       const scalePhysicsResponse = this.capturePhysicsResponseBaseline();
