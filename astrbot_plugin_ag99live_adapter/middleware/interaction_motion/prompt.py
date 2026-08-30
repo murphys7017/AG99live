@@ -65,11 +65,12 @@ class AG99liveMotionPromptContributor:
                 meta={
                     "scope": "static",
                     "node_type": "ag99live_motion_decision_contract",
+                    "targets": ["persona", "core"],
                 },
             ),
             capabilities.prompt_extension(
                 plugin_id=self.plugin_id,
-                mount="capability",
+                mount="system",
                 title="Live2D Motion Capability",
                 value_kind="mapping",
                 value=_build_motion_capability_prompt_payload(
@@ -79,6 +80,7 @@ class AG99liveMotionPromptContributor:
                 meta={
                     "scope": "static",
                     "node_type": "ag99live_motion_capability",
+                    "targets": ["persona", "core"],
                 },
             ),
         ]

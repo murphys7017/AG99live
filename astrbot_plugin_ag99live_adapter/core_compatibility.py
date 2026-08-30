@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import inspect
 from typing import Any
 
 
@@ -46,11 +47,25 @@ def get_interaction_capabilities() -> InteractionCapabilities | None:
 
     if not callable(get_interaction_route_decision):
         return None
+    if not _persona_effect_supports_dynamic_parameters(PersonaEffectSpec):
+        return None
     return InteractionCapabilities(
         interaction_result_contribution=InteractionResultContribution,
         persona_effect_spec=PersonaEffectSpec,
         prompt_extension=PromptExtension,
         get_interaction_route_decision=get_interaction_route_decision,
+    )
+
+
+def _persona_effect_supports_dynamic_parameters(effect_type: type[Any]) -> bool:
+    try:
+        parameters = inspect.signature(effect_type).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    return any(
+        parameter.name == "parameters_resolver"
+        or parameter.kind is inspect.Parameter.VAR_KEYWORD
+        for parameter in parameters
     )
 
 

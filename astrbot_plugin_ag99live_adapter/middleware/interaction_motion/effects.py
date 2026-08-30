@@ -17,6 +17,12 @@ from .shared import (
 from ...motion.payload_validation import (
     normalize_motion_arguments_payload as _payload_normalize_motion_arguments_payload,
 )
+from ...motion.motion_intent import resolve_selected_semantic_axis_profile
+from ...motion.resource_catalog import build_motion_resource_candidates
+from ...prompts.semantic_axis_prompt import (
+    profile_prompt_axes,
+    resolve_available_axis_levels,
+)
 
 def _register_ag99live_motion_persona_effect(context: Any) -> None:
     capabilities = get_interaction_capabilities()
@@ -49,96 +55,148 @@ def _register_ag99live_motion_persona_effect(context: Any) -> None:
                 "properties": {
                     "intent_tags": {
                         "type": "array",
-                        "minItems": 1,
-                        "maxItems": 6,
-                        "uniqueItems": True,
-                        "items": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 48,
-                        },
+                        "items": {"type": "string"},
                     },
                     "axis_levels": {
                         "type": "object",
-                        "additionalProperties": {
-                            "type": "integer",
-                            "minimum": -4,
-                            "maximum": 4,
-                        },
-                        "minProperties": 1,
-                        "maxProperties": 6,
-                    },
-                    "motion_steps": {
-                        "type": "array",
-                        "minItems": 2,
-                        "maxItems": 4,
-                        "items": {
-                            "type": "object",
-                            "additionalProperties": False,
-                            "properties": {
-                                "axis_levels": {
-                                    "type": "object",
-                                    "additionalProperties": {
-                                        "type": "integer",
-                                        "minimum": -4,
-                                        "maximum": 4,
-                                    },
-                                    "minProperties": 1,
-                                    "maxProperties": 6,
-                                },
-                                "duration_weight": {
-                                    "type": "integer",
-                                    "minimum": 1,
-                                    "maximum": 3,
-                                },
-                            },
-                            "required": ["axis_levels", "duration_weight"],
-                        },
-                    },
-                    "duration_hint_ms": {
-                        "type": "integer",
-                        "minimum": 320,
-                        "maximum": 15000,
-                    },
-                    "expression_resource_id": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 160,
-                    },
-                    "motion_resource_id": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 160,
+                        "additionalProperties": {"type": "integer"},
                     },
                 },
                 "required": ["intent_tags"],
-                "oneOf": [
-                    {"required": ["axis_levels"]},
-                    {"required": ["motion_steps"]},
-                    {"required": ["motion_resource_id"]},
-                ],
-                "allOf": [
-                    {
-                        "not": {
-                            "required": [
-                                "expression_resource_id",
-                                "motion_resource_id",
-                            ],
-                        },
-                    },
-                    {
-                        "not": {
-                            "required": [
-                                "motion_steps",
-                                "motion_resource_id",
-                            ],
-                        },
-                    },
-                ],
             },
+            parameters_resolver=_build_ag99live_motion_effect_parameters,
         ),
         event_filter=_is_ag99live_motion_effect_event,
     )
+
+
+def _build_ag99live_motion_effect_parameters(event: Any) -> dict[str, Any]:
+    bundle = _resolve_motion_runtime_bundle(event)
+    if bundle is None:
+        raise RuntimeError("ag99live_motion_runtime_unavailable")
+
+    semantic_profile = resolve_selected_semantic_axis_profile(
+        runtime_state=bundle.runtime_state,
+        require_prompt_axes=True,
+    )
+    axis_properties = {
+        axis_id: {
+            "type": "integer",
+            "enum": resolve_available_axis_levels(axis),
+        }
+        for axis in profile_prompt_axes(semantic_profile)
+        if (axis_id := str(axis.get("id") or "").strip())
+    }
+    if not axis_properties:
+        raise RuntimeError("ag99live_motion_profile_axes_empty")
+
+    axis_levels_schema = {
+        "type": "object",
+        "properties": axis_properties,
+        "additionalProperties": False,
+        "minProperties": 1,
+        "maxProperties": min(6, len(axis_properties)),
+    }
+    expression_resource_ids = _resource_ids_for_schema(
+        bundle.runtime_state,
+        resource_type="expression",
+    )
+    motion_resource_ids = _resource_ids_for_schema(
+        bundle.runtime_state,
+        resource_type="motion",
+    )
+    properties: dict[str, Any] = {
+        "intent_tags": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 6,
+            "uniqueItems": True,
+            "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 48,
+            },
+        },
+        "axis_levels": axis_levels_schema,
+        "motion_steps": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 4,
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "axis_levels": axis_levels_schema,
+                    "duration_weight": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 3,
+                    },
+                },
+                "required": ["axis_levels", "duration_weight"],
+            },
+        },
+        "duration_hint_ms": {
+            "type": "integer",
+            "minimum": 320,
+            "maximum": 15000,
+        },
+    }
+    if expression_resource_ids:
+        properties["expression_resource_id"] = {
+            "type": "string",
+            "enum": expression_resource_ids,
+        }
+    if motion_resource_ids:
+        properties["motion_resource_id"] = {
+            "type": "string",
+            "enum": motion_resource_ids,
+        }
+
+    execution_shapes: list[dict[str, list[str]]] = [
+        {"required": ["axis_levels"]},
+        {"required": ["motion_steps"]},
+    ]
+    if motion_resource_ids:
+        execution_shapes.append({"required": ["motion_resource_id"]})
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": properties,
+        "required": ["intent_tags"],
+        "oneOf": execution_shapes,
+        "allOf": [
+            {
+                "not": {
+                    "required": [
+                        "expression_resource_id",
+                        "motion_resource_id",
+                    ],
+                },
+            },
+            {
+                "not": {
+                    "required": [
+                        "motion_steps",
+                        "motion_resource_id",
+                    ],
+                },
+            },
+        ],
+    }
+
+
+def _resource_ids_for_schema(runtime_state: Any, *, resource_type: str) -> list[str]:
+    return sorted(
+        {
+            str(candidate.get("resource_id") or "").strip()
+            for candidate in build_motion_resource_candidates(runtime_state=runtime_state)
+            if isinstance(candidate, Mapping)
+            and candidate.get("resource_type") == resource_type
+            and str(candidate.get("resource_id") or "").strip()
+        }
+    )
+
 
 def _is_ag99live_motion_effect_event(event: Any) -> bool:
     if _resolve_motion_runtime_bundle(event) is None:
