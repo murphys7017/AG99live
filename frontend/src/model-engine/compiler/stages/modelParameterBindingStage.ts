@@ -157,43 +157,43 @@ type ParameterResponseProfile = NonNullable<
 const RESPONSE_PROFILE_BY_GROUP: Record<string, ParameterResponseProfile> = {
   head: {
     kind: "spring",
-    frequency_hz: 2.6,
-    damping_ratio: 0.76,
+    frequency_hz: 2.9,
+    damping_ratio: 0.72,
   },
   body: {
     kind: "spring",
-    frequency_hz: 0.9,
-    damping_ratio: 0.88,
+    frequency_hz: 1.05,
+    damping_ratio: 0.84,
   },
   torso: {
     kind: "spring",
-    frequency_hz: 0.88,
-    damping_ratio: 0.9,
+    frequency_hz: 1,
+    damping_ratio: 0.86,
   },
   shoulder: {
     kind: "spring",
-    frequency_hz: 0.95,
-    damping_ratio: 0.88,
+    frequency_hz: 1.08,
+    damping_ratio: 0.84,
   },
   gaze: {
     kind: "spring",
-    frequency_hz: 3.8,
-    damping_ratio: 0.78,
+    frequency_hz: 4.2,
+    damping_ratio: 0.74,
   },
   eye: {
     kind: "spring",
-    frequency_hz: 4.2,
-    damping_ratio: 0.9,
+    frequency_hz: 4.4,
+    damping_ratio: 0.86,
   },
   brow: {
     kind: "spring",
-    frequency_hz: 3.6,
-    damping_ratio: 0.82,
+    frequency_hz: 3.9,
+    damping_ratio: 0.78,
   },
   face: {
     kind: "spring",
-    frequency_hz: 3.3,
-    damping_ratio: 0.82,
+    frequency_hz: 3.6,
+    damping_ratio: 0.78,
   },
 };
 

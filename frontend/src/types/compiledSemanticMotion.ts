@@ -204,7 +204,6 @@ export interface PerformanceTimingEventTrace {
     | "transition"
     | "soft_boundary"
     | "intent_tag"
-    | "semantic_reversal"
     | "speech_cue";
 }
 

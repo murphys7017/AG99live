@@ -125,6 +125,11 @@ export function compileParameterSequenceTrackGraph(
       };
     }
     changedStepsByAxis.set(axis.id, changedStepIndices);
+    const reversalStepIndices = resolveParameterReversalStepIndices(
+      parameterSteps,
+      changedStepIndices,
+      axis.neutral,
+    );
     const strategy = resolvePartTrackStrategy(
       axis.semantic_group,
       activeStagedPartAxes.has(axis.id),
@@ -134,6 +139,7 @@ export function compileParameterSequenceTrackGraph(
       schedule,
       axis,
       changedStepIndices,
+      reversalStepIndices,
       strategy,
       firstPlan.timing.blend_out_ms,
     );
@@ -433,6 +439,36 @@ function resolveChangedStepIndices(
   return changedStepIndices;
 }
 
+function resolveParameterReversalStepIndices(
+  parameterSteps: readonly SemanticParameterPlanEntry[],
+  changedStepIndices: readonly number[],
+  axisNeutralValue: number,
+): number[] {
+  const reversalStepIndices: number[] = [];
+  for (let index = 1; index < changedStepIndices.length; index += 1) {
+    const previous = parameterSteps[changedStepIndices[index - 1]];
+    const current = parameterSteps[changedStepIndices[index]];
+    if (!previous || !current) {
+      continue;
+    }
+    const previousValue = previous.input_value;
+    const currentValue = current.input_value;
+    if (previousValue === undefined || currentValue === undefined) {
+      continue;
+    }
+    const previousDelta = previousValue - axisNeutralValue;
+    const currentDelta = currentValue - axisNeutralValue;
+    if (
+      Math.abs(previousDelta) > 0.000001
+      && Math.abs(currentDelta) > 0.000001
+      && previousDelta * currentDelta < 0
+    ) {
+      reversalStepIndices.push(changedStepIndices[index]);
+    }
+  }
+  return reversalStepIndices;
+}
+
 function buildScheduledParameterTrack(
   parameterSteps: SemanticParameterPlanEntry[],
   timing: PerformancePartTrackTiming,
@@ -453,6 +489,7 @@ function resolvePartTrackTiming(
   schedule: PerformanceSchedule,
   axis: SemanticAxisDefinition,
   changedStepIndices: readonly number[],
+  reversalStepIndices: readonly number[],
   strategy: PerformancePartTrackStrategy,
   blendOutMs: number,
 ): PerformanceScheduleMutationResult<PerformancePartTrackTiming> {
@@ -504,6 +541,7 @@ function resolvePartTrackTiming(
         semanticGroup: axis.semantic_group,
         changedStepIndices,
         blendOutMs,
+        reversalStepIndices,
       });
   if (timing.ok) {
     timingsByAxis.set(axis.id, timing.value);

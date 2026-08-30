@@ -185,9 +185,6 @@ export function compilePerformanceSchedule(options: {
     return semanticStepsResult;
   }
   const semanticSteps = semanticStepsResult.semanticSteps;
-  const semanticReversalStepIndices = resolveSemanticReversalStepIndices(
-    options.sequenceSteps,
-  );
   const estimatedAlignments = textSource === "assistant_text"
     ? estimatePhraseStepAlignments(resolvedPhrases, semanticSteps, options.durationMs)
     : [];
@@ -198,7 +195,6 @@ export function compilePerformanceSchedule(options: {
     speechCueMappings: speechCueResult.mappings,
     semanticSteps,
     estimatedAlignments,
-    semanticReversalStepIndices,
     hesitationWindows: [],
     decisions: [],
     events: [],
@@ -347,6 +343,7 @@ export function compileSemanticTrackTiming(options: {
   semanticGroup: string;
   changedStepIndices: readonly number[];
   blendOutMs: number;
+  reversalStepIndices: readonly number[];
 }): PerformanceScheduleMutationResult<PerformancePartTrackTiming> {
   const {
     schedule,
@@ -354,6 +351,7 @@ export function compileSemanticTrackTiming(options: {
     semanticGroup,
     changedStepIndices,
     blendOutMs,
+    reversalStepIndices,
   } = options;
   const normalizedGroup = semanticGroup.trim().toLowerCase();
   if (normalizedGroup === "gaze" || isFaceSemanticGroup(normalizedGroup)) {
@@ -387,15 +385,27 @@ export function compileSemanticTrackTiming(options: {
   }
 
   const policy = resolveTrackTimingPolicy(semanticGroup);
+  const reversalSteps = new Set(reversalStepIndices);
   const baseReleaseAtMs = Math.max(1, schedule.durationMs - blendOutMs);
   const transitionStarts: number[] = [];
   let previousAtMs = 0;
+  let reversalPreparationMs = 0;
   for (let position = 1; position < changedStepIndices.length; position += 1) {
     const step = schedule.semanticSteps[changedStepIndices[position]];
+    if (reversalSteps.has(step.index)) {
+      reversalPreparationMs += policy.preferredHoldMs;
+      recordPerformanceDecision(
+        schedule,
+        `semantic_reversal_preparation:${semanticAxisId}:${step.index}:${policy.preferredHoldMs}`,
+      );
+    }
     const desiredAtMs = resolveHesitationAdjustedStepAtMs(
       schedule,
       step.index,
-      Math.max(1, Math.round(step.startMs + policy.transitionOffsetMs)),
+      Math.max(
+        1,
+        Math.round(step.startMs + policy.transitionOffsetMs + reversalPreparationMs),
+      ),
     );
     const atMs = Math.max(desiredAtMs, previousAtMs + 1);
     transitionStarts.push(atMs);
@@ -473,6 +483,9 @@ export function compileSemanticTrackTiming(options: {
     semanticGroup,
     "semantic",
     Math.max(0, MAX_MOTION_DURATION_MS - blendOutMs - finalTransitionEndMs),
+    reversalStepIndices.includes(
+      changedStepIndices[changedStepIndices.length - 1] ?? -1,
+    ),
   );
   const requiredOwnedUntilMs = Math.max(
     baseReleaseAtMs,
@@ -769,6 +782,7 @@ function finalizePartTrackTiming(
             - finalDraft.desiredAtMs
             - finalDraft.preferredTransitionMs,
         ),
+        false,
       )
     : 0;
   if (allowTailExtension && finalDraft) {
@@ -1395,6 +1409,7 @@ function resolvePerformanceResidualMs(
   semanticGroup: string,
   strategy: PerformancePartTrackStrategy,
   tailBudgetMs: number,
+  finalTransitionReversed: boolean,
 ): number {
   const group = semanticGroup.trim().toLowerCase();
   const baseMs = strategy === "gaze"
@@ -1428,11 +1443,7 @@ function resolvePerformanceResidualMs(
     multiplier += 0.12;
     reasons.push("hesitation");
   }
-  const finalSemanticStepIndex = schedule.semanticSteps.length - 1;
-  if (
-    finalSemanticStepIndex > 0
-    && schedule.semanticReversalStepIndices.includes(finalSemanticStepIndex)
-  ) {
+  if (finalTransitionReversed) {
     multiplier += 0.10;
     reasons.push("semantic_reversal");
   }
@@ -1513,20 +1524,6 @@ function collectHesitationCandidates(
         priority: 70,
       });
     }
-  }
-
-  for (const stepIndex of schedule.semanticReversalStepIndices) {
-    const step = schedule.semanticSteps[stepIndex];
-    const afterPhraseIndex = resolvePhraseIndexBeforeAtMs(schedule, step.startMs);
-    candidates.push({
-      reason: "semantic_reversal",
-      anchorAtMs: step.startMs,
-      holdMs: 120,
-      priority: 90,
-      stepIndex,
-      afterPhraseIndex,
-      phraseIndices: afterPhraseIndex === undefined ? undefined : [afterPhraseIndex],
-    });
   }
 
   if (HESITATION_INTENT_PATTERN.test(intentTags.join(" ").toLowerCase())) {
@@ -1625,35 +1622,6 @@ function resolveHesitationPunctuationReason(
   return /(?:—+|--+)\s*$/u.test(text) ? "dash" : null;
 }
 
-function resolveSemanticReversalStepIndices(
-  sequenceSteps: readonly PerformanceSequenceStepInput[] | undefined,
-): number[] {
-  if (!sequenceSteps || sequenceSteps.length < 2) {
-    return [];
-  }
-  const result: number[] = [];
-  for (let index = 1; index < sequenceSteps.length; index += 1) {
-    const previousAxes = new Map(
-      sequenceSteps[index - 1].axes.map((axis) => [axis.axisId, axis]),
-    );
-    const reversed = sequenceSteps[index].axes.some((axis) => {
-      const previous = previousAxes.get(axis.axisId);
-      if (!previous) {
-        return false;
-      }
-      const previousDelta = previous.value - previous.neutralValue;
-      const currentDelta = axis.value - axis.neutralValue;
-      return Math.abs(previousDelta) > 0.000001
-        && Math.abs(currentDelta) > 0.000001
-        && previousDelta * currentDelta < 0;
-    });
-    if (reversed) {
-      result.push(index);
-    }
-  }
-  return result;
-}
-
 function resolveStepIndexAfterPhrase(
   schedule: PerformanceSchedule,
   phraseIndex: number,
@@ -1663,20 +1631,6 @@ function resolveStepIndexAfterPhrase(
     item.phraseIndex === nextPhraseIndex && item.primaryForPhrase && item.stepIndex > 0
   ));
   return alignment?.stepIndex;
-}
-
-function resolvePhraseIndexBeforeAtMs(
-  schedule: PerformanceSchedule,
-  atMs: number,
-): number | undefined {
-  let result: number | undefined;
-  for (const phrase of schedule.phrases.slice(0, -1)) {
-    if (Math.round(phrase.endRatio * schedule.durationMs) > atMs) {
-      break;
-    }
-    result = phrase.index;
-  }
-  return result;
 }
 
 function resolveHesitationAdjustedStepAtMs(

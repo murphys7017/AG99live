@@ -77,7 +77,6 @@ export interface PerformanceSchedule {
   readonly speechCueMappings: readonly PerformanceSpeechCueMapping[];
   readonly semanticSteps: readonly PerformanceSemanticStepSlot[];
   readonly estimatedAlignments: readonly PerformancePhraseStepAlignment[];
-  readonly semanticReversalStepIndices: readonly number[];
   readonly hesitationWindows: readonly PerformanceHesitationWindow[];
   readonly decisions: readonly string[];
   readonly events: readonly PerformanceTimingEventTrace[];
