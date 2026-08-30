@@ -7,7 +7,7 @@
      落到 http_port 暴露的 /cache/audio/ 下，发给前端用。
   3. 前端图片落地（convert_image_component / convert_image_component_with_diagnostic）：
      接受 data: / base64:// / 本地路径 / http URL 四种形式，只在白名单根目录内的
-     本地文件被允许拷贝到 image_cache_dir。
+     本地文件被允许拷贝到 AstrBot 临时媒体目录，供 Provider 安全地读取。
 """
 
 from __future__ import annotations
@@ -70,6 +70,9 @@ class MediaService:
         self.olv_dir = olv_dir
         self.audio_cache_dir = audio_cache_dir
         self.image_cache_dir = image_cache_dir
+        self.input_image_dir = (
+            Path(get_astrbot_temp_path()) / "olv_pet_adapter" / "input_images"
+        )
         self._audio_buffer_chunks_by_segment: dict[str, list[np.ndarray]] = {}
         self._audio_buffer_lock = asyncio.Lock()
         self._audio_cache_cleanup_lock = threading.Lock()
@@ -345,14 +348,18 @@ class MediaService:
             )
             return None, _build_image_diagnostic("image_too_large")
 
-        self.image_cache_dir.mkdir(parents=True, exist_ok=True)
+        # Provider-side image materialization intentionally accepts local media
+        # only below AstrBot's temporary directory. The public adapter cache is
+        # suitable for browser delivery, but must not become a trusted Provider
+        # file root.
+        self.input_image_dir.mkdir(parents=True, exist_ok=True)
         suffix = mimetypes.guess_extension(mime_type or "") or ".png"
         if suffix == ".jpe":
             suffix = ".jpg"
 
-        image_path = self.image_cache_dir / f"frontend_{uuid4().hex}{suffix}"
+        image_path = self.input_image_dir / f"frontend_{uuid4().hex}{suffix}"
         image_path.write_bytes(image_bytes)
-        logger.debug("Saved frontend image to local file: %s", image_path)
+        logger.debug("Saved frontend image to trusted temporary file: %s", image_path)
         return str(image_path.resolve()), None
 
     def _copy_allowed_frontend_image_to_cache(
