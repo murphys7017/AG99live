@@ -49,7 +49,7 @@ flowchart TB
 
     subgraph TIMELINES[Timeline 按段持有]
         ENTRY[PlaybackTimelineEntry<br/>key = turn_id + message_id]:::singleton
-        TENGINE[PlaybackTimelineEngine<br/>每个 segment 一个]:::singleton
+        TENGINE[PlaybackTimelineEngine<br/>每个 segment 一个执行实例]:::singleton
         ACLOCK[segment-bound AudioClock<br/>或 explicit synthetic clock]:::resource
         SINKS[registered sinks<br/>audio / motion / lip_sync]:::resource
         PROJ[SessionProjection<br/>单例：Store lifecycle port]:::singleton

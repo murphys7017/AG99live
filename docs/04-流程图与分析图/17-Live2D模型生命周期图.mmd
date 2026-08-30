@@ -43,8 +43,8 @@ stateDiagram-v2
         ValidateOwnership --> FrameStopped: stale/released
         RestoreParameters --> ApplyNativeMotion: load saved Cubism parameters
         ApplyNativeMotion --> ApplyNativeEffects: catalog/idle motion then save
-        ApplyNativeEffects --> ApplyMixer: blink / expression / drag / breath
-        ApplyMixer --> ApplyPhysics: snapshot Cubism base + resolve direct plan / speech modulation / lip-sync
+        ApplyNativeEffects --> ResolveActiveParameters: blink / expression / drag / breath
+        ResolveActiveParameters --> ApplyPhysics: ActiveParameterRuntime<br/>Mixer 合成并完成唯一主动参数写入
         ApplyPhysics --> ApplyPose: Cubism Physics
         ApplyPose --> UpdateModel: Cubism Pose
         UpdateModel --> Render: model update / renderer

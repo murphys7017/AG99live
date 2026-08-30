@@ -19,7 +19,7 @@ AG99live 的 AstrBot 插件侧实现。该目录负责协议桥接、Turn 生命
 - 说话时的 plan 级补偿由前端 compile 侧 `SpeechPoseStage` 承接。
 - 扫描器下发 `ag99.voice_following_profile.v3`，只描述语义轴、有效幅度比例和跟随延迟；最终参数绑定、范围和动力学统一由 semantic axis profile 负责。
 - 旧 `voice_following_profile.v1/v2` 和 `speech_pose_cycle` 不属于兼容协议，前端入站会显式拒绝。
-- 连续多段之间的惯性、衰减、残留、soft handoff 和层间混合由前端 Live2D runtime 侧 `ParameterPresentationLayer` 承接，而不是放回后端动作生成链路。
+- 连续多段之间的惯性、衰减、残留、soft handoff 和层间混合由前端 AG99 Live2D runtime 的 `ActiveParameterRuntime`、`ActiveParameterMixer` 和 `ParameterPresentation` 承接，而不是放回后端动作生成链路。
 
 ## 当前部署边界
 

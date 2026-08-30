@@ -17,6 +17,7 @@ flowchart LR
         PLAYER[Motion Player<br/>started / terminal / timeout]:::source
         TIMELINE[Playback Timeline<br/>audio / motion / lip-sync snapshot]:::source
         MANUAL[Motion Lab manual preview]:::source
+        DIVERSITY[MotionObservationRecorder<br/>最近动作摘要：方向 / sequence / 重复统计]:::source
     end
 
     subgraph FRONT[前端 at-least-once 发送]
@@ -81,6 +82,7 @@ flowchart LR
 
         SQLITE --> HISTORY --> PANEL
         SQLITE --> CONTEXT
+        DIVERSITY --> PROMPT
         PANEL -->|source_record_id + turn_id + message_id| SAMPLE
         CONTEXT --> SAMPLE
         SAMPLE --> PROJECT --> SELECT --> PROMPT --> AUDIT --> OBS
@@ -88,11 +90,9 @@ flowchart LR
 
     subgraph REMAINING[明确后续工作]
         STEPEDIT[sequence step editor<br/>axis_levels + duration_weight]:::future
-        DIVERSITY[最近动作族分布<br/>紧凑多样性反馈]:::future
         EXPORT[训练数据导出<br/>小模型阶段]:::future
 
         PANEL -.后续.-> STEPEDIT
-        HISTORY -.后续.-> DIVERSITY
         SAMPLE -.后续.-> EXPORT
     end
 

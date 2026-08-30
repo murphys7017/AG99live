@@ -323,8 +323,10 @@ HTTP       127.0.0.1:12397
 由 ModelEngine 内的 Performance Director 统一编排 phrase、语义步骤、部位延迟、停顿、强调、
 收势和残留，再沿现有 Timeline、参数计划、ParameterMixer 和 Cubism Physics 执行。
 
-当前已完成二期阶段 A 和阶段 B 的 gaze 第一批。后续会继续深化部位协作、主动动力学、语音耦合、
-Motion Lab 评价、Physics 模型级调校和动作小模型数据闭环；已有基础、剩余边界与实施顺序统一见
+当前已完成二期阶段 A，以及阶段 B 的 B1-B7 源码收口：共享部位时序、face、hesitation、dynamic residual、
+speech cues、语音能量耦合、部位主动动力学、说话随动和相邻音频段动作接管均已接入现有主链路。
+后续主要是运行观感验收、跨 Turn 连续性、Motion Lab 评价、Physics 模型级调校和动作小模型数据闭环；
+已有基础、剩余边界与实施顺序统一见
 [二期角色表演系统总体规划](./docs/02-设计文档/18-二期角色表演系统总体规划.md)，不在 README 重复维护。
 
 小模型未来可以负责语义动作或表演编排提示，但不会取代 ModelEngine、Timeline、参数融合和

@@ -125,8 +125,8 @@ flowchart TD
         N6[resource 不可播放 -> 静默 axis-only]:::failure
         N7[Timeline 缺失 -> ModelEngine 直接播放]:::failure
         N8[数据库记录失败 -> 修改当前回复结果]:::failure
-        N9[manifest 不一致 -> 尝试旧 schema]:::failure
-        N10[应有 motion 失败 -> absent / speech-only]:::failure
+        N9[manifest 不一致 -> 拒绝后续消息<br/>不尝试旧 schema]:::failure
+        N10[应有 motion 失败 -> 保留 motion.failed<br/>不得转换为 absent / speech-only]:::failure
         N11[Store slots settled -> 提前 ACK<br/>忽略 open required Timeline]:::failure
     end
 

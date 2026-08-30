@@ -1,9 +1,9 @@
 task:
-  class: feature
+  class: documentation
   risk: medium
-  phase: performance_b_motion_quality
+  phase: documentation_alignment
   status: validation_partial
-  scope: "Complete the current motion performance quality work before adding Motion Lab likes: tune existing schedule, response dynamics, cross-Turn continuity, and speech-driven expression without changing protocol, timeline, mixer ownership, Cubism Physics ownership, or adding a second motion path."
+  scope: "Align the repository documentation and Mermaid source diagrams with the current implementation, protocol manifest, ownership boundaries, completed Phase A/B source work, and remaining runtime-validation scope without changing product code."
 
 context:
   confidence: high
@@ -83,6 +83,18 @@ context:
     - ActiveParameterMixer owns the final target synthesis and the single active response pass; direct-plan collection must not pre-drive a parameter before source fusion.
     - Lip-sync contributions remain immediate and bypass active response dynamics when they participate in a parameter group.
     - PlaybackTimeline sink `required` controls terminal settlement, while optional `requiredForStart` controls whether an idle sink may block the shared clock from entering playing; audio-backed motion remains required for settlement but does not block audio startup.
+
+architecture:
+  primary_flow: "AstrBot -> output.segment.v4 -> SessionStore -> PlaybackTimeline -> ModelEngine/PerformanceSchedule -> engine.parameter_plan.v3 -> ActiveParameterRuntime/ActiveParameterMixer -> ParameterPresentation -> Cubism Physics -> model.update/draw"
+  ownership:
+    - "PerformanceSchedule is the single compile-time performance timing source."
+    - "ActiveParameterMixer is the only active-parameter fusion owner."
+    - "ParameterPresentation applies one response pass to the fused non-lip target."
+    - "Official Cubism Framework/Core remain the frozen low-level model, Physics, and rendering boundary."
+    - "VTube Studio recording is an independent raw-data system and does not join the dialogue playback path."
+  documentation_scope:
+    - "Phase A is complete and Phase B source consolidation is complete; remaining Phase B work is runtime observation and quality tuning."
+    - "Current active defects are maintained only in the active-defect document; resolved history is not retained there."
 
 documentation:
   authorities:
