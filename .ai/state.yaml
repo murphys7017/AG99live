@@ -1,9 +1,30 @@
 task:
-  class: documentation
-  risk: medium
-  phase: documentation_alignment
-  status: validation_partial
-  scope: "Align the repository documentation and Mermaid source diagrams with the current implementation, protocol manifest, ownership boundaries, completed Phase A/B source work, and remaining runtime-validation scope without changing product code."
+  class: bugfix
+  risk: high
+  phase: action_pipeline_investigation
+  status: investigating
+  scope: "Trace the complete AG99 action pipeline from output.segment.v4 ingestion through Timeline, ModelEngine, active parameter execution, Cubism Physics, and terminal acknowledgement. Record only source-confirmed defects; do not add fallback behavior or alter product code before a root cause is established."
+
+investigation:
+  recorded_at: "2026-08-31"
+  source_review:
+    - "output.segment.v4 motion is normalized and atomically committed to TurnPlaybackSessionStore before release."
+    - "TurnPlaybackOrchestrator releases one resolved segment through the existing PlaybackTimeline; it does not maintain a second action queue."
+    - "The audio sink resolves a positive duration before audio.play(), so formal motion preparation is scheduled before the audio-start callback."
+    - "PlaybackTimeline passes the real audio clock to ModelEngine only after the audio Timeline enters playing or paused."
+    - "ModelEngine prepares the queued semantic payload, starts Direct Parameter Plan through the existing MotionPlayer/LAppModel boundary, and records the run through the existing lifecycle tracker."
+    - "LAppModel applies ActiveParameterMixer once before Cubism Physics and model.update(); no separate semantic parameter write path was found."
+  conclusion:
+    - "Runtime evidence for turn 74e3e3655d9e4aa095db21405c8fc7f8 confirms the action failure occurs in AstrBot/AG99 motion validation before frontend playback: the model emitted unknown axes brow_raise and head_tilt, so motion_payload was null and the turn ended with motion_schedule_failed."
+    - "The frontend audio, lip-sync attachment, audio clock, and terminal playback path completed normally; no frontend motion plan could start because the segment carried motion.failed rather than a payload."
+    - "The tool schema accepts arbitrary axis_levels property names and relies on dynamic backend validation, allowing models to emit syntactically valid but semantically unknown axes."
+    - "The previously suspected early motion-sink-start state is not a defect: startSink invokes the sink callback but does not mark the sink started; the lifecycle callback does that after Direct Plan acceptance."
+  evidence_gap:
+    - "The exact provider-side enforcement behavior after changing the action schema/prompt still needs one live comparison using the same model and a known legal axis payload."
+    - "Frontend diagnostics do not print the not_applicable reason when speech-only motion is blocked by motion.failed; this is an observability gap, not evidence that the audio path failed."
+  non_actions:
+    - "No runtime fallback, compatibility path, second queue, duplicate controller, or speculative code change was added."
+    - "No runtime fallback, automatic axis renaming, default action, or compatibility path was added; the invalid model output remains visible as a failed motion fact."
 
 context:
   confidence: high

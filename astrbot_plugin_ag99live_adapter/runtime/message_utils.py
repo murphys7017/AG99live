@@ -12,6 +12,13 @@ def resolve_platform_segment_message_id(platform_extras: dict[str, Any]) -> str:
         if isinstance(message_id, str) and message_id.strip():
             return message_id.strip()
 
+    # ``composite_message_id`` is allocated once per logical delivery call.
+    # Prefer it over the legacy visible-id normalization so separate progress
+    # messages do not collapse into one segment and conflict on updated text.
+    composite_message_id = platform_extras.get("composite_message_id")
+    if isinstance(composite_message_id, str) and composite_message_id.strip():
+        return composite_message_id.strip()
+
     logical_message_id = platform_extras.get("logical_message_id")
     if isinstance(logical_message_id, str) and logical_message_id.strip():
         return logical_message_id.strip()

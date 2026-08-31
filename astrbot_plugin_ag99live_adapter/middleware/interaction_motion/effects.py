@@ -4,6 +4,15 @@ from collections.abc import Mapping
 from typing import Any
 
 from ...core_compatibility import get_interaction_capabilities
+from ...motion.motion_intent import resolve_selected_semantic_axis_profile
+from ...motion.payload_validation import (
+    normalize_motion_arguments_payload as _payload_normalize_motion_arguments_payload,
+)
+from ...motion.resource_catalog import build_motion_resource_candidates
+from ...prompts.semantic_axis_prompt import (
+    profile_prompt_axes,
+    resolve_available_axis_levels,
+)
 from .shared import (
     AG99LIVE_MOTION_EFFECT_NAME,
     AG99LIVE_PLUGIN_ID,
@@ -14,15 +23,7 @@ from .shared import (
     _sanitize_reason_fragment,
     _thaw_snapshot_value,
 )
-from ...motion.payload_validation import (
-    normalize_motion_arguments_payload as _payload_normalize_motion_arguments_payload,
-)
-from ...motion.motion_intent import resolve_selected_semantic_axis_profile
-from ...motion.resource_catalog import build_motion_resource_candidates
-from ...prompts.semantic_axis_prompt import (
-    profile_prompt_axes,
-    resolve_available_axis_levels,
-)
+
 
 def _register_ag99live_motion_persona_effect(context: Any) -> None:
     capabilities = get_interaction_capabilities()
@@ -42,13 +43,21 @@ def _register_ag99live_motion_persona_effect(context: Any) -> None:
             plugin_id=AG99LIVE_PLUGIN_ID,
             name=AG99LIVE_MOTION_EFFECT_NAME,
             description=(
-                "Generate Live2D motion intent for persona expression. Describe "
-                "the visible performance with intent_tags and choose meaningful "
-                "semantic axis levels for this turn. Select at most one typed resource "
-                "only when a listed expression or complete motion is clearly appropriate. "
-                "Emit exactly one motion effect for an assistant segment; never "
-                "split a movement sequence into multiple effects."
+                "Generate Live2D motion intent for persona expression. This effect "
+                "is mandatory exactly once for every assistant segment, including "
+                "greetings, short acknowledgements, and neutral replies. Describe "
+                "the visible performance with intent_tags and valid semantic axis "
+                "levels; use neutral axis levels when no strong motion is needed. "
+                "When the intended performance includes turning, tilting, swaying, "
+                "nodding, or leaning, express the corresponding head and body axes "
+                "together; omit body axes when no body posture is intended. "
+                "Select at most one typed resource when appropriate and never split "
+                "a movement sequence into multiple effects."
             ),
+            metadata={
+                "required_per_segment": True,
+                "exactly_one_per_segment": True,
+            },
             parameters={
                 "type": "object",
                 "additionalProperties": False,
@@ -153,12 +162,32 @@ def _build_ag99live_motion_effect_parameters(event: Any) -> dict[str, Any]:
             "enum": motion_resource_ids,
         }
 
-    execution_shapes: list[dict[str, list[str]]] = [
-        {"required": ["axis_levels"]},
-        {"required": ["motion_steps"]},
+    execution_shapes: list[dict[str, Any]] = [
+        {
+            "allOf": [
+                {"required": ["axis_levels"]},
+                {"not": {"required": ["motion_steps"]}},
+                {"not": {"required": ["motion_resource_id"]}},
+            ]
+        },
+        {
+            "allOf": [
+                {"required": ["motion_steps"]},
+                {"not": {"required": ["axis_levels"]}},
+                {"not": {"required": ["motion_resource_id"]}},
+            ]
+        },
     ]
     if motion_resource_ids:
-        execution_shapes.append({"required": ["motion_resource_id"]})
+        execution_shapes.append(
+            {
+                "allOf": [
+                    {"required": ["motion_resource_id"]},
+                    {"not": {"required": ["axis_levels"]}},
+                    {"not": {"required": ["motion_steps"]}},
+                ]
+            }
+        )
     return {
         "type": "object",
         "additionalProperties": False,
