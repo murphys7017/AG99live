@@ -126,6 +126,11 @@ class WebSocketTransport:
         """
         client = self._ws_client
         if client is None:
+            logger.warning(
+                "WebSocket send skipped: no connected client type=%s turn_id=%s",
+                payload.get("type", "<unknown>"),
+                payload.get("turn_id"),
+            )
             return False
         return await self._send_json_to_client(client, payload)
 
@@ -139,12 +144,20 @@ class WebSocketTransport:
 
         async def send_bound(payload: dict[str, Any]) -> bool:
             if self._ws_client is not client:
+                logger.warning(
+                    "Bound WebSocket send skipped: connection is no longer current "
+                    "type=%s turn_id=%s",
+                    payload.get("type", "<unknown>"),
+                    payload.get("turn_id"),
+                )
                 return False
             return await self._send_json_to_client(client, payload)
 
         return send_bound
 
     async def _send_json_to_client(self, client, payload: dict[str, Any]) -> bool:
+        payload_type = payload.get("type", "<unknown>")
+        turn_id = payload.get("turn_id")
         try:
             await client.send(json.dumps(payload, ensure_ascii=False))
             return True
@@ -153,14 +166,16 @@ class WebSocketTransport:
         except Exception as exc:
             if _is_expected_disconnect_error(exc):
                 logger.debug(
-                    "Desktop websocket disconnected while sending `%s`: %s",
-                    payload.get("type", "<unknown>"),
+                    "Desktop websocket disconnected while sending type=%s turn_id=%s: %s",
+                    payload_type,
+                    turn_id,
                     exc,
                 )
             else:
                 logger.exception(
-                    "Failed to send websocket payload `%s`",
-                    payload.get("type", "<unknown>"),
+                    "Failed to send websocket payload type=%s turn_id=%s",
+                    payload_type,
+                    turn_id,
                 )
             try:
                 await client.close()

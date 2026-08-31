@@ -95,8 +95,13 @@ def normalize_motion_intent_v4_payload(intent: Any) -> dict[str, Any]:
     has_axis_levels = "axis_levels" in intent
     has_motion_steps = "motion_steps" in intent
     has_motion_resource = "motion_resource_id" in intent
-    if sum((has_axis_levels, has_motion_steps, has_motion_resource)) != 1:
-        raise ValueError("motion_execution_shape_invalid")
+    execution_shape_count = sum(
+        (has_axis_levels, has_motion_steps, has_motion_resource)
+    )
+    if execution_shape_count == 0:
+        raise ValueError("motion_execution_shape_missing")
+    if execution_shape_count > 1:
+        raise ValueError("motion_execution_shape_conflict")
     normalized_levels = (
         _normalize_axis_levels(intent.get("axis_levels"))
         if has_axis_levels
