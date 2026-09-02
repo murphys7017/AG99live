@@ -575,9 +575,6 @@ export interface ModelSyncInfo {
 export interface SystemModelSyncPayload {
   model_info: ModelSyncInfo;
   runtime_cache_errors: RuntimeCacheErrorsPayload;
-  conf_name: string;
-  conf_uid: string;
-  client_uid: string;
 }
 
 export interface SystemSemanticAxisProfileSavePayload {

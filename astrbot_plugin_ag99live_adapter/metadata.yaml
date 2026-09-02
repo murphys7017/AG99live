@@ -1,7 +1,6 @@
 name: astrbot_plugin_ag99live_adapter
 display_name: AG99live Adapter
-desc: AG99live V2 desktop platform adapter for AstrBot.
-description: AG99live AstrBot desktop adapter. Bridges AstrBot turns to the frontend and emits motion intent for frontend ModelEngine playback.
+desc: AG99live desktop body adapter for AstrBot, using output.segment.v4 and frontend ModelEngine playback.
 version: 1.1.0
 author: murphys7017
 repo: https://github.com/murphys7017/AG99live

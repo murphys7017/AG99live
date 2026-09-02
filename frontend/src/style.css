@@ -689,8 +689,52 @@ img {
   backdrop-filter: blur(16px);
 }
 
+.settings-sections {
+  display: grid;
+  gap: 34px;
+}
+
+.settings-section {
+  display: grid;
+  gap: 16px;
+}
+
+.settings-section__header {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.28fr) minmax(0, 1fr);
+  gap: 18px;
+  padding: 0 4px 14px;
+  border-bottom: 1px solid rgba(54, 71, 104, 0.12);
+}
+
+.settings-section__header p,
+.settings-section__header h2,
+.settings-section__header span {
+  margin: 0;
+}
+
+.settings-section__header p {
+  color: #b56c2c;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+}
+
+.settings-section__header h2 {
+  color: var(--ink-strong);
+  font-size: clamp(20px, 3vw, 28px);
+}
+
+.settings-section__header span {
+  display: block;
+  margin-top: 5px;
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
 .settings-grid {
   display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 18px;
 }
 
@@ -1848,6 +1892,8 @@ img {
   }
 
   .control-dock__status,
+  .settings-section__header,
+  .settings-grid,
   .settings-card__meta,
   .settings-card__stack {
     grid-template-columns: 1fr;

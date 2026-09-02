@@ -57,7 +57,16 @@ onMounted(() => {
 
 <template>
   <DesktopWindowPanel title="系统设置" subtitle="AG99live Desktop">
-    <section class="settings-grid">
+    <div class="settings-sections">
+      <section class="settings-section">
+        <header class="settings-section__header">
+          <p>01 / CONNECTION</p>
+          <div>
+            <h2>连接与语音输入</h2>
+            <span>管理 AstrBot 连接和当前使用的麦克风。</span>
+          </div>
+        </header>
+        <div class="settings-grid">
       <article class="settings-card">
         <div class="settings-card__header">
           <div>
@@ -135,6 +144,18 @@ onMounted(() => {
         </p>
       </article>
 
+        </div>
+      </section>
+
+      <section class="settings-section">
+        <header class="settings-section__header">
+          <p>02 / LIVE2D</p>
+          <div>
+            <h2>模型表现</h2>
+            <span>调整渲染清晰度、物理响应和动作表现。</span>
+          </div>
+        </header>
+        <div class="settings-grid">
       <article class="settings-card settings-card--wide">
         <div class="settings-card__header">
           <div>
@@ -199,6 +220,93 @@ onMounted(() => {
         </div>
       </article>
 
+      <article class="settings-card">
+        <div class="settings-card__header">
+          <div>
+            <p class="settings-card__eyebrow">动作</p>
+            <h2>默认待机动作</h2>
+          </div>
+          <span class="settings-card__badge">
+            {{ live2dPresentationSettings.ambientMotionEnabled ? "enabled" : "disabled" }}
+          </span>
+        </div>
+
+        <label class="settings-toggle">
+          <input
+            v-model="live2dPresentationSettings.ambientMotionEnabled"
+            class="settings-toggle__input"
+            type="checkbox"
+            @change="applyLive2dPresentationSettings"
+          />
+          <span class="settings-toggle__control" aria-hidden="true"></span>
+          <span class="settings-toggle__copy">
+            控制 Live2D 的默认待机驱动。关闭后会停用自动待机动作、自动呼吸和自动眨眼，方便只观察对话触发的动作。
+          </span>
+        </label>
+
+        <p class="settings-card__hint">
+          关闭后仍然保留对话动作、动作预览、口型同步和手动触发的 motion。
+        </p>
+      </article>
+
+      <article class="settings-card">
+        <div class="settings-card__header">
+          <div>
+            <p class="settings-card__eyebrow">动作强度</p>
+            <h2>ModelEngine 表现倍率</h2>
+          </div>
+          <span class="settings-card__badge">
+            x{{ formatScale(motionEngineSettings.motionIntensityScale) }}
+          </span>
+        </div>
+
+        <div class="settings-slider">
+          <div class="settings-slider__header">
+            <div>
+              <strong>全局动作强度</strong>
+              <p>只对 expressive intent 生效，idle 不做放大。</p>
+            </div>
+            <span class="settings-slider__value">
+              x{{ formatScale(motionEngineSettings.motionIntensityScale) }}
+            </span>
+          </div>
+          <input
+            v-model.number="motionEngineSettings.motionIntensityScale"
+            class="settings-slider__input"
+            type="range"
+            :min="motionIntensityMin"
+            :max="motionIntensityMax"
+            :step="motionIntensityStep"
+            @input="applyMotionEngineSettings"
+          />
+        </div>
+
+        <div class="settings-card__actions">
+          <button
+            type="button"
+            class="settings-card__button settings-card__button--ghost"
+            @click="resetMotionEngineSettings"
+          >
+            重置为默认
+          </button>
+        </div>
+
+        <p class="settings-card__hint">
+          动作强度只由 ModelEngine 在语义轴编译阶段应用。
+        </p>
+      </article>
+        </div>
+      </section>
+
+      <section class="settings-section">
+        <header class="settings-section__header">
+          <p>03 / INPUT</p>
+          <div>
+            <h2>对话输入</h2>
+            <span>配置直播弹幕、桌面上下文和按键说话。</span>
+          </div>
+        </header>
+        <div class="settings-grid">
       <article class="settings-card settings-card--wide">
         <div class="settings-card__header">
           <div>
@@ -297,33 +405,6 @@ onMounted(() => {
       <article class="settings-card">
         <div class="settings-card__header">
           <div>
-            <p class="settings-card__eyebrow">运行状态</p>
-            <h2>{{ bridgeState.modelProjectionSnapshot.selectedModelName || "等待模型同步" }}</h2>
-          </div>
-          <span class="settings-card__badge">
-            {{ bridgeState.modelProjectionSnapshot.recommendedMode || "await-sync" }}
-          </span>
-        </div>
-
-        <dl class="settings-card__meta">
-          <div>
-            <dt>配置</dt>
-            <dd>{{ bridgeState.snapshot.confName || "未同步" }}</dd>
-          </div>
-          <div>
-            <dt>内部 WS</dt>
-            <dd>{{ bridgeState.snapshot.serverWsUrl || "等待后端下发" }}</dd>
-          </div>
-          <div>
-            <dt>内部 HTTP</dt>
-            <dd>{{ bridgeState.snapshot.httpBaseUrl || "等待后端下发" }}</dd>
-          </div>
-        </dl>
-      </article>
-
-      <article class="settings-card">
-        <div class="settings-card__header">
-          <div>
             <p class="settings-card__eyebrow">多模态</p>
             <h2>发送时附带桌面截图</h2>
           </div>
@@ -347,35 +428,6 @@ onMounted(() => {
 
         <p class="settings-card__hint">
           关闭后仍然可以正常聊天，只是不再自动把当前桌面作为上下文一并发送。
-        </p>
-      </article>
-
-      <article class="settings-card">
-        <div class="settings-card__header">
-          <div>
-            <p class="settings-card__eyebrow">动作</p>
-            <h2>默认待机动作</h2>
-          </div>
-          <span class="settings-card__badge">
-            {{ live2dPresentationSettings.ambientMotionEnabled ? "enabled" : "disabled" }}
-          </span>
-        </div>
-
-        <label class="settings-toggle">
-          <input
-            v-model="live2dPresentationSettings.ambientMotionEnabled"
-            class="settings-toggle__input"
-            type="checkbox"
-            @change="applyLive2dPresentationSettings"
-          />
-          <span class="settings-toggle__control" aria-hidden="true"></span>
-          <span class="settings-toggle__copy">
-            控制 Live2D 的默认待机驱动。关闭后会停用自动待机动作、自动呼吸和自动眨眼，方便只观察对话触发的动作。
-          </span>
-        </label>
-
-        <p class="settings-card__hint">
-          关闭后仍然保留对话动作、动作预览、口型同步和手动触发的 motion。
         </p>
       </article>
 
@@ -426,51 +478,39 @@ onMounted(() => {
         </p>
       </article>
 
-      <article class="settings-card settings-card--wide">
+        </div>
+      </section>
+
+      <section class="settings-section">
+        <header class="settings-section__header">
+          <p>04 / STATUS</p>
+          <div>
+            <h2>状态与工具</h2>
+            <span>查看连接诊断，并打开历史、动作实验室和 Profile Editor。</span>
+          </div>
+        </header>
+        <div class="settings-grid">
+      <article class="settings-card">
         <div class="settings-card__header">
           <div>
-            <p class="settings-card__eyebrow">动作强度</p>
-            <h2>ModelEngine 表现倍率</h2>
+            <p class="settings-card__eyebrow">运行状态</p>
+            <h2>{{ bridgeState.modelProjectionSnapshot.selectedModelName || "等待模型同步" }}</h2>
           </div>
           <span class="settings-card__badge">
-            x{{ formatScale(motionEngineSettings.motionIntensityScale) }}
+            {{ bridgeState.modelProjectionSnapshot.recommendedMode || "await-sync" }}
           </span>
         </div>
 
-        <div class="settings-slider">
-          <div class="settings-slider__header">
-            <div>
-              <strong>全局动作强度</strong>
-              <p>只对 expressive intent 生效，idle 不做放大。</p>
-            </div>
-            <span class="settings-slider__value">
-              x{{ formatScale(motionEngineSettings.motionIntensityScale) }}
-            </span>
+        <dl class="settings-card__meta">
+          <div>
+            <dt>内部 WS</dt>
+            <dd>{{ bridgeState.snapshot.serverWsUrl || "等待后端下发" }}</dd>
           </div>
-          <input
-            v-model.number="motionEngineSettings.motionIntensityScale"
-            class="settings-slider__input"
-            type="range"
-            :min="motionIntensityMin"
-            :max="motionIntensityMax"
-            :step="motionIntensityStep"
-            @input="applyMotionEngineSettings"
-          />
-        </div>
-
-        <div class="settings-card__actions">
-          <button
-            type="button"
-            class="settings-card__button settings-card__button--ghost"
-            @click="resetMotionEngineSettings"
-          >
-            重置为默认
-          </button>
-        </div>
-
-        <p class="settings-card__hint">
-          动作强度只由 ModelEngine 在语义轴编译阶段应用。
-        </p>
+          <div>
+            <dt>内部 HTTP</dt>
+            <dd>{{ bridgeState.snapshot.httpBaseUrl || "等待后端下发" }}</dd>
+          </div>
+        </dl>
       </article>
 
       <article class="settings-card settings-card--wide">
@@ -523,8 +563,21 @@ onMounted(() => {
           {{ profileEditorButtonLabel }}
         </button>
       </article>
+        </div>
+      </section>
 
-      <Esp32DisplaySettingsCard />
-    </section>
+      <section class="settings-section">
+        <header class="settings-section__header">
+          <p>05 / DEVICE</p>
+          <div>
+            <h2>外部设备</h2>
+            <span>管理可选的桌面显示和硬件扩展。</span>
+          </div>
+        </header>
+        <div class="settings-grid">
+          <Esp32DisplaySettingsCard />
+        </div>
+      </section>
+    </div>
   </DesktopWindowPanel>
 </template>

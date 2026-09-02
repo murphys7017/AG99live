@@ -87,7 +87,7 @@ flowchart TB
     DEVICE <--> APP
 
     note1[进程边界规则：<br/>Python 不持有浏览器音频时钟；<br/>Renderer 不读取 AstrBot 内部对象；<br/>Main 不参与播放状态机。]:::external
-    note2[当前部署限制：<br/>桌宠 WS / 模型音频 HTTP / debug HTTP<br/>只支持 127.0.0.1 或 localhost；<br/>无远程认证与 IPv6 支持。]:::external
+    note2[当前部署限制：<br/>桌宠 WS / 模型音频 HTTP<br/>固定使用 127.0.0.1；<br/>无远程认证与 IPv6 支持。]:::external
     note1 -.约束.-> PYCORE
     note1 -.约束.-> APP
     note1 -.约束.-> MAINPROC

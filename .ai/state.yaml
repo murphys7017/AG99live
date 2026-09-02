@@ -1,9 +1,28 @@
 task:
-  class: bugfix
+  class: refactor
   risk: high
-  phase: action_contract_unification_implementation
+  phase: configuration_surface_consolidation
   status: source_complete_pending_live_acceptance
-  scope: "Unify AG99 motion execution shapes, Prompt guidance, and sparse motion sequence semantics without fallback behavior. AG99 source migration is complete; AstrBot Core coordination and live AstrBot + Electron + TTS + Live2D acceptance remain external follow-up."
+  scope: "Consolidate AG99 plugin and desktop configuration surfaces: remove dead or fake settings, migrate plugin settings into responsibility-based sections, keep model_sync model-focused, and group desktop settings by workflow without compatibility paths."
+
+configuration_refactor:
+  recorded_at: "2026-09-02"
+  source_review:
+    - "Platform configuration now exposes only ws/http ports, speaker name, and microphone auto-start; loopback binding is an internal invariant."
+    - "The empty debug StaticResourceServer and its configurable port were removed."
+    - "Plugin configuration is grouped into general, live2d_input, performance_curve, vad, and remote_operator sections; old flat keys are not read."
+    - "Silero VAD remains the one implementation and is no longer presented as a selectable model."
+    - "system.model_sync now contains only model_info and runtime_cache_errors; configuration identity fields and their frontend snapshot projection were removed."
+    - "Desktop settings use workflow sections for connection, Live2D presentation, dialogue input, status/tools, and external devices."
+  validation:
+    - "Plugin schema JSON parsed successfully."
+    - "Changed Python modules compiled successfully."
+    - "Frontend renderer, WebSDK, and Node typechecks passed."
+    - "AstrBot plugin structure check reported zero errors and zero warnings."
+    - "The inbound protocol smoke script did not reach assertions because its existing test tsconfig compiles official Cubism sources with incompatible strict settings."
+    - "The RuntimeState model-sync smoke test did not reach the changed payload assertion because its existing seed fixture imports the removed scan constant CORE_BASE_ACTION_CHANNEL_SPECS."
+  evidence_gap:
+    - "AstrBot Dashboard rendering of the new nested plugin schema and a live model_sync handshake still require runtime acceptance."
 
 investigation:
   recorded_at: "2026-08-31"

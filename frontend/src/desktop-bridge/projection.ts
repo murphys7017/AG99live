@@ -78,7 +78,6 @@ export interface DesktopRuntimeSnapshotInput {
   connectionLabel: string;
   stageMessage: string;
   aiState: string;
-  confName: string;
   lastUpdated: string;
 }
 
@@ -99,7 +98,6 @@ export interface DesktopRuntimeSnapshotOutput {
   pttKeyBinding: DesktopPttKeyBinding;
   pttHookStatus: DesktopPttHookStatus;
   audioPlaying: boolean;
-  confName: string;
   lastUpdated: string;
   serverWsUrl: string;
   httpBaseUrl: string;
@@ -183,7 +181,6 @@ export function buildDesktopRuntimeSnapshot(
     pttModeEnabled: p.pttModeEnabled,
     pttKeyBinding: { ...p.pttKeyBinding },
     pttHookStatus: { ...p.pttHookStatus },
-    confName: input.confName,
     lastUpdated: input.lastUpdated,
     serverWsUrl: p.serverWsUrl,
     httpBaseUrl: p.httpBaseUrl,

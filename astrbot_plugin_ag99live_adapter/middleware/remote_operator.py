@@ -212,7 +212,7 @@ def arbitrate_remote_operator_tools_for_request(event: Any, request: Any) -> lis
         return []
 
     config = filter_online_remote_operator_config(
-        resolve_remote_operator_config(_load_plugin_config())
+        resolve_remote_operator_config(_load_remote_operator_config())
     )
     if config is not None:
         override_prompt = build_remote_operator_core_override_prompt(
@@ -259,7 +259,7 @@ def arbitrate_remote_operator_tools_for_request(event: Any, request: Any) -> lis
 
 
 def remote_operator_available() -> bool:
-    config = resolve_remote_operator_config(_load_plugin_config())
+    config = resolve_remote_operator_config(_load_remote_operator_config())
     if config is None:
         return False
     return filter_online_remote_operator_config(config) is not None
@@ -309,7 +309,7 @@ def collect_remote_operator_prompt_extension(
     if _is_remote_operator_result_event(event):
         return None
 
-    config = resolve_remote_operator_config(_load_plugin_config())
+    config = resolve_remote_operator_config(_load_remote_operator_config())
     if config is None:
         logger.debug("Remote operator prompt skipped: config_unavailable")
         return None
@@ -347,7 +347,7 @@ def resolve_remote_operator_config(config: Any) -> RemoteOperatorConfig | None:
     if not computers:
         return None
 
-    default_computer = _normalize_key(config.get("remote_operator_default_computer"))
+    default_computer = _normalize_key(config.get("default_computer"))
     if default_computer not in computers:
         default_computer = next(iter(computers))
 
@@ -449,7 +449,7 @@ def parse_remote_operator_request_from_view(
     if not prompt:
         return None, "prompt_empty"
 
-    config = resolve_remote_operator_config(_load_plugin_config())
+    config = resolve_remote_operator_config(_load_remote_operator_config())
     if config is None:
         return None, "config_unavailable"
     online_config = filter_online_remote_operator_config(config)
@@ -464,7 +464,7 @@ def parse_remote_operator_request_from_view(
 
 
 def _resolve_computers(config: Mapping[str, Any]) -> dict[str, str]:
-    entries = config.get("remote_operator_computer_entries")
+    entries = config.get("computer_entries")
     computers: dict[str, str] = {}
     if isinstance(entries, list):
         for item in entries:
@@ -484,7 +484,7 @@ def _resolve_computers(config: Mapping[str, Any]) -> dict[str, str]:
 
 
 def _resolve_target_descriptions(config: Mapping[str, Any]) -> dict[str, str]:
-    entries = config.get("remote_operator_computer_entries")
+    entries = config.get("computer_entries")
     descriptions: dict[str, str] = {}
     if isinstance(entries, list):
         for item in entries:
@@ -529,7 +529,7 @@ def _normalize_bool(value: Any) -> bool:
 
 
 def _resolve_default_profile(config: Mapping[str, Any]) -> str:
-    profile = _normalize_profile(config.get("remote_operator_default_profile"))
+    profile = _normalize_profile(config.get("default_profile"))
     return profile or "simple"
 
 
@@ -538,7 +538,7 @@ def _resolve_profile_labels(config: Mapping[str, Any]) -> dict[str, str]:
         "simple": "简单任务",
         "complex": "复杂任务",
     }
-    raw_profiles = config.get("remote_operator_profiles")
+    raw_profiles = config.get("profiles")
     if isinstance(raw_profiles, Mapping):
         for key in ("simple", "complex"):
             raw_profile = raw_profiles.get(key)
@@ -620,7 +620,7 @@ def _preview_text(text: str, limit: int = 80) -> str:
     return f"{normalized[: limit - 3]}..."
 
 
-def _load_plugin_config() -> Any:
-    from ..runtime.plugin_runtime import get_plugin_config
+def _load_remote_operator_config() -> Any:
+    from ..runtime.plugin_runtime import get_config_value, get_plugin_config
 
-    return get_plugin_config()
+    return get_config_value(get_plugin_config() or {}, "remote_operator", {})

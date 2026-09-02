@@ -63,9 +63,6 @@ def build_system_model_sync(
     *,
     model_info: dict[str, Any],
     runtime_cache_errors: dict[str, str] | None = None,
-    conf_name: str,
-    conf_uid: str,
-    client_uid: str,
 ) -> dict[str, Any]:
     return build_message_envelope(
         TYPE_SYSTEM_MODEL_SYNC,
@@ -77,9 +74,6 @@ def build_system_model_sync(
                 for key, value in (runtime_cache_errors or {}).items()
                 if str(key).strip() and str(value).strip()
             },
-            "conf_name": conf_name,
-            "conf_uid": conf_uid,
-            "client_uid": client_uid,
         },
     )
 

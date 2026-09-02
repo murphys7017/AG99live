@@ -42,16 +42,9 @@ export function parseSystemModelSyncPayload(
     envelope.type,
     "payload",
     root,
-    ["model_info", "runtime_cache_errors", "conf_name", "conf_uid", "client_uid"],
+    ["model_info", "runtime_cache_errors"],
   );
   if (!rootKeys.ok) return rootKeys;
-
-  const confName = parseNonEmptyString(envelope.type, root.conf_name, "payload.conf_name");
-  if (!confName.ok) return confName;
-  const confUid = parseNonEmptyString(envelope.type, root.conf_uid, "payload.conf_uid");
-  if (!confUid.ok) return confUid;
-  const clientUid = parseNonEmptyString(envelope.type, root.client_uid, "payload.client_uid");
-  if (!clientUid.ok) return clientUid;
 
   const modelInfoRecord = asRecord(root.model_info);
   if (!modelInfoRecord) {
@@ -160,9 +153,6 @@ export function parseSystemModelSyncPayload(
         models,
       },
       runtime_cache_errors: runtimeCacheErrors,
-      conf_name: confName.payload,
-      conf_uid: confUid.payload,
-      client_uid: clientUid.payload,
     },
   };
 }

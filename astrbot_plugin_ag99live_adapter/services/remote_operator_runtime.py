@@ -77,17 +77,17 @@ def resolve_remote_operator_endpoint_config(
     computers = {key: target.label for key, target in targets.items()}
     endpoints = {key: target.endpoint for key, target in targets.items()}
 
-    profiles = _resolve_profiles(config.get("remote_operator_profiles"))
-    default_profile = _normalize_text(config.get("remote_operator_default_profile"))
+    profiles = _resolve_profiles(config.get("profiles"))
+    default_profile = _normalize_text(config.get("default_profile"))
     if default_profile not in profiles:
         default_profile = "simple"
 
-    default_computer = _normalize_text(config.get("remote_operator_default_computer"))
+    default_computer = _normalize_text(config.get("default_computer"))
     if default_computer not in targets:
         default_computer = next(iter(targets))
 
     probe_max_failures = _normalize_positive_int(
-        config.get("remote_operator_probe_max_failures"),
+        config.get("probe_max_failures"),
         default=5,
     )
 
@@ -728,7 +728,7 @@ def _extract_skill_path(result: Any, target_name: str) -> str:
 
 
 def _resolve_target_entries(config: Mapping[str, Any]) -> dict[str, RemoteOperatorTarget]:
-    entries = config.get("remote_operator_computer_entries")
+    entries = config.get("computer_entries")
     targets: dict[str, RemoteOperatorTarget] = {}
     if isinstance(entries, list):
         for item in entries:

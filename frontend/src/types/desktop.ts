@@ -326,7 +326,6 @@ export interface DesktopModelProjectionSnapshot {
   selectedModelName: string;
   selectedModelIconUrl: string;
   recommendedMode: string;
-  confName: string;
   lastUpdated: string;
   runtimeSemanticAxisProfile: SemanticAxisProfile | null;
   baseActionPreview: DesktopBaseActionPreview | null;
@@ -363,7 +362,6 @@ export interface DesktopRuntimeSnapshot {
   pttKeyBinding: DesktopPttKeyBinding;
   pttHookStatus: DesktopPttHookStatus;
   audioPlaying: boolean;
-  confName: string;
   lastUpdated: string;
   serverWsUrl: string;
   httpBaseUrl: string;

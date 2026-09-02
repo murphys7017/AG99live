@@ -50,19 +50,15 @@ PUBLIC_CACHE_DIR = PLUGIN_DATA_DIR / "public_cache"
 AUDIO_CACHE_DIR = PUBLIC_CACHE_DIR / "audio"
 IMAGE_CACHE_DIR = PUBLIC_CACHE_DIR / "images"
 STATE_DIR = PLUGIN_DATA_DIR / "state"
-SUPPORTED_LOOPBACK_BIND_HOSTS = frozenset({"127.0.0.1", "localhost"})
+LOOPBACK_BIND_HOST = "127.0.0.1"
 
 
 @register_platform_adapter(
     "olv_pet_adapter",
     "AG99live Adapter",
     default_config_tmpl={
-        "host": "127.0.0.1",
         "port": 12396,
         "http_port": 12397,
-        "debug_port": 12398,
-        "conf_name": "AG99live Desktop",
-        "conf_uid": "ag99live-desktop",
         "speaker_name": "AstrBot",
         "auto_start_mic": False,
     },
@@ -72,7 +68,7 @@ class OLVPetPlatformAdapter(Platform):
 
     持有的组件（按生命周期顺序）：
       - RuntimeState / SessionState / TurnIdentityMap — 配置与轮次状态；
-      - StaticResourceServer × 2 — 静态资源 + 调试 API 端口；
+      - StaticResourceServer — Live2D、图片和音频静态资源；
       - MediaService — 音频流缓冲 / 缓存 / 图片落地；
       - MessageFactory — 协议消息 → AstrBotMessage；
       - ChatBuffer / ConversationHistoryBridge / FrontendSystemCommandHandler — 业务组合；
@@ -94,28 +90,24 @@ class OLVPetPlatformAdapter(Platform):
         self.config = platform_config
         self.settings = platform_settings or {}
 
-        self.host = _require_loopback_host(
-            get_config_value(self.config, "host", "127.0.0.1")
-        )
+        self.host = LOOPBACK_BIND_HOST
         self.port = int(get_config_value(self.config, "port", 12396))
         self.http_port = int(get_config_value(self.config, "http_port", 12397))
-        self.debug_port = int(get_config_value(self.config, "debug_port", 12398))
-        self.conf_name = get_config_value(self.config, "conf_name", "AG99live Desktop")
-        self.conf_uid = get_config_value(self.config, "conf_uid", "ag99live-desktop")
         self.speaker_name = get_config_value(self.config, "speaker_name", "AstrBot")
         self.auto_start_mic = bool(get_config_value(self.config, "auto_start_mic", False))
         self._event_loop: asyncio.AbstractEventLoop | None = None
 
         self._plugin_context = get_plugin_context()
         self._plugin_config = get_plugin_config() or {}
+        general_config = get_config_value(self._plugin_config, "general", {})
 
         self.client_uid = normalize_client_uid(
-            get_config_value(self._plugin_config, "client_uid", DEFAULT_CLIENT_UID),
+            get_config_value(general_config, "client_uid", DEFAULT_CLIENT_UID),
             DEFAULT_CLIENT_UID,
         )
         self.client_nickname = normalize_client_nickname(
             get_config_value(
-                self._plugin_config,
+                general_config,
                 "client_nickname",
                 DEFAULT_CLIENT_NICKNAME,
             ),
@@ -147,11 +139,6 @@ class OLVPetPlatformAdapter(Platform):
                 image_cache_dir=IMAGE_CACHE_DIR,
             ),
         )
-        self._debug_server = StaticResourceServer(
-            host=self.host,
-            port=self.debug_port,
-            routes={},
-        )
         self.media_service = MediaService(
             host=self.host,
             http_port=self.http_port,
@@ -167,7 +154,7 @@ class OLVPetPlatformAdapter(Platform):
             image_cooldown_seconds_getter=lambda: self.runtime_state.image_cooldown_seconds,
         )
         self.chat_buffer = ChatBuffer(
-            maxlen=int(get_config_value(self.runtime_state.plugin_config, "chat_buffer_size", 10))
+            maxlen=int(get_config_value(general_config, "chat_buffer_size", 10))
         )
         self.history_bridge = ConversationHistoryBridge(
             plugin_context=self._plugin_context,
@@ -196,7 +183,11 @@ class OLVPetPlatformAdapter(Platform):
         self.remote_operator_runtime: RemoteOperatorRuntime | None = None
         if self.runtime_state.interaction_contributors_available:
             self.remote_operator_runtime = RemoteOperatorRuntime(
-                plugin_config_loader=get_plugin_config,
+                plugin_config_loader=lambda: get_config_value(
+                    get_plugin_config() or {},
+                    "remote_operator",
+                    {},
+                ),
                 submit_system_text_input=self._submit_remote_operator_system_text_input,
             )
 
@@ -216,16 +207,14 @@ class OLVPetPlatformAdapter(Platform):
             build_platform_event=self._build_platform_event,
             commit_event=self.commit_event,
             create_vad_engine=lambda: create_stream_vad_engine(
-                engine_type=self.runtime_state.vad_model,
+                engine_type="silero_vad",
                 kwargs=self.runtime_state.vad_config,
             ),
         )
 
         logger.debug(
             "AG99live adapter initialized "
-            f"(host={self.host}, ws_port={self.port}, http_port={self.http_port}, "
-            f"debug_port={self.debug_port}, "
-            f"conf_name={self.conf_name}, conf_uid={self.conf_uid})"
+            f"(host={self.host}, ws_port={self.port}, http_port={self.http_port})"
         )
         self._refresh_runtime_settings()
 
@@ -250,7 +239,6 @@ class OLVPetPlatformAdapter(Platform):
     async def run(self):
         self._event_loop = asyncio.get_running_loop()
         try:
-            await asyncio.to_thread(self._debug_server.start)
             if self.remote_operator_runtime is not None:
                 self.remote_operator_runtime.start()
             await self.transport.start()
@@ -261,7 +249,6 @@ class OLVPetPlatformAdapter(Platform):
             logger.exception("AG99live adapter failed during run()")
             raise
         finally:
-            await asyncio.to_thread(self._debug_server.stop)
             self._event_loop = None
 
     async def send_by_session(self, session: MessageSesion, message_chain):
@@ -368,11 +355,7 @@ class OLVPetPlatformAdapter(Platform):
         self._sync_client_profile_from_runtime_state()
 
     async def _send_current_model_and_conf(self, *, force: bool = False) -> bool:
-        payload = self.runtime_state.build_current_model_payload(
-            conf_name=self.conf_name,
-            conf_uid=self.conf_uid,
-            client_uid=self.client_uid,
-        )
+        payload = self.runtime_state.build_current_model_payload()
         signature = self.runtime_state.build_model_payload_signature(payload)
         if not self.runtime_state.should_send_model_payload(signature, force=force):
             return True
@@ -380,9 +363,8 @@ class OLVPetPlatformAdapter(Platform):
         sent = await self._send_json(payload)
         if not sent:
             logger.warning(
-                "Failed to deliver current model/config payload "
-                "(conf_uid=%s, phase=message-only). Will retry on next refresh.",
-                self.conf_uid,
+                "Failed to deliver current model payload. "
+                "Will retry on next refresh.",
             )
             return False
 
@@ -421,7 +403,6 @@ class OLVPetPlatformAdapter(Platform):
             if callable(close_motion_lab):
                 await close_motion_lab()
         finally:
-            await asyncio.to_thread(self._debug_server.stop)
             self._event_loop = None
 
     async def _submit_remote_operator_system_text_input(
@@ -493,13 +474,3 @@ class OLVPetPlatformAdapter(Platform):
             self.client_nickname,
         )
         self.history_bridge.set_client_uid(self.client_uid)
-
-
-def _require_loopback_host(value: Any) -> str:
-    host = str(value or "").strip().lower()
-    if host not in SUPPORTED_LOOPBACK_BIND_HOSTS:
-        raise ValueError(
-            "ag99live_transport_host_must_use_supported_loopback:"
-            f"{host or '<empty>'}"
-        )
-    return host

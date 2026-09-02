@@ -100,7 +100,6 @@ class RuntimeState:
             get_turn_context=self._get_motion_lab_turn_context,
         )
         self.motion_lab_recorder = self._build_motion_lab_recorder()
-        self.vad_model = "silero_vad"
         self.vad_config: dict[str, Any] = {}
         self.model_info: dict[str, Any] = {}
         self.image_cooldown_seconds = 0
@@ -143,55 +142,53 @@ class RuntimeState:
 
         previous_performance_curve_provider_id = self.performance_curve_provider_id
         previous_enable_performance_curve = self.enable_performance_curve
+        general_config = get_config_value(self.plugin_config, "general", {})
+        live2d_input_config = get_config_value(self.plugin_config, "live2d_input", {})
+        performance_curve_config = get_config_value(
+            self.plugin_config,
+            "performance_curve",
+            {},
+        )
+        vad_config = get_config_value(self.plugin_config, "vad", {})
         self.client_uid = normalize_client_uid(
-            get_config_value(self.plugin_config, "client_uid", self.client_uid),
+            get_config_value(general_config, "client_uid", self.client_uid),
             DEFAULT_CLIENT_UID,
         )
         self.client_nickname = normalize_client_nickname(
             get_config_value(
-                self.plugin_config,
+                general_config,
                 "client_nickname",
                 self.client_nickname,
             ),
             DEFAULT_CLIENT_NICKNAME,
         )
         self.performance_curve_provider_id = get_config_value(
-            self.plugin_config,
-            "performance_curve_provider_id",
+            performance_curve_config,
+            "provider_id",
             "",
         )
         self.enable_performance_curve = bool(
-            get_config_value(self.plugin_config, "enable_performance_curve", False)
+            get_config_value(performance_curve_config, "enabled", False)
         )
-        self.vad_model = str(
-            get_config_value(self.plugin_config, "vad_model", "silero_vad")
-            or ""
-        ).strip()
-        if self.vad_model != "silero_vad":
-            raise RuntimeStateConfigurationError(
-                "Configured VAD engine "
-                f"`{self.vad_model or '<empty>'}` is not supported. "
-                "Use `silero_vad`."
-            )
         self.vad_config = {
             "orig_sr": 16000,
             "target_sr": 16000,
             "prob_threshold": float(
-                get_config_value(self.plugin_config, "vad_prob_threshold", 0.4)
+                get_config_value(vad_config, "prob_threshold", 0.4)
             ),
             "required_hits": int(
-                get_config_value(self.plugin_config, "vad_required_hits", 3)
+                get_config_value(vad_config, "required_hits", 3)
             ),
             "required_misses": int(
-                get_config_value(self.plugin_config, "vad_required_misses", 24)
+                get_config_value(vad_config, "required_misses", 24)
             ),
         }
         self.image_cooldown_seconds = max(
-            int(get_config_value(self.plugin_config, "image_cooldown_seconds", 0)),
+            int(get_config_value(live2d_input_config, "image_cooldown_seconds", 0)),
             0,
         )
         selected_model_name = str(
-            get_config_value(self.plugin_config, "live2d_model_name", "")
+            get_config_value(live2d_input_config, "model_name", "")
         ).strip()
         base_url = f"http://{self.host}:{self.http_port}"
         live2d_dir_md5 = build_live2d_directory_md5(Path(self.live2ds_dir))
@@ -314,21 +311,12 @@ class RuntimeState:
             )
         return provider
 
-    def build_current_model_payload(
-        self,
-        *,
-        conf_name: str,
-        conf_uid: str,
-        client_uid: str,
-    ) -> dict[str, Any]:
+    def build_current_model_payload(self) -> dict[str, Any]:
         runtime_cache_errors = self._build_runtime_cache_error_payload()
         model_info_payload = _project_frontend_model_info(self.model_info)
         return build_system_model_sync(
             model_info=model_info_payload,
             runtime_cache_errors=runtime_cache_errors,
-            conf_name=conf_name,
-            conf_uid=conf_uid,
-            client_uid=client_uid,
         )
 
     def save_semantic_axis_profile_update(

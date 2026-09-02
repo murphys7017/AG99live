@@ -221,10 +221,10 @@ Motion Lab 事件采用 at-least-once 交付：前端必须先把事件写入 In
 
 ## 传输部署边界
 
-- 当前 WebSocket、静态资源 HTTP 和 debug HTTP 只支持绑定 `127.0.0.1` 或 `localhost`。
+- 当前 WebSocket 和静态资源 HTTP 固定绑定 `127.0.0.1`。
 - 当前没有远程客户端认证、TLS、跨主机媒体授权或 IPv6 URL 规范化；`::1` 也不属于支持值。
 - `audio.url`、Live2D 资源 URL 和连接地址都依赖同一回环部署假设。
-- 远程 AstrBot 属于后续公开协议设计，不能通过把当前 `host` 改成局域网地址实现。
+- 远程 AstrBot 属于后续公开协议设计，不能通过修改当前平台配置实现。
 
 ## 动作路径
 

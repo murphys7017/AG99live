@@ -189,7 +189,6 @@ export function createPetRuntimeSnapshotPublisher(
         connectionLabel: options.connectionLabel.value,
         stageMessage: options.stageMessage.value,
         aiState: options.aiState.value,
-        confName: options.modelSyncState.confName,
         lastUpdated: options.modelSyncState.lastUpdated,
       };
   }
@@ -263,7 +262,6 @@ export function createPetRuntimeSnapshotPublisher(
       selectedModelIconUrl: model?.icon_url ?? "",
       recommendedMode:
         model?.engine_hints.recommended_mode ?? "",
-      confName: options.modelSyncState.confName,
       lastUpdated: options.modelSyncState.lastUpdated,
       runtimeSemanticAxisProfile: options.selectedSemanticAxisProfile.value
         ? cloneJson(options.selectedSemanticAxisProfile.value)
@@ -283,7 +281,6 @@ export function createPetRuntimeSnapshotPublisher(
 
   const stopModelProjectionWatch = watch(
     () => [
-      options.modelSyncState.confName,
       options.modelSyncState.lastUpdated,
       options.selectedModel.value?.name ?? "",
       options.selectedModel.value?.icon_url ?? "",

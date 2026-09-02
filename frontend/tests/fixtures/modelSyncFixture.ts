@@ -129,9 +129,6 @@ export function makeValidModelSyncPayload(overrides: Record<string, unknown> = {
       models: [model],
     },
     runtime_cache_errors: {},
-    conf_name: "default",
-    conf_uid: "conf-1",
-    client_uid: "client-1",
     ...overrides,
   };
 }

@@ -50,11 +50,7 @@ def test_runtime_state_injects_semantic_profile_into_model_sync(
     assert "semantic_axis_profile" in model
     assert model["semantic_axis_profile"]["profile_id"] == "DemoModel.semantic.v1"
 
-    payload = state.build_current_model_payload(
-        conf_name="conf",
-        conf_uid="conf-uid",
-        client_uid="desktop-client",
-    )
+    payload = state.build_current_model_payload()
     payload_model = payload["payload"]["model_info"]["models"][0]
     assert payload_model["semantic_axis_profile"]["revision"] == 1
     assert "expression_example_library" not in payload_model
@@ -99,11 +95,7 @@ def test_runtime_state_exposes_runtime_cache_segment_errors_in_model_sync(
     )
     asyncio.run(state.refresh_async())
 
-    payload = state.build_current_model_payload(
-        conf_name="conf",
-        conf_uid="conf-uid",
-        client_uid="desktop-client",
-    )
+    payload = state.build_current_model_payload()
     assert payload["payload"]["runtime_cache_errors"] == {
         "scan_cache": "live2d_runtime_cache_scan_cache_invalid",
     }

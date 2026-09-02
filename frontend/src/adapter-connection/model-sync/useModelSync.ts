@@ -13,7 +13,6 @@ import type {
 import type { SemanticAxisProfile } from "../../types/semantic-axis-profile.js";
 
 interface ModelSyncState {
-  confName: string;
   lastUpdated: string;
   modelInfo: ModelSyncInfo | null;
   runtimeCacheErrors: RuntimeCacheErrorsPayload | null;
@@ -29,14 +28,12 @@ export interface ModelSyncInstance {
 
 export function createModelSync(): ModelSyncInstance {
   const state = reactive<ModelSyncState>({
-    confName: "",
     lastUpdated: "",
     modelInfo: null,
     runtimeCacheErrors: null,
   });
 
   function resetModelSyncState(): void {
-    state.confName = "";
     state.lastUpdated = "";
     state.modelInfo = null;
     state.runtimeCacheErrors = null;
@@ -49,7 +46,6 @@ export function createModelSync(): ModelSyncInstance {
       return;
     }
 
-    state.confName = envelope.payload.conf_name;
     state.lastUpdated = envelope.timestamp;
     state.modelInfo = envelope.payload.model_info;
     state.runtimeCacheErrors = envelope.payload.runtime_cache_errors;

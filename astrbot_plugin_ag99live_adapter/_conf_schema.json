@@ -1,212 +1,233 @@
 {
-  "chat_buffer_size": {
-    "description": "缓存最近多少条用户/助手文本对话。",
-    "type": "int",
-    "default": 10,
-    "hint": "用于维护桌面端最近对话缓存。"
-  },
-  "client_uid": {
-    "description": "桌面端前端在 AstrBot 中使用的用户 ID。",
-    "type": "string",
-    "default": "desktop-client"
-  },
-  "client_nickname": {
-    "description": "桌面端前端在 AstrBot 中显示的用户昵称。",
-    "type": "string",
-    "default": "DesktopUser"
-  },
-  "remote_operator_default_computer": {
-    "description": "增强版 AstrBot 专用。远程执行器默认电脑 key；用户没有指定电脑时使用该 key，如果不在映射中则使用第一台电脑。官方兼容模式不启动 Remote Operator。",
-    "type": "string",
-    "default": ""
-  },
-  "remote_operator_computer_entries": {
-    "description": "增强版 AstrBot 专用。每项配置一个 computer key、用户可说出的名称、执行后端和后端固定参数；官方兼容模式不探测 endpoint，也不注入或执行远程任务。",
-    "type": "template_list",
-    "default": [],
-    "templates": {
-      "computer": {
-        "name": "电脑",
-        "description": "一台可用的远程执行器电脑。",
-        "items": {
-          "key": {
-            "description": "内部 computer key，例如 work。",
-            "type": "string",
-            "default": ""
-          },
-          "label": {
-            "description": "用户可说出的电脑名称，例如 工作电脑。",
-            "type": "string",
-            "default": ""
-          },
-          "enabled": {
-            "description": "是否启用这个执行器。",
-            "type": "bool",
-            "default": true
-          },
-          "allow_unrestricted_access": {
-            "description": "明确允许该执行器绕过沙箱并自动批准命令、文件修改和权限申请。仅可对完全信任的电脑启用；未启用时该执行器不会上线。",
-            "type": "bool",
-            "default": false
-          },
-          "backend": {
-            "description": "执行后端。codex_app_server 用于 Codex app-server + Computer Use 桌面控制；opencode 用于 OpenCode 代码、文件、命令和项目任务。",
-            "type": "string",
-            "default": "codex_app_server",
-            "options": [
-              "codex_app_server",
-              "opencode"
-            ]
-          },
-          "endpoint": {
-            "description": "后端地址。codex_app_server 填 WebSocket 地址，例如 ws://127.0.0.1:4500；opencode 可填 opencode serve 地址，例如 http://127.0.0.1:4096，留空则直接本地运行 opencode run。",
-            "type": "string",
-            "default": ""
-          },
-          "workdir": {
-            "description": "OpenCode 工作目录。仅 backend=opencode 时使用，例如 C:\\Users\\Administrator\\Documents\\GitHub\\AG99live。",
-            "type": "string",
-            "default": ""
-          },
-          "model": {
-            "description": "OpenCode 固定执行模型，例如 provider/free-model。仅 backend=opencode 时使用；由配置锁定，不由聊天模型选择。",
-            "type": "string",
-            "default": ""
-          },
-          "variant": {
-            "description": "OpenCode 模型变体或推理档位，例如 minimal、low、high。仅 backend=opencode 时使用。",
-            "type": "string",
-            "default": ""
-          },
-          "description": {
-            "description": "给聊天模型看的执行器用途说明，只描述适合处理什么任务，不包含模型、密钥或工作目录。",
-            "type": "string",
-            "default": ""
-          }
-        }
+  "general": {
+    "description": "基础身份与会话",
+    "type": "object",
+    "items": {
+      "client_uid": {
+        "description": "桌面端前端在 AstrBot 中使用的用户 ID。",
+        "type": "string",
+        "default": "desktop-client"
+      },
+      "client_nickname": {
+        "description": "桌面端前端在 AstrBot 中显示的用户昵称。",
+        "type": "string",
+        "default": "DesktopUser"
+      },
+      "chat_buffer_size": {
+        "description": "桌面端维护的最近用户/助手文本条数。",
+        "type": "int",
+        "default": 10
       }
     }
   },
-  "remote_operator_probe_max_failures": {
-    "description": "增强版 AstrBot 中，远程执行器在线探测连续失败多少次后停止继续探测该 endpoint。重启插件或修改 endpoint 后会重新探测。",
-    "type": "int",
-    "default": 5
-  },
-  "remote_operator_default_profile": {
-    "description": "增强版 AstrBot 中的远程执行器默认执行档位。未明确指定复杂任务时使用 simple。",
-    "type": "string",
-    "default": "simple",
-    "options": [
-      "simple",
-      "complex"
-    ]
-  },
-  "remote_operator_profiles": {
-    "description": "增强版 AstrBot 中的远程执行器执行档位配置。仅支持 simple 和 complex 两档。",
+  "live2d_input": {
+    "description": "Live2D 与图片输入",
     "type": "object",
     "items": {
-      "simple": {
-        "description": "简单任务档位。未明确指定复杂任务时使用。",
-        "type": "object",
-        "items": {
-          "label": {
-            "description": "档位显示名称。",
-            "type": "string",
-            "default": "简单任务"
-          },
-          "model": {
-            "description": "Codex 执行模型。",
-            "type": "string",
-            "default": "gpt-5.3-codex"
-          },
-          "effort": {
-            "description": "Codex reasoning effort。",
-            "type": "string",
-            "default": "low",
-            "options": [
-              "none",
-              "minimal",
-              "low",
-              "medium",
-              "high",
-              "xhigh"
-            ]
+      "model_name": {
+        "description": "优先加载的 Live2D 模型目录名。留空时使用扫描到的第一个模型。",
+        "type": "string",
+        "default": ""
+      },
+      "image_cooldown_seconds": {
+        "description": "图片输入冷却时间（秒）。冷却期内的新图片会被丢弃，但文本仍正常提交；0 表示不限制。",
+        "type": "int",
+        "default": 0
+      }
+    }
+  },
+  "performance_curve": {
+    "description": "可选表演曲线",
+    "type": "object",
+    "items": {
+      "enabled": {
+        "description": "调用独立 Provider 为动作生成进入、保持和退出节奏提示。失败或超时不影响原动作播放。",
+        "type": "bool",
+        "default": false
+      },
+      "provider_id": {
+        "description": "表演曲线专用聊天 Provider。启用后必须选择，不复用当前会话聊天模型。",
+        "type": "string",
+        "default": "",
+        "_special": "select_provider"
+      }
+    }
+  },
+  "vad": {
+    "description": "语音断句",
+    "type": "object",
+    "items": {
+      "prob_threshold": {
+        "description": "Silero VAD 判定当前音频帧为语音的概率阈值。",
+        "type": "float",
+        "default": 0.4
+      },
+      "required_hits": {
+        "description": "开始一次语音输入前要求连续命中的帧数。",
+        "type": "int",
+        "default": 3
+      },
+      "required_misses": {
+        "description": "结束一次语音输入前要求连续静音的帧数。",
+        "type": "int",
+        "default": 24
+      }
+    }
+  },
+  "remote_operator": {
+    "description": "远程执行器（增强版 AstrBot 专用）",
+    "type": "object",
+    "items": {
+      "default_computer": {
+        "description": "用户未指定电脑时使用的 computer key；留空或无效时使用第一台在线电脑。官方兼容模式不启动 Remote Operator。",
+        "type": "string",
+        "default": ""
+      },
+      "computer_entries": {
+        "description": "配置可用电脑、执行后端和固定参数。官方兼容模式不探测 endpoint，也不注入或执行远程任务。",
+        "type": "template_list",
+        "default": [],
+        "templates": {
+          "computer": {
+            "name": "电脑",
+            "description": "一台可用的远程执行器电脑。",
+            "items": {
+              "key": {
+                "description": "内部 computer key，例如 work。",
+                "type": "string",
+                "default": ""
+              },
+              "label": {
+                "description": "用户可说出的电脑名称，例如 工作电脑。",
+                "type": "string",
+                "default": ""
+              },
+              "enabled": {
+                "description": "是否启用这个执行器。",
+                "type": "bool",
+                "default": true
+              },
+              "allow_unrestricted_access": {
+                "description": "明确允许该执行器绕过沙箱并自动批准命令、文件修改和权限申请。只能对完全信任的电脑启用；未启用时该执行器不会上线。",
+                "type": "bool",
+                "default": false
+              },
+              "backend": {
+                "description": "执行后端。codex_app_server 用于 Codex app-server + Computer Use；opencode 用于 OpenCode 代码、文件、命令和项目任务。",
+                "type": "string",
+                "default": "codex_app_server",
+                "options": [
+                  "codex_app_server",
+                  "opencode"
+                ]
+              },
+              "endpoint": {
+                "description": "后端地址。codex_app_server 填 WebSocket 地址；opencode 可填 opencode serve 地址，留空则本地运行 opencode run。",
+                "type": "string",
+                "default": ""
+              },
+              "workdir": {
+                "description": "OpenCode 工作目录，仅 backend=opencode 时使用。",
+                "type": "string",
+                "default": ""
+              },
+              "model": {
+                "description": "OpenCode 固定执行模型，仅 backend=opencode 时使用。",
+                "type": "string",
+                "default": ""
+              },
+              "variant": {
+                "description": "OpenCode 模型变体或推理档位，仅 backend=opencode 时使用。",
+                "type": "string",
+                "default": ""
+              },
+              "description": {
+                "description": "给聊天模型看的执行器用途说明，不包含模型、密钥或工作目录。",
+                "type": "string",
+                "default": ""
+              }
+            }
           }
         }
       },
-      "complex": {
-        "description": "复杂任务档位。仅当用户明确要求复杂/深入/高档执行时使用。",
+      "probe_max_failures": {
+        "description": "在线探测连续失败多少次后停止继续探测该 endpoint。重启插件或修改 endpoint 后重新探测。",
+        "type": "int",
+        "default": 5
+      },
+      "default_profile": {
+        "description": "默认执行档位。未明确指定复杂任务时使用 simple。",
+        "type": "string",
+        "default": "simple",
+        "options": [
+          "simple",
+          "complex"
+        ]
+      },
+      "profiles": {
+        "description": "执行档位配置，仅支持 simple 和 complex 两档。",
         "type": "object",
         "items": {
-          "label": {
-            "description": "档位显示名称。",
-            "type": "string",
-            "default": "复杂任务"
+          "simple": {
+            "description": "简单任务档位。",
+            "type": "object",
+            "items": {
+              "label": {
+                "description": "档位显示名称。",
+                "type": "string",
+                "default": "简单任务"
+              },
+              "model": {
+                "description": "Codex 执行模型。",
+                "type": "string",
+                "default": "gpt-5.3-codex"
+              },
+              "effort": {
+                "description": "Codex reasoning effort。",
+                "type": "string",
+                "default": "low",
+                "options": [
+                  "none",
+                  "minimal",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh"
+                ]
+              }
+            }
           },
-          "model": {
-            "description": "Codex 执行模型。",
-            "type": "string",
-            "default": "gpt-5.4-codex"
-          },
-          "effort": {
-            "description": "Codex reasoning effort。",
-            "type": "string",
-            "default": "high",
-            "options": [
-              "none",
-              "minimal",
-              "low",
-              "medium",
-              "high",
-              "xhigh"
-            ]
+          "complex": {
+            "description": "复杂任务档位，仅在用户明确要求复杂或深入执行时使用。",
+            "type": "object",
+            "items": {
+              "label": {
+                "description": "档位显示名称。",
+                "type": "string",
+                "default": "复杂任务"
+              },
+              "model": {
+                "description": "Codex 执行模型。",
+                "type": "string",
+                "default": "gpt-5.4-codex"
+              },
+              "effort": {
+                "description": "Codex reasoning effort。",
+                "type": "string",
+                "default": "high",
+                "options": [
+                  "none",
+                  "minimal",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh"
+                ]
+              }
+            }
           }
         }
       }
     }
-  },
-  "live2d_model_name": {
-    "description": "优先加载的 Live2D 模型目录名。留空时默认使用扫描到的第一个模型。",
-    "type": "string",
-    "default": ""
-  },
-  "image_cooldown_seconds": {
-    "description": "图片输入冷却时间（秒）。在冷却时间内再次收到图片会直接丢弃，仅保留文本。",
-    "type": "int",
-    "default": 0
-  },
-  "enable_performance_curve": {
-    "description": "是否启用表演曲线提示生成。启用后会调用表演曲线 Provider 为动作生成进入、保持、退出节奏提示；失败时不影响原动作播放。",
-    "type": "bool",
-    "default": false
-  },
-  "performance_curve_provider_id": {
-    "description": "表演曲线提示生成专用的聊天 Provider。启用表演曲线时必须选择，且不会复用当前会话聊天模型。",
-    "type": "string",
-    "default": "",
-    "_special": "select_provider"
-  },
-  "vad_model": {
-    "description": "前端原始音频断句使用的 VAD 模型。",
-    "type": "string",
-    "default": "silero_vad",
-    "options": [
-      "silero_vad"
-    ]
-  },
-  "vad_prob_threshold": {
-    "description": "VAD 语音概率阈值。",
-    "type": "float",
-    "default": 0.4
-  },
-  "vad_required_hits": {
-    "description": "VAD 连续命中次数。",
-    "type": "int",
-    "default": 3
-  },
-  "vad_required_misses": {
-    "description": "VAD 连续静音次数。",
-    "type": "int",
-    "default": 24
   }
 }

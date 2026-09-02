@@ -23,9 +23,8 @@ AG99live 的 AstrBot 插件侧实现。该目录负责协议桥接、Turn 生命
 
 ## 当前部署边界
 
-- 桌宠 WebSocket、静态资源 HTTP 和 debug HTTP 当前只允许绑定
-  `127.0.0.1` 或 `localhost`，用于 AstrBot 与 Electron 在同一台电脑上的部署。
-- `::1` 当前被明确拒绝：静态资源服务器和媒体 URL 生成尚未实现一致的 IPv6 地址处理。
+- 桌宠 WebSocket 与静态资源 HTTP 固定绑定 `127.0.0.1`，用于 AstrBot 与 Electron
+  在同一台电脑上的部署。
 - 当前协议没有远程客户端认证、授权、TLS 和跨主机媒体 URL 保护，因此不能把 `host`
   改为局域网或公网地址来部署远程 AstrBot。
 - 远程执行器的 Codex app-server / OpenCode endpoint 是 Adapter 的另一条出站连接，
@@ -130,7 +129,7 @@ AG99live 远程执行器只在具备 Interaction Prompt/Result contributor 的�
 
 当前关键边界：
 
-- `_conf_schema.json` 的 `remote_operator_computer_entries` 配置执行器 key、用户可读名称、后端类型和固定执行参数。执行器只有在 `allow_unrestricted_access=true` 时才会上线；该开关表示明确允许绕过沙箱并自动批准命令、文件修改和权限申请，只能用于完全信任的电脑。
+- `_conf_schema.json` 的 `remote_operator.computer_entries` 配置执行器 key、用户可读名称、后端类型和固定执行参数。执行器只有在 `allow_unrestricted_access=true` 时才会上线；该开关表示明确允许绕过沙箱并自动批准命令、文件修改和权限申请，只能用于完全信任的电脑。
 - `backend=codex_app_server` 用于 Windows 桌面、应用、浏览器和 Computer Use 操作，endpoint 填 Codex app-server WebSocket 地址。
 - `backend=opencode` 用于代码、文件、命令、日志和项目开发任务；`model`、`variant`、`workdir` 均由配置锁定，不由聊天模型决定。
 - Adapter 会 probe endpoint 并只向 prompt 注入在线电脑。
@@ -147,8 +146,13 @@ AG99live 远程执行器只在具备 Interaction Prompt/Result contributor 的�
 
 ## 关键配置
 
-- `remote_operator_default_computer` / `remote_operator_computer_entries`：远程执行器路由和后端配置；支持 `codex_app_server` 与 `opencode`。
-- `remote_operator_default_profile` / `remote_operator_profiles`：远程执行器执行档位。Codex app-server 后端使用该档位选择 turn 模型与 effort；OpenCode 后端使用 entry 内固定的 `model` / `variant`。
+- `general`：桌面端身份与会话缓存。
+- `live2d_input`：模型选择和图片输入冷却。
+- `performance_curve`：可选表演曲线的开关与专用 Provider。
+- `vad`：Silero VAD 的断句阈值和连续帧参数。
+- `remote_operator`：远程执行器路由、目标电脑和执行档位；支持 `codex_app_server` 与 `opencode`。
+
+配置结构已按职责重组；旧的平级配置键不会再被读取。开发阶段请直接按当前 Schema 重新生成或编辑插件配置，不保留旧路径兼容。
 
 当前 Persona Effect 的参考策略：
 

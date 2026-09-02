@@ -79,7 +79,6 @@ export const defaultSnapshot: DesktopRuntimeSnapshot = {
     updatedAt: "",
   },
   audioPlaying: false,
-  confName: "",
   lastUpdated: "",
   serverWsUrl: "",
   httpBaseUrl: "",
