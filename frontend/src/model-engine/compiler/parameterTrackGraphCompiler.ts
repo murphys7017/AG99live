@@ -39,6 +39,8 @@ type ParameterTrackBuildResult =
   | { ok: true; points: SemanticParameterPlanEntry["keyframes"] }
   | { ok: false; reason: string };
 
+type ParameterStep = SemanticParameterPlanEntry | undefined;
+
 export type ParameterTrackGraphCompileResult =
   | {
     ok: true;
@@ -80,7 +82,7 @@ export function compileParameterSequenceTrackGraph(
   }
   const scheduleDurationMs = schedule.durationMs;
   const axisById = new Map(profile.axes.map((axis) => [axis.id, axis]));
-  const parameterStepsResult = resolveParameterSteps(stepPlans, axisById);
+  const parameterStepsResult = resolveParameterSteps(stepPlans);
   if (!parameterStepsResult.ok) {
     return parameterStepsResult;
   }
@@ -99,7 +101,18 @@ export function compileParameterSequenceTrackGraph(
     axisById,
   );
   for (const parameterSteps of parameterStepsResult.parameterSteps.values()) {
-    const baseParameter = parameterSteps[0];
+    const firstDefinedStepIndex = parameterSteps.findIndex(
+      (parameter) => parameter !== undefined,
+    );
+    const baseParameter = parameterSteps[firstDefinedStepIndex];
+    if (!baseParameter) {
+      return {
+        ok: false,
+        reason: "parameter_track_graph_parameter_missing",
+        code: "parameter_track_graph_parameter_missing",
+        stepIndex: 0,
+      };
+    }
     const axis = axisById.get(baseParameter.axis_id);
     if (!axis) {
       return {
@@ -195,9 +208,7 @@ export function compileParameterSequenceTrackGraph(
     }
     graphDurationMs = Math.max(
       graphDurationMs,
-      keyframes.points
-        ? timing.value.requiredOwnedUntilMs + firstPlan.timing.blend_out_ms
-        : scheduleDurationMs,
+      timing.value.requiredOwnedUntilMs + firstPlan.timing.blend_out_ms,
     );
     if (keyframes.points) {
       const nodeResult = registerPerformanceParameterNodes(
@@ -224,6 +235,7 @@ export function compileParameterSequenceTrackGraph(
     }
     parameters.push({
       ...baseParameter,
+      activation_at_ms: schedule.semanticSteps[firstDefinedStepIndex].startMs,
       keyframes: keyframes.points,
     });
   }
@@ -277,9 +289,8 @@ export function compileParameterSequenceTrackGraph(
 
 function resolveParameterSteps(
   plans: SemanticParameterPlan[],
-  axisById: Map<string, SemanticAxisDefinition>,
 ):
-  | { ok: true; parameterSteps: Map<string, SemanticParameterPlanEntry[]> }
+  | { ok: true; parameterSteps: Map<string, ParameterStep[]> }
   | Extract<ParameterTrackGraphCompileResult, { ok: false }> {
   const templates = new Map<string, SemanticParameterPlanEntry>();
   for (const plan of plans) {
@@ -290,24 +301,18 @@ function resolveParameterSteps(
     }
   }
 
-  const parameterSteps = new Map<string, SemanticParameterPlanEntry[]>();
+  const parameterSteps = new Map<string, ParameterStep[]>();
   for (const template of templates.values()) {
-    const steps: SemanticParameterPlanEntry[] = [];
+    const steps: ParameterStep[] = [];
+    let current: SemanticParameterPlanEntry | undefined;
     for (let index = 0; index < plans.length; index += 1) {
       const existing = plans[index].parameters.find(
         (parameter) => parameter.parameter_id === template.parameter_id,
       );
-      const parameter = existing ?? resolveNeutralParameter(template, axisById);
-      if (!parameter || (!existing && template.source === "semantic_axis")) {
-        return {
-          ok: false,
-          reason: `parameter_track_graph_parameter_set_mismatch:${index}:${template.parameter_id}`,
-          code: "parameter_track_graph_parameter_set_mismatch",
-          stepIndex: index,
-          parameterId: template.parameter_id,
-        };
+      if (existing) {
+        current = existing;
       }
-      steps.push(parameter);
+      steps.push(current);
     }
     parameterSteps.set(template.parameter_id, steps);
   }
@@ -315,7 +320,7 @@ function resolveParameterSteps(
 }
 
 function buildSemanticTrack(
-  parameterSteps: SemanticParameterPlanEntry[],
+  parameterSteps: readonly ParameterStep[],
   events: PerformancePartTrackTiming["parameterEvents"],
 ): ParameterTrackBuildResult {
   if (events.length === 0) {
@@ -332,7 +337,7 @@ function buildSemanticTrack(
     }
     const parameter = parameterSteps[stepIndex];
     if (!parameter) {
-      return { ok: false, reason: `parameter_track_graph_event_step_out_of_range:${event.id}` };
+      return { ok: false, reason: `parameter_track_graph_event_step_uncontrolled:${event.id}` };
     }
     points.push({
       at_ms: event.atMs,
@@ -348,7 +353,7 @@ function buildSemanticTrack(
 }
 
 export function buildStagedPartParameterTrack(
-  parameterSteps: readonly SemanticParameterPlanEntry[],
+  parameterSteps: readonly ParameterStep[],
   timing: PerformancePartTrackTiming,
   axisNeutralValue: number,
 ): ParameterTrackBuildResult {
@@ -423,12 +428,21 @@ function areSameStepIndices(
 }
 
 function resolveChangedStepIndices(
-  parameterSteps: readonly SemanticParameterPlanEntry[],
+  parameterSteps: readonly ParameterStep[],
 ): number[] {
-  const changedStepIndices = [0];
-  for (let index = 1; index < parameterSteps.length; index += 1) {
+  const firstDefinedStepIndex = parameterSteps.findIndex(
+    (parameter) => parameter !== undefined,
+  );
+  if (firstDefinedStepIndex < 0) {
+    return [];
+  }
+  const changedStepIndices = [firstDefinedStepIndex];
+  for (let index = firstDefinedStepIndex + 1; index < parameterSteps.length; index += 1) {
     const current = parameterSteps[index];
     const previous = parameterSteps[changedStepIndices[changedStepIndices.length - 1]];
+    if (!current || !previous) {
+      continue;
+    }
     if (
       Math.abs(current.target_value - previous.target_value) > 0.000001
       || Math.abs((current.input_value ?? 0) - (previous.input_value ?? 0)) > 0.000001
@@ -440,7 +454,7 @@ function resolveChangedStepIndices(
 }
 
 function resolveParameterReversalStepIndices(
-  parameterSteps: readonly SemanticParameterPlanEntry[],
+  parameterSteps: readonly ParameterStep[],
   changedStepIndices: readonly number[],
   axisNeutralValue: number,
 ): number[] {
@@ -470,7 +484,7 @@ function resolveParameterReversalStepIndices(
 }
 
 function buildScheduledParameterTrack(
-  parameterSteps: SemanticParameterPlanEntry[],
+  parameterSteps: readonly ParameterStep[],
   timing: PerformancePartTrackTiming,
   axisNeutralValue: number,
 ): ParameterTrackBuildResult {
@@ -503,19 +517,6 @@ function resolvePartTrackTiming(
       };
     }
     return { ok: true, value: existing, reason: "" };
-  }
-  if (strategy === "semantic" && changedStepIndices.length === 1) {
-    const timing: PerformancePartTrackTiming = {
-      strategy: "semantic",
-      events: [],
-      parameterEvents: [],
-      requiredOwnedUntilMs: 0,
-      staggered: false,
-      residual: false,
-      compressed: false,
-    };
-    timingsByAxis.set(axis.id, timing);
-    return { ok: true, value: timing, reason: "" };
   }
   const timing = strategy === "gaze"
     ? compileGazeTrackTiming({
@@ -550,45 +551,16 @@ function resolvePartTrackTiming(
 }
 
 export function isStagedPartParameterTrackActive(
-  parameterSteps: readonly SemanticParameterPlanEntry[],
+  parameterSteps: readonly ParameterStep[],
   axisNeutralValue: number,
 ): boolean {
-  return parameterSteps.some((parameter) => (
+  return parameterSteps.some((parameter) => parameter && (
     Math.abs(parameter.target_value - parameter.neutral_target_value) > 0.000001
     || (
       parameter.input_value !== undefined
       && Math.abs(parameter.input_value - axisNeutralValue) > 0.000001
     )
   ));
-}
-
-function resolveNeutralParameter(
-  template: SemanticParameterPlanEntry,
-  axisById: Map<string, SemanticAxisDefinition>,
-): SemanticParameterPlanEntry | null {
-  if (template.source === "semantic_axis") {
-    return null;
-  }
-  const axis = axisById.get(template.axis_id);
-  const binding = axis?.parameter_bindings.find(
-    (item) => item.parameter_id === template.parameter_id,
-  );
-  if (!axis || !binding) {
-    return null;
-  }
-  const [inputMin, inputMax] = binding.input_range;
-  const [outputMin, outputMax] = binding.output_range;
-  if (inputMax <= inputMin) {
-    return null;
-  }
-  const inputRatio = (axis.neutral - inputMin) / (inputMax - inputMin);
-  const mappedRatio = binding.invert ? 1 - inputRatio : inputRatio;
-  return {
-    ...template,
-    input_value: axis.neutral,
-    target_value: roundValue(outputMin + (outputMax - outputMin) * mappedRatio),
-    modulation: undefined,
-  };
 }
 
 function retimePlan(
@@ -653,12 +625,18 @@ function resolveStagedPartTargetRatio(
 }
 
 function resolveActiveStagedPartAxes(
-  parameterStepsById: Map<string, SemanticParameterPlanEntry[]>,
+  parameterStepsById: Map<string, ParameterStep[]>,
   axisById: Map<string, SemanticAxisDefinition>,
 ): Set<string> {
   const activeAxisIds = new Set<string>();
   for (const parameterSteps of parameterStepsById.values()) {
-    const axis = axisById.get(parameterSteps[0].axis_id);
+    const firstParameter = parameterSteps.find(
+      (parameter) => parameter !== undefined,
+    );
+    if (!firstParameter) {
+      continue;
+    }
+    const axis = axisById.get(firstParameter.axis_id);
     if (
       axis
       && resolvePerformancePartTrackStrategy(axis.semantic_group)

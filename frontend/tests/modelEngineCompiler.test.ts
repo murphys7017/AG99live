@@ -38,7 +38,8 @@ function testAcceptsMotionSequence(): void {
     ...buildBasePayload(),
     motion_steps: [
       { axis_levels: { head_yaw: -3 }, duration_weight: 1 },
-      { axis_levels: { head_yaw: 3 }, duration_weight: 2 },
+      { axis_levels: { head_pitch: 2 }, duration_weight: 2 },
+      { axis_levels: { head_yaw: 0 }, duration_weight: 1 },
     ],
   });
 
@@ -52,7 +53,8 @@ function testAcceptsMotionSequence(): void {
   }
   assert.deepEqual(result.payload.intent.motion_steps, [
     { axis_levels: { head_yaw: -3 }, duration_weight: 1 },
-    { axis_levels: { head_yaw: 3 }, duration_weight: 2 },
+    { axis_levels: { head_pitch: 2 }, duration_weight: 2 },
+    { axis_levels: { head_yaw: 0 }, duration_weight: 1 },
   ]);
 }
 

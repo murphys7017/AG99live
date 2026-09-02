@@ -1,9 +1,9 @@
 task:
   class: bugfix
   risk: high
-  phase: action_pipeline_investigation
-  status: investigating
-  scope: "Trace the complete AG99 action pipeline from output.segment.v4 ingestion through Timeline, ModelEngine, active parameter execution, Cubism Physics, and terminal acknowledgement. Record only source-confirmed defects; do not add fallback behavior or alter product code before a root cause is established."
+  phase: action_contract_unification_implementation
+  status: source_complete_pending_live_acceptance
+  scope: "Unify AG99 motion execution shapes, Prompt guidance, and sparse motion sequence semantics without fallback behavior. AG99 source migration is complete; AstrBot Core coordination and live AstrBot + Electron + TTS + Live2D acceptance remain external follow-up."
 
 investigation:
   recorded_at: "2026-08-31"
@@ -15,6 +15,10 @@ investigation:
     - "ModelEngine prepares the queued semantic payload, starts Direct Parameter Plan through the existing MotionPlayer/LAppModel boundary, and records the run through the existing lifecycle tracker."
     - "LAppModel applies ActiveParameterMixer once before Cubism Physics and model.update(); no separate semantic parameter write path was found."
   conclusion:
+    - "AG99 now treats motion_steps as sparse parameter-track events: a parameter remains uncontrolled until its first declaration, later omission holds its previous target, and explicit 0 returns it to semantic neutral."
+    - "The same sequence reduction is used by motion validation, prompt reference projection, MotionLab sample validation, prompt history summaries, ModelEngine track compilation, parameter-plan parsing, and ActiveParameterMixer execution."
+    - "AG99 Prompt guidance no longer encourages neutral filler actions. intent_tags-only and invalid axes remain explicit rejected facts; AG99 does not add default motion, axis renaming, or fallback execution."
+    - "Documentation separates AG99 implementation from external AstrBot Core coordination; AG99 source migration is complete and requires live end-to-end acceptance."
     - "Runtime evidence for turn 74e3e3655d9e4aa095db21405c8fc7f8 confirms the action failure occurs in AstrBot/AG99 motion validation before frontend playback: the model emitted unknown axes brow_raise and head_tilt, so motion_payload was null and the turn ended with motion_schedule_failed."
     - "The frontend audio, lip-sync attachment, audio clock, and terminal playback path completed normally; no frontend motion plan could start because the segment carried motion.failed rather than a payload."
     - "The tool schema accepts arbitrary axis_levels property names and relies on dynamic backend validation, allowing models to emit syntactically valid but semantically unknown axes."

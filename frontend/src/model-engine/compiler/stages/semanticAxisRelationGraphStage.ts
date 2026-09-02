@@ -87,7 +87,10 @@ function resolveSemanticAxisRelationGraph(
   const adjustmentByRuleId = new Map<string, MotionAxisRelationAdjustment>();
   const evaluationByRuleId = new Map<string, MotionAxisRelationEvaluation>();
   const warningSet = new Set<string>();
-  const maxPasses = Math.max(1, rules.length + 1);
+  // Range constraints may change the intensity-scaled input before relation
+  // propagation starts. Reserve one pass for that normalization and one final
+  // pass to prove the propagated graph is stable.
+  const maxPasses = Math.max(2, rules.length + 2);
 
   for (let pass = 0; pass < maxPasses; pass += 1) {
     adjustmentByRuleId.clear();

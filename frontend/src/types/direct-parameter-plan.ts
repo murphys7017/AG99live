@@ -53,6 +53,7 @@ export type DirectParameterResponsePolicy =
 export interface DirectParameterPlanEntryInput {
   axis_id: string;
   parameter_id: string;
+  activation_at_ms: number;
   target_value: number;
   neutral_target_value: number;
   weight: number;

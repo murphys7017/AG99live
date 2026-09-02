@@ -200,7 +200,8 @@ def validate_normalized_motion_intent_payload(
     allowed_axis_ids = set(axis_by_id)
     used_axis_ids = set(validated_levels or {})
     if motion_steps:
-        used_axis_ids.update(motion_steps[0]["axis_levels"])
+        for step in motion_steps:
+            used_axis_ids.update(step["axis_levels"])
     unknown_axis_ids = sorted(used_axis_ids - allowed_axis_ids)
     if unknown_axis_ids:
         return None, append_resolution_reason(

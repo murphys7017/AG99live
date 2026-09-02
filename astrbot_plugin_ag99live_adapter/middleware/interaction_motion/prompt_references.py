@@ -117,12 +117,6 @@ def _project_reference_examples_for_prompt(
                             "duration_weight": duration_weight,
                         }
                     )
-                projected_axis_sets = {
-                    tuple(step["axis_levels"].keys())
-                    for step in projected_steps
-                }
-                if len(projected_axis_sets) > 1:
-                    raise ValueError("motion_reference_example_step_axes_mismatch")
             elif motion_steps is not None:
                 raise ValueError("motion_reference_example_steps_invalid")
             if projected_steps:

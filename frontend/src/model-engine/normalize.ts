@@ -48,7 +48,6 @@ function normalizeMotionStepsV4(value: unknown): MotionAxisLevelStep[] | null {
     return null;
   }
   const steps: MotionAxisLevelStep[] = [];
-  let expectedAxisIds: string[] | null = null;
   for (const rawStep of value) {
     if (!isObject(rawStep)) {
       return null;
@@ -70,15 +69,6 @@ function normalizeMotionStepsV4(value: unknown): MotionAxisLevelStep[] | null {
     ) {
       return null;
     }
-    const axisIds = Object.keys(axisLevels).sort();
-    if (
-      expectedAxisIds
-      && (axisIds.length !== expectedAxisIds.length
-        || axisIds.some((axisId, index) => axisId !== expectedAxisIds?.[index]))
-    ) {
-      return null;
-    }
-    expectedAxisIds = axisIds;
     steps.push({
       axis_levels: axisLevels,
       duration_weight: durationWeight as 1 | 2 | 3,

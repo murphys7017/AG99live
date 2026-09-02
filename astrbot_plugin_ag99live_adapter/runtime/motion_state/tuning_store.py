@@ -366,7 +366,6 @@ class MotionTuningStore:
         if not isinstance(raw_steps, list) or not 2 <= len(raw_steps) <= 4:
             return [], "sequence_steps_invalid"
         projected_steps: list[dict[str, Any]] = []
-        expected_axis_ids: tuple[str, ...] | None = None
         for step in raw_steps:
             if not isinstance(step, dict):
                 return [], "sequence_step_invalid"
@@ -389,11 +388,6 @@ class MotionTuningStore:
                 axis_levels[axis_id] = raw_level
             if not axis_levels:
                 return [], "sequence_step_axis_levels_empty"
-            axis_ids = tuple(sorted(axis_levels))
-            if expected_axis_ids is None:
-                expected_axis_ids = axis_ids
-            elif axis_ids != expected_axis_ids:
-                return [], "sequence_step_axis_set_mismatch"
             duration_weight = step.get("durationWeight")
             if (
                 isinstance(duration_weight, bool)
@@ -684,7 +678,6 @@ class MotionTuningStore:
             steps = motion_payload.get("steps")
             if not isinstance(steps, list) or not 2 <= len(steps) <= 4:
                 raise ValueError("motion_tuning_sample_compiled_semantic_motion_steps_invalid")
-            expected_axis_ids: tuple[str, ...] | None = None
             for step in steps:
                 if not isinstance(step, dict):
                     raise ValueError("motion_tuning_sample_compiled_semantic_motion_step_invalid")
@@ -699,13 +692,7 @@ class MotionTuningStore:
                     )
                 self._validate_compiled_motion_axes(step.get("axes"))
                 self._validate_compiled_motion_diagnostics(step.get("diagnostics"))
-                axis_ids = self._validate_sequence_step_trace(step)
-                if expected_axis_ids is None:
-                    expected_axis_ids = axis_ids
-                elif axis_ids != expected_axis_ids:
-                    raise ValueError(
-                        "motion_tuning_sample_compiled_semantic_motion_step_axis_set_mismatch"
-                    )
+                self._validate_sequence_step_trace(step)
         return deepcopy(motion_payload)
 
     @staticmethod

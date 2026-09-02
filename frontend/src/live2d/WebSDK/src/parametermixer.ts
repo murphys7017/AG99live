@@ -20,6 +20,7 @@ export type ParameterFrameOwner = ParameterContributionOwner | "mixed";
 export interface DirectSemanticParameterBinding {
   axisId: string;
   parameterIdRaw: string;
+  activationAtMs: number;
   targetValue: number;
   neutralTargetValue: number;
   weight: number;
@@ -52,6 +53,8 @@ export interface ActiveDirectParameterFrameState {
   semanticBindings: DirectSemanticParameterBinding[];
   playbackClockReader: { getElapsedMs: () => number | null };
   diagnosticFrameCount: number;
+  /** Set only after every binding has activated and the active target settled. */
+  releaseStartedAtMs: number | null;
 }
 
 export interface ParameterContribution {
@@ -119,6 +122,9 @@ export interface DirectPlanContributionCollection {
   contributions: ParameterContribution[];
   failure: string | null;
   shouldLogFrame: boolean;
+  elapsedMs: number | null;
+  allBindingsActivated: boolean;
+  nominalReleaseReached: boolean;
   releaseEligible: boolean;
   released: boolean;
 }
@@ -188,6 +194,17 @@ export class ActiveParameterMixer {
       ...directPlan,
       released: directPlan.releaseEligible && resolution.presentationSettled,
     };
+
+    if (
+      input.directPlan
+      && input.directPlan.releaseStartedAtMs === null
+      && directPlan.elapsedMs !== null
+      && directPlan.nominalReleaseReached
+      && directPlan.allBindingsActivated
+      && resolution.presentationSettled
+    ) {
+      input.directPlan.releaseStartedAtMs = directPlan.elapsedMs;
+    }
 
     for (const parameter of resolution.parameters) {
       model.setParameterValueById(parameter.parameterId, parameter.value);
@@ -374,6 +391,9 @@ export class ActiveParameterMixer {
         contributions: [],
         failure: null,
         shouldLogFrame: false,
+        elapsedMs: null,
+        allBindingsActivated: false,
+        nominalReleaseReached: false,
         releaseEligible: false,
         released: false,
       };
@@ -385,6 +405,9 @@ export class ActiveParameterMixer {
         contributions: [],
         failure: "parameter_plan_clock_unavailable",
         shouldLogFrame: false,
+        elapsedMs: null,
+        allBindingsActivated: false,
+        nominalReleaseReached: false,
         releaseEligible: false,
         released: false,
       };
@@ -392,7 +415,12 @@ export class ActiveParameterMixer {
 
     const shouldLogFrame = planState.diagnosticFrameCount < 2;
     const contributions: ParameterContribution[] = [];
+    let allBindingsActivated = true;
     for (const item of planState.semanticBindings) {
+      if (elapsedMs < item.activationAtMs) {
+        allBindingsActivated = false;
+        continue;
+      }
       const rawFrameTargetValue = resolveDirectBindingTargetValue(
         item,
         elapsedMs,
@@ -405,7 +433,11 @@ export class ActiveParameterMixer {
         owner: "direct_plan",
         source: `direct_plan:${item.axisId}`,
         value: rawFrameTargetValue,
-        weight: item.weight * resolveParameterOwnershipWeight(elapsedMs, planState.timing),
+        weight: item.weight * resolveParameterOwnershipWeight(
+          elapsedMs,
+          planState.timing,
+          planState.releaseStartedAtMs,
+        ),
         priority: PARAMETER_MIX_PRIORITY.directPlan,
         presentation: {
           node: item.presentation,
@@ -419,7 +451,14 @@ export class ActiveParameterMixer {
       contributions,
       failure: null,
       shouldLogFrame,
-      releaseEligible: elapsedMs >= planState.timing.totalMs,
+      elapsedMs,
+      allBindingsActivated,
+      nominalReleaseReached: elapsedMs >= Math.max(
+        0,
+        planState.timing.totalMs - Math.max(0, planState.timing.blendOutMs),
+      ),
+      releaseEligible: planState.releaseStartedAtMs !== null
+        && elapsedMs >= planState.releaseStartedAtMs + Math.max(0, planState.timing.blendOutMs),
       released: false,
     };
   }
@@ -593,16 +632,19 @@ function clamp(value: number, minValue: number, maxValue: number): number {
 function resolveParameterOwnershipWeight(
   elapsedMs: number,
   timing: DirectParameterExecutionPlan["timing"],
+  releaseStartedAtMs: number | null,
 ): number {
   const blendOutMs = Math.max(0, timing.blendOutMs);
-  const releaseStartMs = Math.max(0, timing.totalMs - blendOutMs);
-  if (elapsedMs < releaseStartMs) {
+  if (releaseStartedAtMs === null || elapsedMs < releaseStartedAtMs) {
     return 1;
   }
-  if (blendOutMs === 0 || elapsedMs >= timing.totalMs) {
+  if (
+    blendOutMs === 0
+    || elapsedMs >= releaseStartedAtMs + blendOutMs
+  ) {
     return 0;
   }
-  return smoothstep(1 - (elapsedMs - releaseStartMs) / blendOutMs);
+  return smoothstep(1 - (elapsedMs - releaseStartedAtMs) / blendOutMs);
 }
 
 function smoothstep(value: number): number {

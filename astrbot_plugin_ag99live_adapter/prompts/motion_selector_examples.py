@@ -56,7 +56,6 @@ def create_default_motion_reference_examples(axis_names: list[str]) -> list[dict
                             axis_names,
                             head_roll=3,
                             body_roll=2,
-                            gaze_x=2,
                         ),
                         "duration_weight": 2,
                     },
@@ -73,7 +72,6 @@ def create_default_motion_reference_examples(axis_names: list[str]) -> list[dict
                         "axis_levels": build_example_axis_levels(
                             axis_names,
                             head_roll=-1,
-                            body_roll=-1,
                             gaze_x=0,
                         ),
                         "duration_weight": 2,
@@ -154,8 +152,6 @@ def create_default_motion_reference_examples(axis_names: list[str]) -> list[dict
                             axis_names,
                             head_pitch=4,
                             body_pitch=4,
-                            gaze_y=4,
-                            brow_bias=4,
                         ),
                         "duration_weight": 1,
                     },
@@ -174,8 +170,6 @@ def create_default_motion_reference_examples(axis_names: list[str]) -> list[dict
                             axis_names,
                             head_pitch=1,
                             body_pitch=1,
-                            gaze_y=2,
-                            brow_bias=2,
                         ),
                         "duration_weight": 2,
                     },
@@ -187,7 +181,7 @@ def create_default_motion_reference_examples(axis_names: list[str]) -> list[dict
             "input": (
                 "场景：助手先给出简短回答，随后用一句追问向用户确认，句尾保持可爱的侧倾。"
                 "这是普通回复中的句尾姿态变化，不要拆成多个 effect call；"
-                "各步骤保持同一组轴，最后一步可以保持非中性姿态。"
+                "每一步只写新开始控制或发生变化的轴，最后一步可以保持非中性姿态。"
             ),
             "output": {
                 "intent_tags": ["回答后追问", "句尾歪头", "可爱保持"],
@@ -214,8 +208,6 @@ def create_default_motion_reference_examples(axis_names: list[str]) -> list[dict
                     {
                         "axis_levels": build_example_axis_levels(
                             axis_names,
-                            head_roll=3,
-                            body_roll=2,
                             gaze_x=0,
                         ),
                         "duration_weight": 2,

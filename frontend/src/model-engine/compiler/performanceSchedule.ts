@@ -368,8 +368,7 @@ export function compileSemanticTrackTiming(options: {
     || !Number.isInteger(blendOutMs)
     || blendOutMs < 0
     || blendOutMs > schedule.durationMs
-    || changedStepIndices.length < 2
-    || changedStepIndices[0] !== 0
+    || changedStepIndices.length < 1
     || changedStepIndices.some((stepIndex, index) => (
       !Number.isInteger(stepIndex)
       || stepIndex < 0
@@ -386,9 +385,63 @@ export function compileSemanticTrackTiming(options: {
 
   const policy = resolveTrackTimingPolicy(semanticGroup);
   const reversalSteps = new Set(reversalStepIndices);
+  const firstChangedStepIndex = changedStepIndices[0];
+  const firstChangedStep = schedule.semanticSteps[firstChangedStepIndex];
   const baseReleaseAtMs = Math.max(1, schedule.durationMs - blendOutMs);
+  if (changedStepIndices.length === 1) {
+    if (firstChangedStep.index === 0) {
+      return {
+        ok: true,
+        reason: "",
+        value: {
+          strategy: "semantic",
+          events: [],
+          parameterEvents: [],
+          requiredOwnedUntilMs: baseReleaseAtMs,
+          staggered: false,
+          residual: false,
+          compressed: false,
+        },
+      };
+    }
+    // A sparse sequence may introduce an axis after playback has started. It
+    // has no parameter-to-parameter transition, but it still needs time at
+    // full ownership before the shared plan releases it.
+    const activationEndMs = firstChangedStep.startMs
+      + policy.transitionMs
+      + policy.preferredHoldMs;
+    const residualMs = resolvePerformanceResidualMs(
+      schedule,
+      semanticAxisId,
+      semanticGroup,
+      "semantic",
+      Math.max(0, MAX_MOTION_DURATION_MS - blendOutMs - activationEndMs),
+      false,
+    );
+    const requiredOwnedUntilMs = Math.max(
+      baseReleaseAtMs,
+      activationEndMs + residualMs,
+    );
+    recordPerformanceDecision(
+      schedule,
+      `semantic_delayed_activation:${semanticAxisId}:${firstChangedStep.index}:${requiredOwnedUntilMs}`,
+    );
+    return {
+      ok: true,
+      reason: "",
+      value: {
+        strategy: "semantic",
+        events: [],
+        parameterEvents: [],
+        requiredOwnedUntilMs,
+        staggered: false,
+        residual: residualMs > 0,
+        compressed: false,
+      },
+    };
+  }
   const transitionStarts: number[] = [];
-  let previousAtMs = 0;
+  let previousAtMs = firstChangedStep.startMs;
   let reversalPreparationMs = 0;
   for (let position = 1; position < changedStepIndices.length; position += 1) {
     const step = schedule.semanticSteps[changedStepIndices[position]];
@@ -414,22 +467,22 @@ export function compileSemanticTrackTiming(options: {
 
   const events: PerformanceTimingEventTrace[] = [];
   let compressed = false;
-  let finalTransitionEndMs = 0;
+  let finalTransitionEndMs = firstChangedStep.startMs;
   const initialNextAtMs = transitionStarts[0] ?? schedule.durationMs;
   events.push({
-    id: buildSemanticEventId(semanticAxisId, 0),
+    id: buildSemanticEventId(semanticAxisId, firstChangedStep.index),
     kind: "semantic_transition",
     source: "semantic_step",
     timingSource: "semantic_group_policy",
     semanticAxisId,
     semanticGroup,
-    atMs: 0,
+    atMs: firstChangedStep.startMs,
     transitionMs: 0,
-    holdMs: Math.max(0, initialNextAtMs),
+    holdMs: Math.max(0, initialNextAtMs - firstChangedStep.startMs),
     residualMs: 0,
     transitionOffsetMs: 0,
     compressed: false,
-    stepIndex: 0,
+    stepIndex: firstChangedStep.index,
   });
 
   for (let position = 0; position < transitionStarts.length; position += 1) {
@@ -546,7 +599,6 @@ export function compileGazeTrackTiming(options: {
     || blendOutMs < 0
     || blendOutMs > schedule.durationMs
     || changedStepIndices.length === 0
-    || changedStepIndices[0] !== 0
     || changedStepIndices.length > MAX_PARAMETER_KEYFRAME_COUNT
     || changedStepIndices.some((stepIndex, index) => (
       !Number.isInteger(stepIndex)
@@ -563,6 +615,13 @@ export function compileGazeTrackTiming(options: {
     };
   }
 
+  const firstChangedStepIndex = changedStepIndices[0];
+  const firstActivationAtMs = sequenceSchedule
+    ? schedule.semanticSteps[firstChangedStepIndex].startMs
+    : 0;
+  const firstPhraseIndices = sequenceSchedule
+    ? resolvePrimaryPhraseIndices(schedule, firstChangedStepIndex)
+    : (schedule.phrases[0] ? [schedule.phrases[0].index] : undefined);
   const transferDrafts = changedStepIndices.slice(1).map((stepIndex) => {
     const step = schedule.semanticSteps[stepIndex];
     return {
@@ -570,7 +629,7 @@ export function compileGazeTrackTiming(options: {
       desiredAtMs: resolveHesitationAdjustedStepAtMs(
         schedule,
         stepIndex,
-        Math.max(1, step.startMs - GAZE_LEAD_OFFSET_MS),
+        Math.max(firstActivationAtMs + 1, step.startMs - GAZE_LEAD_OFFSET_MS),
       ),
       preferredTransitionMs: GAZE_TRANSFER_TRANSITION_MS,
       stepIndex,
@@ -581,22 +640,23 @@ export function compileGazeTrackTiming(options: {
   const firstTransferAtMs = transferDrafts[0]?.desiredAtMs;
   const includeDwell = changedStepIndices.length < MAX_PARAMETER_KEYFRAME_COUNT
     && (firstTransferAtMs === undefined
-      || firstTransferAtMs >= GAZE_DWELL_AT_MS + GAZE_DWELL_TRANSITION_MS + GAZE_MIN_DWELL_MS);
+      || firstTransferAtMs >= firstActivationAtMs
+        + GAZE_DWELL_AT_MS + GAZE_DWELL_TRANSITION_MS + GAZE_MIN_DWELL_MS);
   const trackDrafts: PerformancePartTrackDraft[] = [{
     kind: "gaze_lead",
-    desiredAtMs: 0,
+    desiredAtMs: firstActivationAtMs,
     preferredTransitionMs: 0,
-    stepIndex: sequenceSchedule ? 0 : undefined,
-    phraseIndices: schedule.phrases[0] ? [schedule.phrases[0].index] : undefined,
+    stepIndex: sequenceSchedule ? firstChangedStepIndex : undefined,
+    phraseIndices: firstPhraseIndices,
     transitionOffsetMs: 0,
   }];
   if (includeDwell) {
     trackDrafts.push({
       kind: "gaze_dwell",
-      desiredAtMs: GAZE_DWELL_AT_MS,
+      desiredAtMs: firstActivationAtMs + GAZE_DWELL_AT_MS,
       preferredTransitionMs: GAZE_DWELL_TRANSITION_MS,
-      stepIndex: sequenceSchedule ? 0 : undefined,
-      phraseIndices: schedule.phrases[0] ? [schedule.phrases[0].index] : undefined,
+      stepIndex: sequenceSchedule ? firstChangedStepIndex : undefined,
+      phraseIndices: firstPhraseIndices,
       transitionOffsetMs: GAZE_DWELL_AT_MS,
     });
   }
@@ -610,7 +670,10 @@ export function compileGazeTrackTiming(options: {
         desiredAtMs: resolveHesitationAdjustedPhraseAtMs(
           schedule,
           phraseTransfer.index,
-          Math.round(phraseTransfer.endRatio * schedule.durationMs),
+          Math.max(
+            firstActivationAtMs + 1,
+            Math.round(phraseTransfer.endRatio * schedule.durationMs),
+          ),
         ),
         preferredTransitionMs: GAZE_TRANSFER_TRANSITION_MS,
         phraseIndices: [phraseTransfer.index],
@@ -657,7 +720,6 @@ export function compileFaceTrackTiming(options: {
     || blendOutMs < 0
     || blendOutMs > schedule.durationMs
     || changedStepIndices.length === 0
-    || changedStepIndices[0] !== 0
     || changedStepIndices.length > MAX_PARAMETER_KEYFRAME_COUNT
     || changedStepIndices.some((stepIndex, index) => (
       !Number.isInteger(stepIndex)
@@ -674,6 +736,13 @@ export function compileFaceTrackTiming(options: {
     };
   }
 
+  const firstChangedStepIndex = changedStepIndices[0];
+  const firstActivationAtMs = sequenceSchedule
+    ? schedule.semanticSteps[firstChangedStepIndex].startMs
+    : 0;
+  const firstPhraseIndices = sequenceSchedule
+    ? resolvePrimaryPhraseIndices(schedule, firstChangedStepIndex)
+    : (schedule.phrases[0] ? [schedule.phrases[0].index] : undefined);
   const transferDrafts: PerformancePartTrackDraft[] = changedStepIndices
     .slice(1)
     .map((stepIndex) => {
@@ -683,7 +752,7 @@ export function compileFaceTrackTiming(options: {
         desiredAtMs: resolveHesitationAdjustedStepAtMs(
           schedule,
           stepIndex,
-          Math.max(1, step.startMs + FACE_TRANSFER_OFFSET_MS),
+          Math.max(firstActivationAtMs + 1, step.startMs + FACE_TRANSFER_OFFSET_MS),
         ),
         preferredTransitionMs: FACE_TRANSFER_TRANSITION_MS,
         stepIndex,
@@ -694,24 +763,22 @@ export function compileFaceTrackTiming(options: {
   const firstTransferAtMs = transferDrafts[0]?.desiredAtMs;
   const includeSettle = changedStepIndices.length < MAX_PARAMETER_KEYFRAME_COUNT
     && (firstTransferAtMs === undefined
-      || firstTransferAtMs >= FACE_SETTLE_AT_MS + FACE_SETTLE_TRANSITION_MS + FACE_MIN_HOLD_MS);
-  const firstPhraseIndices = schedule.phrases[0]
-    ? [schedule.phrases[0].index]
-    : undefined;
+      || firstTransferAtMs >= firstActivationAtMs
+        + FACE_SETTLE_AT_MS + FACE_SETTLE_TRANSITION_MS + FACE_MIN_HOLD_MS);
   const trackDrafts: PerformancePartTrackDraft[] = [{
     kind: "face_enter",
-    desiredAtMs: 0,
+    desiredAtMs: firstActivationAtMs,
     preferredTransitionMs: 0,
-    stepIndex: sequenceSchedule ? 0 : undefined,
+    stepIndex: sequenceSchedule ? firstChangedStepIndex : undefined,
     phraseIndices: firstPhraseIndices,
     transitionOffsetMs: 0,
   }];
   if (includeSettle) {
     trackDrafts.push({
       kind: "face_settle",
-      desiredAtMs: FACE_SETTLE_AT_MS,
+      desiredAtMs: firstActivationAtMs + FACE_SETTLE_AT_MS,
       preferredTransitionMs: FACE_SETTLE_TRANSITION_MS,
-      stepIndex: sequenceSchedule ? 0 : undefined,
+      stepIndex: sequenceSchedule ? firstChangedStepIndex : undefined,
       phraseIndices: firstPhraseIndices,
       transitionOffsetMs: FACE_SETTLE_AT_MS,
     });

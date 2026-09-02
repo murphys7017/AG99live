@@ -143,6 +143,11 @@ def normalize_motion_intent_v4_payload(intent: Any) -> dict[str, Any]:
             )
         except ValueError as exc:
             raise ValueError(f"performance_curve_hint_invalid:{exc}") from exc
+    sequence_axis_ids = {
+        axis_id
+        for step in normalized_steps or []
+        for axis_id in step["axis_levels"]
+    }
     normalized_intent = {
         "schema_version": MOTION_INTENT_V4_SCHEMA_VERSION,
         "profile_id": profile_id,
@@ -152,9 +157,7 @@ def normalize_motion_intent_v4_payload(intent: Any) -> dict[str, Any]:
         "intent_tags": intent_tags,
         "emotion_label": derive_motion_emotion_label(intent_tags),
         "summary": {
-            "axis_count": len(normalized_levels or normalized_steps[0]["axis_levels"])
-            if normalized_levels or normalized_steps
-            else 0,
+            "axis_count": len(normalized_levels or sequence_axis_ids),
             "intent_tag_count": len(intent_tags),
             "motion_step_count": len(normalized_steps or []),
         },
@@ -222,7 +225,6 @@ def normalize_motion_steps(
     if not isinstance(value, list) or len(value) < 2 or len(value) > 4:
         return None, "motion_steps_count_invalid"
     normalized_steps: list[dict[str, Any]] = []
-    expected_axis_ids: set[str] | None = None
     for index, step in enumerate(value):
         if not isinstance(step, dict):
             return None, f"motion_step_not_object:{index}"
@@ -240,11 +242,6 @@ def normalize_motion_steps(
             )
         if not levels:
             return None, f"motion_step_axis_levels_empty:{index}"
-        axis_ids = set(levels)
-        if expected_axis_ids is None:
-            expected_axis_ids = axis_ids
-        elif axis_ids != expected_axis_ids:
-            return None, f"motion_step_axis_set_mismatch:{index}"
         duration_weight = step.get("duration_weight")
         if (
             isinstance(duration_weight, bool)

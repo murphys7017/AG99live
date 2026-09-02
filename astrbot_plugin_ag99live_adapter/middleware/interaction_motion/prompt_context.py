@@ -138,19 +138,15 @@ def _build_motion_variation_payload(
         return {}
     snapshot = history[-1]
 
-    axis_levels = snapshot.get("axis_levels")
+    axis_levels = _resolve_snapshot_axis_levels(snapshot)
     motion_steps = snapshot.get("motion_steps")
-    if isinstance(motion_steps, list) and motion_steps:
-        last_step = motion_steps[-1]
-        if isinstance(last_step, dict):
-            axis_levels = last_step.get("axis_levels")
     axes = snapshot.get("axes")
     expression_resource_id = str(snapshot.get("expression_resource_id") or "").strip()
     motion_resource_id = str(snapshot.get("motion_resource_id") or "").strip()
     has_motion_shape = bool(
-        isinstance(axis_levels, dict)
-        or isinstance(axes, dict)
-        or isinstance(motion_steps, list)
+        axis_levels
+        or axes
+        or motion_steps
         or expression_resource_id
         or motion_resource_id
     )
@@ -284,9 +280,21 @@ def _resolve_snapshot_axis_levels(snapshot: dict[str, Any]) -> dict[str, int]:
     axis_levels = snapshot.get("axis_levels")
     motion_steps = snapshot.get("motion_steps")
     if isinstance(motion_steps, list) and motion_steps:
-        last_step = motion_steps[-1]
-        if isinstance(last_step, dict):
-            axis_levels = last_step.get("axis_levels")
+        resolved_levels: dict[str, int] = {}
+        for step in motion_steps:
+            step_levels = step.get("axis_levels") if isinstance(step, dict) else None
+            if not isinstance(step_levels, dict):
+                continue
+            for axis_id, level in step_levels.items():
+                normalized_axis_id = str(axis_id).strip()
+                if (
+                    normalized_axis_id
+                    and isinstance(level, int)
+                    and not isinstance(level, bool)
+                    and -4 <= level <= 4
+                ):
+                    resolved_levels[normalized_axis_id] = level
+        return resolved_levels
     if not isinstance(axis_levels, dict):
         return {}
     return {

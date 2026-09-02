@@ -23,7 +23,7 @@ flowchart TD
         TAGS[intent_tags<br/>动作语义]:::contract
         CHOICE{动作表示方式}:::contract
         LEVELS[axis_levels<br/>单姿态，-4..4 整数]:::contract
-        STEPS[motion_steps<br/>2-4 个同轴集合步骤<br/>duration_weight 1-3]:::contract
+        STEPS[motion_steps<br/>2-4 个稀疏步骤<br/>首次声明/保持/显式 0 回中]:::contract
         RES{typed resource}:::contract
         EXP[expression_resource_id<br/>表情层]:::contract
         MOT[motion_resource_id<br/>完整动作层]:::contract

@@ -111,7 +111,8 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
     )
     axis_shape_text = (
         "单姿态使用 axis_levels；动作序列使用 motion_steps；完整动作资源只使用 motion_resource_id。三者必须且只能选择一个。"
-        "motion_steps 的所有步骤必须使用完全相同的轴集合，最后一步可以保持有意义的非中性姿态。"
+        "motion_steps 的每一步只写新开始控制或需要改变的轴；轴在首次声明前不受本序列控制，首次声明后省略表示保持该轴的上一目标，"
+        "只有显式 0 才表示该轴回到语义中性。最后一步可以保持有意义的非中性姿态。"
         "axis_levels 只能使用下方列出的轴 id。"
     )
     return (

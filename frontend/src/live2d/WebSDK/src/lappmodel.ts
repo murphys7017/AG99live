@@ -1776,6 +1776,7 @@ export class LAppModel extends CubismUserModel {
       semanticBindings.push({
         axisId,
         parameterIdRaw,
+        activationAtMs: Number(item.activation_at_ms),
         targetValue,
         neutralTargetValue,
         weight: Number(item.weight),
@@ -1855,6 +1856,7 @@ export class LAppModel extends CubismUserModel {
       semanticBindings,
       playbackClockReader,
       diagnosticFrameCount: 0,
+      releaseStartedAtMs: null,
       runId: runId || ('direct-plan-' + Date.now() + '-' + Math.random().toString(36).slice(2)),
       onTerminal: onTerminal,
       expressionId: expressionId || null,

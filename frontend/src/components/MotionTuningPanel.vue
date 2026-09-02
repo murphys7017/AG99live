@@ -355,7 +355,6 @@ function resetDraftAxes(source: MotionDraftSource | null): void {
 }
 
 function buildHistoryDraftSource(record: SemanticMotionPlaybackRecord): MotionDraftSource {
-  const trace = record.diagnostics?.transformTrace;
   const base = {
     id: `record:${record.id}`,
     sourceRecordId: record.id,
@@ -369,60 +368,30 @@ function buildHistoryDraftSource(record: SemanticMotionPlaybackRecord): MotionDr
     durationMs: record.plan.timing.duration_ms,
     record,
   } as const;
-  if (!trace) {
-    return {
-      ...base,
-      motionKind: record.semanticMotion.kind,
-      axes: {},
-      explicitAxisIds: [],
-      error: "motion_tuning_transform_trace_missing",
-    };
-  }
-  if (trace.rawMotionSteps?.length) {
-    if (record.semanticMotion.kind !== "sequence") {
-      return {
-        ...base,
-        motionKind: "pose",
-        axes: {},
-        explicitAxisIds: [],
-        error: "motion_tuning_sequence_trace_kind_mismatch",
-      };
-    }
+  const semanticMotion = record.semanticMotion;
+  if (semanticMotion.kind === "sequence") {
     return {
       ...base,
       motionKind: "sequence",
       axes: {},
       explicitAxisIds: [],
-    };
-  }
-  if (record.semanticMotion.kind === "sequence") {
-    return {
-      ...base,
-      motionKind: "sequence",
-      axes: {},
-      explicitAxisIds: [],
-      error: "motion_tuning_sequence_trace_missing",
     };
   }
 
-  const explicitAxisIds = Object.keys(
-    Object.keys(trace.rawAxisLevels ?? {}).length
-      ? trace.rawAxisLevels ?? {}
-      : trace.rawAxes,
-  );
+  const explicitAxisIds = semanticMotion.axes.map((axis) => axis.axisId);
   const axes: Record<string, number> = {};
-  for (const axisId of explicitAxisIds) {
-    const value = trace.constrainedAxes[axisId];
+  for (const axis of semanticMotion.axes) {
+    const value = axis.value;
     if (!Number.isFinite(value)) {
       return {
         ...base,
         motionKind: "pose",
         axes: {},
         explicitAxisIds: [],
-        error: `motion_tuning_explicit_axis_value_missing:${axisId}`,
+        error: `motion_tuning_compiled_axis_value_invalid:${axis.axisId}`,
       };
     }
-    axes[axisId] = value;
+    axes[axis.axisId] = value;
   }
   if (!explicitAxisIds.length) {
     return {

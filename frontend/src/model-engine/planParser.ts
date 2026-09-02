@@ -92,6 +92,7 @@ const PARAMETER_PLAN_FIELD_SCHEMA: ObjectFieldSchema = {
         fields: [
           "axis_id",
           "parameter_id",
+          "activation_at_ms",
           "target_value",
           "neutral_target_value",
           "weight",
@@ -256,6 +257,7 @@ function normalizePlanResource(value: unknown): SemanticPlanResource | undefined
 function normalizeParameterKeyframes(
   value: unknown,
   durationMs: number,
+  activationAtMs: number,
 ): SemanticParameterPlan["parameters"][number]["keyframes"] | null | undefined {
   if (value === undefined) {
     return undefined;
@@ -303,7 +305,10 @@ function normalizeParameterKeyframes(
       input_value: isFiniteNumber(inputValue) ? inputValue : undefined,
     });
   }
-  if (keyframes[0].at_ms !== 0 || keyframes[0].transition_ms !== 0) {
+  if (
+    keyframes[0].at_ms !== activationAtMs
+    || keyframes[0].transition_ms !== 0
+  ) {
     return null;
   }
   return keyframes;
@@ -355,12 +360,21 @@ export function parseSemanticParameterPlan(
     }
     const axisId = normalizeText(item.axis_id);
     const parameterId = normalizeText(item.parameter_id);
+    const activationAtMs = item.activation_at_ms;
     const targetValue = item.target_value;
     const neutralTargetValue = item.neutral_target_value;
     const weight = item.weight;
     const inputValue = item.input_value;
     if (!axisId || !parameterId) {
       return { ok: false, reason: "parameter_plan_v3.parameter_id_empty" };
+    }
+    if (
+      !isFiniteNumber(activationAtMs)
+      || !Number.isInteger(activationAtMs)
+      || activationAtMs < 0
+      || activationAtMs > timing.duration_ms
+    ) {
+      return { ok: false, reason: "parameter_plan_v3.activation_at_ms_invalid" };
     }
     if (parameterIds.has(parameterId)) {
       return { ok: false, reason: `parameter_plan_v3.duplicate_parameter:${parameterId}` };
@@ -377,7 +391,11 @@ export function parseSemanticParameterPlan(
     if (!isFiniteNumber(neutralTargetValue)) {
       return { ok: false, reason: "parameter_plan_v3.neutral_target_value_not_number" };
     }
-    const keyframes = normalizeParameterKeyframes(item.keyframes, timing.duration_ms);
+    const keyframes = normalizeParameterKeyframes(
+      item.keyframes,
+      timing.duration_ms,
+      activationAtMs,
+    );
     if (keyframes === null) {
       return { ok: false, reason: "parameter_plan_v3.invalid_keyframes" };
     }
@@ -396,6 +414,7 @@ export function parseSemanticParameterPlan(
     parameters.push({
       axis_id: axisId,
       parameter_id: parameterId,
+      activation_at_ms: activationAtMs,
       target_value: targetValue,
       neutral_target_value: neutralTargetValue,
       weight,

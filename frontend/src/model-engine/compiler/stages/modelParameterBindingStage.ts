@@ -115,6 +115,7 @@ function buildSemanticPlanParameters(
       parameters.push({
         axis_id: axisId,
         parameter_id: binding.parameter_id,
+        activation_at_ms: 0,
         target_value: parameter.targetValue,
         neutral_target_value: parameter.neutralTargetValue,
         weight: binding.default_weight,
