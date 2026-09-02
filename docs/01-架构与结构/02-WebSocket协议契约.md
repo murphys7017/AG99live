@@ -75,6 +75,7 @@ control.turn_finished
 - `stream_id` 在一个连接内必须先 start、再按严格递增 `seq` 发送 chunk、最后 end；重复 start、
   无 start 的 chunk/end、重复或乱序 chunk 都是协议错误，不允许自动补建、覆盖或忽略。
 - PTT 在 `input.audio_stream_end` 时把该段 PCM16LE 转成一个对话输入。常开收音持续传输同一采集会话的音频，后端使用 `stream_id` 作为缓冲键，并为每段 VAD 语音派生 `<capture_turn_id>:vad:<n>` 作为正式对话 turn ID。
+- `manual` / `auto` 采集流在 `input.audio_stream_start` 时创建独立的 VAD 会话，并在该流结束、中断或连接断开时随流释放；不同采集流不得复用 VAD 的流式内部状态。
 - 对 VAD 子轮次发出的 `control.interrupt` 只能定位同一采集会话仍在飞的上一子轮次，不能使用采集根 ID；常开采集不会因完成一轮转写而停止。
 - 如果 `dropped === true`，后端丢弃该次采集并返回输入错误；因为它尚未建立正式 Turn，
   不发布 `control.turn_finished`。

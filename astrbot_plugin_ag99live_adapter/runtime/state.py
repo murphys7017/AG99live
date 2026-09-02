@@ -8,6 +8,8 @@ from typing import Any, Callable
 
 from astrbot.api import logger
 from astrbot.api.provider import Provider, STTProvider
+from astrbot.core.platform.message_session import MessageSession
+from astrbot.core.platform.message_type import MessageType
 
 from ..core_compatibility import supports_interaction_contributors
 from .client_profile import (
@@ -75,7 +77,6 @@ class RuntimeState:
         self.plugin_context = plugin_context
         self.plugin_config_loader = plugin_config_loader
 
-        self.stt_provider_id = ""
         self.performance_curve_provider_id = ""
         self.enable_performance_curve = False
         self.interaction_contributors_available = supports_interaction_contributors(
@@ -103,7 +104,6 @@ class RuntimeState:
         self.vad_config: dict[str, Any] = {}
         self.model_info: dict[str, Any] = {}
         self.image_cooldown_seconds = 0
-        self.selected_stt_provider: STTProvider | None = None
         self.selected_performance_curve_provider: Provider | None = None
         self.performance_curve_runtime = PerformanceCurveRuntime(runtime_state=self)
         self._live2d_runtime_cache_path = (
@@ -136,17 +136,13 @@ class RuntimeState:
             message_id=message_id,
         )
 
-    def refresh(self, *, reload_providers: bool = False) -> bool:
+    def refresh(self, *, reload_providers: bool = False) -> None:
         latest_plugin_config = self._load_latest_plugin_config()
         if latest_plugin_config is not None:
             self.plugin_config = latest_plugin_config
 
-        previous_stt_provider_id = self.stt_provider_id
         previous_performance_curve_provider_id = self.performance_curve_provider_id
         previous_enable_performance_curve = self.enable_performance_curve
-        previous_vad_model = self.vad_model
-        previous_vad_config = dict(self.vad_config)
-
         self.client_uid = normalize_client_uid(
             get_config_value(self.plugin_config, "client_uid", self.client_uid),
             DEFAULT_CLIENT_UID,
@@ -159,7 +155,6 @@ class RuntimeState:
             ),
             DEFAULT_CLIENT_NICKNAME,
         )
-        self.stt_provider_id = get_config_value(self.plugin_config, "stt_provider_id", "")
         self.performance_curve_provider_id = get_config_value(
             self.plugin_config,
             "performance_curve_provider_id",
@@ -168,24 +163,27 @@ class RuntimeState:
         self.enable_performance_curve = bool(
             get_config_value(self.plugin_config, "enable_performance_curve", False)
         )
-        self.vad_model = get_config_value(self.plugin_config, "vad_model", "silero_vad")
+        self.vad_model = str(
+            get_config_value(self.plugin_config, "vad_model", "silero_vad")
+            or ""
+        ).strip()
+        if self.vad_model != "silero_vad":
+            raise RuntimeStateConfigurationError(
+                "Configured VAD engine "
+                f"`{self.vad_model or '<empty>'}` is not supported. "
+                "Use `silero_vad`."
+            )
         self.vad_config = {
             "orig_sr": 16000,
             "target_sr": 16000,
             "prob_threshold": float(
                 get_config_value(self.plugin_config, "vad_prob_threshold", 0.4)
             ),
-            "db_threshold": int(
-                get_config_value(self.plugin_config, "vad_db_threshold", 60)
-            ),
             "required_hits": int(
                 get_config_value(self.plugin_config, "vad_required_hits", 3)
             ),
             "required_misses": int(
                 get_config_value(self.plugin_config, "vad_required_misses", 24)
-            ),
-            "smoothing_window": int(
-                get_config_value(self.plugin_config, "vad_smoothing_window", 5)
             ),
         }
         self.image_cooldown_seconds = max(
@@ -232,16 +230,12 @@ class RuntimeState:
         )
 
         provider_config_changed = (
-            previous_stt_provider_id != self.stt_provider_id
-            or previous_performance_curve_provider_id != self.performance_curve_provider_id
+            previous_performance_curve_provider_id != self.performance_curve_provider_id
             or previous_enable_performance_curve != self.enable_performance_curve
         )
         provider_binding_missing = (
-            (self.stt_provider_id and self.selected_stt_provider is None)
-            or (
-                self.enable_performance_curve
-                and self.selected_performance_curve_provider is None
-            )
+            self.enable_performance_curve
+            and self.selected_performance_curve_provider is None
             or (
                 not self.enable_performance_curve
                 and self.selected_performance_curve_provider is not None
@@ -250,28 +244,22 @@ class RuntimeState:
         if reload_providers or provider_config_changed or provider_binding_missing:
             logger.info(
                 "Reloading provider bindings "
-                "(stt: %s -> %s, performance_curve: %s -> %s, performance_curve_enabled: %s -> %s)",
-                previous_stt_provider_id or "<default>",
-                self.stt_provider_id or "<default>",
+                "(performance_curve: %s -> %s, performance_curve_enabled: %s -> %s)",
                 previous_performance_curve_provider_id or "<default>",
                 self.performance_curve_provider_id or "<default>",
                 previous_enable_performance_curve,
                 self.enable_performance_curve,
             )
-            self.selected_stt_provider = None
             self.selected_performance_curve_provider = None
             self.load_selected_providers()
 
-        return (
-            self.vad_model != previous_vad_model
-            or self.vad_config != previous_vad_config
-        )
+        return None
 
     async def refresh_async(
         self,
         *,
         reload_providers: bool = False,
-    ) -> bool:
+    ) -> None:
         return self.refresh(reload_providers=reload_providers)
 
     def load_selected_providers(self) -> None:
@@ -279,22 +267,6 @@ class RuntimeState:
             raise RuntimeStateConfigurationError(
                 "Plugin context is unavailable while loading provider bindings."
             )
-
-        if self.stt_provider_id:
-            provider = self.plugin_context.get_provider_by_id(self.stt_provider_id)
-            if isinstance(provider, STTProvider):
-                self.selected_stt_provider = provider
-                logger.info("Loaded STT provider from plugin config: %s", self.stt_provider_id)
-            else:
-                raise RuntimeStateConfigurationError(
-                    "Configured STT provider "
-                    f"`{self.stt_provider_id}` was not found or is not an STTProvider."
-                )
-        else:
-            provider = self.plugin_context.get_using_stt_provider(umo=self.client_uid)
-            if isinstance(provider, STTProvider):
-                self.selected_stt_provider = provider
-                logger.info("Using current STT provider: %s", provider.meta().id)
 
         if self.enable_performance_curve:
             if not self.performance_curve_provider_id:
@@ -315,6 +287,32 @@ class RuntimeState:
                 "Loaded performance curve provider from plugin config: %s",
                 self.performance_curve_provider_id,
             )
+
+    def resolve_stt_provider(self) -> STTProvider:
+        """Resolve AstrBot's current STT provider for the desktop session.
+
+        STT selection belongs to AstrBot. Resolve it at transcription time so a
+        provider switch takes effect without leaving a stale adapter binding.
+        """
+        if self.plugin_context is None:
+            raise RuntimeStateConfigurationError(
+                "Plugin context is unavailable while resolving the STT provider."
+            )
+
+        provider = self.plugin_context.get_using_stt_provider(
+            umo=str(
+                MessageSession(
+                    platform_name="olv_pet_adapter",
+                    message_type=MessageType.FRIEND_MESSAGE,
+                    session_id=self.client_uid,
+                )
+            )
+        )
+        if not isinstance(provider, STTProvider):
+            raise RuntimeStateConfigurationError(
+                "AstrBot has no active STT provider for the AG99live desktop session."
+            )
+        return provider
 
     def build_current_model_payload(
         self,

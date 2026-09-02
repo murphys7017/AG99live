@@ -87,20 +87,14 @@ class SileroVADStreamEngine:
 
 
 def create_vad_engine(
-    olv_dir,
     engine_type: str,
     kwargs: dict[str, Any],
 ):
-    del olv_dir
-
-    if not engine_type:
-        return None
-
     if engine_type == "silero_vad":
         return SileroVADStreamEngine(kwargs=kwargs)
 
     raise RuntimeError(
-        f"Unsupported VAD engine `{engine_type}`. Supported values: '', 'silero_vad'."
+        f"Unsupported VAD engine `{engine_type}`. Supported value: 'silero_vad'."
     )
 
 

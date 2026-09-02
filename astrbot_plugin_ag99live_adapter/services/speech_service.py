@@ -29,12 +29,15 @@ from ..protocol.builder import (
 @dataclass
 class AudioStreamState:
     stream_id: str
+    capture_turn_id: str | None = None
     sample_rate: int = 16000
     channels: int = 1
     encoding: str = "pcm16le"
     capture_mode: str = "ptt"
     chunks: list[bytes] = field(default_factory=list)
     last_seq: int = -1
+    vad_engine: Any | None = None
+    vad_turn_count: int = 0
 
 
 @dataclass
@@ -74,11 +77,10 @@ TEMP_AUDIO_CLEANUP_WARNING_THRESHOLD = 5
 class SpeechIngressService:
     """语音输入服务：聚合 PCM chunk、做 VAD 切分、调 STT、产出 AstrBotMessage。
 
-    内部维护三类状态：
-      - _audio_streams: dict[stream_id, AudioStreamState]，存正在接收的流；
+    内部维护两类服务状态；每个 _audio_streams 条目同时拥有该采集流的 VAD 会话：
+      - _audio_streams: dict[stream_id, AudioStreamState]，存正在接收的流及其 VAD；
       - _pending_temp_audio_files: dict[path, PendingTempAudioFile]，延迟 N 轮后
         回收的 STT 临时 wav 文件；
-      - _vad_turn_counters: dict[root_turn_id, int]，VAD 切分出来的子轮次自增计数。
 
     出站时通过构造注入的 send_json 发 control_error / output_transcription；
     检测到用户开口时通知 TurnCoordinator 选择要中断的正式轮次。能形成有效转写的路径
@@ -90,21 +92,20 @@ class SpeechIngressService:
         *,
         media_service,
         runtime_state,
-        ensure_vad_engine,
+        create_vad_engine,
         send_json,
         build_message_object,
         on_vad_speech_started,
     ) -> None:
         self.media_service = media_service
         self.runtime_state = runtime_state
-        self._ensure_vad_engine = ensure_vad_engine
+        self._create_vad_engine = create_vad_engine
         self._send_json = send_json
         self._build_message_object = build_message_object
         self._on_vad_speech_started = on_vad_speech_started
         self._audio_streams: dict[str, AudioStreamState] = {}
         self._pending_temp_audio_files: dict[str, PendingTempAudioFile] = {}
         self._completed_transcription_turns = 0
-        self._vad_turn_counters: dict[str, int] = {}
 
     async def handle_audio_stream_start(self, message) -> None:
         """处理 input.audio_stream_start：登记一条新的、唯一的流状态。"""
@@ -115,12 +116,28 @@ class SpeechIngressService:
         if stream_id in self._audio_streams:
             raise ValueError(f"audio_stream_duplicate_start:{stream_id}")
 
+        capture_mode = self._normalize_capture_mode(
+            payload.get("capture_mode"),
+            default="ptt",
+        )
+        vad_engine = None
+        if capture_mode in {"manual", "auto"}:
+            try:
+                vad_engine = self._create_vad_engine()
+            except Exception as exc:
+                logger.exception("Failed to initialize VAD engine for stream_id=%s", stream_id)
+                raise RuntimeError(
+                    f"vad_initialization_failed:{stream_id}"
+                ) from exc
+
         self._audio_streams[stream_id] = AudioStreamState(
             stream_id=stream_id,
+            capture_turn_id=str(getattr(message, "turn_id", "") or "").strip() or None,
             sample_rate=payload["sample_rate"],
             channels=payload["channels"],
             encoding=payload["encoding"],
-            capture_mode=self._normalize_capture_mode(payload.get("capture_mode"), default="ptt"),
+            capture_mode=capture_mode,
+            vad_engine=vad_engine,
         )
 
     async def handle_audio_stream_binary_chunk(self, frame: BinaryAudioChunkFrame):
@@ -223,7 +240,7 @@ class SpeechIngressService:
             )
 
         if capture_mode in {"manual", "auto"}:
-            if self._consume_vad_turn_counter(message.turn_id):
+            if stream.vad_turn_count > 0:
                 logger.debug("Ignoring VAD audio stream end after child turns: %s", stream_id)
                 return None
             await self._emit_input_error(
@@ -268,21 +285,18 @@ class SpeechIngressService:
         audio_data = self._pcm16_bytes_to_float32([chunk_bytes])
         if audio_data.size == 0:
             return None
+        stream = self._audio_streams.get(stream_id)
+        if stream is None:
+            raise ValueError(f"binary_audio_chunk_without_start:{stream_id}")
         message = _StreamVadMessage(
             turn_id=turn_id,
             raw_type=raw_type,
             stream_id=stream_id,
             sample_rate=sample_rate,
         )
-        try:
-            vad_engine = self._ensure_vad_engine()
-        except Exception:
-            logger.exception("Failed to initialize VAD engine")
-            await self._emit_input_error(
-                turn_id=turn_id,
-                error_message="VAD initialization failed.",
-            )
-            return None
+        vad_engine = stream.vad_engine
+        if vad_engine is None:
+            raise RuntimeError(f"vad_engine_unavailable:{stream_id}")
 
         segment_id = self._resolve_audio_segment_id(message)
         for audio_bytes in vad_engine.detect_speech(audio_data.tolist()):
@@ -361,7 +375,11 @@ class SpeechIngressService:
     async def _build_message_from_vad_segment(self, message):
         segment_id = self._resolve_audio_segment_id(message)
         audio_buffer = await self.media_service.drain_audio_buffer(segment_id=segment_id)
-        vad_turn_id = self._next_vad_turn_id(message.turn_id)
+        stream = self._audio_streams.get(message.stream_id)
+        if stream is None:
+            raise ValueError(f"binary_audio_stream_without_state:{message.stream_id}")
+        stream.vad_turn_count += 1
+        vad_turn_id = self._next_vad_turn_id(stream)
 
         if audio_buffer.size == 0:
             logger.debug("Ignoring VAD segment with empty buffer.")
@@ -385,19 +403,12 @@ class SpeechIngressService:
                 return normalized
         return None
 
-    def _next_vad_turn_id(self, root_turn_id: str | None) -> str | None:
-        normalized = str(root_turn_id or "").strip()
+    @staticmethod
+    def _next_vad_turn_id(stream: AudioStreamState) -> str | None:
+        normalized = str(stream.capture_turn_id or "").strip()
         if not normalized:
             return None
-        next_index = self._vad_turn_counters.get(normalized, 0) + 1
-        self._vad_turn_counters[normalized] = next_index
-        return f"{normalized}:vad:{next_index}"
-
-    def _consume_vad_turn_counter(self, root_turn_id: str | None) -> bool:
-        normalized = str(root_turn_id or "").strip()
-        if not normalized:
-            return False
-        return self._vad_turn_counters.pop(normalized, 0) > 0
+        return f"{normalized}:vad:{stream.vad_turn_count}"
 
     @staticmethod
     def _clone_raw_message_with_turn_id(
@@ -422,17 +433,14 @@ class SpeechIngressService:
         )
 
     async def _transcribe_audio(self, audio_buffer: np.ndarray, *, sample_rate: int = 16000) -> str:
-        if self.runtime_state.selected_stt_provider is None:
-            raise RuntimeError(
-                "No STT provider available. Please configure `stt_provider_id` in plugin config or set a default AstrBot STT provider."
-            )
+        stt_provider = self.runtime_state.resolve_stt_provider()
 
         temp_path = self.media_service.save_audio_buffer_to_temp_wav(
             audio_buffer,
             sample_rate=sample_rate,
         )
         try:
-            return await self.runtime_state.selected_stt_provider.get_text(temp_path)
+            return await stt_provider.get_text(temp_path)
         finally:
             self._schedule_temp_file_cleanup(temp_path)
 

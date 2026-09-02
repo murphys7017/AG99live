@@ -13,7 +13,7 @@ from astrbot.api.platform import register_platform_adapter
 from astrbot.core.platform.astr_message_event import MessageSesion
 from astrbot.core.utils.astrbot_path import get_astrbot_plugin_data_path
 
-from .services.audio_runtime import create_vad_engine
+from .services.audio_runtime import create_vad_engine as create_stream_vad_engine
 from .runtime.chat_buffer import ChatBuffer
 from .runtime.client_profile import (
     DEFAULT_CLIENT_NICKNAME,
@@ -200,7 +200,6 @@ class OLVPetPlatformAdapter(Platform):
                 submit_system_text_input=self._submit_remote_operator_system_text_input,
             )
 
-        self._vad_engine = None
         self.turn_coordinator = TurnCoordinator(
             session_state=self.session_state,
             turn_identity_map=self.turn_identity_map,
@@ -216,7 +215,10 @@ class OLVPetPlatformAdapter(Platform):
             send_json=self.transport.send_json,
             build_platform_event=self._build_platform_event,
             commit_event=self.commit_event,
-            ensure_vad_engine=self._ensure_vad_engine,
+            create_vad_engine=lambda: create_stream_vad_engine(
+                engine_type=self.runtime_state.vad_model,
+                kwargs=self.runtime_state.vad_config,
+            ),
         )
 
         logger.debug(
@@ -238,24 +240,12 @@ class OLVPetPlatformAdapter(Platform):
         return metadata
 
     @property
-    def vad_model(self) -> str:
-        return self.runtime_state.vad_model
-
-    @property
-    def vad_config(self) -> dict[str, Any]:
-        return self.runtime_state.vad_config
-
-    @property
     def model_info(self) -> dict[str, Any]:
         return self.runtime_state.model_info
 
     @property
     def image_cooldown_seconds(self) -> int:
         return self.runtime_state.image_cooldown_seconds
-
-    @property
-    def _selected_stt_provider(self):
-        return self.runtime_state.selected_stt_provider
 
     async def run(self):
         self._event_loop = asyncio.get_running_loop()
@@ -342,16 +332,6 @@ class OLVPetPlatformAdapter(Platform):
     async def handle_binary_msg(self, message: bytes):
         await self.turn_coordinator.handle_binary_msg(message)
 
-    def _ensure_vad_engine(self):
-        if self._vad_engine is not None:
-            return self._vad_engine
-        self._vad_engine = create_vad_engine(
-            olv_dir=ASSETS_DIR,
-            engine_type=self.vad_model,
-            kwargs=self.vad_config,
-        )
-        return self._vad_engine
-
     async def emit_message_chain(
         self,
         message_chain,
@@ -374,22 +354,18 @@ class OLVPetPlatformAdapter(Platform):
         )
 
     def _refresh_runtime_settings(self) -> None:
-        vad_settings_changed = self.runtime_state.refresh()
+        self.runtime_state.refresh()
         self._sync_client_profile_from_runtime_state()
-        if self._vad_engine is not None and vad_settings_changed:
-            self._vad_engine = None
 
     async def _refresh_runtime_settings_async(
         self,
         *,
         reload_providers: bool = False,
     ) -> None:
-        vad_settings_changed = await self.runtime_state.refresh_async(
+        await self.runtime_state.refresh_async(
             reload_providers=reload_providers,
         )
         self._sync_client_profile_from_runtime_state()
-        if self._vad_engine is not None and vad_settings_changed:
-            self._vad_engine = None
 
     async def _send_current_model_and_conf(self, *, force: bool = False) -> bool:
         payload = self.runtime_state.build_current_model_payload(

@@ -90,7 +90,7 @@ class TurnCoordinator:
         send_json: Callable[[dict[str, Any]], Awaitable[bool]],
         build_platform_event: Callable[[Any], Any],
         commit_event: Callable[[Any], None],
-        ensure_vad_engine: Callable[[], Any],
+        create_vad_engine: Callable[[], Any],
     ) -> None:
         self.session_state = session_state
         self.turn_identity_map = turn_identity_map
@@ -106,11 +106,11 @@ class TurnCoordinator:
         self._send_json = send_json
         self._build_platform_event = build_platform_event
         self._commit_event = commit_event
-        self._ensure_vad_engine = ensure_vad_engine
+        self._create_vad_engine = create_vad_engine
         self.speech_ingress = SpeechIngressService(
             media_service=self.media_service,
             runtime_state=self.runtime_state,
-            ensure_vad_engine=self._ensure_vad_engine,
+            create_vad_engine=self._create_vad_engine,
             send_json=self._send_json,
             build_message_object=self._build_message_object,
             on_vad_speech_started=self._handle_vad_speech_started,

@@ -100,8 +100,8 @@ def test_handle_binary_audio_stream_chunk_transcribes_on_stream_end(
 
     service = SpeechIngressService(
         media_service=MediaServiceStub(),
-        runtime_state=SimpleNamespace(selected_stt_provider=SttProviderStub()),
-        ensure_vad_engine=lambda: None,
+        runtime_state=SimpleNamespace(resolve_stt_provider=lambda: SttProviderStub()),
+        create_vad_engine=lambda: None,
         send_json=send_json,
         build_message_object=lambda *, text, raw_message: {
             "text": text,
@@ -168,8 +168,8 @@ def test_handle_manual_binary_audio_stream_chunk_uses_vad_segments(
 
     service = SpeechIngressService(
         media_service=MediaServiceStub(),
-        runtime_state=SimpleNamespace(selected_stt_provider=SttProviderStub()),
-        ensure_vad_engine=lambda: vad_engine,
+        runtime_state=SimpleNamespace(resolve_stt_provider=lambda: SttProviderStub()),
+        create_vad_engine=lambda: vad_engine,
         send_json=send_json,
         build_message_object=lambda *, text, raw_message: {
             "text": text,
@@ -221,8 +221,8 @@ def test_handle_binary_audio_stream_end_dropped_reports_input_error(
 
     service = SpeechIngressService(
         media_service=MediaServiceStub(),
-        runtime_state=SimpleNamespace(selected_stt_provider=SttProviderStub()),
-        ensure_vad_engine=lambda: None,
+        runtime_state=SimpleNamespace(resolve_stt_provider=lambda: SttProviderStub()),
+        create_vad_engine=lambda: None,
         send_json=send_json,
         build_message_object=lambda *, text, raw_message: build_calls.append((text, raw_message)),
         on_vad_speech_started=ignore_vad_speech_started,
