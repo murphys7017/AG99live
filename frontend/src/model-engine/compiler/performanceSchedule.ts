@@ -970,15 +970,15 @@ export function compileSpeechTrackTiming(options: {
 
   const bodyLayer = layer === "body";
   const settleDurationMs = clampInteger(
-    Math.round(activeDurationMs * (bodyLayer ? 0.20 : 0.16)),
+    Math.round(activeDurationMs * 0.16),
     80,
-    180,
+    bodyLayer ? 160 : 180,
   );
   const settleAtMs = activeDurationMs - settleDurationMs;
   const introMs = clampInteger(
-    Math.round(activeDurationMs * (bodyLayer ? 0.11 : 0.07)),
+    Math.round(activeDurationMs * (bodyLayer ? 0.065 : 0.07)),
     18,
-    bodyLayer ? 100 : 70,
+    bodyLayer ? 72 : 70,
   );
   const phraseLimit = resolveGesturePhraseLimit(
     settleAtMs - introMs,
@@ -1001,8 +1001,10 @@ export function compileSpeechTrackTiming(options: {
       index,
       phrase.text,
     ].join(":"));
+    // Body motion still follows mouth onset, but must arrive in time to read
+    // as part of the current phrase instead of trailing into its release.
     const onsetRatio = bodyLayer
-      ? 0.12 + performanceUnitInterval(seed) * 0.14
+      ? 0.07 + performanceUnitInterval(seed) * 0.09
       : 0.05 + performanceUnitInterval(seed) * 0.12;
     const baseCandidateAtMs = windowStartMs
       + Math.round(Math.max(1, windowEndMs - windowStartMs) * onsetRatio);
@@ -1063,8 +1065,8 @@ export function compileSpeechTrackTiming(options: {
       activeDurationMs,
     ].join(":"));
     const transitionRatio = bodyLayer
-      ? 0.56 + performanceUnitInterval(transitionSeed) * 0.18
-      : 0.34 + performanceUnitInterval(transitionSeed) * 0.22;
+      ? 0.42 + performanceUnitInterval(transitionSeed) * 0.16
+      : 0.28 + performanceUnitInterval(transitionSeed) * 0.18;
     event.transitionMs = Math.min(
       transitionBudgetMs,
       Math.max(1, Math.round(transitionBudgetMs * transitionRatio)),
