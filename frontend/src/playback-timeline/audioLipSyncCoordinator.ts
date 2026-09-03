@@ -45,7 +45,7 @@ export function createPlaybackTimelineAudioLipSyncSink(options: {
       options.pushHistory(
         "system",
         degraded
-          ? `嘴型同步加载失败：${reason}。已切换为随机开合。`
+          ? `嘴型同步不可用：${reason}。语音随动继续使用可用的声学信号。`
           : `嘴型同步加载失败：${reason}。`,
       );
     },

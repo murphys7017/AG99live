@@ -9,7 +9,7 @@ const SPEECH_EMPHASIS_RATIO_FLOOR = 0.24;
 const SPEECH_EMPHASIS_RATIO_SPAN = 0.24;
 
 interface LiveLipSyncRuntime {
-  resume: () => Promise<string | null>;
+  resume: () => Promise<void>;
   stop: () => void;
 }
 
@@ -80,23 +80,17 @@ export function createLive2DLipSyncTimelineSink(): PlaybackTimelineLipSyncSink {
         return;
       }
       try {
-        const degradedReason = await liveRuntime.resume();
-        if (degradedReason) {
-          console.error("[Live2D] lip sync failed during resume.", {
-            reason: degradedReason,
-          });
-          markActiveUnavailable?.(degradedReason, true);
-        }
+        await liveRuntime.resume();
         markActiveStarted?.();
       } catch (error) {
-        const name = error instanceof Error && error.name
-          ? error.name
-          : "unknown";
+        const reason = error instanceof Error && error.message.trim()
+          ? error.message.trim()
+          : `lip_sync_resume_failed:${error instanceof Error && error.name ? error.name : "unknown"}`;
         console.error("[Live2D] lip sync resume failed without degradation.", {
-          reason: `lip_sync_resume_failed:${name}`,
+          reason,
           error,
         });
-        markActiveUnavailable?.(`lip_sync_resume_failed:${name}`, false);
+        markActiveUnavailable?.(reason, false);
       }
     },
     stop,
@@ -168,42 +162,19 @@ function startLiveLipSync(
     }
   };
 
-  const degradedRuntime = (): LiveLipSyncRuntime | null => {
-    if (!hasLipSyncParameters) {
-      return null;
-    }
-    sourceRuntime = createRandomLipSyncRuntime(
-      (values) => writeAudioSignalSource(sourceId, values),
-      endSignalSource,
-      isCurrentAudio,
-      onRuntimeFailure,
-    );
-    return sourceRuntime;
-  };
-
   const AudioContextCtor = window.AudioContext
     ?? (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
   if (!AudioContextCtor) {
-    const fallbackRuntime = degradedRuntime();
-    if (!fallbackRuntime) {
-      endSignalSource();
-    }
-    return reportLipSyncFailure(
-      "lip_sync_audio_context_unavailable",
-      undefined,
-      fallbackRuntime,
-    );
+    endSignalSource();
+    return reportLipSyncFailure("lip_sync_audio_context_unavailable");
   }
 
   try {
     const audioContext = new AudioContextCtor();
     if (typeof audioContext.createMediaElementSource !== "function") {
       void audioContext.close?.();
-      return reportLipSyncFailure(
-        "lip_sync_media_element_source_unavailable",
-        undefined,
-        degradedRuntime(),
-      );
+      endSignalSource();
+      return reportLipSyncFailure("lip_sync_media_element_source_unavailable");
     }
     const analyser = audioContext.createAnalyser();
     analyser.fftSize = 1024;
@@ -216,7 +187,6 @@ function startLiveLipSync(
     const frequencyBins = new Uint8Array(analyser.frequencyBinCount);
     let animationFrameId: number | null = null;
     let stopped = false;
-    let resumeFallback: LiveLipSyncRuntime | null = null;
     let firstFrameLogged = false;
 
     const tick = () => {
@@ -253,9 +223,7 @@ function startLiveLipSync(
           });
         }
       } catch (error) {
-        stopped = true;
-        animationFrameId = null;
-        endSignalSource();
+        sourceRuntime?.stop();
         console.error("[Live2D] lip sync frame write failed.", {
           reason: "lip_sync_parameter_write_failed",
           error,
@@ -277,35 +245,17 @@ function startLiveLipSync(
           try {
             await audioContext.resume();
           } catch (error) {
-            stopped = true;
-            if (animationFrameId !== null) {
-              window.cancelAnimationFrame(animationFrameId);
-              animationFrameId = null;
-            }
             const name = error instanceof Error && error.name
               ? error.name
               : "unknown";
-            try {
-              writeAudioSignalSource(sourceId, { speechEnergyValue: 0 });
-              resumeFallback = degradedRuntime();
-              await resumeFallback?.resume();
-            } catch (fallbackError) {
-              endSignalSource();
-              console.error("[Live2D] degraded lip sync setup failed.", {
-                reason: "lip_sync_resume_degradation_failed",
-                fallbackError,
-              });
-              onRuntimeFailure("lip_sync_resume_degradation_failed", false);
-            }
-            return `lip_sync_resume_failed:${name}`;
+            sourceRuntime?.stop();
+            throw new Error(`lip_sync_resume_failed:${name}`);
           }
         }
-        return null;
+        return;
       },
       stop: () => {
         stopped = true;
-        resumeFallback?.stop();
-        resumeFallback = null;
         if (animationFrameId !== null) {
           window.cancelAnimationFrame(animationFrameId);
           animationFrameId = null;
@@ -329,25 +279,17 @@ function startLiveLipSync(
       failureReason: hasLipSyncParameters ? null : "lip_sync_parameters_unconfigured",
     };
   } catch (error) {
-    const fallbackRuntime = degradedRuntime();
-    if (!fallbackRuntime) {
-      endSignalSource();
-    }
-    return reportLipSyncFailure(
-      "lip_sync_analyser_failed",
-      error,
-      fallbackRuntime,
-    );
+    endSignalSource();
+    return reportLipSyncFailure("lip_sync_analyser_failed", error);
   }
 }
 
 function reportLipSyncFailure(
   reason: string,
   error?: unknown,
-  runtime: LiveLipSyncRuntime | null = null,
 ): LiveLipSyncStartResult {
   console.error("[Live2D] lip sync failed.", { reason, error });
-  return { runtime, failureReason: reason };
+  return { runtime: null, failureReason: reason };
 }
 
 function resolveSpeechEmphasisValue(
@@ -401,57 +343,4 @@ function resolveFrequencyBandEnergy(
     energy += normalizedMagnitude * normalizedMagnitude;
   }
   return energy;
-}
-
-function createRandomLipSyncRuntime(
-  writeAudioSignalSource: (values: {
-    lipSyncIntensity?: number;
-    speechEnergyValue?: number;
-  }) => void,
-  endSignalSource: () => void,
-  isCurrentAudio: () => boolean,
-  onRuntimeFailure: (reason: string, degraded: boolean) => void,
-): LiveLipSyncRuntime {
-  let timerId: number | null = null;
-  let stopped = false;
-
-  const scheduleNext = (): void => {
-    if (stopped || !isCurrentAudio()) {
-      return;
-    }
-    const open = Math.random() >= 0.45;
-    const value = open ? 0.35 + Math.random() * 0.5 : 0;
-    try {
-      writeAudioSignalSource({ lipSyncIntensity: value });
-    } catch (error) {
-      stopped = true;
-      timerId = null;
-      console.error("[Live2D] random lip sync fallback failed.", {
-        reason: "lip_sync_random_fallback_parameter_write_failed",
-        error,
-      });
-      endSignalSource();
-      onRuntimeFailure("lip_sync_random_fallback_parameter_write_failed", false);
-      return;
-    }
-    timerId = window.setTimeout(scheduleNext, 90 + Math.round(Math.random() * 140));
-  };
-
-  return {
-    resume: async () => {
-      if (stopped || timerId !== null) {
-        return null;
-      }
-      scheduleNext();
-      return null;
-    },
-    stop: () => {
-      stopped = true;
-      if (timerId !== null) {
-        window.clearTimeout(timerId);
-        timerId = null;
-      }
-      endSignalSource();
-    },
-  };
 }

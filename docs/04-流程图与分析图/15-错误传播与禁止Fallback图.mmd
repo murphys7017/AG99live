@@ -102,18 +102,19 @@ flowchart TD
     end
 
     subgraph LIP[Lip-sync 可选能力]
-        ATTACH{WebAudio analyser 和嘴部参数可用？}:::check
+        ATTACH{WebAudio analyser 可用？}:::check
+        MOUTH{模型有可写口型参数？}:::check
         LFAIL[记录 lip_sync failed<br/>日志 + Timeline optional terminal]:::failure
-        DEGRADE{允许随机嘴部视觉降级？}:::check
-        RANDOM[有界随机开合至音频结束<br/>不能驱动 speech gesture]:::owner
-        NORMAL[真实 RMS 口型]:::terminal
+        NORMAL[真实 RMS 口型 + speech energy]:::terminal
+        SPEECH[真实 RMS speech energy<br/>口型不可用可见]:::terminal
+        LIPEND[仅音频继续，口型失败可见]:::failure
 
         RUN --> ATTACH
-        ATTACH -->|是| NORMAL
+        ATTACH -->|是| MOUTH
+        MOUTH -->|是| NORMAL
+        MOUTH -->|否| SPEECH
         ATTACH -->|否| LFAIL
-        LFAIL --> DEGRADE
-        DEGRADE -->|当前显式策略允许| RANDOM
-        DEGRADE -->|不允许/参数不可写| LIPEND[仅音频继续，口型失败可见]:::failure
+        LFAIL --> LIPEND
     end
 
     subgraph NO[明确禁止的 fallback]
