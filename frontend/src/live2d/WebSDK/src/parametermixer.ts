@@ -110,7 +110,6 @@ export type ActiveParameterMixerResolution =
   | {
       ok: true;
       parameters: ResolvedParameterFrameEntry[];
-      presentationSettled: boolean;
     }
   | {
       ok: false;
@@ -181,6 +180,7 @@ export class ActiveParameterMixer {
     const resolution = this.resolveFrame(
       contributions,
       this.captureParameterBaseSnapshots(model, contributions),
+      directPlan.releaseEligible,
     );
     if (resolution.ok === false) {
       return {
@@ -192,7 +192,7 @@ export class ActiveParameterMixer {
 
     const directPlanExecution = {
       ...directPlan,
-      released: directPlan.releaseEligible && resolution.presentationSettled,
+      released: directPlan.releaseEligible,
     };
 
     if (
@@ -201,7 +201,6 @@ export class ActiveParameterMixer {
       && directPlan.elapsedMs !== null
       && directPlan.nominalReleaseReached
       && directPlan.allBindingsActivated
-      && resolution.presentationSettled
     ) {
       input.directPlan.releaseStartedAtMs = directPlan.elapsedMs;
     }
@@ -229,6 +228,7 @@ export class ActiveParameterMixer {
   public resolveFrame(
     contributions: readonly ParameterContribution[],
     baseSnapshots: ReadonlyMap<number, ParameterBaseSnapshot>,
+    releaseEligible = false,
   ): ActiveParameterMixerResolution {
     const grouped = new Map<number, {
       parameterIdRaw: string;
@@ -268,7 +268,6 @@ export class ActiveParameterMixer {
     }
 
     const parameters: ResolvedParameterFrameEntry[] = [];
-    let presentationSettled = true;
     const orderedGroups = [...grouped.entries()]
       .sort(([leftIndex], [rightIndex]) => leftIndex - rightIndex);
     for (const [parameterIndex, group] of orderedGroups) {
@@ -352,15 +351,15 @@ export class ActiveParameterMixer {
       );
       let presentedValue = directOnlyTargetValue;
       if (presentationContribution?.presentation) {
-        const presentationFrame = resolveParameterPresentationFrame(
-          presentationContribution.presentation.node,
-          directOnlyTargetValue,
-          baseValue,
-          presentationContribution.presentation.elapsedMs,
-          presentationContribution.presentation.timing,
-        );
-        presentedValue = presentationFrame.drivenValue;
-        presentationSettled = presentationSettled && presentationFrame.settled;
+        presentedValue = releaseEligible
+          ? baseValue
+          : resolveParameterPresentationFrame(
+              presentationContribution.presentation.node,
+              directOnlyTargetValue,
+              baseValue,
+              presentationContribution.presentation.elapsedMs,
+              presentationContribution.presentation.timing,
+            ).drivenValue;
       }
       // Keep the active response state current, but never delay lip-sync output.
       const finalValue = hasLipSyncContribution ? mixedTargetValue : presentedValue;
@@ -379,7 +378,7 @@ export class ActiveParameterMixer {
       });
     }
 
-    return { ok: true, parameters, presentationSettled };
+    return { ok: true, parameters };
   }
 
   private collectDirectPlanContributions(
