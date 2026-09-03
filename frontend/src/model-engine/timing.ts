@@ -45,12 +45,14 @@ export function resolveMotionTiming(
   let resolvedDurationMs = DEFAULT_MOTION_INTENT_DURATION_MS;
   let timingSource: MotionTimingResolution["timingSource"] = "default";
 
-  if (syncedDuration !== null) {
-    resolvedDurationMs = syncedDuration;
-    timingSource = "audio_sync";
-  } else if (hintedDuration !== null) {
+  // An explicit semantic duration describes the action itself. Audio starts
+  // the action and drives speech, but must not truncate a declared gesture.
+  if (hintedDuration !== null) {
     resolvedDurationMs = hintedDuration;
     timingSource = "hint";
+  } else if (syncedDuration !== null) {
+    resolvedDurationMs = syncedDuration;
+    timingSource = "audio_sync";
   }
 
   if (options.mode === "idle") {

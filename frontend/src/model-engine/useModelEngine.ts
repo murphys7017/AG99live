@@ -173,7 +173,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
       dependencies.onMotionRejected({
         turnId: normalizeTurnId(context.turnId) as string,
         messageId: context.messageId,
-        reason: context.startReason,
+        reason: state.lastCompileReason || context.startReason,
       });
     },
   });
