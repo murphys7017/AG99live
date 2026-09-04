@@ -44,6 +44,8 @@ export interface Ag99DesktopApi {
   setPttMode: (enabled: boolean, binding?: DesktopPttKeyBinding) => void;
   getPttHookStatus: () => Promise<DesktopPttHookStatus>;
   reportPttEventAck: (ack: DesktopPttEventAck) => void;
+  sendRuntimeBridgeMessage: (payload: unknown) => void;
+  onRuntimeBridgeMessage: (callback: (payload: unknown) => void) => () => void;
   onIpc: <TPayload = unknown>(
     channel: string,
     callback: (payload: TPayload) => void,

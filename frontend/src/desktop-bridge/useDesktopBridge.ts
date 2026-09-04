@@ -266,12 +266,22 @@ export function createDesktopBridge(): DesktopBridgeInstance {
   let started = false;
   let runtimeChannel: BroadcastChannel | null = null;
   let profileAuthoringChannel: BroadcastChannel | null = null;
+  let removeRuntimeBridgeListener: (() => void) | null = null;
   let removeStorageListener: (() => void) | null = null;
   let removeWindowStateListener: (() => void) | null = null;
   const commandListeners = new Set<(command: DesktopRuntimeCommand) => void>();
   const profileAuthoringCommandListeners = new Set<
     (command: DesktopProfileAuthoringCommand) => void
   >();
+
+  function sendRuntimeBridgeMessage(payload: RuntimeBridgeMessage): void {
+    const nextPayload = cloneJson(payload);
+    if (window.ag99desktop) {
+      window.ag99desktop.sendRuntimeBridgeMessage(nextPayload);
+      return;
+    }
+    runtimeChannel?.postMessage(nextPayload);
+  }
 
   function start(): void {
     if (started || typeof window === "undefined") {
@@ -280,77 +290,86 @@ export function createDesktopBridge(): DesktopBridgeInstance {
 
     started = true;
 
-    if ("BroadcastChannel" in window) {
+    const handleRuntimeBridgeMessage = (payload: RuntimeBridgeMessage): void => {
+      if (!payload || typeof payload !== "object") {
+        return;
+      }
+
+      if (payload.kind === "snapshot") {
+        const nextSnapshot = safeNormalizeSnapshot(payload.snapshot, "broadcast");
+        if (!nextSnapshot) {
+          return;
+        }
+        // Revision 守卫：同一 publisher 只接受 revision 严格递增的快照
+        const nextPub = nextSnapshot._publisherId;
+        const currentPub = state.snapshot._publisherId;
+        const nextRev = nextSnapshot._revision;
+        const currentRev = state.snapshot._revision;
+        if (nextPub === currentPub && nextRev <= currentRev) {
+          return;
+        }
+        const previousLatestRecordId = state.snapshot.motionPlaybackRecords[0]?.id ?? null;
+        const nextLatestRecordId = nextSnapshot.motionPlaybackRecords[0]?.id ?? null;
+        if (previousLatestRecordId !== nextLatestRecordId) {
+          console.info("[MotionLab] runtime snapshot received by window.", {
+            windowRole: document.documentElement.dataset.windowRole ?? "unknown",
+            recordCount: nextSnapshot.motionPlaybackRecords.length,
+            latestRecordId: nextLatestRecordId,
+            latestTurnId: nextSnapshot.motionPlaybackRecords[0]?.turnId ?? null,
+            latestMessageId: nextSnapshot.motionPlaybackRecords[0]?.messageId ?? null,
+          });
+        }
+        const stabilizedSnapshot = reuseStableRuntimeSnapshotCollections(
+          state.snapshot,
+          nextSnapshot,
+        );
+        state.snapshot = stabilizedSnapshot;
+        persistRuntimeSnapshot(stabilizedSnapshot);
+        return;
+      }
+
+      if (payload.kind === "model_projection") {
+        const nextSnapshot = safeNormalizeModelProjectionSnapshot(
+          payload.snapshot,
+          "broadcast",
+        );
+        if (!nextSnapshot) {
+          return;
+        }
+        state.modelProjectionSnapshot = nextSnapshot;
+        return;
+      }
+
+      if (payload.kind === "motion_tuning_samples") {
+        state.motionTuningSamples = normalizeMotionTuningSamples(payload.samples);
+        state.motionTuningSamplesStatus = normalizeMotionTuningSamplesStatus(payload.status);
+        return;
+      }
+
+      if (payload.kind === "motion_preview_status") {
+        state.motionPreviewStatus = cloneJson(payload.status);
+        return;
+      }
+
+      if (payload.kind === "command") {
+        for (const listener of commandListeners) {
+          listener(payload.command);
+        }
+      }
+    };
+
+    if (window.ag99desktop) {
+      removeRuntimeBridgeListener = window.ag99desktop.onRuntimeBridgeMessage(
+        (payload: unknown) => handleRuntimeBridgeMessage(payload as RuntimeBridgeMessage),
+      );
+    } else if ("BroadcastChannel" in window) {
       runtimeChannel = new BroadcastChannel(RUNTIME_CHANNEL_NAME);
       runtimeChannel.addEventListener("message", (event: MessageEvent<RuntimeBridgeMessage>) => {
-        const payload = event.data;
-        if (!payload || typeof payload !== "object") {
-          return;
-        }
-
-        if (payload.kind === "snapshot") {
-          const nextSnapshot = safeNormalizeSnapshot(payload.snapshot, "broadcast");
-          if (!nextSnapshot) {
-            return;
-          }
-          // Revision 守卫：同一 publisher 只接受 revision 严格递增的快照
-          const nextPub = nextSnapshot._publisherId;
-          const currentPub = state.snapshot._publisherId;
-          const nextRev = nextSnapshot._revision;
-          const currentRev = state.snapshot._revision;
-          if (nextPub === currentPub && nextRev <= currentRev) {
-            return;
-          }
-          const previousLatestRecordId = state.snapshot.motionPlaybackRecords[0]?.id ?? null;
-          const nextLatestRecordId = nextSnapshot.motionPlaybackRecords[0]?.id ?? null;
-          if (previousLatestRecordId !== nextLatestRecordId) {
-            console.info("[MotionLab] runtime snapshot received by window.", {
-              windowRole: document.documentElement.dataset.windowRole ?? "unknown",
-              recordCount: nextSnapshot.motionPlaybackRecords.length,
-              latestRecordId: nextLatestRecordId,
-              latestTurnId: nextSnapshot.motionPlaybackRecords[0]?.turnId ?? null,
-              latestMessageId: nextSnapshot.motionPlaybackRecords[0]?.messageId ?? null,
-            });
-          }
-          const stabilizedSnapshot = reuseStableRuntimeSnapshotCollections(
-            state.snapshot,
-            nextSnapshot,
-          );
-          state.snapshot = stabilizedSnapshot;
-          persistRuntimeSnapshot(stabilizedSnapshot);
-          return;
-        }
-
-        if (payload.kind === "model_projection") {
-          const nextSnapshot = safeNormalizeModelProjectionSnapshot(
-            payload.snapshot,
-            "broadcast",
-          );
-          if (!nextSnapshot) {
-            return;
-          }
-          state.modelProjectionSnapshot = nextSnapshot;
-          return;
-        }
-
-        if (payload.kind === "motion_tuning_samples") {
-          state.motionTuningSamples = normalizeMotionTuningSamples(payload.samples);
-          state.motionTuningSamplesStatus = normalizeMotionTuningSamplesStatus(payload.status);
-          return;
-        }
-
-        if (payload.kind === "motion_preview_status") {
-          state.motionPreviewStatus = cloneJson(payload.status);
-          return;
-        }
-
-        if (payload.kind === "command") {
-          for (const listener of commandListeners) {
-            listener(payload.command);
-          }
-        }
+        handleRuntimeBridgeMessage(event.data);
       });
+    }
 
+    if ("BroadcastChannel" in window) {
       profileAuthoringChannel = new BroadcastChannel(PROFILE_AUTHORING_CHANNEL_NAME);
       profileAuthoringChannel.addEventListener(
         "message",
@@ -432,6 +451,8 @@ export function createDesktopBridge(): DesktopBridgeInstance {
     removeStorageListener = null;
     removeWindowStateListener?.();
     removeWindowStateListener = null;
+    removeRuntimeBridgeListener?.();
+    removeRuntimeBridgeListener = null;
     runtimeChannel?.close();
     runtimeChannel = null;
     profileAuthoringChannel?.close();
@@ -452,7 +473,7 @@ export function createDesktopBridge(): DesktopBridgeInstance {
     state.snapshot = stabilizedSnapshot;
     persistRuntimeSnapshot(stabilizedSnapshot);
     const broadcastSnapshot = cloneJson(stabilizedSnapshot);
-    runtimeChannel?.postMessage({
+    sendRuntimeBridgeMessage({
       kind: "snapshot",
       snapshot: broadcastSnapshot,
     } satisfies RuntimeBridgeMessage);
@@ -467,7 +488,7 @@ export function createDesktopBridge(): DesktopBridgeInstance {
     }
     state.modelProjectionSnapshot = nextSnapshot;
     const broadcastSnapshot = cloneJson(nextSnapshot);
-    runtimeChannel?.postMessage({
+    sendRuntimeBridgeMessage({
       kind: "model_projection",
       snapshot: broadcastSnapshot,
     } satisfies RuntimeBridgeMessage);
@@ -481,7 +502,7 @@ export function createDesktopBridge(): DesktopBridgeInstance {
     const nextStatus = normalizeMotionTuningSamplesStatus(status);
     state.motionTuningSamples = nextSamples;
     state.motionTuningSamplesStatus = nextStatus;
-    runtimeChannel?.postMessage({
+    sendRuntimeBridgeMessage({
       kind: "motion_tuning_samples",
       samples: cloneJson(nextSamples),
       status: cloneJson(nextStatus),
@@ -491,7 +512,7 @@ export function createDesktopBridge(): DesktopBridgeInstance {
   function publishMotionPreviewStatus(status: DesktopMotionPreviewStatus): void {
     const nextStatus = cloneJson(status);
     state.motionPreviewStatus = nextStatus;
-    runtimeChannel?.postMessage({
+    sendRuntimeBridgeMessage({
       kind: "motion_preview_status",
       status: nextStatus,
     } satisfies RuntimeBridgeMessage);
@@ -514,7 +535,7 @@ export function createDesktopBridge(): DesktopBridgeInstance {
   }
 
   function sendCommand(command: DesktopRuntimeCommand): void {
-    runtimeChannel?.postMessage({
+    sendRuntimeBridgeMessage({
       kind: "command",
       command: cloneJson(command),
     } satisfies RuntimeBridgeMessage);

@@ -242,6 +242,21 @@ function broadcastToAllWindows(channel: string, payload: unknown): void {
   }
 }
 
+function broadcastToOtherWindows(
+  sender: Electron.WebContents,
+  channel: string,
+  payload: unknown,
+): void {
+  for (const currentWindow of BrowserWindow.getAllWindows()) {
+    if (
+      !currentWindow.isDestroyed()
+      && currentWindow.webContents !== sender
+    ) {
+      currentWindow.webContents.send(channel, payload);
+    }
+  }
+}
+
 function normalizePttKeycode(binding: unknown): number | null {
   if (!binding || typeof binding !== "object") {
     return 29;
@@ -401,6 +416,14 @@ function watchWindowShortcuts(window: BrowserWindow): void {
 }
 
 function setupIpc(): void {
+  ipcMain.on("desktop:runtime-bridge-message", (event, payload: unknown) => {
+    broadcastToOtherWindows(
+      event.sender,
+      "desktop:runtime-bridge-message",
+      payload,
+    );
+  });
+
   ipcMain.on("desktop:toggle-aux-window", (_event, target) => {
     if (
       target === "settings"

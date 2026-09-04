@@ -105,6 +105,18 @@ const api = {
   reportPttEventAck: (ack: DesktopPttEventAck) => {
     ipcRenderer.send("desktop:ptt-event-ack", ack);
   },
+  sendRuntimeBridgeMessage: (payload: unknown) => {
+    ipcRenderer.send("desktop:runtime-bridge-message", payload);
+  },
+  onRuntimeBridgeMessage: (callback: (payload: unknown) => void) => {
+    const handler = (_event: unknown, payload: unknown) => {
+      callback(payload);
+    };
+    ipcRenderer.on("desktop:runtime-bridge-message", handler);
+    return () => {
+      ipcRenderer.removeListener("desktop:runtime-bridge-message", handler);
+    };
+  },
   onIpc: <TPayload = unknown>(channel: string, callback: (payload: TPayload) => void) => {
     const handler = (_event: unknown, payload: TPayload) => {
       callback(payload);
