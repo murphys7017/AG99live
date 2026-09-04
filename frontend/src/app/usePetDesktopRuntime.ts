@@ -289,6 +289,19 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
         messageId,
       });
     },
+    onMotionPreparationNotApplicable: ({ turnId, messageId, timelineId, reason }) => {
+      sendMotionLabEvent({
+        event_type: "motion.frontend_preparation_not_applicable",
+        message_id: messageId,
+        source_route: "playback_timeline",
+        phase: "frontend_preparation",
+        assistant_text: getCanonicalAssistantText(turnId, messageId),
+        raw: {
+          reason,
+          timelineId,
+        },
+      }, turnId);
+    },
   });
   const stopMotionLabReconnectWatch = watch(
     () => adapter.state.status,

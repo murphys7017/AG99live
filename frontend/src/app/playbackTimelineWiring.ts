@@ -121,6 +121,12 @@ export function configurePlaybackTimelineMotionRuntime(options: {
     turnId: string | null,
     messageId: string,
   ) => readonly OutputSegmentSpeechCue[];
+  onMotionPreparationNotApplicable?: (event: {
+    turnId: string | null;
+    messageId: string;
+    timelineId: string;
+    reason: string;
+  }) => void;
 }): {
   motionTimelineSink: PlaybackTimelineMotionSink;
   handleAudioTimelineStarted: (
@@ -140,6 +146,7 @@ export function configurePlaybackTimelineMotionRuntime(options: {
     onMissingPlaybackTimeline,
     getCanonicalAssistantText,
     getCanonicalSpeechCues,
+    onMotionPreparationNotApplicable,
   } = options;
 
   function handleAudioTimelineStarted(
@@ -199,6 +206,12 @@ export function configurePlaybackTimelineMotionRuntime(options: {
       getCanonicalSpeechCues(turnId, messageId),
     );
     if (result.status === "not_applicable") {
+      onMotionPreparationNotApplicable?.({
+        turnId,
+        messageId,
+        timelineId: preparedTimeline.timelineId,
+        reason: result.reason,
+      });
       return;
     }
     if (result.status === "failed") {

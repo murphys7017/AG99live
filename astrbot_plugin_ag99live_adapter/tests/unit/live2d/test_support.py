@@ -54,7 +54,7 @@ def _make_component(
 
 def build_seed_inputs(*, reinforce_primary_observations: bool = False) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     standard_channels: dict[str, dict[str, Any]] = {}
-    for spec in live2d_scan.CORE_BASE_ACTION_CHANNEL_SPECS:
+    for spec in live2d_scan.STANDARD_CHANNEL_SPECS:
         standard_channels[spec["name"]] = {
             "label": spec["label"],
             "available": False,
@@ -316,6 +316,10 @@ def build_seed_model_info_with_options(
         parameter_scan=deepcopy(parameter_scan),
         motions=deepcopy(motions),
     )
+    expression_scan = live2d_scan._apply_expression_hints_to_parameters(
+        parameter_scan=deepcopy(parameter_scan),
+        expressions=[],
+    )
     adaptive_parameter_profile = live2d_scan._build_adaptive_parameter_profile(
         parameter_scan=deepcopy(parameter_scan),
         motions=deepcopy(motions),
@@ -341,11 +345,33 @@ def build_seed_model_info_with_options(
         "models": [
             {
                 "name": "DemoModel",
+                "root_path": "/live2ds/DemoModel",
+                "model_path": "Demo.model3.json",
+                "model_url": "http://127.0.0.1:12397/live2ds/DemoModel/Demo.model3.json",
+                "icon_url": "",
+                "resource_scan": {
+                    "model3_file": "Demo.model3.json",
+                    "cdi3_file": "",
+                    "physics3_file": "",
+                    "texture_count": 0,
+                    "texture_files": [],
+                    "expression_count": 0,
+                    "expression_files": [],
+                    "motion_count": len(motions),
+                    "motion_files": [],
+                    "motion_groups": [],
+                    "vtube_profile_count": 0,
+                    "vtube_profiles": [],
+                    "has_motion_catalog": False,
+                },
                 "parameter_scan": deepcopy(parameter_scan),
+                "expression_scan": expression_scan,
                 "parameter_action_library": parameter_action_library,
+                "constraints": {"expressions": [], "motions": []},
                 "adaptive_parameter_profile": adaptive_parameter_profile,
                 "calibration_profile": calibration_profile,
                 "voice_following_profile": voice_following_profile,
+                "engine_hints": engine_hints,
                 "summary": live2d_scan._build_model_summary(
                     resource_scan={
                         "texture_count": 0,

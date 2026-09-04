@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import importlib
-from urllib.request import urlopen
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
 
 
 def test_static_resource_server_serves_cache_audio_file(
@@ -39,5 +40,26 @@ def test_static_resource_server_serves_cache_audio_file(
             assert response.status == 200
             assert response.headers.get("Content-Length") == str(len(audio_bytes))
             assert response.read() == audio_bytes
+        with urlopen(
+            Request(
+                f"http://127.0.0.1:{port}/cache/audio/voice.wav",
+                method="OPTIONS",
+            ),
+            timeout=3,
+        ) as response:
+            assert response.status == 200
+            assert response.headers.get("Access-Control-Allow-Methods") == "GET, HEAD, OPTIONS"
+        try:
+            urlopen(
+                Request(
+                    f"http://127.0.0.1:{port}/cache/audio/voice.wav",
+                    method="POST",
+                ),
+                timeout=3,
+            )
+        except HTTPError as error:
+            assert error.code == 501
+        else:
+            raise AssertionError("StaticResourceServer must reject POST requests.")
     finally:
         server.stop()

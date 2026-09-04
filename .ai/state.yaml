@@ -20,7 +20,9 @@ configuration_refactor:
     - "Frontend renderer, WebSDK, and Node typechecks passed."
     - "AstrBot plugin structure check reported zero errors and zero warnings."
     - "The inbound protocol smoke script did not reach assertions because its existing test tsconfig compiles official Cubism sources with incompatible strict settings."
-    - "The RuntimeState model-sync smoke test did not reach the changed payload assertion because its existing seed fixture imports the removed scan constant CORE_BASE_ACTION_CHANNEL_SPECS."
+    - "The RuntimeState model-sync smoke test now reaches its payload assertions; the stale seed fixture was aligned with current STANDARD_CHANNEL_SPECS and model-info projection fields. Live runtime acceptance remains user-led."
+    - "Plugin configuration is now explicitly Mapping-based: AstrBot injects dict-derived config, the hot-refresh path returns JSON objects, and the obsolete attribute fallback was removed with focused runtime coverage."
+    - "Motion preparation not_applicable outcomes now enter the existing MotionLab raw-event queue with their reason and Timeline identity; renderer typecheck and the runtime unit subset pass."
   evidence_gap:
     - "AstrBot Dashboard rendering of the new nested plugin schema and a live model_sync handshake still require runtime acceptance."
 

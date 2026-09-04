@@ -77,7 +77,7 @@ class OLVPetPlatformAdapter(Platform):
       - TurnCoordinator — 协议 + 轮次中枢（详细职责见 turn_coordinator.py）。
 
     AstrBot 自身只通过 Platform.run / emit_message_chain / commit_event 等基类钩子
-    与它交互；前端只看到 WebSocketTransport + 静态资源 + 调试 API。
+    与它交互；前端只看到 WebSocketTransport 和静态资源。
     """
 
     def __init__(

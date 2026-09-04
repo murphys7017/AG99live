@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from copy import deepcopy
 import json
 import os
@@ -11,7 +12,7 @@ from astrbot.core.utils.astrbot_path import get_astrbot_config_path
 
 _state_lock = threading.RLock()
 _plugin_context: Any = None
-_plugin_config: Any = None
+_plugin_config: dict[str, Any] = {}
 _plugin_config_path: str | None = None
 PLUGIN_CONFIG_BASENAME = "astrbot_plugin_ag99live_adapter_config.json"
 _default_plugin_config_paths = tuple(
@@ -20,14 +21,10 @@ _default_plugin_config_paths = tuple(
 )
 
 
-def get_config_value(config: Any, key: str, default: Any) -> Any:
+def get_config_value(config: Mapping[str, Any] | None, key: str, default: Any) -> Any:
     if config is None:
         return default
-    getter = getattr(config, "get", None)
-    if callable(getter):
-        value = getter(key, default)
-        return default if value is None else value
-    value = getattr(config, key, default)
+    value = config.get(key, default)
     return default if value is None else value
 
 
@@ -42,17 +39,17 @@ def get_plugin_context() -> Any:
         return _plugin_context
 
 
-def set_plugin_config(config: Any) -> None:
+def set_plugin_config(config: Mapping[str, Any] | None) -> None:
     global _plugin_config
     global _plugin_config_path
     with _state_lock:
         # AstrBotConfig is a dict subclass with framework-owned state that is not deepcopy-safe.
-        _plugin_config = dict(config) if isinstance(config, dict) else config
+        _plugin_config = dict(config or {})
         config_path = getattr(config, "config_path", None)
         _plugin_config_path = config_path if isinstance(config_path, str) and config_path else None
 
 
-def get_plugin_config() -> Any:
+def get_plugin_config() -> dict[str, Any]:
     with _state_lock:
         disk_config = _load_plugin_config_from_disk(
             _plugin_config_path,
