@@ -38,7 +38,7 @@ from ..live2d.semantic_axis_profile import (
 )
 from ..protocol.builder import build_system_model_sync
 from ..protocol.schema_versions import MODEL_INFO_SCHEMA_VERSION
-from .plugin_runtime import get_config_value
+from .plugin_runtime import PluginConfigSnapshot, get_config_value
 from .motion_state import MotionTuningStore
 from .motion_lab import MotionLabRawEventStore, MotionLabRecorder
 
@@ -56,7 +56,7 @@ class RuntimeState:
         platform_config: Any,
         plugin_context: Any,
         plugin_config: Any,
-        plugin_config_loader: Callable[[], Any] | None,
+        plugin_config_loader: Callable[[], PluginConfigSnapshot | None] | None,
         host: str,
         http_port: int,
         client_uid: str,
@@ -74,6 +74,9 @@ class RuntimeState:
         self.client_nickname = DEFAULT_CLIENT_NICKNAME
 
         self.plugin_config = self._clone_plugin_config(plugin_config)
+        self.plugin_config_source = "constructor"
+        self.plugin_config_path: str | None = None
+        self.plugin_config_mtime_ns: int | None = None
         self.plugin_context = plugin_context
         self.plugin_config_loader = plugin_config_loader
 
@@ -138,7 +141,10 @@ class RuntimeState:
     def refresh(self, *, reload_providers: bool = False) -> None:
         latest_plugin_config = self._load_latest_plugin_config()
         if latest_plugin_config is not None:
-            self.plugin_config = latest_plugin_config
+            self.plugin_config = latest_plugin_config.config
+            self.plugin_config_source = latest_plugin_config.source
+            self.plugin_config_path = latest_plugin_config.path
+            self.plugin_config_mtime_ns = latest_plugin_config.mtime_ns
 
         previous_performance_curve_provider_id = self.performance_curve_provider_id
         previous_enable_performance_curve = self.enable_performance_curve
@@ -221,7 +227,9 @@ class RuntimeState:
 
         logger.info(
             "Refreshed adapter runtime settings "
-            "(selected_model=%s, available_models=%s)",
+            "(config_source=%s, config_mtime_ns=%s, selected_model=%s, available_models=%s)",
+            self.plugin_config_source,
+            self.plugin_config_mtime_ns if self.plugin_config_mtime_ns is not None else "<none>",
             self.model_info.get("selected_model", ""),
             self.model_info.get("available_models", []),
         )
@@ -576,9 +584,14 @@ class RuntimeState:
             return {}
         return deepcopy(config)
 
-    def _load_latest_plugin_config(self) -> Any:
+    def _load_latest_plugin_config(self) -> PluginConfigSnapshot | None:
         if self.plugin_config_loader is None:
-            return self._clone_plugin_config(self.plugin_config)
+            return PluginConfigSnapshot(
+                config=self._clone_plugin_config(self.plugin_config),
+                source=self.plugin_config_source,
+                path=self.plugin_config_path,
+                mtime_ns=self.plugin_config_mtime_ns,
+            )
 
         try:
             latest_config = self.plugin_config_loader()
@@ -589,14 +602,29 @@ class RuntimeState:
         if latest_config is None:
             return None
 
-        if not isinstance(latest_config, dict):
+        if not isinstance(latest_config, PluginConfigSnapshot):
             logger.error(
-                "Invalid plugin config from plugin runtime: expected a JSON object, got `%s`.",
+                "Invalid plugin config snapshot from plugin runtime: expected PluginConfigSnapshot, got `%s`.",
                 type(latest_config).__name__,
             )
-            raise RuntimeError("Invalid plugin config from plugin runtime: expected a JSON object.")
+            raise RuntimeError(
+                "Invalid plugin config snapshot from plugin runtime: expected PluginConfigSnapshot."
+            )
+        if not isinstance(latest_config.config, dict):
+            logger.error(
+                "Invalid plugin config snapshot from plugin runtime: expected a JSON object, got `%s`.",
+                type(latest_config.config).__name__,
+            )
+            raise RuntimeError(
+                "Invalid plugin config snapshot from plugin runtime: expected a JSON object."
+            )
 
-        return self._clone_plugin_config(latest_config)
+        return PluginConfigSnapshot(
+            config=self._clone_plugin_config(latest_config.config),
+            source=latest_config.source,
+            path=latest_config.path,
+            mtime_ns=latest_config.mtime_ns,
+        )
 
 
 def _project_frontend_model_info(model_info: dict[str, Any]) -> dict[str, Any]:

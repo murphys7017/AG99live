@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from copy import deepcopy
+from dataclasses import dataclass
 import json
 import os
 import threading
@@ -19,6 +20,14 @@ _default_plugin_config_paths = tuple(
     os.path.join(get_astrbot_config_path(), filename)
     for filename in (PLUGIN_CONFIG_BASENAME,)
 )
+
+
+@dataclass(frozen=True)
+class PluginConfigSnapshot:
+    config: dict[str, Any]
+    source: str
+    path: str | None
+    mtime_ns: int | None
 
 
 def get_config_value(config: Mapping[str, Any] | None, key: str, default: Any) -> Any:
@@ -50,29 +59,41 @@ def set_plugin_config(config: Mapping[str, Any] | None) -> None:
 
 
 def get_plugin_config() -> dict[str, Any]:
+    return deepcopy(get_plugin_config_snapshot().config)
+
+
+def get_plugin_config_snapshot() -> PluginConfigSnapshot:
     with _state_lock:
-        disk_config = _load_plugin_config_from_disk(
+        disk_snapshot = _load_plugin_config_from_disk(
             _plugin_config_path,
             source_label="plugin config",
+            source="plugin_config_file",
         )
-        if disk_config is None:
+        if disk_snapshot is None:
             for default_config_path in _default_plugin_config_paths:
-                disk_config = _load_plugin_config_from_disk(
+                disk_snapshot = _load_plugin_config_from_disk(
                     default_config_path,
                     source_label="default plugin config",
+                    source="default_plugin_config_file",
                 )
-                if disk_config is not None:
+                if disk_snapshot is not None:
                     break
-        if disk_config is not None:
-            return disk_config
-        return deepcopy(_plugin_config)
+        if disk_snapshot is not None:
+            return disk_snapshot
+        return PluginConfigSnapshot(
+            config=deepcopy(_plugin_config),
+            source="injected_snapshot",
+            path=None,
+            mtime_ns=None,
+        )
 
 
 def _load_plugin_config_from_disk(
     config_path: str | None,
     *,
     source_label: str,
-) -> dict[str, Any] | None:
+    source: str,
+) -> PluginConfigSnapshot | None:
     if not config_path or not os.path.exists(config_path):
         return None
 
@@ -95,4 +116,14 @@ def _load_plugin_config_from_disk(
         raise RuntimeError(
             f"Invalid {source_label} in `{config_path}`: expected a JSON object."
         )
-    return deepcopy(data)
+    try:
+        mtime_ns = os.stat(config_path).st_mtime_ns
+    except OSError:
+        mtime_ns = None
+
+    return PluginConfigSnapshot(
+        config=deepcopy(data),
+        source=source,
+        path=config_path,
+        mtime_ns=mtime_ns,
+    )

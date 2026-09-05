@@ -220,7 +220,7 @@ usePetDesktopRuntime
 
 ## Phase 3 — 配置来源诊断
 
-在刷新日志中记录 canonical 快照来源和 revision/mtime，减少运行诊断歧义。
+已完成：`get_plugin_config_snapshot()` 返回 canonical 配置、来源、文件路径和修改时间；`RuntimeState.refresh()` 的运行日志记录来源与 `mtime_ns`。注入快照、指定插件配置文件和默认插件配置文件现在可在运行日志中区分。
 
 ## Phase 4 — 观测补强
 

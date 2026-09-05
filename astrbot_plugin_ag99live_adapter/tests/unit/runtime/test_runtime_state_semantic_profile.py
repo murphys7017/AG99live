@@ -15,6 +15,28 @@ def _import_runtime_state_with_fake_astrbot(*, install_fake_astrbot):
     return importlib.import_module("astrbot_plugin_ag99live_adapter.runtime.state")
 
 
+def test_runtime_state_keeps_current_config_when_loader_has_no_snapshot(
+    install_fake_astrbot,
+    tmp_path,
+) -> None:
+    runtime_state = _import_runtime_state_with_fake_astrbot(
+        install_fake_astrbot=install_fake_astrbot,
+    )
+    state = runtime_state.RuntimeState(
+        platform_config={},
+        plugin_context=None,
+        plugin_config={"general": {"client_uid": "configured-client"}},
+        plugin_config_loader=lambda: None,
+        host="127.0.0.1",
+        http_port=12397,
+        client_uid="desktop-client",
+        live2ds_dir=tmp_path / "live2ds",
+    )
+
+    assert state._load_latest_plugin_config() is None
+    assert state.plugin_config == {"general": {"client_uid": "configured-client"}}
+
+
 def test_runtime_state_injects_semantic_profile_into_model_sync(
     monkeypatch,
     install_fake_astrbot,

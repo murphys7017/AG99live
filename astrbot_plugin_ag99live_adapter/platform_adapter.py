@@ -30,6 +30,7 @@ from .transport.static_routes import build_static_routes, list_background_files
 from .runtime.plugin_runtime import (
     get_config_value,
     get_plugin_config,
+    get_plugin_config_snapshot,
     get_plugin_context,
 )
 from .runtime.state import RuntimeState
@@ -98,7 +99,8 @@ class OLVPetPlatformAdapter(Platform):
         self._event_loop: asyncio.AbstractEventLoop | None = None
 
         self._plugin_context = get_plugin_context()
-        self._plugin_config = get_plugin_config() or {}
+        plugin_config_snapshot = get_plugin_config_snapshot()
+        self._plugin_config = plugin_config_snapshot.config
         general_config = get_config_value(self._plugin_config, "general", {})
 
         self.client_uid = normalize_client_uid(
@@ -118,7 +120,7 @@ class OLVPetPlatformAdapter(Platform):
             platform_config=self.config,
             plugin_context=self._plugin_context,
             plugin_config=self._plugin_config,
-            plugin_config_loader=get_plugin_config,
+            plugin_config_loader=get_plugin_config_snapshot,
             host=self.host,
             http_port=self.http_port,
             client_uid=self.client_uid,
