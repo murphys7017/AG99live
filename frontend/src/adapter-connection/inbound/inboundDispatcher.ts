@@ -76,7 +76,7 @@ export interface InboundDispatchDeps {
       messageId: string,
       material: OutputSegmentMaterial,
     ) => OutputSegmentCommitResult;
-  } | undefined;
+  };
   pushHistory: (role: string, text: string) => void;
   modelSyncAdapter: {
     applyModelSyncMessage: (envelope: ProtocolEnvelope<SystemModelSyncPayload>) => void;

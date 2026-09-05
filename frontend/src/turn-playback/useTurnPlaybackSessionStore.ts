@@ -115,7 +115,8 @@ export function useTurnPlaybackSessionStore() {
 
   function getSession(turnId: string | null): TurnPlaybackSession | undefined {
     const sessionId = resolveSessionId(turnId);
-    return sessionId ? state.sessions.get(sessionId) : undefined;
+    const session = sessionId ? state.sessions.get(sessionId) : undefined;
+    return session;
   }
 
   function requireSession(turnId: string | null): TurnPlaybackSession {
@@ -130,14 +131,16 @@ export function useTurnPlaybackSessionStore() {
     if (!state.activeSessionId) {
       return undefined;
     }
-    return state.sessions.get(state.activeSessionId);
+    const session = state.sessions.get(state.activeSessionId);
+    return session;
   }
 
   function getSessionById(sessionId: string | null): TurnPlaybackSession | undefined {
     if (!sessionId) {
       return undefined;
     }
-    return state.sessions.get(sessionId);
+    const session = state.sessions.get(sessionId);
+    return session;
   }
 
   function getSessions(): TurnPlaybackSession[] {
@@ -712,18 +715,7 @@ export function useTurnPlaybackSessionStore() {
     return markPhaseInternal(session, phase);
   }
 
-  // ── finalize / prune ─────────────────────────────────────────────
-
-  /**
-   * 尝试把会话推到 completed。仅做 phase 转移（受合法性检查约束）；
-   * 调用方（完成协调器）负责决定"什么时候"调用。
-   */
-  function finalizeSession(
-    turnId: string | null,
-  ): boolean {
-    const session = requireSession(turnId);
-    return markPhaseInternal(session, "completed");
-  }
+  // ── prune ────────────────────────────────────────────────────────
 
   /**
    * 清理已到终态（completed/failed）的旧会话，仅保留活跃会话和最近 keepRecent
@@ -794,7 +786,6 @@ export function useTurnPlaybackSessionStore() {
     markInterrupt,
     markSessionFailed,
     markPhase,
-    finalizeSession,
     pruneSessions,
   };
 }

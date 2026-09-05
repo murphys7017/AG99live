@@ -49,8 +49,6 @@ class OutputSegmentCoordinator:
         is_official_inline_anim_compat_enabled: Callable[[], bool],
         finish_turn: Callable[..., Awaitable[None]],
         mark_turn_timing: Callable[[str, str], None],
-        mark_turn_synthesizing: Callable[[str], None],
-        mark_turn_playing: Callable[[str], None],
     ) -> None:
         self.runtime_state = runtime_state
         self.media_service = media_service
@@ -65,8 +63,6 @@ class OutputSegmentCoordinator:
         )
         self._finish_turn = finish_turn
         self._mark_turn_timing = mark_turn_timing
-        self._mark_turn_synthesizing = mark_turn_synthesizing
-        self._mark_turn_playing = mark_turn_playing
         self._pending_segments: dict[str, PendingOutputSegment] = {}
         self._closing_turn_ids: set[str] = set()
         self._closed_turn_ids: set[str] = set()
@@ -225,7 +221,6 @@ class OutputSegmentCoordinator:
                 "Failed to cancel performance curve after output closure: turn_id=%s",
                 normalized_turn_id,
             )
-        self._mark_turn_playing(normalized_turn_id)
 
     def _get_pending_segment(self, turn_id: str, message_id: str) -> PendingOutputSegment:
         key = f"{turn_id}|{message_id}"
@@ -370,8 +365,6 @@ class OutputSegmentCoordinator:
         )
         if audio_slot["state"] == "present":
             self._mark_turn_timing(segment.turn_id, "audio_payload_sent_at")
-            self._mark_turn_synthesizing(segment.turn_id)
-        self._mark_turn_playing(segment.turn_id)
 
     def _build_motion_slot(self, segment: PendingOutputSegment) -> dict[str, Any]:
         if segment.motion_payload is None:

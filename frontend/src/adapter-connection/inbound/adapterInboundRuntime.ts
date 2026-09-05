@@ -23,7 +23,7 @@ import type { useTurnPlaybackSessionStore } from "../../turn-playback/useTurnPla
 
 export interface AdapterInboundRuntimeDeps {
   state: AdapterConnectionState;
-  getSessionStore: () => ReturnType<typeof useTurnPlaybackSessionStore> | undefined;
+  getSessionStore: () => ReturnType<typeof useTurnPlaybackSessionStore>;
   getHistoryAdapter: () => ReturnType<typeof useAdapterHistory> | null;
   getMotionTuningAdapter: () => ReturnType<typeof useAdapterMotionTuning> | null;
   getModelSyncAdapter: () => ModelSyncInstance | null;
@@ -122,19 +122,7 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
 
     return {
       state: deps.state,
-      sessionStore: sessionStore
-        ? {
-            setActiveSession: (tId) => sessionStore.setActiveSession(tId),
-            markTurnStarted: (tId) => sessionStore.markTurnStarted(tId),
-            markSynthFinished: (tId) => sessionStore.markSynthFinished(tId),
-            markTurnFinished: (tId, success, reason) => sessionStore.markTurnFinished(tId, success, reason),
-            markInterrupt: (tId) => sessionStore.markInterrupt(tId),
-            assertOutputSegmentsResolved: (tId) =>
-              sessionStore.assertOutputSegmentsResolved(tId),
-            commitOutputSegment: (tId, msgId, material) =>
-              sessionStore.commitOutputSegment(tId, msgId, material),
-          }
-        : undefined,
+      sessionStore,
       pushHistory: deps.pushHistory,
       modelSyncAdapter: modelSyncAdapter
         ? {

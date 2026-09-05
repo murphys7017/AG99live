@@ -1,9 +1,26 @@
 task:
   class: refactor
   risk: high
-  phase: configuration_surface_consolidation
+  phase: architecture_audit_followup
   status: source_complete_pending_live_acceptance
-  scope: "Consolidate AG99 plugin and desktop configuration surfaces: remove dead or fake settings, migrate plugin settings into responsibility-based sections, keep model_sync model-focused, and group desktop settings by workflow without compatibility paths."
+  scope: "Fix source-confirmed audit findings: motion revision validation, required inbound SessionStore contract, unused internal entry points, and fixed compiler stages. Audio ownership migration, observation identity migration, Remote Operator and Store read-only projections are outside this change."
+
+architecture_audit_followup:
+  recorded_at: "2026-09-05"
+  scope:
+    - "Keep compiler stage execution order and diagnostics; remove dynamic registry and its injection/export paths."
+    - "Reject fractional frontend profile revisions and boolean backend profile revisions."
+    - "Require SessionStore throughout inbound dispatch; remove silent optional calls."
+    - "Remove unused ingestion/finalization/validation entry points and unreachable zero-motion branch."
+  validation:
+    - "Renderer, WebSDK and Node typechecks passed."
+    - "Frontend motion payload smoke checks passed, including positive integer preservation and fractional revision rejection."
+    - "Backend revision boundary smoke check passed (1 test); the initial fixture omitted required intent_tags and was corrected. Environment emitted 14 dependency deprecation warnings."
+    - "Standalone frontend smoke compilation passed using the project's ESNext/Bundler resolution; the initial NodeNext invocation rejected an existing extensionless type import. Project compiler settings were not changed."
+    - "Both fixed stage sequences were compared with HEAD's resolved order: all six semantic and four model-parameter stages match."
+    - "Changed Python modules parsed successfully; diff whitespace check passed."
+  evidence_gap:
+    - "Live AstrBot, Electron, TTS and Live2D acceptance has not been performed."
 
 configuration_refactor:
   recorded_at: "2026-09-02"
@@ -90,7 +107,7 @@ context:
     - The plugin platform event owns how completion closes the AG99 output queue, but the plugin must not invoke that completion from its own Hook.
     - Remote Operator requires the enhanced Core Interaction Prompt/Result contributor lifecycle; official compatibility mode does not promise this capability.
     - Official compatibility mode must not create RemoteOperatorRuntime or probe configured endpoints when no request/result lifecycle exists.
-    - `src/types/compiledSemanticMotion.ts` is a shared contract module and must not own runtime cloning or parsing dependencies.
+    - "`src/types/compiledSemanticMotion.ts` is a shared contract module and must not own runtime cloning or parsing dependencies."
     - The unique CompiledSemanticMotion runtime parser belongs to ModelEngine compiler and is shared by MotionLab transport and desktop snapshot projections.
     - Enhanced-Core Remote Operator contributors depend on the formal AstrMessageEvent get/set-extra and platform identity APIs; failures must remain visible.
     - Toolset shape adaptation may distinguish `get_tool()` from a tools list, but an exception from an available API must not be converted into “tool absent.”
@@ -108,7 +125,7 @@ context:
     - Component disposal must attempt every owned cleanup even when one motion stop fails; disposal must not turn an error into idle.
     - Hesitation is an internal scheduling window, not a new semantic target, Stage, clock, player, mixer source, WebSDK branch, or protocol field.
     - Candidate legality is evaluated before strongest-candidate selection, so an illegal high-priority candidate cannot suppress a legal lower-priority window.
-    - `engine.parameter_plan.v3` has one global blend-out. Part tracks may request different minimum ownership windows, but they cannot claim independent runtime release without a protocol and ParameterMixer ownership-envelope change.
+    - "`engine.parameter_plan.v3` has one global blend-out. Part tracks may request different minimum ownership windows, but they cannot claim independent runtime release without a protocol and ParameterMixer ownership-envelope change."
     - The sequence track graph owns finalizing the one actual V3 release after all per-axis requirements are known; gaze/face release trace events must match that global blend start.
     - Hesitation delays are cumulative after the selected window. A downstream event that cannot retain legal ordering and fit before its fixed release fails compilation instead of being compressed or truncated.
     - B5-pre is split at the real process boundary: AstrBot owns Provider-neutral `speech_cues` generation, normalization, and the post-result hook; AG99 transports the cues through output.segment.v4 and maps them only inside the existing PerformanceSchedule without creating a TTS text transformer, private clock, new mixer source, or provider-specific motion path.
@@ -166,13 +183,13 @@ verification:
     - Electron pet and overlay windows now carry their renderer role through the URL/query boundary and remain hidden until their own renderer has finished loading; overlay display also requires the pet window to be visible.
     - Overlay content height is fixed at the window boundary; the ResizeObserver -> IPC -> BrowserWindow resize handshake was removed, so input rendering no longer depends on a post-mount transparent-window resize.
     - Motion sink start rejection, synchronous start exceptions, invalid motion release timestamps, and timeline preparation failures now all enter the existing motion rejection and required-sink terminal path; a confirmed start is marked released only after the sink accepts it.
-    - `npm run typecheck:renderer`, `npm run typecheck:node`, `npm run typecheck:websdk`, and `git diff --check` remain required for this batch; live Electron, audio, and Live2D acceptance is still user-led.
+    - "`npm run typecheck:renderer`, `npm run typecheck:node`, `npm run typecheck:websdk`, and `git diff --check` remain required for this batch; live Electron, audio, and Live2D acceptance is still user-led."
     - Audio-backed motion sinks now remain required for terminal settlement but no longer block the shared Timeline from entering `playing`; the real audio-start callback therefore delivers an `audio / playing` clock to ModelEngine instead of leaving motion pending behind an aggregate startup deadlock.
     - MotionRuntimeScheduler again consumes pending motion only from an authoritative `audio / playing` or `paused` Timeline snapshot; it no longer accepts an audio-preparing callback as a startup shortcut.
-    - `npm run typecheck:renderer`, `npm run typecheck:websdk`, and `git diff --check` pass for the Timeline startup-gate correction. The existing PlaybackTimeline smoke command remains blocked by pre-existing strict-type errors in the frozen Cubism Framework test compilation; no test workaround was added.
+    - "`npm run typecheck:renderer`, `npm run typecheck:websdk`, and `git diff --check` pass for the Timeline startup-gate correction. The existing PlaybackTimeline smoke command remains blocked by pre-existing strict-type errors in the frozen Cubism Framework test compilation; no test workaround was added."
     - Motion rejection now always forwards the existing segment interruption to the ModelEngine motion sink before settling the session projection, so pending inbound payloads and prepared semantic motions cannot survive a pre-start rejection; no second cleanup owner was added.
     - Timeline Clock reports `audio_pending` until the Timeline itself starts, and its attached audio time is monotonic; motion resources keep their prior elapsed-time baseline when the playback reader regresses instead of advancing from the rollback.
-    - `npm run typecheck:renderer`, `npm run typecheck:websdk`, and `git diff --check` pass for the playback rejection and monotonic-clock correction; live Electron, audio, and Live2D acceptance remains user-led.
+    - "`npm run typecheck:renderer`, `npm run typecheck:websdk`, and `git diff --check` pass for the playback rejection and monotonic-clock correction; live Electron, audio, and Live2D acceptance remains user-led."
     - The previous dynamics batch changes parameter track transitions to linear target interpolation and removes generic default entry easing; explicit curve presets, ownership release blending, and spring/bounded response policies remain intact.
     - The current dynamics batch gives gaze, eye, brow, and face groups distinct spring policies while preserving bounded fallback; B6-1 gives head/gaze/body/torso/shoulder/face different response frequency and damping profiles while preserving existing-plan velocity and acceleration limits.
     - ActiveParameterMixer now receives raw direct-plan targets, applies ownership release during source fusion, then runs ParameterPresentation once on the fused target; the old per-direct-contribution pre-smoothing path is removed.
@@ -180,7 +197,7 @@ verification:
     - ParameterPresentation advances the direct-plan offset relative to the current Cubism base. After plan totalMs, ownership reaches zero and the stable zero-offset target guarantees release convergence without freezing ambient motion or adding a timeout.
     - A non-increasing playback clock freezes the existing presentation offset, velocity, and last effective elapsed time; pause frames no longer erase spring inertia.
     - Lip-sync remains an immediate high-priority contribution and prevents active response dynamics from delaying mouth output; presentation nodes track direct-only targets instead of lip-sync-contaminated values.
-    - `npm run typecheck:renderer`, `npm run typecheck:websdk`, `npm run typecheck:node`, and `git diff --check` pass for the B6-1 response-policy batch.
+    - "`npm run typecheck:renderer`, `npm run typecheck:websdk`, `npm run typecheck:node`, and `git diff --check` pass for the B6-1 response-policy batch."
     - The current motion-quality batch removes global semantic-reversal hesitation and routes reversal preparation through the owning semantic parameter track; renderer and WebSDK typechecks pass. The basic model-engine smoke command remains blocked by pre-existing strict-type and missing-Core-global errors in the frozen Cubism Framework test compilation.
     - Cross-Turn motion diversity now replaces the single previous-motion snapshot with one bounded TurnCoordinator history; Prompt context includes recent action shapes, main axis directions, intent tags, repeated direction counts, and sequence usage.
     - The diversity summary is advisory only: current semantic intent remains authoritative, and no protocol, timeline, parameter mixer, WebSDK, or Physics path was added.
@@ -189,10 +206,10 @@ verification:
     - B5-pre Schedule mapping is complete: emphasis/laugh/chuckle adjust the existing phrase emphasis, while hesitate/breath/sigh participate only in the existing strongest-legal hesitation candidate selection.
     - PerformanceSchedule trace v7 records source phrase indices, cue mappings, mapped internal phrase indices, and cue scheduling or rejection decisions; output.segment.v4, engine.motion_intent.v4, and engine.parameter_plan.v3 remain unchanged.
     - Motion Lab's existing performance diagnostics render the cue mapping target and reason without adding another history or persistence path.
-    - `npm run typecheck:renderer` and `git diff --check` pass for the B5-pre Schedule mapping batch.
+    - "`npm run typecheck:renderer` and `git diff --check` pass for the B5-pre Schedule mapping batch."
     - The structural cleanup preserves the existing PerformanceSchedule facade while moving phrase/step analysis to performanceScheduleText.ts, internal DTOs to performanceScheduleTypes.ts, and shared deterministic helpers to performanceDeterminism.ts.
     - The redundant contributor-level speech_cues normalization is removed; Persona result normalization and PendingOutputSegment boundary validation remain intact.
-    - `npm run typecheck:renderer`, `python -m compileall -q astrbot_plugin_ag99live_adapter`, and `git diff --check` pass for the cleanup batch.
+    - "`npm run typecheck:renderer`, `python -m compileall -q astrbot_plugin_ag99live_adapter`, and `git diff --check` pass for the cleanup batch."
     - B5-1 adds head/body activity floors to the existing SpeechSignalRuntime gain only; `npm run typecheck:websdk` and `git diff --check` pass, and the direct call chain remains LAppModel -> ActiveParameterMixer -> existing speech modulation gain.
     - B5-2 removes the duplicate raw-energy history and derives emphasis from the existing smoothed head envelope; `npm run typecheck:websdk` and `git diff --check` pass.
     - B5-3 derives a bounded upper-speech-band ratio from the existing AnalyserNode, carries it through the existing frontend AG99 audio bridge, and merges it in SpeechSignalRuntime; `npm run typecheck:websdk`, `npm run typecheck:renderer`, and `git diff --check` pass.
@@ -200,19 +217,19 @@ verification:
     - AG99 B5-pre transport is source-reviewed: enhanced AstrBot Persona results hand off normalized speech_cues through one-shot event state, output.segment.v4 carries a strict speech slot, and the frontend SessionStore retains the cues without compiling them into motion.
     - speech.state=present requires 1..8 cues on both producer and parser boundaries; an empty cue list is represented only by speech.state=absent.
     - The one-shot Persona-to-contributor handoff is cleared when consumed, so a later output in the same Turn cannot inherit stale speech cues.
-    - `python scripts/check_protocol_schema_manifest.py`, `python -m compileall -q astrbot_plugin_ag99live_adapter`, `npm run typecheck:renderer`, and `git diff --check` pass for B5-pre.
+    - "`python scripts/check_protocol_schema_manifest.py`, `python -m compileall -q astrbot_plugin_ag99live_adapter`, `npm run typecheck:renderer`, and `git diff --check` pass for B5-pre."
     - Phase-B review corrections are complete: each track declares a minimum ownership requirement, the sequence graph finalizes one actual V3 release, and gaze/face release trace events match the global ParameterMixer blend start.
     - Final semantic transitions retain their full response duration and extend the legal plan tail when necessary instead of being compressed against the original audio duration.
     - Hesitation delay is cumulative for all downstream semantic steps, phrase transfers, and SpeechPose points; SpeechPose overflow is an explicit `performance_schedule_speech_hesitation_window_exceeded` compile failure.
     - Performance event registration now rejects duplicate IDs, reversed batch order, invalid step/phrase references, malformed local/window times, and event spans beyond MAX_MOTION_DURATION_MS.
     - The internal PerformanceSchedule trace is v7; older Motion Lab records are intentionally incompatible with the current cue mapping and release semantics and must be regenerated.
-    - `npm run typecheck:renderer` and `git diff --check` pass after the review corrections.
+    - "`npm run typecheck:renderer` and `git diff --check` pass after the review corrections."
     - A temporary basic runtime smoke compile could not run because `tsconfig.test.json` first exposes existing strict-type and missing-Core-global errors inside the frozen Cubism Framework; no compiler relaxation or SDK workaround was added, and the temporary output was removed.
     - Phase-B review corrections finalize one global V3 plan release from semantic, gaze, and face minimum ownership requirements; per-part release events no longer disagree with the ParameterMixer ownership envelope.
     - Dynamic residual feeds the existing requiredOwnedUntilMs and graph duration paths only; it does not create another stage, player, clock, mixer source, WebSDK policy, or Cubism business rule.
     - Semantic timing rejects a transition whose owned window plus blend-out exceeds MAX_MOTION_DURATION_MS; staged-part tail extension remains capped before blend-out, and non-extending pose tracks record only residual that fits before their existing release.
     - The internal PerformanceSchedule trace is now v7; engine.motion_intent.v4 and engine.parameter_plan.v3 remain unchanged.
-    - `npm run typecheck:renderer` and `git diff --check` pass for the B4 source and documentation changes.
+    - "`npm run typecheck:renderer` and `git diff --check` pass for the B4 source and documentation changes."
     - Phase-B batch B3 is complete: ellipsis, dash, transition, consecutive soft-boundary, hesitation-tag, and semantic-reversal signals produce at most one strongest legal hesitation hold/resume window in the shared PerformanceSchedule.
     - Semantic, gaze, face, and SpeechPose timing consume the same cumulative absolute hesitation delay; no extra parameter keyframe or random target is generated, and insufficient SpeechPose space is an explicit compile failure.
     - Insufficient candidates remain visible through performance-schedule decisions, while registered invalid events still fail compilation instead of falling back.
@@ -230,7 +247,7 @@ verification:
     - Motion replacement now settles the tracked Direct Plan or motion resource before starting the candidate; a stop failure rejects the replacement and cannot publish a new started run.
     - ModelEngine stop and segment interruption release local run ownership in finally, retain failed state on downstream errors, and rethrow the original error.
     - MotionPlayer no longer registers a duplicate Vue Scope cleanup; PetDesktopRuntime remains the single component-disposal owner and isolates each cleanup step.
-    - `npm run typecheck:renderer` passes after the playback ownership changes.
+    - "`npm run typecheck:renderer` passes after the playback ownership changes."
     - The previous Remote Operator error-visibility correction is committed as `e4fe844`.
     - The broader end-to-end source review reached the current Adapter -> PlaybackTimeline -> ModelEngine -> ParameterMixer -> WebSDK boundary; the architecture remains valid and the active defect register is empty after source review.
     - ESP32 display initial status read failures are visible after commit `0a0da08`.

@@ -1,5 +1,4 @@
 import { compileParameterMotionIntent } from "../compiler/compileParameterMotionIntent.js";
-import { createModelEngineStageRegistry } from "../compiler/registry.js";
 import { resolveCatalogResource } from "../compiler/resourceCatalog.js";
 import { buildBaseCompileDiagnostics } from "../compiler/diagnostics.js";
 import { normalizeModelEngineSettings } from "../settings.js";
@@ -68,15 +67,6 @@ interface SpeechOnlyPayload {
 }
 
 type CompilableMotionPayload = SemanticIntentPayload | SpeechOnlyPayload;
-
-export function reportInvalidMotionPayload(
-  reason: string,
-  state: MotionRuntimeStateController,
-): void {
-  state.setLastCompileReason(reason);
-  state.setState("failed", `动作载荷无效：${reason}`, null);
-  state.pushHistory("error", `动作载荷无效：${reason}`);
-}
 
 const MOTION_PLAYER_RUN_ID_MISSING = "motion_player_started_without_run_id";
 
@@ -254,7 +244,7 @@ function prepareCompilableMotionPayload(
       turnId: context.turnId ?? "",
       messageId: context.messageId,
     },
-  }, dependencies.stageRegistry ?? createModelEngineStageRegistry());
+  });
 
   state.setLastCompileReason(compileResult.reason);
   state.setLastCompileDiagnostics(compileResult.diagnostics);

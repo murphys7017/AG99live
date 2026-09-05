@@ -144,8 +144,6 @@ class TurnCoordinator:
             ),
             finish_turn=self._finish_turn,
             mark_turn_timing=self._mark_turn_timing,
-            mark_turn_synthesizing=self._mark_turn_synthesizing,
-            mark_turn_playing=self._mark_turn_playing,
         )
 
     async def handle_msg(self, raw_message: dict[str, Any]) -> None:
@@ -346,20 +344,6 @@ class TurnCoordinator:
     async def close_turn_output_queue(self, *, turn_id: str) -> None:
         """Forward output closure to the segment owner."""
         await self.output_segments.close_turn_output_queue(turn_id=turn_id)
-
-    def _mark_turn_synthesizing(self, turn_id: str) -> None:
-        if self.session_state.current_turn_id != turn_id:
-            return
-        mark_synthesizing = getattr(self.session_state, "mark_synthesizing", None)
-        if callable(mark_synthesizing):
-            mark_synthesizing()
-
-    def _mark_turn_playing(self, turn_id: str) -> None:
-        if self.session_state.current_turn_id != turn_id:
-            return
-        mark_playing = getattr(self.session_state, "mark_playing", None)
-        if callable(mark_playing):
-            mark_playing()
 
     async def finalize_turn(
         self,

@@ -246,6 +246,7 @@ Motion Lab 事件采用 at-least-once 交付：前端必须先把事件写入 In
 约束：
 
 - `intent_tags` 是必需语义输入；`axis_levels`、`motion_steps` 和 `motion_resource_id` 是三选一的执行形态。
+- `profile_revision` 必须是正整数；布尔值、字符串和带小数部分的数值均拒绝，前端不做四舍五入。
 - `axis_levels` 唯一合法形态是 `Record<string, -4|-3|-2|-1|0|1|2|3|4>`；`motion_steps` 由 2–4 个稀疏等级步骤组成，每一步只声明新开始控制或目标发生变化的轴。
 - 对单姿态，省略轴表示本轮不控制，`0` 表示明确回到中性。对 `motion_steps`，轴在首次声明前不受该序列控制；首次声明后省略表示保持上一目标；显式 `0` 表示回到语义中性。
 - v4 出现 `axes`、非法等级、未知轴或缺失 profile 锚点时直接失败，不降级为 v3。

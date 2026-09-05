@@ -27,7 +27,7 @@ export interface InboundOutputDispatchDeps {
       messageId: string,
       material: OutputSegmentMaterial,
     ) => OutputSegmentCommitResult;
-  } | undefined;
+  };
   pushHistory: (role: string, text: string) => void;
   rewriteHttpUrl: (rawUrl: string | null) => string;
   normalizeMotionPayload: MotionPayloadNormalizer;
@@ -57,10 +57,6 @@ function applyOutputSegment(
   deps: InboundOutputDispatchDeps,
   event: Extract<InboundAdapterEvent, { kind: "output_segment" }>,
 ): void {
-  if (!deps.sessionStore) {
-    throw new Error("output_segment_session_store_unavailable");
-  }
-
   const { payload } = event;
   const { state } = deps;
   let normalizedMotion: NormalizedMotionPayload | null = null;

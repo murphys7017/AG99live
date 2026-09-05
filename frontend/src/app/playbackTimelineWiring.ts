@@ -38,9 +38,22 @@ export interface PlaybackTimelineMotionEnginePort {
 
 type SessionStore = ReturnType<typeof useTurnPlaybackSessionStore>;
 
+export interface PlaybackAudioCompositionPort {
+  releaseAudioForTimelinePlayback: (
+    audioUrl: string,
+    messageId: string,
+    turnId: string | null,
+  ) => boolean;
+  initializeAudioRuntime: (
+    runtime: PlaybackTimelineRuntime<NormalizedMotionPayload>,
+    audioSink: PlaybackTimelineAudioSink,
+  ) => void;
+}
+
 export function createAppPlaybackTimelineRuntime(options: {
   sessionStore: SessionStore;
   adapterPlayback: AdapterPlaybackCompositionPort;
+  audioPlayback: PlaybackAudioCompositionPort;
   motionSink: Pick<
     PlaybackTimelineSegmentMotionSink<NormalizedMotionPayload>,
     "start" | "interrupt"
@@ -57,7 +70,7 @@ export function createAppPlaybackTimelineRuntime(options: {
     playbackTimeline: PlaybackTimelineSnapshot,
   ) => void;
 }): PlaybackTimelineWiringPort {
-  const { sessionStore, adapterPlayback } = options;
+  const { sessionStore, adapterPlayback, audioPlayback } = options;
   const runtime = createPlaybackTimelineRuntime<NormalizedMotionPayload>({
     segmentExecution: {
       session: {
@@ -74,7 +87,7 @@ export function createAppPlaybackTimelineRuntime(options: {
       },
       audioSink: {
         releaseAudioForPlayback:
-          adapterPlayback.releaseAudioForTimelinePlayback,
+          audioPlayback.releaseAudioForTimelinePlayback,
       },
       motionSink: options.motionSink,
     },
@@ -92,7 +105,7 @@ export function createAppPlaybackTimelineRuntime(options: {
     onAudioTimelineDurationReady: options.onAudioTimelineDurationReady,
   });
 
-  adapterPlayback.initializeAudioRuntime(runtime, options.audioSink);
+  audioPlayback.initializeAudioRuntime(runtime, options.audioSink);
 
   return runtime;
 }

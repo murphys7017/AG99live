@@ -3,7 +3,7 @@ export function runCompilePipeline<
   Result extends { ok: boolean },
 >(
   context: Context,
-  stages: Array<{ id: string; run(context: Context): Result }>,
+  stages: ReadonlyArray<{ id: string; run(context: Context): Result }>,
 ): Extract<Result, { ok: false }> & { stageId: string } | { ok: true } {
   for (const stage of stages) {
     const result = stage.run(context);

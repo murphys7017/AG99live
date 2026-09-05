@@ -83,7 +83,7 @@ def normalize_motion_intent_v4_payload(intent: Any) -> dict[str, Any]:
     if not model_id:
         raise ValueError("model_id_empty")
     profile_revision = intent.get("profile_revision")
-    if not isinstance(profile_revision, int) or profile_revision <= 0:
+    if type(profile_revision) is not int or profile_revision <= 0:
         raise ValueError("profile_revision_invalid")
     mode = str(intent.get("mode") or "expressive").strip().lower()
     if mode not in {"expressive", "idle"}:

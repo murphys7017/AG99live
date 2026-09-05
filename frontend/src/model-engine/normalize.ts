@@ -132,7 +132,11 @@ function parseSemanticMotionIntent(value: unknown): ParseResult<SemanticMotionIn
   if (!modelId) {
     return { ok: false, reason: "motion_intent.model_id_empty" };
   }
-  if (!isFiniteNumber(profileRevision) || profileRevision <= 0) {
+  if (
+    typeof profileRevision !== "number"
+    || !Number.isInteger(profileRevision)
+    || profileRevision <= 0
+  ) {
     return { ok: false, reason: "motion_intent.profile_revision_invalid" };
   }
 
@@ -199,7 +203,7 @@ function parseSemanticMotionIntent(value: unknown): ParseResult<SemanticMotionIn
 
   const common = {
     profile_id: profileId,
-    profile_revision: Math.round(profileRevision),
+    profile_revision: profileRevision,
     model_id: modelId,
     mode,
     intent_tags: intentTags,

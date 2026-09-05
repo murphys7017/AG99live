@@ -34,7 +34,7 @@ export interface InboundRuntimeDispatchDeps {
     markTurnFinished: (turnId: string | null, success: boolean, reason?: string) => boolean;
     markInterrupt: (turnId: string | null) => boolean;
     assertOutputSegmentsResolved: (turnId: string | null) => void;
-  } | undefined;
+  };
   pushHistory: (role: string, text: string) => void;
   stopAudioAndSettleTurn: (turnId: string | null, reason: string) => void;
   findActiveAudioSegment: () => { turnId: string | null; messageId: string } | null;
@@ -90,8 +90,8 @@ function applyTurnStarted(
 ): void {
   const s = deps.state;
   s.currentTurnId = event.turnId;
-  deps.sessionStore?.setActiveSession(event.turnId);
-  deps.sessionStore?.markTurnStarted(event.turnId);
+  deps.sessionStore.setActiveSession(event.turnId);
+  deps.sessionStore.markTurnStarted(event.turnId);
   s.turnFinishedTurnId = null;
   s.turnFinishedSuccess = true;
   s.turnFinishedReason = "";
@@ -106,11 +106,11 @@ function applyTurnFinished(
   const s = deps.state;
   let accepted = true;
   try {
-    accepted = deps.sessionStore?.markTurnFinished(
+    accepted = deps.sessionStore.markTurnFinished(
       event.turnId,
       event.success,
       event.reason,
-    ) ?? true;
+    );
   } catch (error) {
     deps.reportRuntimeProtocolViolation(
       error instanceof Error ? error.message : "turn_finished arrived for unknown session.",
@@ -145,7 +145,7 @@ function applyInterrupt(
   const interruptedTurnId = event.turnId;
   let accepted = true;
   try {
-    accepted = deps.sessionStore?.markInterrupt(interruptedTurnId) ?? true;
+    accepted = deps.sessionStore.markInterrupt(interruptedTurnId);
   } catch (error) {
     deps.reportRuntimeProtocolViolation(
       error instanceof Error ? error.message : "interrupt arrived for unknown session.",
@@ -181,8 +181,8 @@ function applySynthFinished(
 ): void {
   const s = deps.state;
   try {
-    deps.sessionStore?.assertOutputSegmentsResolved(event.turnId);
-    deps.sessionStore?.markSynthFinished(event.turnId);
+    deps.sessionStore.assertOutputSegmentsResolved(event.turnId);
+    deps.sessionStore.markSynthFinished(event.turnId);
   } catch (error) {
     deps.reportRuntimeProtocolViolation(
       error instanceof Error ? error.message : "synth_finished arrived for invalid session.",

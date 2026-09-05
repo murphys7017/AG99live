@@ -119,6 +119,7 @@ export interface AdapterConnectionInstance {
 
 export interface AdapterConnectionCompositionInstance extends AdapterConnectionInstance {
   playback: AdapterPlaybackCompositionPort;
+  audioPlayback: AdapterAudioPlaybackPort;
 }
 
 export interface AdapterPlaybackCompositionPort {
@@ -132,6 +133,9 @@ export interface AdapterPlaybackCompositionPort {
     turnId: string | null,
     reason: string,
   ) => boolean;
+}
+
+export interface AdapterAudioPlaybackPort {
   releaseAudioForTimelinePlayback: (
     audioUrl: string,
     messageId: string,
@@ -712,10 +716,10 @@ export function createAdapterConnection(
     state,
     updateAssistantText,
     markTextDelivered: (turnId, messageId) => {
-      sessionStore?.markTextDelivered(turnId, messageId);
+      sessionStore.markTextDelivered(turnId, messageId);
     },
     markTextFailed: (turnId, messageId, reason) => {
-      sessionStore?.markTextFailed(turnId, messageId, reason);
+      sessionStore.markTextFailed(turnId, messageId, reason);
     },
   });
 
@@ -894,6 +898,8 @@ export function createAdapterConnection(
     playback: {
       releaseAssistantTextForPlayback,
       failAssistantTextForPlayback,
+    },
+    audioPlayback: {
       releaseAudioForTimelinePlayback,
       initializeAudioRuntime,
     },

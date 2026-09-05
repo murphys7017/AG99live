@@ -535,20 +535,6 @@ export class LAppModel extends CubismUserModel {
         this.preLoadMotionGroup(group[i]);
       }
 
-      // モーションがない場合 (Original check, now might be redundant but kept for safety)
-      if (motionGroupCount == 0) {
-        this._state = LoadStep.LoadTexture;
-
-        // 全てのモーションを停止する
-        this._motionManager.stopAllMotions();
-
-        this._updating = false;
-        this._initialized = true;
-
-        this.createRenderer();
-        this.setupTextures();
-        this.getRenderer().startUp(gl);
-      }
     };
   }
 

@@ -59,6 +59,7 @@ export function createConversationPlaybackRuntime(options: {
   const playbackTimeline = createAppPlaybackTimelineRuntime({
     sessionStore: options.sessionStore,
     adapterPlayback: adapter.playback,
+    audioPlayback: adapter.audioPlayback,
     motionSink: requiredMotionTimelineSink,
     audioSink: createBrowserAudioTimelineSink(),
     onAudioTimelineStarted: (turnId, messageId, timeline) => {

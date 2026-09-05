@@ -68,7 +68,7 @@ ModelEngine 不负责：
 | `planParser.ts` | `engine.parameter_plan.v3` 严格解析 |
 | `compiler/compileParameterMotionIntent.ts` | 参数动作 compiler 主入口与两阶段结果收口 |
 | `compiler/compileContext.ts` | stage 共享 state |
-| `compiler/registry.ts` | 实例级 stage registry |
+| `compiler/stages.ts` | 两个固定、有序的只读阶段序列 |
 | `compiler/performanceSchedule.ts` | 整段 pose/sequence 的部位事件、轨道时序、释放和来源诊断 |
 | `compiler/performanceScheduleText.ts` | canonical text 的 phrase 分段、step 时间窗和 estimated alignment |
 | `compiler/performanceScheduleTypes.ts` | PerformanceSchedule 内部 DTO 与编译结果契约 |
@@ -83,21 +83,21 @@ ModelEngine 不负责：
 
 ## 5. Compiler Pipeline
 
-真实顺序由 `compiler/registry.ts` 定义：
+真实顺序由 `compiler/stages.ts` 定义：
 
 ```text
-IntentValidator                 10 core
--> AxisResolver                20 core
--> IntensityStage              30 core
--> SemanticAxisRelationGraph   40 core
--> ModeResolverStage           45 core
--> TimingStage                 46 core
+IntentValidator
+-> AxisResolver
+-> IntensityStage
+-> SemanticAxisRelationGraph
+-> ModeResolverStage
+-> TimingStage
 -> CompiledSemanticMotion
 -> PerformanceSchedule         compile-time shared schedule
--> SpeechPoseStage             60 extension
--> ModelParameterBindingStage 80 core
--> ParameterTrackGraphStage    85 core
--> ResourcePolicyStage         90 core
+-> SpeechPoseStage
+-> ModelParameterBindingStage
+-> ParameterTrackGraphStage
+-> ResourcePolicyStage
 -> [sequence] parameterTrackGraphCompiler final projection
 ```
 
@@ -119,7 +119,7 @@ IntentValidator                 10 core
 step 完成同一套 model-parameter pipeline，再由 `parameterTrackGraphCompiler` 使用这份 Schedule 一次性
 合成最终参数轨道；因此 sequence gaze 不会在每个 step 中重复注册。
 
-核心阶段不能在运行时禁用或卸载。扩展阶段必须声明顺序和输入输出，不得绕过 pipeline 修改最终计划。
+两个阶段序列均固定，不提供运行时注册、卸载或启停 API。新增阶段须在源码中明确顺序和输入输出，不得绕过 pipeline 修改最终计划。
 
 ## 6. Compile State
 

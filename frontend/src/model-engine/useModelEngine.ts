@@ -33,16 +33,14 @@ import type {
   MotionPlaybackClockContext,
   MotionTimelinePreparationResult,
 } from "./runtime/playbackClock.js";
-import { normalizeMotionPayload, normalizeTurnId } from "./normalize.js";
+import { normalizeTurnId } from "./normalize.js";
 import {
   prepareSemanticMotionPayload,
   prepareSpeechOnlyMotionRequest,
-  reportInvalidMotionPayload,
   startNormalizedMotionPayload,
   startSpeechOnlyMotionRequest,
   type PreparedSemanticMotionPayload,
 } from "./runtime/motionStart.js";
-import { createModelEngineStageRegistry } from "./compiler/registry.js";
 
 function buildSpeechCueKey(cues: readonly OutputSegmentSpeechCue[]): string {
   return cues
@@ -51,7 +49,6 @@ function buildSpeechCueKey(cues: readonly OutputSegmentSpeechCue[]): string {
 }
 
 export function useModelEngine(dependencies: ModelEngineDependencies) {
-  const stageRegistry = createModelEngineStageRegistry();
   const state = reactive({
     status: "idle" as ModelEngineStatus,
     message: "等待动作输入。",
@@ -121,7 +118,6 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
       dependencies.onMotionRejected(event);
     },
     onCompileFailed: dependencies.onCompileFailed,
-    stageRegistry,
   };
 
   const runtimeStateController = {
@@ -177,26 +173,6 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
       });
     },
   });
-
-  function ingestInboundPayload(
-    payload: unknown,
-    context: InboundPayloadContext,
-  ): boolean {
-    const normalized = normalizeMotionPayload(payload);
-    if (!normalized.ok) {
-      reportInvalidMotionPayload(normalized.reason, runtimeStateController);
-      const turnId = normalizeTurnId(context.turnId);
-      if (turnId) {
-        dependencies.onMotionRejected({
-          turnId,
-          messageId: context.messageId,
-          reason: normalized.reason,
-        });
-      }
-      return false;
-    }
-    return runtimeScheduler.queueInboundPayload(normalized.payload, context);
-  }
 
   function ingestNormalizedPayload(
     payload: NormalizedMotionPayload,
@@ -503,7 +479,6 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
         settings: dependencies.getSettings(),
         samplingIdentity: { turnId: "", messageId: requestId.trim() },
       },
-      stageRegistry,
     );
     state.lastCompileReason = result.reason;
     state.lastCompileDiagnostics = result.diagnostics;
@@ -594,7 +569,6 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
 
   return {
     state: readonly(state),
-    ingestInboundPayload,
     ingestNormalizedPayload,
     preparePlaybackTimeline,
     handlePlaybackTimelineStarted,
@@ -602,6 +576,5 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     handlePlaybackTerminal,
     interruptPlaybackSegment,
     stop,
-    stageRegistry,
   };
 }

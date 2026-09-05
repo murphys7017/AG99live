@@ -1,3 +1,4 @@
+import { semanticStages } from "./stages.js";
 import type {
   NormalizedSemanticMotionIntentV4,
   SemanticMotionIntent,
@@ -22,10 +23,6 @@ import {
   finalizeCompileDiagnostics,
 } from "./diagnostics.js";
 import { runCompilePipeline } from "./pipeline.js";
-import {
-  createModelEngineStageRegistry,
-  type ModelEngineStageRegistry,
-} from "./registry.js";
 
 type CompileSemanticPoseContextResult =
   | {
@@ -39,7 +36,6 @@ type CompileSemanticPoseContextResult =
 export function compileSemanticMotion(
   intent: SemanticMotionIntent,
   options: CompileOptions,
-  stageRegistry: ModelEngineStageRegistry = createModelEngineStageRegistry(),
 ): CompileSemanticMotionResult {
   if (
     intent.schema_version === SCHEMA_MOTION_INTENT_V4
@@ -50,10 +46,9 @@ export function compileSemanticMotion(
         motion_steps: NonNullable<NormalizedSemanticMotionIntentV4["motion_steps"]>;
       },
       options,
-      stageRegistry,
     );
   }
-  const compiled = compileSemanticPoseContext(intent, options, stageRegistry);
+  const compiled = compileSemanticPoseContext(intent, options);
   if (!compiled.ok) {
     return compiled;
   }
@@ -72,7 +67,6 @@ function compileSemanticSequence(
     motion_steps: NonNullable<NormalizedSemanticMotionIntentV4["motion_steps"]>;
   },
   options: CompileOptions,
-  stageRegistry: ModelEngineStageRegistry,
 ): CompileSemanticMotionResult {
   const compiledSteps = intent.motion_steps.map((step) =>
     compileSemanticPoseContext(
@@ -82,7 +76,6 @@ function compileSemanticSequence(
         motion_steps: undefined,
       } as NormalizedSemanticMotionIntentV4,
       { ...options, allowNeutralAxisPose: true },
-      stageRegistry,
     ),
   );
   const failedStepIndex = compiledSteps.findIndex((step) => !step.ok);
@@ -139,7 +132,6 @@ function compileSemanticSequence(
 function compileSemanticPoseContext(
   intent: SemanticMotionIntent,
   options: CompileOptions,
-  stageRegistry: ModelEngineStageRegistry,
 ): CompileSemanticPoseContextResult {
   const settings = normalizeModelEngineSettings(options.settings);
   const context: MotionCompileContext = {
@@ -151,8 +143,7 @@ function compileSemanticPoseContext(
   };
   context.state.warnings.push(...(options.runtimeWarnings ?? []));
 
-  const stages = stageRegistry.resolve(context, "semantic");
-  const pipelineResult = runCompilePipeline(context, stages);
+  const pipelineResult = runCompilePipeline(context, semanticStages);
   if (!pipelineResult.ok) {
     return failSemanticCompile(pipelineResult.reason, context, pipelineResult.stageId);
   }

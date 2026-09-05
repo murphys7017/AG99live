@@ -1,3 +1,4 @@
+import { modelParameterStages } from "./stages.js";
 import type {
   SemanticParameterPlan,
 } from "../../types/protocol.js";
@@ -10,10 +11,6 @@ import type {
   CompileResult,
 } from "./contracts.js";
 import { runCompilePipeline } from "./pipeline.js";
-import {
-  createModelEngineStageRegistry,
-  type ModelEngineStageRegistry,
-} from "./registry.js";
 import {
   createModelParameterCompileContext,
   type ModelParameterCompileContext,
@@ -29,7 +26,6 @@ import {
 export function compileModelParameterPlan(
   semanticMotion: CompiledSemanticMotion,
   options: CompileOptions,
-  stageRegistry: ModelEngineStageRegistry = createModelEngineStageRegistry(),
 ): CompileResult {
   const performanceScheduleResult = compilePerformanceSchedule({
     assistantText: options.assistantText,
@@ -54,14 +50,12 @@ export function compileModelParameterPlan(
       semanticMotion,
       performanceSchedule,
       options,
-      stageRegistry,
     );
   }
   return compileModelParameterPose(
     semanticMotion,
     performanceSchedule,
     options,
-    stageRegistry,
   );
 }
 
@@ -69,7 +63,6 @@ function compileModelParameterPose(
   semanticMotion: Extract<CompiledSemanticMotion, { kind: "pose" }>,
   performanceSchedule: PerformanceSchedule,
   options: CompileOptions,
-  stageRegistry: ModelEngineStageRegistry,
 ): CompileResult {
   let context: ModelParameterCompileContext;
   try {
@@ -85,7 +78,6 @@ function compileModelParameterPose(
       semanticMotion,
     );
   }
-  const modelParameterStages = stageRegistry.resolve(context, "model_parameter");
   const pipelineResult = runCompilePipeline(context, modelParameterStages);
   if (!pipelineResult.ok) {
     return failCompile(
@@ -103,7 +95,6 @@ function compileMotionSequenceIntent(
   semanticMotion: Extract<CompiledSemanticMotion, { kind: "sequence" }>,
   performanceSchedule: PerformanceSchedule,
   options: CompileOptions,
-  stageRegistry: ModelEngineStageRegistry,
 ): CompileResult {
   const stepResults = semanticMotion.steps.map((step, index) => {
     // A sequence owns one speech modulation track for its shared Schedule;
@@ -122,7 +113,6 @@ function compileMotionSequenceIntent(
         allowNeutralAxisPose: true,
         speechActive: ownsSpeechPose && options.speechActive,
       },
-      stageRegistry,
     );
   });
   const failedStepIndex = stepResults.findIndex((result) => !result.ok || !result.plan);

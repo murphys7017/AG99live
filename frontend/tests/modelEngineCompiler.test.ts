@@ -27,6 +27,7 @@ function testAcceptsAxisLevels(): void {
     throw new Error("Expected a normalized semantic motion intent.");
   }
   assert.equal(result.payload.intent.schema_version, "engine.motion_intent.v4");
+  assert.equal(result.payload.intent.profile_revision, 1);
   assert.deepEqual(result.payload.intent.axis_levels, {
     head_yaw: -4,
     mouth_smile: 4,
@@ -71,7 +72,20 @@ function testRejectsInvalidAxisLevels(): void {
   assert.equal(result.reason, "motion_intent_v4.invalid_axis_levels");
 }
 
+function testRejectsFractionalProfileRevision(): void {
+  const result = normalizeMotionPayload({
+    ...buildBasePayload(),
+    profile_revision: 1.5,
+    axis_levels: { head_yaw: 1 },
+  });
+  assert.deepEqual(result, {
+    ok: false,
+    reason: "motion_intent.profile_revision_invalid",
+  });
+}
+
 testAcceptsAxisLevels();
 testAcceptsMotionSequence();
 testRejectsInvalidAxisLevels();
+testRejectsFractionalProfileRevision();
 console.log("modelEngineCompiler smoke tests passed");
