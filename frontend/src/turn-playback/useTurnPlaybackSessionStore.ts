@@ -25,7 +25,7 @@
  *   - 暴露的 state 是 readonly 包装，外部只能通过 mark* / setActiveSession / prune* 写入。
  */
 
-import { reactive, readonly } from "vue";
+import { reactive, readonly, type DeepReadonly } from "vue";
 import type {
   TurnPlaybackSession,
   TurnPlaybackPhase,
@@ -50,6 +50,9 @@ interface SessionStoreState {
   sessions: Map<string, TurnPlaybackSession>;
   activeSessionId: string | null;
 }
+
+type ReadonlyTurnPlaybackSession = DeepReadonly<TurnPlaybackSession>;
+type ReadonlyTurnPlaybackSegment = DeepReadonly<TurnPlaybackSegment>;
 
 // ── Store ──────────────────────────────────────────────────────────
 
@@ -113,38 +116,46 @@ export function useTurnPlaybackSessionStore() {
     return session;
   }
 
-  function getSession(turnId: string | null): TurnPlaybackSession | undefined {
+  function findSession(turnId: string | null): TurnPlaybackSession | undefined {
     const sessionId = resolveSessionId(turnId);
-    const session = sessionId ? state.sessions.get(sessionId) : undefined;
-    return session;
+    return sessionId ? state.sessions.get(sessionId) : undefined;
+  }
+
+  function getSession(turnId: string | null): ReadonlyTurnPlaybackSession | undefined {
+    const session = findSession(turnId);
+    return session ? readonly(session) : undefined;
   }
 
   function requireSession(turnId: string | null): TurnPlaybackSession {
-    const session = getSession(turnId);
+    const session = findSession(turnId);
     if (session) {
       return session;
     }
     throw new Error(`Turn playback session does not exist for turnId=${turnId ?? "null"}.`);
   }
 
-  function getActiveSession(): TurnPlaybackSession | undefined {
+  function getActiveSession(): ReadonlyTurnPlaybackSession | undefined {
     if (!state.activeSessionId) {
       return undefined;
     }
     const session = state.sessions.get(state.activeSessionId);
-    return session;
+    return session ? readonly(session) : undefined;
   }
 
-  function getSessionById(sessionId: string | null): TurnPlaybackSession | undefined {
+  function findSessionById(sessionId: string | null): TurnPlaybackSession | undefined {
     if (!sessionId) {
       return undefined;
     }
-    const session = state.sessions.get(sessionId);
-    return session;
+    return state.sessions.get(sessionId);
   }
 
-  function getSessions(): TurnPlaybackSession[] {
-    return Array.from(state.sessions.values());
+  function getSessionById(sessionId: string | null): ReadonlyTurnPlaybackSession | undefined {
+    const session = findSessionById(sessionId);
+    return session ? readonly(session) : undefined;
+  }
+
+  function getSessions(): readonly ReadonlyTurnPlaybackSession[] {
+    return Array.from(state.sessions.values(), (session) => readonly(session));
   }
 
   function setActiveSession(
@@ -180,9 +191,10 @@ export function useTurnPlaybackSessionStore() {
   function getSegment(
     sessionId: string | null,
     messageId: string,
-  ): TurnPlaybackSegment | undefined {
+  ): ReadonlyTurnPlaybackSegment | undefined {
     const segmentId = normalizeRequiredMessageId(messageId);
-    return getSessionById(sessionId)?.segments.get(segmentId);
+    const segment = findSessionById(sessionId)?.segments.get(segmentId);
+    return segment ? readonly(segment) : undefined;
   }
 
   function getMotionTerminal(
@@ -215,13 +227,13 @@ export function useTurnPlaybackSessionStore() {
     );
   }
 
-  function getUnsettledSegments(): TurnPlaybackSegment[] {
-    const unsettled: TurnPlaybackSegment[] = [];
+  function getUnsettledSegments(): readonly ReadonlyTurnPlaybackSegment[] {
+    const unsettled: ReadonlyTurnPlaybackSegment[] = [];
     for (const session of state.sessions.values()) {
       for (const segmentId of session.segmentOrder) {
         const segment = session.segments.get(segmentId);
         if (segment && !isSegmentLocallySettled(segment)) {
-          unsettled.push(segment);
+          unsettled.push(readonly(segment));
         }
       }
     }
@@ -259,9 +271,10 @@ export function useTurnPlaybackSessionStore() {
     }
   }
 
-  function getActiveSegment(sessionId: string | null): TurnPlaybackSegment | null {
-    const session = getSessionById(sessionId);
-    return session ? getActivePlaybackSegment(session) : null;
+  function getActiveSegment(sessionId: string | null): ReadonlyTurnPlaybackSegment | null {
+    const session = findSessionById(sessionId);
+    const segment = session ? getActivePlaybackSegment(session) : null;
+    return segment ? readonly(segment) : null;
   }
 
   /**

@@ -260,8 +260,8 @@ Remote Operator 重复不是仅仅“有两个 DTO”：
 
 | Canonical Concept | Current Names | Conflict | Recommended Naming |
 |---|---|---|---|
-| 客户端身份 | `client_uid`、MotionLab `conversation_uid` | 一个客户端可切换多个 AstrBot conversation | MotionLab 当前字段应叫 `client_uid` |
-| AstrBot 对话身份 | `cid/history_uid/conversation_id` | 与上述 `conversation_uid` 无法直接对应 | 明确 `conversation_id` |
+| 客户端身份 | `client_uid` | 固定客户端身份，不表示某一轮对话 | 保留 `client_uid` |
+| 当前轮次对话 | `conversation_uid`、`turn_id` | 当前实现中二者应指向同一轮次 | `conversation_uid` 使用当前 `turn_id` |
 | 前端播放轮次 | `turn_id/playbackTurnId/sessionId/currentGroup` | 部分是框架身份区别，部分只是旧命名 | 对外统一 `turnId`；框架 ID 显式加前缀 |
 | 前端事件轮次 | `event_frontend_turn_id/scheduled_frontend_turn_id` | 后者 property 直接返回前者 | 合并为 `frontend_turn_id` |
 | 最新轮次展示 | `SessionState` | 容易误解成所有轮次的权威状态 | 删除无消费者字段后再判断是否需要独立对象 |
@@ -271,9 +271,9 @@ Remote Operator 重复不是仅仅“有两个 DTO”：
 
 最实质性的身份偏差：
 
-[MotionObservationRecorder](C:/Users/Administrator/Documents/GitHub/AG99live/astrbot_plugin_ag99live_adapter/runtime/motion_observation_recorder.py:136) 把 `session_state.client_uid` 写为 `conversation_uid`；动作调度观察也采用相同写法。
+[MotionObservationRecorder](C:/Users/Administrator/Documents/GitHub/AG99live/astrbot_plugin_ag99live_adapter/runtime/motion_observation_recorder.py:136) 把固定的 `session_state.client_uid` 错写为 `conversation_uid`；当前轮次应使用对应的 `turn_id`。动作调度和 Prompt 观察也曾采用相同错误来源。
 
-这意味着该字段不能用于区分同一客户端切换的 AstrBot 历史会话。**字段语义错误已确认；是否已有下游因此错误分组，NEEDS VERIFICATION。**
+`conversation_uid` 应用于当前轮次关联；AstrBot 历史会话仍由 `history_uid` / `conversation_id` 表示。当前 MotionLab 观察入口尚未填充历史会话字段。
 
 # 7. Complexity Hotspots
 
@@ -358,7 +358,7 @@ Remote Operator 重复不是仅仅“有两个 DTO”：
 | Persona Effect / TTS 可选 hook | 官方与增强版 Core 差异 | 无法在官方环境加载或正确工作 | **KEEP**，探测集中在边界 |
 | message ID 优先级树 | 消费不同 AstrBot 输出 metadata | 可能改变分段聚合 | **VERIFY** 配套 Core 实际输出 |
 | motion object 三种 type、三种 payload 字段 | 本仓库 producer 只输出 canonical 组合 | 潜在外部 producer 受影响 | **VERIFY → DELETE** 无消费者别名 |
-| `scheduled_frontend_turn_id` 同值别名 | 内部诊断和调度读取 | 可统一调用方，无独立语义损失 | **REFACTOR** |
+| `scheduled_frontend_turn_id` 同值别名 | 内部诊断和调度读取 | 已统一调用方，无独立语义损失 | **DONE** |
 | SessionStage 与 last_user_text | 未找到读取者 | 删除写入不改变现有消费者行为 | **DELETE** |
 | 动态 compiler extension API | 未找到运行期修改消费者 | 固定编译不受影响 | **DELETE / SIMPLIFY** |
 | 扫描缓存 schema 失配重建 | 模型与缓存变化 | 删除后会使用陈旧缓存 | **KEEP** |
@@ -433,7 +433,7 @@ registry 的实际实现包含 `register/unregister/setEnabled/list`、extension
 | `_mark_turn_synthesizing/_mark_turn_playing` 及注入回调 | 仅维护上述无消费者 stage | OutputSegmentCoordinator | 低至中 | 高 |
 | registry 动态修改 API 及其 disabled-extension 状态 | 无注册、启停、卸载调用 | 固定编译依赖 resolve，需保留静态阶段顺序 | 中 | 高 |
 | `lappmodel.ts` 第二个 `motionGroupCount == 0` 分支 | 总动作数为零时前面已 return | 无可达路径 | 低 | 高 |
-| `_FrontendIdentitySnapshot` 同值 property | 只是字段别名 | scheduling、prompt observation | 低 | 高；需统一调用方 |
+| `_FrontendIdentitySnapshot` 同值 property | 已删除，调用方直接使用 `event_frontend_turn_id` | — | 低 | 已完成 |
 | motion object 历史 type / payload 别名 | 本仓库没有对应 producer | 外部 Core/插件未知 | 中 | NEEDS VERIFICATION |
 
 删除依据位置：
@@ -582,9 +582,9 @@ Remote Operator → 两种外部执行后端
 | Priority | Action | Scope | Benefit | Risk | Prerequisite |
 |---|---|---|---|---|---|
 | P0 | 暂无已证实必须紧急修改项 | — | 避免把架构风险夸大成生产事故 | — | 若真实播放存在无法收口，再升级 |
-| P1 | SIMPLIFY：收紧内部契约和 Store 读取接口 | SessionStore、Inbound deps、关键 lifecycle 回调 | 缺失状态不再静默跳过，写入权可执行 | 中 | 检查正式装配和当前调用者 |
+| P1 | SIMPLIFY：收紧内部契约和 Store 读取接口 | SessionStore、Inbound deps、关键 lifecycle 回调 | 缺失状态不再静默跳过，写入权可执行 | 中 | Inbound 必需依赖和 Store 只读查询已完成；关键 lifecycle 回调的故障语义仍待验证 |
 | P1 | MERGE：播放装配从 Adapter 收归 Playback | 音频 runtime、controller、wiring | 消除执行依赖环和转发层 | 中高 | 保留开始、失败、中断、接管与 ACK 语义 |
-| P1 | SIMPLIFY：统一身份与协议含义 | revision、conversation/client ID | 防止同版本不同解释及数据分组歧义 | 中 | 历史 MotionLab 字段消费者核对 |
+| P1 | SIMPLIFY：统一身份与协议含义 | revision、conversation/client ID | 防止同版本不同解释及数据分组歧义 | 中 | 已完成源码入口修正；历史数据和 history_uid 关联仍需核对 |
 | P2 | DELETE：删除高置信度无用入口与分支 | 第 11 节前三项、加载重复分支 | 直接减少维护面 | 低 | 引用核对后做最小静态检查 |
 | P2 | DELETE：删除无消费者阶段状态 | SessionStage 与回调传播 | 去除虚假状态机 | 低至中 | 保留仍消费的 turn identity 与计数 |
 | P2 | SIMPLIFY：动态 registry 改固定阶段 | ModelEngine compiler | 阶段顺序直接可见 | 中 | 保持现有阶段顺序和诊断 |
@@ -598,34 +598,34 @@ Remote Operator → 两种外部执行后端
 
 # 16. Things You Would NOT Change
 
-1. **原子 output segment。**  
+1. **原子 output segment。**
    文本、音频、动作和 speech cues 有共同身份，是整个系统最有价值的边界之一。
 
-2. **真实音频时钟与无音频 synthetic clock 的区分。**  
+2. **真实音频时钟与无音频 synthetic clock 的区分。**
    无音频动作需要时钟，这不是掩盖音频失败的 fallback。
 
-3. **语义意图与参数计划分离。**  
+3. **语义意图与参数计划分离。**
    LLM 不直接输出 Live2D 参数名，模型差异由 Profile 和编译器吸收，方向正确。
 
-4. **ActiveParameterRuntime 与 Cubism Physics 的分工。**  
+4. **ActiveParameterRuntime 与 Cubism Physics 的分工。**
    主动参数先融合，Physics 后处理，有清楚的执行顺序。
 
-5. **显式失败，不自动替换非法动作。**  
+5. **显式失败，不自动替换非法动作。**
    当前已经存在 schema 拒绝、Profile revision 校验和明确终态，应继续强化。
 
-6. **主窗口唯一 runtime、辅助窗口命令与快照模式。**  
+6. **主窗口唯一 runtime、辅助窗口命令与快照模式。**
    多窗口投影并非重复维护一套业务系统。
 
-7. **ModelEngine 内的真实编译阶段。**  
+7. **ModelEngine 内的真实编译阶段。**
    文件多不等于抽象多；轴解析、关系图、时间编排、参数绑定确实解决不同问题。
 
-8. **MotionLab 的持久化确认和待发送队列。**  
+8. **MotionLab 的持久化确认和待发送队列。**
    本地待确认事件与后端已持久化事件有不同职责，不是应无条件合并的双份 memory。
 
-9. **独立 VTS 录制器。**  
+9. **独立 VTS 录制器。**
    原始跟踪数据采集与语义动作观察不是同一种数据，不应为了“统一”强行共用数据库或 runtime。
 
-10. **官方 AstrBot 兼容支持与两个 Remote Operator backend。**  
+10. **官方 AstrBot 兼容支持与两个 Remote Operator backend。**
     都有真实产品场景。应削减内部扩散，而不是默认删除能力。
 
 # 17. Final Verdict

@@ -135,7 +135,7 @@ class MotionObservationRecorder:
         return record_motion_observation(
             getattr(self.runtime_state, "motion_lab_recorder", None),
             event_type=event_type,
-            conversation_uid=getattr(self.session_state, "client_uid", None),
+            conversation_uid=str(turn_id or "").strip() or None,
             turn_id=str(turn_id or "").strip(),
             frontend_turn_id=frontend_turn_id,
             message_id=message_id,

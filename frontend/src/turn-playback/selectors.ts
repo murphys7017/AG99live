@@ -1,9 +1,10 @@
 import type { TurnPlaybackSegment, TurnPlaybackSession } from "./session.js";
 import { isSegmentLocallySettled } from "./session.js";
+import type { DeepReadonly } from "vue";
 
 export function getActivePlaybackSegment(
-  session: TurnPlaybackSession,
-): TurnPlaybackSegment | null {
+  session: DeepReadonly<TurnPlaybackSession>,
+): DeepReadonly<TurnPlaybackSegment> | null {
   for (const segmentId of session.segmentOrder) {
     const segment = session.segments.get(segmentId);
     if (segment && !isSegmentLocallySettled(segment)) {
@@ -14,8 +15,8 @@ export function getActivePlaybackSegment(
 }
 
 export function getNextPlaybackReleaseSegment(
-  session: TurnPlaybackSession,
-): TurnPlaybackSegment | null {
+  session: DeepReadonly<TurnPlaybackSession>,
+): DeepReadonly<TurnPlaybackSegment> | null {
   for (const segmentId of session.segmentOrder) {
     const segment = session.segments.get(segmentId);
     if (
@@ -29,7 +30,9 @@ export function getNextPlaybackReleaseSegment(
   return null;
 }
 
-function isAudioBackedMotionTail(segment: TurnPlaybackSegment): boolean {
+function isAudioBackedMotionTail(
+  segment: DeepReadonly<TurnPlaybackSegment>,
+): boolean {
   return (
     segment.text.delivered
     && segment.audio.started
@@ -46,7 +49,9 @@ function isAudioBackedMotionTail(segment: TurnPlaybackSegment): boolean {
  *
  * Audio must have a url and must not already have reached a terminal state.
  */
-export function canReleaseAudio(segment: TurnPlaybackSegment): boolean {
+export function canReleaseAudio(
+  segment: DeepReadonly<TurnPlaybackSegment>,
+): boolean {
   return (
     typeof segment.audio.url === "string"
     && segment.audio.url.trim().length > 0
@@ -60,7 +65,9 @@ export function canReleaseAudio(segment: TurnPlaybackSegment): boolean {
  *
  * Motion must have a payload and must not already be started.
  */
-export function canReleaseMotion(segment: TurnPlaybackSegment): boolean {
+export function canReleaseMotion(
+  segment: DeepReadonly<TurnPlaybackSegment>,
+): boolean {
   return segment.motion.payload !== null && !segment.motion.released;
 }
 
@@ -76,7 +83,7 @@ export function canReleaseMotion(segment: TurnPlaybackSegment): boolean {
  * Backend turn completion is a separate protocol step.
  */
 export function isPlaybackLocallySettled(
-  session: TurnPlaybackSession,
+  session: DeepReadonly<TurnPlaybackSession>,
 ): boolean {
   if (session.segmentOrder.length === 0) {
     return false;

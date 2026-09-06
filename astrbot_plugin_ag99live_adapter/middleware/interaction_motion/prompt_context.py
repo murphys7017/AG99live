@@ -55,12 +55,8 @@ def _record_motion_prompt_reference_observation(
     record_motion_observation(
         getattr(bundle.runtime_state, "motion_lab_recorder", None),
         event_type="motion.prompt_reference_examples_resolved",
-        conversation_uid=getattr(
-            getattr(bundle.turn_coordinator, "session_state", None),
-            "client_uid",
-            None,
-        ),
-        turn_id=identity.scheduled_frontend_turn_id,
+        conversation_uid=identity.event_frontend_turn_id,
+        turn_id=identity.event_frontend_turn_id,
         frontend_turn_id=identity.event_frontend_turn_id,
         source_route=source_route,
         phase="prompt",

@@ -3,7 +3,20 @@ task:
   risk: high
   phase: architecture_audit_followup
   status: source_complete_pending_live_acceptance
-  scope: "Fix source-confirmed audit findings: motion revision validation, required inbound SessionStore contract, unused internal entry points, and fixed compiler stages. Audio ownership migration, observation identity migration, Remote Operator and Store read-only projections are outside this change."
+  scope: "Fix source-confirmed audit findings: motion revision validation, required inbound SessionStore contract, unused internal entry points, fixed compiler stages, observation identity semantics, and read-only SessionStore query projections. Audio ownership migration and Remote Operator consolidation remain outside this change."
+
+architecture_audit_continuation:
+  recorded_at: "2026-09-06"
+  scope:
+    - "Remove the same-value scheduled_frontend_turn_id alias from the internal identity snapshot and use the event frontend turn ID directly."
+    - "Return Vue deep-readonly session and segment views from TurnPlaybackSessionStore query APIs while keeping mutation private to store methods."
+  non_actions:
+    - "Do not migrate audio runtime ownership from Adapter to Playback in this bounded continuation."
+    - "Do not merge Remote Operator configuration parsing before tracing its Core lifecycle and external configuration consumers."
+  validation:
+    - "Renderer, WebSDK, and Node typechecks passed."
+    - "Focused Python syntax checks passed for the changed interaction-motion modules."
+    - "Diff whitespace check passed."
 
 architecture_audit_followup:
   recorded_at: "2026-09-05"

@@ -21,6 +21,7 @@
 
 import type { NormalizedMotionPayload } from "../types/motion.js";
 import type { OutputSegmentSpeechCue } from "../types/protocol.js";
+import type { DeepReadonly } from "vue";
 
 // ── Phase ──────────────────────────────────────────────────────────
 
@@ -335,7 +336,9 @@ export function createTurnPlaybackSession(
  * 段是否已经本地结算：整段已被原子拒绝，或者 text 已 delivered、audio 已到终态、
  * motion 已 absent/completed/failed 三者之一。注意不读 backend.*。
  */
-export function isSegmentLocallySettled(segment: TurnPlaybackSegment): boolean {
+export function isSegmentLocallySettled(
+  segment: DeepReadonly<TurnPlaybackSegment>,
+): boolean {
   if (segment.rejected) {
     return true;
   }

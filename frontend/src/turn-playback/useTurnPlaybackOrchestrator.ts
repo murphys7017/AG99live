@@ -1,6 +1,7 @@
-import { watch } from "vue";
+import { watch, type DeepReadonly } from "vue";
 import type { useTurnPlaybackSessionStore } from "./useTurnPlaybackSessionStore";
 import type { NormalizedMotionPayload } from "../types/motion.js";
+import { cloneJson } from "../utils/cloneJson.js";
 import {
   canReleaseAudio,
   canReleaseMotion,
@@ -29,7 +30,7 @@ export function useTurnPlaybackOrchestrator(
     if (options.timelineRuntime.findPlaybackReleaseBlockers().length > 0) {
       return;
     }
-    let segment: TurnPlaybackSegment | null = null;
+    let segment: DeepReadonly<TurnPlaybackSegment> | null = null;
     for (const session of options.sessionStore.getSessions()) {
       if (session.phase === "completed" || session.phase === "failed") {
         continue;
@@ -76,6 +77,9 @@ export function useTurnPlaybackOrchestrator(
     if (!releaseText && !releaseAudio && !releaseMotion) {
       return;
     }
+    const motionPayload = releaseMotion && segment.motion.payload
+      ? cloneReleasedMotionPayload(segment.motion.payload)
+      : null;
     const receivedAtMs = releaseMotion ? segment.motion.receivedAtMs : null;
     if (
       releaseMotion
@@ -107,7 +111,7 @@ export function useTurnPlaybackOrchestrator(
         noAudioConfirmed: segment.audio.terminal === "absent",
       },
       motion: {
-        payload: releaseMotion ? segment.motion.payload : null,
+        payload: motionPayload,
         receivedAtMs,
       },
       speech: {
@@ -156,7 +160,7 @@ export function useTurnPlaybackOrchestrator(
 }
 
 function isAtomicSegmentResolved(
-  segment: TurnPlaybackSegment,
+  segment: DeepReadonly<TurnPlaybackSegment>,
 ): boolean {
   const textResolved = Boolean(segment.text.content) || segment.text.delivered;
   const audioResolved = Boolean(segment.audio.url) || segment.audio.terminal !== "idle";
@@ -164,4 +168,10 @@ function isAtomicSegmentResolved(
     || segment.motion.absent
     || segment.motion.failed;
   return textResolved && audioResolved && motionResolved;
+}
+
+function cloneReleasedMotionPayload(
+  payload: DeepReadonly<NormalizedMotionPayload>,
+): NormalizedMotionPayload {
+  return cloneJson(payload) as unknown as NormalizedMotionPayload;
 }

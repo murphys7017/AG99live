@@ -1,4 +1,4 @@
-import { watch } from "vue";
+import { watch, type DeepReadonly } from "vue";
 import type { useTurnPlaybackSessionStore } from "./useTurnPlaybackSessionStore.js";
 import { isPlaybackLocallySettled } from "./selectors.js";
 import type { TurnPlaybackSession } from "./session.js";
@@ -27,7 +27,9 @@ export function usePlaybackCompletionCoordinator(
   const ackedSessions = new Set<string>();
   const pendingAckSessions = new Set<string>();
 
-  function getSession(sessionId: string | null): TurnPlaybackSession | undefined {
+  function getSession(
+    sessionId: string | null,
+  ): DeepReadonly<TurnPlaybackSession> | undefined {
     return sessionId ? options.sessionStore.getSessionById(sessionId) : undefined;
   }
 
@@ -180,7 +182,9 @@ export function usePlaybackCompletionCoordinator(
   };
 }
 
-function resolvePlaybackFailureReason(session: TurnPlaybackSession): string | null {
+function resolvePlaybackFailureReason(
+  session: DeepReadonly<TurnPlaybackSession>,
+): string | null {
   for (const segmentId of session.segmentOrder) {
     const segment = session.segments.get(segmentId);
     if (!segment) {

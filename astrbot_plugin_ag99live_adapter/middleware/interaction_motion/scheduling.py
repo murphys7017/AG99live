@@ -245,7 +245,7 @@ async def _schedule_motion_from_interaction_result(
         return _MotionScheduleAttempt(
             phase=phase,
             source="persona_effect",
-            scheduled_frontend_turn_id=identity.scheduled_frontend_turn_id,
+            scheduled_frontend_turn_id=identity.event_frontend_turn_id,
             event_frontend_turn_id=identity.event_frontend_turn_id,
             reply_plan_route_mode=reply_plan.route_mode if reply_plan is not None else None,
             reply_plan_should_emit_immediate_reply=(
@@ -263,7 +263,7 @@ async def _schedule_motion_from_interaction_result(
         return _MotionScheduleAttempt(
             phase=phase,
             source=None,
-            scheduled_frontend_turn_id=identity.scheduled_frontend_turn_id,
+            scheduled_frontend_turn_id=identity.event_frontend_turn_id,
             event_frontend_turn_id=identity.event_frontend_turn_id,
             reply_plan_route_mode=reply_plan.route_mode if reply_plan is not None else None,
             reply_plan_should_emit_immediate_reply=(
@@ -280,7 +280,7 @@ async def _schedule_motion_from_interaction_result(
         return _MotionScheduleAttempt(
             phase=phase,
             source=None,
-            scheduled_frontend_turn_id=identity.scheduled_frontend_turn_id,
+            scheduled_frontend_turn_id=identity.event_frontend_turn_id,
             event_frontend_turn_id=identity.event_frontend_turn_id,
             reply_plan_route_mode=reply_plan.route_mode if reply_plan is not None else None,
             reply_plan_should_emit_immediate_reply=(
@@ -305,7 +305,7 @@ async def _schedule_motion_from_interaction_result(
         return _MotionScheduleAttempt(
             phase=phase,
             source=policy.source,
-            scheduled_frontend_turn_id=identity.scheduled_frontend_turn_id,
+            scheduled_frontend_turn_id=identity.event_frontend_turn_id,
             event_frontend_turn_id=identity.event_frontend_turn_id,
             reply_plan_route_mode=reply_plan.route_mode if reply_plan is not None else None,
             reply_plan_should_emit_immediate_reply=(
@@ -321,7 +321,7 @@ async def _schedule_motion_from_interaction_result(
     return _MotionScheduleAttempt(
         phase=phase,
         source=policy.source,
-        scheduled_frontend_turn_id=identity.scheduled_frontend_turn_id,
+        scheduled_frontend_turn_id=identity.event_frontend_turn_id,
         event_frontend_turn_id=identity.event_frontend_turn_id,
         reply_plan_route_mode=reply_plan.route_mode if reply_plan is not None else None,
         reply_plan_should_emit_immediate_reply=(
@@ -409,9 +409,9 @@ def _record_motion_lab_interaction_event(
         logger.exception("MotionLab interaction profile resolution failed")
         profile = None
     effect_calls = [_thaw_snapshot_value(item) for item in _extract_effect_calls_for_motion(event, view)]
-    turn_id = identity.scheduled_frontend_turn_id
+    turn_id = identity.event_frontend_turn_id
     observation_context = {
-        "conversation_uid": getattr(getattr(bundle.turn_coordinator, "session_state", None), "client_uid", None),
+        "conversation_uid": turn_id,
         "turn_id": turn_id,
         "frontend_turn_id": identity.event_frontend_turn_id,
         "source_route": "persona_effect",

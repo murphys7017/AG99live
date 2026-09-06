@@ -79,7 +79,7 @@ control.turn_finished
 - 对 VAD 子轮次发出的 `control.interrupt` 只能定位同一采集会话仍在飞的上一子轮次，不能使用采集根 ID；常开采集不会因完成一轮转写而停止。
 - 如果 `dropped === true`，后端丢弃该次采集并返回输入错误；因为它尚未建立正式 Turn，
   不发布 `control.turn_finished`。
-- Electron / Windows 桌面端的设备枚举和采集可以来自主进程 DirectShow/ffmpeg，也可以回退到浏览器 `MediaDevices`。原生路径直接让 ffmpeg 输出 `s16le`，Web Audio 路径在 renderer 内把 Float32 转成 PCM16LE。
+- Electron / Windows 桌面端的设备枚举和采集可以来自主进程 DirectShow/ffmpeg，也可以使用浏览器 `MediaDevices`。未指定原生设备或选择的设备不是原生设备时使用浏览器路径；显式选中的原生设备启动失败会直接报错。原生路径直接让 ffmpeg 输出 `s16le`，Web Audio 路径在 renderer 内把 Float32 转成 PCM16LE。
 - 按键说话模式只改变采集开始/结束时机。按下配置按键等价于开始一段麦克风采集，松开按键等价于发送该段 `input.audio_stream_end(reason="ptt_release")`。
 - 非流式 JSON 数组音频协议已删除；未知旧类型会作为不受支持的消息拒绝。
 

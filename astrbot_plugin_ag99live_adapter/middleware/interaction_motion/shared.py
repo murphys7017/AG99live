@@ -19,10 +19,6 @@ class _MotionRuntimeBundle:
 class _FrontendIdentitySnapshot:
     event_frontend_turn_id: str | None
 
-    @property
-    def scheduled_frontend_turn_id(self) -> str | None:
-        return self.event_frontend_turn_id
-
 def _resolve_motion_runtime_bundle(event: Any) -> _MotionRuntimeBundle | None:
     platform_id = _call_event_method(event, "get_platform_id")
     platform_name = _call_event_method(event, "get_platform_name")
