@@ -3,7 +3,18 @@ task:
   risk: high
   phase: architecture_audit_followup
   status: source_complete_pending_live_acceptance
-  scope: "Fix source-confirmed audit findings: motion revision validation, required inbound SessionStore contract, unused internal entry points, fixed compiler stages, observation identity semantics, and read-only SessionStore query projections. Audio ownership migration and Remote Operator consolidation remain outside this change."
+  scope: "Fix source-confirmed audit findings: motion revision validation, required inbound SessionStore contract, unused internal entry points, fixed compiler stages, observation identity semantics, read-only SessionStore query projections, and a canonical Remote Operator target-policy parser. Audio ownership migration remains outside this change."
+
+remote_operator_config_consolidation:
+  recorded_at: "2026-09-06"
+  scope:
+    - "Make middleware prompt availability project the runtime's canonical executable-target policy, including allow_unrestricted_access."
+  non_actions:
+    - "Do not merge the two Core prompt collector registrations before their lifecycle ordering is verified."
+    - "Do not change execution backends, authorization policy, endpoint probing, or request routing."
+  validation:
+    - "Focused Remote Operator parser and middleware registration tests passed (7 tests)."
+    - "Changed Remote Operator modules compiled successfully and diff whitespace check passed."
 
 architecture_audit_continuation:
   recorded_at: "2026-09-06"

@@ -21,7 +21,7 @@ AstrBot 对话生成
 | P1 | 音频执行归在 Adapter 内，Timeline 又通过 Adapter 调回音频执行，形成运行时依赖环 | 已确认 |
 | P1 | 内部契约没有贯彻到底：必需依赖被当作可选依赖，Store 查询返回可变内部对象 | 已确认 |
 | P1 | 同一协议概念存在不同解释：动作 revision 校验不一致；`conversation_uid` 实际是客户端 UID | 已确认 |
-| P2 | Remote Operator 的配置解析、Prompt 注入和路由策略分散，存在重复语义 | 已确认；重复注入是否发生需验证 |
+| P2 | Remote Operator 的配置解析、Prompt 注入和路由策略分散，存在重复语义 | 配置解析已收敛；重复注入是否发生仍需验证 |
 | P2 | 固定动作编译管线保留动态 registry、无调用者入口和历史状态写入 | 已确认 |
 
 **AI 增量开发债务特征明显，但不是整个项目失控。** 存在“新增路径后旧入口未删”“声明必需后仍防御性判空”“固定流程保留未来扩展机制”等模式；不能仅凭这些模式断言具体代码由 AI 生成。
@@ -241,20 +241,18 @@ Store 查询证据：[useTurnPlaybackSessionStore.ts](C:/Users/Administrator/Doc
 |---|---|---|---|---|
 | Adapter 音频 runtime、controller | 播放启动和停止转交 | Timeline 音频执行链 | P1 | 合并装配，音频执行归 Playback |
 | Motion V4 前后端解析器 | 相同 wire contract | revision 等字段规则各自实现 | P1 | 保留两端边界校验，统一规则与契约样例 |
-| Remote Operator middleware 配置解析 | 可用电脑、默认电脑、profile | RemoteOperatorRuntime 配置解析 | P2 | 只解析一次，Prompt 使用投影 |
+| Remote Operator middleware 配置解析 | 可用电脑、默认电脑、profile | RemoteOperatorRuntime 配置解析 | P2 | 已改为 Runtime 权威解析的 Prompt 投影 |
 | 两个 Remote Operator Prompt collector | 同一 Prompt 构造 | 同一个 `collect_remote_operator_prompt_extension` | P2 / VERIFY | 查清 Core 阶段后收敛注册入口 |
 | 音频 StateBridge、Runner | 启动异常分类 | 两套错误名称映射 | P2 | Runner 产生统一错误，UI 只翻译 |
 | SessionStore `finalizeSession` | 转入 completed | `markPhase(..., "completed")` | P2 | 删除无调用者入口 |
 | ModelEngine `ingestInboundPayload` | unknown → normalized → queue | 正式入站已 normalize，再调用 `ingestNormalizedPayload` | P2 | 删除未使用入口 |
 | 动作 metadata 多种字段名 | motion payload 提取 | `motion_payload / intent / plan` | P2 / VERIFY | 核实消费者后只保留 canonical 字段 |
 
-Remote Operator 重复不是仅仅“有两个 DTO”：
+Remote Operator 原本不是仅仅“有两个 DTO”：middleware 曾自行解释 `computer_entries`、backend、enabled 和默认 profile，而 runtime 还额外检查 `allow_unrestricted_access`。这会让 Prompt 暴露一个运行时必然拒绝的目标。
 
-- middleware 自行解释 `computer_entries`、backend、enabled 和默认 profile。
-- runtime 再独立解释相同配置，并额外检查 `allow_unrestricted_access`。
-- 在线过滤能减少部分不一致，但没有消除两套配置规则。
+现在 middleware 只把 Runtime 的可执行目标策略投影为 Prompt 配置，包含 `allow_unrestricted_access`。仍待验证的是两个 Core Prompt collector 是否会在同一阶段重复注入。
 
-证据：[middleware 解析](C:/Users/Administrator/Documents/GitHub/AG99live/astrbot_plugin_ag99live_adapter/middleware/remote_operator.py:342)、[runtime 解析](C:/Users/Administrator/Documents/GitHub/AG99live/astrbot_plugin_ag99live_adapter/services/remote_operator_runtime.py:730)。
+证据：[middleware Prompt 投影](C:/Users/Administrator/Documents/GitHub/AG99live/astrbot_plugin_ag99live_adapter/middleware/remote_operator.py:342)、[Runtime 权威解析](C:/Users/Administrator/Documents/GitHub/AG99live/astrbot_plugin_ag99live_adapter/services/remote_operator_runtime.py:67)。
 
 # 6. Concept Drift
 
@@ -588,7 +586,7 @@ Remote Operator → 两种外部执行后端
 | P2 | DELETE：删除高置信度无用入口与分支 | 第 11 节前三项、加载重复分支 | 直接减少维护面 | 低 | 引用核对后做最小静态检查 |
 | P2 | DELETE：删除无消费者阶段状态 | SessionStage 与回调传播 | 去除虚假状态机 | 低至中 | 保留仍消费的 turn identity 与计数 |
 | P2 | SIMPLIFY：动态 registry 改固定阶段 | ModelEngine compiler | 阶段顺序直接可见 | 中 | 保持现有阶段顺序和诊断 |
-| P2 | MERGE：Remote Operator 配置解析 | middleware/runtime | 默认值、可用性与执行目标一致 | 中 | 保留两种真实 backend |
+| P2 | MERGE：Remote Operator 配置解析 | middleware/runtime | 默认值、可用性与执行目标一致 | 中 | 已使用 Runtime 权威解析；保留两种真实 backend |
 | P2 | VERIFY → DELETE：清理 motion metadata 别名 | message_utils / segment extraction | 缩小内部协议 | 中 | 配套 AstrBot 源码与真实 payload |
 | P3 | VERIFY：合并双 Prompt 注册路径 | Remote Operator | 防止重复注入及多次决策 | 中 | 确认 Core 两种 collector 的调用阶段 |
 | P3 | VERIFY：评估可选 curve 子系统去留 | curve runtime/coordinator/hint | 可能移除整块非必要复杂度 | 中 | 命中率与观感证据 |

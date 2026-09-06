@@ -12,10 +12,11 @@ from ..protocol.remote_operator import RemoteOperatorRequest
 from ..runtime.remote_operator_registry import (
     get_remote_operator_online_computers,
 )
+from ..services.remote_operator_runtime import resolve_remote_operator_endpoint_config
 
 
 @dataclass(frozen=True, slots=True)
-class RemoteOperatorConfig:
+class RemoteOperatorPromptConfig:
     default_computer: str
     computers: dict[str, str]
     target_descriptions: dict[str, str]
@@ -212,7 +213,7 @@ def arbitrate_remote_operator_tools_for_request(event: Any, request: Any) -> lis
         return []
 
     config = filter_online_remote_operator_config(
-        resolve_remote_operator_config(_load_remote_operator_config())
+        resolve_remote_operator_prompt_config(_load_remote_operator_config())
     )
     if config is not None:
         override_prompt = build_remote_operator_core_override_prompt(
@@ -259,7 +260,7 @@ def arbitrate_remote_operator_tools_for_request(event: Any, request: Any) -> lis
 
 
 def remote_operator_available() -> bool:
-    config = resolve_remote_operator_config(_load_remote_operator_config())
+    config = resolve_remote_operator_prompt_config(_load_remote_operator_config())
     if config is None:
         return False
     return filter_online_remote_operator_config(config) is not None
@@ -273,7 +274,7 @@ def is_remote_operator_action_text(text: Any) -> bool:
 
 
 def build_remote_operator_core_override_prompt(
-    config: RemoteOperatorConfig,
+    config: RemoteOperatorPromptConfig,
     prompt_text: str,
 ) -> str:
     return (
@@ -309,7 +310,7 @@ def collect_remote_operator_prompt_extension(
     if _is_remote_operator_result_event(event):
         return None
 
-    config = resolve_remote_operator_config(_load_remote_operator_config())
+    config = resolve_remote_operator_prompt_config(_load_remote_operator_config())
     if config is None:
         logger.debug("Remote operator prompt skipped: config_unavailable")
         return None
@@ -339,30 +340,31 @@ def collect_remote_operator_prompt_extension(
     )
 
 
-def resolve_remote_operator_config(config: Any) -> RemoteOperatorConfig | None:
-    if not isinstance(config, Mapping):
+def resolve_remote_operator_prompt_config(
+    config: Any,
+) -> RemoteOperatorPromptConfig | None:
+    endpoint_config = resolve_remote_operator_endpoint_config(config)
+    if endpoint_config is None:
         return None
 
-    computers = _resolve_computers(config)
-    if not computers:
-        return None
-
-    default_computer = _normalize_key(config.get("default_computer"))
-    if default_computer not in computers:
-        default_computer = next(iter(computers))
-
-    return RemoteOperatorConfig(
-        default_computer=default_computer,
-        computers=computers,
-        target_descriptions=_resolve_target_descriptions(config),
-        default_profile=_resolve_default_profile(config),
-        profiles=_resolve_profile_labels(config),
+    return RemoteOperatorPromptConfig(
+        default_computer=endpoint_config.default_computer,
+        computers=endpoint_config.computers,
+        target_descriptions={
+            key: target.description or _default_target_description(target.backend)
+            for key, target in endpoint_config.targets.items()
+        },
+        default_profile=endpoint_config.default_profile,
+        profiles={
+            key: profile.label
+            for key, profile in endpoint_config.profiles.items()
+        },
     )
 
 
 def filter_online_remote_operator_config(
-    config: RemoteOperatorConfig,
-) -> RemoteOperatorConfig | None:
+    config: RemoteOperatorPromptConfig,
+) -> RemoteOperatorPromptConfig | None:
     online_keys = get_remote_operator_online_computers()
     if not online_keys:
         return None
@@ -379,7 +381,7 @@ def filter_online_remote_operator_config(
     if default_computer not in online_computers:
         default_computer = next(iter(online_computers))
 
-    return RemoteOperatorConfig(
+    return RemoteOperatorPromptConfig(
         default_computer=default_computer,
         computers=online_computers,
         target_descriptions={
@@ -392,7 +394,7 @@ def filter_online_remote_operator_config(
     )
 
 
-def build_remote_operator_prompt(config: RemoteOperatorConfig) -> str:
+def build_remote_operator_prompt(config: RemoteOperatorPromptConfig) -> str:
     lines = [
         "当用户明确要求操作电脑、打开软件、使用浏览器、检查本机项目或让远程执行器完成任务时，生成远程执行器请求。",
         "如果你正在进行 AstrBot interaction 路由决策，以上请求绝不能选择 self_reply；必须选择 hybrid 或 delegate_to_core，并在 core_task_spec.execution_prompt 中要求核心只输出远程执行器 JSON。",
@@ -449,7 +451,7 @@ def parse_remote_operator_request_from_view(
     if not prompt:
         return None, "prompt_empty"
 
-    config = resolve_remote_operator_config(_load_remote_operator_config())
+    config = resolve_remote_operator_prompt_config(_load_remote_operator_config())
     if config is None:
         return None, "config_unavailable"
     online_config = filter_online_remote_operator_config(config)
@@ -463,46 +465,10 @@ def parse_remote_operator_request_from_view(
     return RemoteOperatorRequest(computer=computer, profile=profile, prompt=prompt), "ok"
 
 
-def _resolve_computers(config: Mapping[str, Any]) -> dict[str, str]:
-    entries = config.get("computer_entries")
-    computers: dict[str, str] = {}
-    if isinstance(entries, list):
-        for item in entries:
-            if not isinstance(item, Mapping):
-                continue
-            key = _normalize_key(item.get("key"))
-            label = str(item.get("label") or "").strip()
-            endpoint = str(item.get("endpoint") or "").strip()
-            backend = str(item.get("backend") or "").strip()
-            if not _normalize_bool(item.get("enabled", True)):
-                continue
-            if backend != "opencode" and not endpoint:
-                continue
-            if key and label and key not in computers:
-                computers[key] = label
-    return computers
-
-
-def _resolve_target_descriptions(config: Mapping[str, Any]) -> dict[str, str]:
-    entries = config.get("computer_entries")
-    descriptions: dict[str, str] = {}
-    if isinstance(entries, list):
-        for item in entries:
-            if not isinstance(item, Mapping):
-                continue
-            key = _normalize_key(item.get("key"))
-            if not key or key in descriptions:
-                continue
-            explicit = str(item.get("description") or "").strip()
-            if explicit:
-                descriptions[key] = explicit
-                continue
-            backend = str(item.get("backend") or "").strip()
-            if backend == "opencode":
-                descriptions[key] = "代码、文件、命令、日志和项目开发任务"
-            else:
-                descriptions[key] = "Windows 桌面、应用、浏览器和 Computer Use 操作"
-    return descriptions
+def _default_target_description(backend: str) -> str:
+    if backend == "opencode":
+        return "代码、文件、命令、日志和项目开发任务"
+    return "Windows 桌面、应用、浏览器和 Computer Use 操作"
 
 
 def _normalize_key(value: Any) -> str:
@@ -514,40 +480,6 @@ def _normalize_profile(value: Any) -> str:
     if normalized in {"simple", "complex"}:
         return normalized
     return ""
-
-
-def _normalize_bool(value: Any) -> bool:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        normalized = value.strip().lower()
-        if normalized in {"false", "0", "no", "off", "disabled"}:
-            return False
-        if normalized in {"true", "1", "yes", "on", "enabled"}:
-            return True
-    return True
-
-
-def _resolve_default_profile(config: Mapping[str, Any]) -> str:
-    profile = _normalize_profile(config.get("default_profile"))
-    return profile or "simple"
-
-
-def _resolve_profile_labels(config: Mapping[str, Any]) -> dict[str, str]:
-    labels = {
-        "simple": "简单任务",
-        "complex": "复杂任务",
-    }
-    raw_profiles = config.get("profiles")
-    if isinstance(raw_profiles, Mapping):
-        for key in ("simple", "complex"):
-            raw_profile = raw_profiles.get(key)
-            if not isinstance(raw_profile, Mapping):
-                continue
-            label = str(raw_profile.get("label") or "").strip()
-            if label:
-                labels[key] = label
-    return labels
 
 
 def _is_ag99live_event(event: Any) -> bool:
