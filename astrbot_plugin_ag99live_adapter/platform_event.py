@@ -20,10 +20,20 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         self._standard_output_platform_extras = {
             "logical_message_id": "standard_reply",
         }
+        self._direct_output_sequence = 0
         self._attach_prompt_annotations(message_obj=message_obj)
 
     async def send(self, message):
-        await self.send_message_with_extras(message)
+        self._direct_output_sequence += 1
+        await self.send_message_with_extras(
+            message,
+            platform_extras={
+                "logical_message_id": (
+                    f"direct_output:{self._direct_output_sequence:04d}"
+                )
+            },
+            finalize_output_segment=True,
+        )
 
     async def send_message_with_extras(
         self,
@@ -31,6 +41,7 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         *,
         platform_extras: dict[str, Any] | None = None,
         record_send_operation: bool = True,
+        finalize_output_segment: bool = False,
     ) -> None:
         turn_id = str(self.get_extra("output_correlation_id", "") or "").strip()
         if not turn_id:
@@ -81,6 +92,13 @@ class OLVPetPlatformEvent(AstrMessageEvent):
                 await record_send()
             else:
                 await super().send(message)
+        if finalize_output_segment:
+            message_id = str(
+                resolved_platform_extras.get("logical_message_id", "") or ""
+            ).strip()
+            if not message_id:
+                raise RuntimeError("output_event_segment_message_id_missing")
+            await self.complete_output_segment_delivery(message_id=message_id)
 
     async def complete_visible_turn(self) -> None:
         if self._is_stop_requested():
@@ -91,6 +109,22 @@ class OLVPetPlatformEvent(AstrMessageEvent):
             if inspect.isawaitable(result):
                 await result
         await self._close_frontend_turn_output_queue()
+
+    async def complete_output_segment_delivery(self, *, message_id: str) -> None:
+        """Finalize one logical output after Core has sent every physical component."""
+        if self._is_stop_requested():
+            return
+        turn_id = str(self.get_extra("output_correlation_id", "") or "").strip()
+        if not turn_id:
+            raise RuntimeError("output_event_turn_id_missing")
+        normalized_message_id = str(message_id or "").strip()
+        if not normalized_message_id:
+            raise RuntimeError("output_event_segment_message_id_missing")
+        turn_coordinator = getattr(self.adapter, "turn_coordinator", None)
+        finalize_segment = getattr(turn_coordinator, "finalize_output_segment", None)
+        if not callable(finalize_segment):
+            raise RuntimeError("output_event_segment_finalizer_missing")
+        await finalize_segment(turn_id=turn_id, message_id=normalized_message_id)
 
     async def _close_frontend_turn_output_queue(self) -> None:
         turn_id = str(self.get_extra("output_correlation_id", "") or "").strip()

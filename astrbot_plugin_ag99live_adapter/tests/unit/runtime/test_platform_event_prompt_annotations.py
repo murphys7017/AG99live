@@ -64,9 +64,11 @@ class Image:
 class AdapterStub:
     def __init__(self) -> None:
         self.emit_calls = []
+        self.finalized_segments: list[tuple[str, str]] = []
         self.closed_output_queues: list[str] = []
         self.turn_coordinator = types.SimpleNamespace(
             close_turn_output_queue=self._close_turn_output_queue,
+            finalize_output_segment=self._finalize_output_segment,
         )
 
     async def emit_message_chain(self, **kwargs) -> None:
@@ -74,6 +76,14 @@ class AdapterStub:
 
     async def _close_turn_output_queue(self, *, turn_id: str) -> None:
         self.closed_output_queues.append(turn_id)
+
+    async def _finalize_output_segment(
+        self,
+        *,
+        turn_id: str,
+        message_id: str,
+    ) -> None:
+        self.finalized_segments.append((turn_id, message_id))
 
 
 def _build_event(module, *, images: list[dict] | None):
@@ -201,7 +211,7 @@ def test_send_message_with_extras_only_uses_adapter_emit_path(
     assert event.send_operation_count == 1
 
 
-def test_standard_send_aggregates_parts_without_closing_output_queue(
+def test_direct_sends_finalize_separate_segments_without_closing_output_queue(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -212,13 +222,18 @@ def test_standard_send_aggregates_parts_without_closing_output_queue(
 
     asyncio.run(event.send([Plain("first")]))
     asyncio.run(event.send([Plain("second")]))
-    asyncio.run(event.send_message_with_extras([Plain("third")], platform_extras={}))
+    asyncio.run(event.send([Plain("third")]))
 
     assert adapter.closed_output_queues == []
     assert [
         call["platform_extras"]["logical_message_id"]
         for call in adapter.emit_calls
-    ] == ["standard_reply", "standard_reply", "standard_reply"]
+    ] == ["direct_output:0001", "direct_output:0002", "direct_output:0003"]
+    assert adapter.finalized_segments == [
+        ("turn-1", "direct_output:0001"),
+        ("turn-1", "direct_output:0002"),
+        ("turn-1", "direct_output:0003"),
+    ]
 
     asyncio.run(event.complete_visible_turn())
     assert adapter.closed_output_queues == ["turn-1"]

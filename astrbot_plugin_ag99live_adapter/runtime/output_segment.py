@@ -29,6 +29,10 @@ class PendingOutputSegment:
     motion_source: str = ""
     performance_curve_request_id: str = ""
     speech_cues: list[dict[str, Any]] = field(default_factory=list)
+    finalized: bool = False
+    ready_at: float | None = None
+    flushed_at: float | None = None
+    flush_reason: str = ""
 
     def merge_text(self, value: str) -> None:
         self.text = _merge_unique_text(self.text, value, "text")
@@ -138,6 +142,33 @@ class PendingOutputSegment:
             request_id,
             "performance_curve_request_id",
         )
+
+    def finalize(self, *, ready_at: float) -> None:
+        """Seal one logical segment after Core confirms every physical delivery."""
+        if self.finalized:
+            return
+        if self.tts_status == "succeeded" and not self.audio_path:
+            raise ValueError(
+                f"output_segment_tts_succeeded_without_audio:{self.message_id}"
+            )
+        if self.tts_status == "failed" and self.audio_path:
+            raise ValueError(
+                f"output_segment_tts_failed_with_audio:{self.message_id}"
+            )
+        if self.audio_path and not self.text:
+            raise ValueError(f"output_segment_audio_text_missing:{self.message_id}")
+        if self.speech_cues and not self.text:
+            raise ValueError(
+                f"output_segment_speech_cues_text_missing:{self.message_id}"
+            )
+        if (
+            self.motion_expected
+            and self.motion_payload is None
+            and not self.motion_failure_reason
+        ):
+            self.merge_motion_failure("motion_schedule_payload_missing")
+        self.finalized = True
+        self.ready_at = ready_at
 
 
 def _merge_unique_text(current: str, incoming: str, field_name: str) -> str:

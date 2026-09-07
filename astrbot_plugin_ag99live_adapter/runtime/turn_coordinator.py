@@ -17,9 +17,10 @@ TurnCoordinator 把"前端协议消息 ↔ AstrBot 事件总线 ↔ 出站回放
 
 出站
     4. emit_message_chain 把输出交给 OutputSegmentCoordinator 合并为 logical output segment。
-    5. close_turn_output_queue 委托 OutputSegmentCoordinator 原子发送 output.segment，
-       再发 control.synth_finished。
-    6. finalize_turn → _finish_turn 在收到前端 control.playback_finished（或被打断）
+    5. finalize_output_segment 在 Core 确认一个 logical delivery 的所有物理组件均已派发后，
+       委托 OutputSegmentCoordinator 原子发送 output.segment。
+    6. close_turn_output_queue 确认全部 segment 已发送后，再发 control.synth_finished。
+    7. finalize_turn → _finish_turn 在收到前端 control.playback_finished（或被打断）
        后发 control.turn_finished 并把 session_state 切回 idle。
 
 边界
@@ -344,6 +345,19 @@ class TurnCoordinator:
     async def close_turn_output_queue(self, *, turn_id: str) -> None:
         """Forward output closure to the segment owner."""
         await self.output_segments.close_turn_output_queue(turn_id=turn_id)
+
+    async def finalize_output_segment(
+        self,
+        *,
+        turn_id: str,
+        message_id: str,
+    ) -> None:
+        """Finalize one fully delivered logical output without closing its Turn."""
+        await self.output_segments.finalize_output_segment(
+            turn_id=turn_id,
+            message_id=message_id,
+            flush_reason="logical_delivery_complete",
+        )
 
     async def finalize_turn(
         self,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import Any, Awaitable, Callable
 
 from astrbot.api import logger
@@ -64,12 +65,16 @@ class OutputSegmentCoordinator:
         self._finish_turn = finish_turn
         self._mark_turn_timing = mark_turn_timing
         self._pending_segments: dict[str, PendingOutputSegment] = {}
+        self._flushed_segment_keys: set[str] = set()
+        self._turn_locks: dict[str, asyncio.Lock] = {}
         self._closing_turn_ids: set[str] = set()
         self._closed_turn_ids: set[str] = set()
         self._emitted_turn_ids: set[str] = set()
 
     def reset(self) -> None:
         self._pending_segments.clear()
+        self._flushed_segment_keys.clear()
+        self._turn_locks.clear()
         self._closing_turn_ids.clear()
         self._closed_turn_ids.clear()
         self._emitted_turn_ids.clear()
@@ -87,6 +92,10 @@ class OutputSegmentCoordinator:
         for key in tuple(self._pending_segments):
             if key.startswith(prefix):
                 self._pending_segments.pop(key, None)
+        self._flushed_segment_keys.difference_update(
+            key for key in self._flushed_segment_keys if key.startswith(prefix)
+        )
+        self._turn_locks.pop(turn_id, None)
         self._closing_turn_ids.discard(turn_id)
         self._closed_turn_ids.discard(turn_id)
         self._emitted_turn_ids.discard(turn_id)
@@ -103,127 +112,182 @@ class OutputSegmentCoordinator:
         del unified_msg_origin
 
         normalized_turn_id = _require_turn_id_value(turn_id)
-        self._require_output_queue_open(normalized_turn_id)
         extras = platform_extras if isinstance(platform_extras, dict) else {}
         segment_message_id = resolve_platform_segment_message_id(extras)
-        self._mark_turn_timing(normalized_turn_id, "emit_started_at")
-        texts, picture_paths, record_paths, record_texts = extract_outbound_message_parts(
-            message_chain
-        )
-        logger.info(
-            "WIRING output_parts turn_id=%s message_id=%s text_count=%s "
-            "image_count=%s record_count=%s",
-            normalized_turn_id,
-            segment_message_id,
-            len(texts),
-            len(picture_paths),
-            len(record_paths),
-        )
-        raw_reply_text = (
-            str(raw_reply_text_override or "").strip()
-            or "\n".join(texts).strip()
-        )
-        record_text = sanitize_assistant_output_text("\n".join(record_texts).strip())
-        reply_text = sanitize_assistant_output_text("\n".join(texts).strip())
-        semantic_text = str(extras.get("semantic_text") or "").strip()
-        canonical_text = _resolve_canonical_assistant_text(
-            semantic_text=semantic_text,
-            plain_text=reply_text,
-            record_text=record_text,
-            raw_reply_text=raw_reply_text,
-        )
-        segment = self._get_pending_segment(normalized_turn_id, segment_message_id)
-        segment.merge_text(canonical_text)
-        segment.merge_semantic_text(canonical_text)
-        segment.merge_images(picture_paths)
-        if len(record_paths) > 1:
-            raise ValueError(f"output_segment_multiple_audio_files:{segment_message_id}")
-        tts_state, audio_attachment = _extract_platform_tts_delivery_state(
-            extras,
-            expected_turn_id=normalized_turn_id,
-            expected_message_id=segment_message_id,
-        )
-        if audio_attachment == "present" and not record_paths:
-            raise ValueError(
-                f"output_segment_audio_attachment_missing:{segment_message_id}"
+        async with self._get_turn_lock(normalized_turn_id):
+            self._require_output_queue_open(normalized_turn_id)
+            key = self._segment_key(normalized_turn_id, segment_message_id)
+            if key in self._flushed_segment_keys:
+                logger.info(
+                    "WIRING output_segment_duplicate_ignored turn_id=%s message_id=%s",
+                    normalized_turn_id,
+                    segment_message_id,
+                )
+                return
+
+            self._mark_turn_timing(normalized_turn_id, "emit_started_at")
+            texts, picture_paths, record_paths, record_texts = extract_outbound_message_parts(
+                message_chain
             )
-        if audio_attachment == "absent" and record_paths:
-            raise ValueError(
-                f"output_segment_unexpected_audio_attachment:{segment_message_id}"
+            logger.info(
+                "WIRING output_parts turn_id=%s message_id=%s text_count=%s "
+                "image_count=%s record_count=%s",
+                normalized_turn_id,
+                segment_message_id,
+                len(texts),
+                len(picture_paths),
+                len(record_paths),
             )
-        if record_paths:
-            segment.merge_audio(path=record_paths[0])
-        if tts_state is not None:
-            segment.merge_tts_terminal_state(**tts_state)
-            if self.performance_curves.owns_request(
+            raw_reply_text = (
+                str(raw_reply_text_override or "").strip()
+                or "\n".join(texts).strip()
+            )
+            record_text = sanitize_assistant_output_text("\n".join(record_texts).strip())
+            reply_text = sanitize_assistant_output_text("\n".join(texts).strip())
+            semantic_text = str(extras.get("semantic_text") or "").strip()
+            canonical_text = _resolve_canonical_assistant_text(
+                semantic_text=semantic_text,
+                plain_text=reply_text,
+                record_text=record_text,
+                raw_reply_text=raw_reply_text,
+            )
+            segment = self._get_pending_segment(normalized_turn_id, segment_message_id)
+            segment.merge_text(canonical_text)
+            segment.merge_semantic_text(canonical_text)
+            segment.merge_images(picture_paths)
+            if len(record_paths) > 1:
+                raise ValueError(f"output_segment_multiple_audio_files:{segment_message_id}")
+            tts_state, audio_attachment = _extract_platform_tts_delivery_state(
+                extras,
+                expected_turn_id=normalized_turn_id,
+                expected_message_id=segment_message_id,
+            )
+            if audio_attachment == "present" and not record_paths:
+                raise ValueError(
+                    f"output_segment_audio_attachment_missing:{segment_message_id}"
+                )
+            if audio_attachment == "absent" and record_paths:
+                raise ValueError(
+                    f"output_segment_unexpected_audio_attachment:{segment_message_id}"
+                )
+            if record_paths:
+                segment.merge_audio(path=record_paths[0])
+            if tts_state is not None:
+                segment.merge_tts_terminal_state(**tts_state)
+                if self.performance_curves.owns_request(
+                    turn_id=normalized_turn_id,
+                    request_id=tts_state["request_id"],
+                ):
+                    segment.bind_performance_curve_request(tts_state["request_id"])
+
+            if "ag99live_speech_cues" in extras:
+                segment.merge_speech_cues(extras.get("ag99live_speech_cues"))
+
+            motion_candidate, motion_resolution_failure = self._resolve_motion(
+                platform_extras=extras,
+                raw_reply_text=raw_reply_text,
+            )
+            motion_expected, motion_failure_reason = _resolve_motion_schedule(extras)
+            if motion_expected:
+                segment.require_motion()
+            if motion_resolution_failure:
+                segment.merge_motion_failure(motion_resolution_failure)
+            elif motion_failure_reason:
+                segment.merge_motion_failure(motion_failure_reason)
+            if motion_candidate is not None:
+                segment.merge_motion(**motion_candidate)
+
+    async def finalize_output_segment(
+        self,
+        *,
+        turn_id: str,
+        message_id: str,
+        flush_reason: str = "segment_finalized",
+    ) -> None:
+        """Finalize and flush one logical output segment without closing its Turn."""
+        normalized_turn_id = _require_turn_id_value(turn_id)
+        normalized_message_id = _require_message_id_value(message_id)
+        async with self._get_turn_lock(normalized_turn_id):
+            self._require_output_queue_open(normalized_turn_id)
+            await self._finalize_output_segment_locked(
                 turn_id=normalized_turn_id,
-                request_id=tts_state["request_id"],
-            ):
-                segment.bind_performance_curve_request(tts_state["request_id"])
-
-        if "ag99live_speech_cues" in extras:
-            segment.merge_speech_cues(extras.get("ag99live_speech_cues"))
-
-        motion_candidate, motion_resolution_failure = self._resolve_motion(
-            platform_extras=extras,
-            raw_reply_text=raw_reply_text,
-        )
-        motion_expected, motion_failure_reason = _resolve_motion_schedule(extras)
-        if motion_expected:
-            segment.require_motion()
-        if motion_resolution_failure:
-            segment.merge_motion_failure(motion_resolution_failure)
-        elif motion_failure_reason:
-            segment.merge_motion_failure(motion_failure_reason)
-        if motion_candidate is not None:
-            segment.merge_motion(**motion_candidate)
+                message_id=normalized_message_id,
+                flush_reason=flush_reason,
+            )
 
     async def close_turn_output_queue(self, *, turn_id: str) -> None:
         normalized_turn_id = _require_turn_id_value(turn_id)
-        if normalized_turn_id in self._closed_turn_ids:
-            return
-        if normalized_turn_id in self._closing_turn_ids:
-            return
-        self._closing_turn_ids.add(normalized_turn_id)
-        try:
-            flushed_count = await self._flush_pending_segments(
-                turn_id=normalized_turn_id
-            )
-            if flushed_count > 0:
-                self._emitted_turn_ids.add(normalized_turn_id)
-            if normalized_turn_id not in self._emitted_turn_ids:
-                reason = f"output_segment_missing:{normalized_turn_id}"
-                error_sent = await self._send_json(
-                    build_control_error(turn_id=normalized_turn_id, message=reason)
-                )
-                if not error_sent:
-                    raise RuntimeError(f"control_error_send_failed:{normalized_turn_id}")
-                await self._finish_turn(
-                    turn_id=normalized_turn_id,
-                    success=False,
-                    reason=reason,
-                )
+        async with self._get_turn_lock(normalized_turn_id):
+            if normalized_turn_id in self._closed_turn_ids:
                 return
-            sent = await self._send_json(
-                build_control_synth_finished(turn_id=normalized_turn_id)
-            )
-            if not sent:
-                raise RuntimeError(f"synth_finished_send_failed:{normalized_turn_id}")
-        except Exception:
-            self._closing_turn_ids.discard(normalized_turn_id)
-            raise
-        self._closing_turn_ids.discard(normalized_turn_id)
-        self._closed_turn_ids.add(normalized_turn_id)
-        try:
-            self.performance_curves.cancel_turn(normalized_turn_id)
-        except Exception:  # noqa: BLE001 - optional cleanup must not reopen output.
-            logger.exception(
-                "Failed to cancel performance curve after output closure: turn_id=%s",
-                normalized_turn_id,
-            )
+            if normalized_turn_id in self._closing_turn_ids:
+                return
+            self._closing_turn_ids.add(normalized_turn_id)
+            try:
+                await self._flush_ready_segments(
+                    turn_id=normalized_turn_id,
+                    flush_reason="turn_closing",
+                )
+                pending_segment = self._first_pending_segment(normalized_turn_id)
+                if pending_segment is not None:
+                    reason = (
+                        "output_segment_not_finalized:"
+                        f"{normalized_turn_id}:{pending_segment.message_id}"
+                    )
+                    error_sent = await self._send_json(
+                        build_control_error(turn_id=normalized_turn_id, message=reason)
+                    )
+                    if not error_sent:
+                        raise RuntimeError(
+                            f"control_error_send_failed:{normalized_turn_id}"
+                        )
+                    await self._finish_turn(
+                        turn_id=normalized_turn_id,
+                        success=False,
+                        reason=reason,
+                    )
+                    return
+                if normalized_turn_id not in self._emitted_turn_ids:
+                    reason = f"output_segment_missing:{normalized_turn_id}"
+                    error_sent = await self._send_json(
+                        build_control_error(turn_id=normalized_turn_id, message=reason)
+                    )
+                    if not error_sent:
+                        raise RuntimeError(
+                            f"control_error_send_failed:{normalized_turn_id}"
+                        )
+                    await self._finish_turn(
+                        turn_id=normalized_turn_id,
+                        success=False,
+                        reason=reason,
+                    )
+                    return
+                sent = await self._send_json(
+                    build_control_synth_finished(turn_id=normalized_turn_id)
+                )
+                if not sent:
+                    raise RuntimeError(f"synth_finished_send_failed:{normalized_turn_id}")
+                synth_finished_at = time.perf_counter()
+                logger.info(
+                    "WIRING output_synth_finished turn_id=%s synth_finished_at=%.6f "
+                    "pending_segment_count=%s",
+                    normalized_turn_id,
+                    synth_finished_at,
+                    self._pending_segment_count(normalized_turn_id),
+                )
+                self._closed_turn_ids.add(normalized_turn_id)
+                try:
+                    self.performance_curves.cancel_turn(normalized_turn_id)
+                except Exception:  # noqa: BLE001 - optional cleanup must not reopen output.
+                    logger.exception(
+                        "Failed to cancel performance curve after output closure: turn_id=%s",
+                        normalized_turn_id,
+                    )
+            finally:
+                self._closing_turn_ids.discard(normalized_turn_id)
 
     def _get_pending_segment(self, turn_id: str, message_id: str) -> PendingOutputSegment:
-        key = f"{turn_id}|{message_id}"
+        key = self._segment_key(turn_id, message_id)
         segment = self._pending_segments.get(key)
         if segment is None:
             segment = PendingOutputSegment(turn_id=turn_id, message_id=message_id)
@@ -234,7 +298,6 @@ class OutputSegmentCoordinator:
         if (
             turn_id in self._closing_turn_ids
             or turn_id in self._closed_turn_ids
-            or turn_id in self._emitted_turn_ids
             or self._is_turn_terminal(turn_id)
         ):
             raise RuntimeError(f"output_segment_queue_closed:{turn_id}")
@@ -283,25 +346,54 @@ class OutputSegmentCoordinator:
             "source": "official_inline_anim_compat",
         }, ""
 
-    async def _flush_pending_segments(self, *, turn_id: str) -> int:
+    async def _finalize_output_segment_locked(
+        self,
+        *,
+        turn_id: str,
+        message_id: str,
+        flush_reason: str,
+    ) -> None:
+        key = self._segment_key(turn_id, message_id)
+        if key in self._flushed_segment_keys:
+            return
+        segment = self._pending_segments.get(key)
+        if segment is None:
+            raise ValueError(f"output_segment_missing:{turn_id}:{message_id}")
+        segment.finalize(ready_at=time.perf_counter())
+        logger.info(
+            "WIRING output_segment_ready turn_id=%s message_id=%s "
+            "segment_ready_at=%.6f flush_reason=%s pending_segment_count=%s",
+            turn_id,
+            message_id,
+            segment.ready_at or 0.0,
+            flush_reason,
+            self._pending_segment_count(turn_id),
+        )
+        await self._flush_ready_segments(turn_id=turn_id, flush_reason=flush_reason)
+
+    async def _flush_ready_segments(self, *, turn_id: str, flush_reason: str) -> int:
         flushed_count = 0
-        for key, segment in list(self._pending_segments.items()):
-            if segment.turn_id != turn_id:
+        turn_keys = [
+            key
+            for key, segment in self._pending_segments.items()
+            if segment.turn_id == turn_id
+        ]
+        for key in turn_keys:
+            segment = self._pending_segments.get(key)
+            if segment is None:
                 continue
-            await self._flush_segment(segment)
-            self._pending_segments.pop(key, None)
+            if not segment.finalized:
+                break
+            await self._flush_segment(segment, flush_reason=flush_reason)
             flushed_count += 1
         return flushed_count
 
-    async def _flush_segment(self, segment: PendingOutputSegment) -> None:
-        if segment.tts_status == "succeeded" and not segment.audio_path:
-            raise ValueError(
-                f"output_segment_tts_succeeded_without_audio:{segment.message_id}"
-            )
-        if segment.tts_status == "failed" and segment.audio_path:
-            raise ValueError(
-                f"output_segment_tts_failed_with_audio:{segment.message_id}"
-            )
+    async def _flush_segment(
+        self,
+        segment: PendingOutputSegment,
+        *,
+        flush_reason: str,
+    ) -> None:
         audio_slot: dict[str, Any] = {"state": "absent"}
         if segment.audio_path:
             if not segment.text:
@@ -345,6 +437,24 @@ class OutputSegmentCoordinator:
         if not sent:
             raise RuntimeError(f"output_segment_send_failed:{segment.message_id}")
 
+        segment.flushed_at = time.perf_counter()
+        segment.flush_reason = flush_reason
+        key = self._segment_key(segment.turn_id, segment.message_id)
+        self._pending_segments.pop(key, None)
+        self._flushed_segment_keys.add(key)
+        self._emitted_turn_ids.add(segment.turn_id)
+        logger.info(
+            "WIRING output_segment_flushed turn_id=%s message_id=%s "
+            "segment_ready_at=%.6f segment_flushed_at=%.6f flush_reason=%s "
+            "pending_segment_count=%s",
+            segment.turn_id,
+            segment.message_id,
+            segment.ready_at or 0.0,
+            segment.flushed_at,
+            flush_reason,
+            self._pending_segment_count(segment.turn_id),
+        )
+
         self.performance_curves.commit_output_side_effects(segment, motion_slot)
         self.observations.record_motion_slot(motion_slot, source=segment.motion_source)
         if segment.text:
@@ -365,6 +475,29 @@ class OutputSegmentCoordinator:
         )
         if audio_slot["state"] == "present":
             self._mark_turn_timing(segment.turn_id, "audio_payload_sent_at")
+
+    def _get_turn_lock(self, turn_id: str) -> asyncio.Lock:
+        return self._turn_locks.setdefault(turn_id, asyncio.Lock())
+
+    @staticmethod
+    def _segment_key(turn_id: str, message_id: str) -> str:
+        return f"{turn_id}|{message_id}"
+
+    def _pending_segment_count(self, turn_id: str) -> int:
+        return sum(
+            segment.turn_id == turn_id
+            for segment in self._pending_segments.values()
+        )
+
+    def _first_pending_segment(self, turn_id: str) -> PendingOutputSegment | None:
+        return next(
+            (
+                segment
+                for segment in self._pending_segments.values()
+                if segment.turn_id == turn_id
+            ),
+            None,
+        )
 
     def _build_motion_slot(self, segment: PendingOutputSegment) -> dict[str, Any]:
         if segment.motion_payload is None:
@@ -398,6 +531,13 @@ def _require_turn_id_value(turn_id: str | None) -> str:
     normalized = str(turn_id or "").strip()
     if not normalized:
         raise ValueError("Interactive protocol messages require a non-empty turn_id.")
+    return normalized
+
+
+def _require_message_id_value(message_id: str | None) -> str:
+    normalized = str(message_id or "").strip()
+    if not normalized:
+        raise ValueError("output_segment_message_id_missing")
     return normalized
 
 

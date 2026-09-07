@@ -255,14 +255,19 @@ class OLVPetPlatformAdapter(Platform):
 
     async def send_by_session(self, session: MessageSesion, message_chain):
         turn_id = await self.turn_coordinator.begin_proactive_output_turn()
+        message_id = f"proactive_reply:{uuid4().hex}"
         try:
             await self.emit_message_chain(
                 message_chain=message_chain,
                 turn_id=turn_id,
                 unified_msg_origin=str(session),
                 platform_extras={
-                    "logical_message_id": f"proactive_reply:{uuid4().hex}"
+                    "logical_message_id": message_id
                 },
+            )
+            await self.turn_coordinator.finalize_output_segment(
+                turn_id=turn_id,
+                message_id=message_id,
             )
             await self.turn_coordinator.close_turn_output_queue(turn_id=turn_id)
         except asyncio.CancelledError:
