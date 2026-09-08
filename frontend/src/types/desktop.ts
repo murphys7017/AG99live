@@ -358,6 +358,7 @@ export interface DesktopRuntimeSnapshot {
   connectionStatusMessage: string;
   aiState: string;
   micCapturing: boolean;
+  microphoneStandby: boolean;
   pttModeEnabled: boolean;
   pttKeyBinding: DesktopPttKeyBinding;
   pttHookStatus: DesktopPttHookStatus;

@@ -34,6 +34,7 @@ export interface AdapterMicrophoneRuntimeState {
   microphoneDeviceId: string;
   microphoneDevices: MicrophoneDeviceInfo[];
   micCapturing: boolean;
+  microphoneStandby: boolean;
   pttModeEnabled: boolean;
   pttKeyBinding: DesktopPttKeyBinding;
   lastError: string;
@@ -66,9 +67,11 @@ export interface AdapterMicrophoneRuntime {
   stopMicrophoneCapture: (reason?: string) => Promise<boolean>;
   setPttMode: (enabled: boolean) => void;
   setPttKeyBinding: (binding: DesktopPttKeyBinding) => void;
+  preparePttStandby: () => Promise<boolean>;
   startPttCapture: () => Promise<PttCaptureCommandResult>;
   stopPttCapture: () => Promise<PttCaptureCommandResult>;
   cancelPendingStart: () => void;
+  dispose: () => Promise<void>;
 }
 
 const MAX_MIC_SOCKET_BUFFERED_AMOUNT = 512 * 1024;
@@ -79,8 +82,8 @@ export function createAdapterMicrophoneRuntime(
 ): AdapterMicrophoneRuntime {
   let micStartPromise: Promise<boolean> | null = null;
   let micStartToken: object | null = null;
-  let activeMicCaptureToken: object | null = null;
   let micStartCancelled = false;
+  let microphoneRuntimeGeneration = 0;
   let audioSequenceBroken = false;
   let activeMicTurnId: string | null = null;
   let activeMicStreamId: string | null = null;
@@ -91,6 +94,11 @@ export function createAdapterMicrophoneRuntime(
   let lastStartFailureReason: MicrophoneStartFailureReason = "none";
 
   function sendMicrophoneAudioChunk(chunk: MicrophoneAudioChunk): void {
+    // A PTT standby owns the device but must never create a Turn or transmit
+    // PCM until the key has opened a logical capture session.
+    if (!deps.state.micCapturing) {
+      return;
+    }
     const socket = deps.getSocket();
     if (
       !socket
@@ -216,21 +224,15 @@ export function createAdapterMicrophoneRuntime(
 
     if (deps.state.pttModeEnabled) {
       // PTT 模式下点按钮 = 切换到常开模式并启动麦克风
-      setPttMode(false);
+      disablePttForManualCapture();
     }
     return startMicrophoneCapture("manual");
   }
 
   async function startMicrophoneCapture(
     origin: MicrophoneCaptureOrigin = "manual",
+    retryAfterSupersededStart = false,
   ): Promise<boolean> {
-    if (micStartPromise) {
-      if (!micStartCancelled) {
-        return micStartPromise;
-      }
-      await micStartPromise;
-      return startMicrophoneCapture(origin);
-    }
     if (deps.state.micCapturing) {
       return true;
     }
@@ -244,92 +246,79 @@ export function createAdapterMicrophoneRuntime(
       return false;
     }
 
-    deps.state.statusMessage = "正在请求麦克风权限...";
+    if (!await ensureMicrophoneRuntime(retryAfterSupersededStart)) {
+      return false;
+    }
+    const captureModeStillAllowed = origin === "ptt"
+      ? deps.state.pttModeEnabled
+      : !deps.state.pttModeEnabled;
+    if (
+      micStartCancelled
+      || !isMicrophoneCaptureRuntimeActive()
+      || !captureModeStillAllowed
+    ) {
+      return false;
+    }
+    if (pendingPttRelease && origin === "ptt") {
+      pendingPttRelease = false;
+      lastStartFailureReason = "ptt_release_before_ready";
+      deps.state.statusMessage = "按键时间过短，未开始识别。";
+      return false;
+    }
 
-    micStartCancelled = false;
-    const currentStartToken = {};
-    micStartToken = currentStartToken;
-    activeMicCaptureToken = currentStartToken;
-    const currentStartPromise = (async () => {
-      try {
-        audioSequenceBroken = false;
-        lastStartFailureReason = "none";
-        pendingPttRelease = false;
-        activeMicTurnId = createRootInputTurnId();
-        micCaptureOrigin = origin;
-        await startMicrophoneCaptureRuntime({
-          deviceId: deps.state.microphoneDeviceId || null,
-          onChunk: (chunk) => {
-            if (activeMicCaptureToken !== currentStartToken || micStartCancelled) {
-              return;
-            }
-            sendMicrophoneAudioChunk(chunk);
-          },
-          onDeviceEnded: () => {
-            if (activeMicCaptureToken !== currentStartToken) {
-              return;
-            }
-            void stopMicrophoneCapture("device_ended");
-          },
-        });
-
-        if (micStartToken !== currentStartToken || micStartCancelled) {
-          await discardMicrophoneCaptureBeforeRecognition("connection_closed");
-          return false;
-        }
-
-        if (pendingPttRelease && micCaptureOrigin === "ptt") {
-          await discardMicrophoneCaptureBeforeRecognition("ptt_release_before_ready");
-          lastStartFailureReason = "ptt_release_before_ready";
-          return false;
-        }
-
-        deps.state.micCapturing = true;
-        deps.state.lastError = "";
-        lastStartFailureReason = "none";
-        deps.state.statusMessage = "麦克风已开启，正在自动检测说话。";
-        void refreshMicrophoneDevices({ requestPermission: false });
-        deps.pushHistory("system", deps.state.statusMessage);
-        return true;
-      } catch (error) {
-        deps.state.micCapturing = false;
-        clearMicCaptureSession();
-        lastStartFailureReason = "start_error";
-        deps.state.lastError =
-          error instanceof Error ? error.message : "麦克风启动失败。";
-        deps.state.statusMessage = `麦克风启动失败：${deps.state.lastError}`;
-        deps.pushHistory("error", deps.state.statusMessage);
-        return false;
-      } finally {
-        if (micStartToken === currentStartToken) {
-          micStartPromise = null;
-          micStartToken = null;
-        }
-      }
-    })();
-    micStartPromise = currentStartPromise;
-
-    return currentStartPromise;
+    audioSequenceBroken = false;
+    activeMicTurnId = createRootInputTurnId();
+    micCaptureOrigin = origin;
+    deps.state.micCapturing = true;
+    deps.state.lastError = "";
+    lastStartFailureReason = "none";
+    deps.state.statusMessage = "麦克风已开启，正在自动检测说话。";
+    deps.pushHistory("system", deps.state.statusMessage);
+    return true;
   }
 
   async function restartMicrophoneCaptureAfterDeviceChange(): Promise<void> {
-    const previousOrigin = micCaptureOrigin ?? "manual";
-    const stopped = await stopMicrophoneCapture("device_change");
-    if (!stopped) {
+    const previousOrigin = micCaptureOrigin;
+    invalidateMicrophoneRuntimeStart();
+    await stopMicrophoneCapture("device_change", true);
+    if (deps.state.pttModeEnabled) {
+      await preparePttStandby();
       return;
     }
-    await startMicrophoneCapture(previousOrigin);
+    if (previousOrigin) {
+      await startMicrophoneCapture(previousOrigin, true);
+    }
   }
 
   function setPttMode(enabled: boolean): void {
+    if (deps.state.pttModeEnabled === enabled) {
+      return;
+    }
     deps.state.pttModeEnabled = enabled;
     saveStoredPttModeEnabled(enabled);
     deps.setDesktopPttMode?.(enabled, deps.state.pttKeyBinding);
     if (enabled) {
-      if (deps.state.micCapturing || isMicrophoneCaptureRuntimeActive()) {
-        void stopMicrophoneCapture("ptt_mode_enabled");
+      // A manual startup may still be awaiting getUserMedia. It belongs to
+      // the old mode and must not become a capture after PTT is enabled.
+      if (micStartPromise) {
+        invalidateMicrophoneRuntimeStart();
       }
+      void (async () => {
+        if (deps.state.micCapturing) {
+          await stopMicrophoneCapture("ptt_mode_enabled");
+        }
+        await preparePttStandby();
+      })();
+      return;
     }
+    invalidateMicrophoneRuntimeStart();
+    void stopMicrophoneCapture("ptt_mode_disabled", true);
+  }
+
+  function disablePttForManualCapture(): void {
+    deps.state.pttModeEnabled = false;
+    saveStoredPttModeEnabled(false);
+    deps.setDesktopPttMode?.(false, deps.state.pttKeyBinding);
   }
 
   function setPttKeyBinding(binding: DesktopPttKeyBinding): void {
@@ -348,7 +337,7 @@ export function createAdapterMicrophoneRuntime(
     if (deps.state.micCapturing) {
       return "started";
     }
-    const started = await startMicrophoneCapture("ptt");
+    const started = await startMicrophoneCapture("ptt", true);
     if (started) {
       return "started";
     }
@@ -360,7 +349,7 @@ export function createAdapterMicrophoneRuntime(
       return "ignored";
     }
     if (!deps.state.micCapturing) {
-      if (micStartPromise && micCaptureOrigin === "ptt") {
+      if (micStartPromise) {
         pendingPttRelease = true;
         return "discarded";
       }
@@ -372,22 +361,17 @@ export function createAdapterMicrophoneRuntime(
     return await stopMicrophoneCapture("ptt_release") ? "stopped" : "ignored";
   }
 
-  async function discardMicrophoneCaptureBeforeRecognition(reason: string): Promise<void> {
-    await stopMicrophoneCaptureRuntime();
-    deps.state.micCapturing = false;
-    deps.state.statusMessage = reason === "ptt_release_before_ready"
-      ? "按键时间过短，未开始识别。"
-      : "麦克风启动已取消。";
-    clearMicCaptureSession();
+  async function preparePttStandby(): Promise<boolean> {
+    if (!deps.state.pttModeEnabled) {
+      return false;
+    }
+    return ensureMicrophoneRuntime(true);
   }
 
-  async function stopMicrophoneCapture(reason = "manual_stop"): Promise<boolean> {
-    if (!isMicrophoneCaptureRuntimeActive()) {
-      deps.state.micCapturing = false;
-      clearMicCaptureSession();
-      return true;
-    }
-
+  async function stopMicrophoneCapture(
+    reason = "manual_stop",
+    releaseRuntime = !deps.state.pttModeEnabled,
+  ): Promise<boolean> {
     deps.state.micCapturing = false;
     const inputTurnId = activeMicTurnId ?? createRootInputTurnId();
     const inputStreamId = activeMicStreamId;
@@ -399,10 +383,18 @@ export function createAdapterMicrophoneRuntime(
     clearMicCaptureSession();
 
     let captureStopError: unknown = null;
-    try {
-      await stopMicrophoneCaptureRuntime();
-    } catch (error) {
-      captureStopError = error;
+    if (releaseRuntime) {
+      invalidateMicrophoneRuntimeStart();
+      if (isMicrophoneCaptureRuntimeActive()) {
+        try {
+          await stopMicrophoneCaptureRuntime();
+        } catch (error) {
+          captureStopError = error;
+        }
+      }
+      if (!isMicrophoneCaptureRuntimeActive()) {
+        deps.state.microphoneStandby = false;
+      }
     }
 
     let protocolError: unknown = null;
@@ -452,8 +444,9 @@ export function createAdapterMicrophoneRuntime(
       return true;
     }
 
-    deps.state.statusMessage =
-      reason === "manual_stop"
+    deps.state.statusMessage = !releaseRuntime && deps.state.pttModeEnabled
+      ? "按键说话已就绪，麦克风保持开启。"
+      : reason === "manual_stop"
         ? "麦克风已关闭。"
         : "麦克风采集已停止。";
     if (reason !== "connection_closed" && reason !== "connection_reset") {
@@ -463,11 +456,94 @@ export function createAdapterMicrophoneRuntime(
   }
 
   function cancelPendingStart(): void {
-    micStartCancelled = true;
+    // Reconnects must not tear down an already requested PTT standby. The
+    // hardware runtime is independent from the current WebSocket session.
+    if (!deps.state.pttModeEnabled) {
+      invalidateMicrophoneRuntimeStart();
+    }
+  }
+
+  async function dispose(): Promise<void> {
+    invalidateMicrophoneRuntimeStart();
+    await micStartPromise;
+    await stopMicrophoneCapture("adapter_dispose", true);
+  }
+
+  async function ensureMicrophoneRuntime(
+    retryAfterSupersededStart = false,
+  ): Promise<boolean> {
+    if (isMicrophoneCaptureRuntimeActive()) {
+      return true;
+    }
+    if (micStartPromise) {
+      const started = await micStartPromise;
+      if (started) {
+        return started;
+      }
+      return micStartCancelled && retryAfterSupersededStart
+        ? ensureMicrophoneRuntime(true)
+        : false;
+    }
+
+    micStartCancelled = false;
+    const currentStartToken = {};
+    const currentRuntimeGeneration = ++microphoneRuntimeGeneration;
+    micStartToken = currentStartToken;
+    deps.state.statusMessage = "正在启动麦克风...";
+    const currentStartPromise = (async () => {
+      try {
+        await startMicrophoneCaptureRuntime({
+          deviceId: deps.state.microphoneDeviceId || null,
+          onChunk: sendMicrophoneAudioChunk,
+          onDeviceEnded: () => {
+            if (currentRuntimeGeneration !== microphoneRuntimeGeneration) {
+              return;
+            }
+            void stopMicrophoneCapture("device_ended", true);
+          },
+        });
+        if (
+          micStartToken !== currentStartToken
+          || micStartCancelled
+          || currentRuntimeGeneration !== microphoneRuntimeGeneration
+        ) {
+          await stopMicrophoneCaptureRuntime();
+          deps.state.microphoneStandby = false;
+          return false;
+        }
+        deps.state.lastError = "";
+        deps.state.microphoneStandby = true;
+        void refreshMicrophoneDevices({ requestPermission: false });
+        if (!deps.state.micCapturing) {
+          deps.state.statusMessage = "按键说话已就绪，麦克风保持开启。";
+        }
+        return true;
+      } catch (error) {
+        lastStartFailureReason = "start_error";
+        deps.state.microphoneStandby = false;
+        deps.state.lastError =
+          error instanceof Error ? error.message : "麦克风启动失败。";
+        deps.state.statusMessage = `麦克风启动失败：${deps.state.lastError}`;
+        deps.pushHistory("error", deps.state.statusMessage);
+        return false;
+      } finally {
+        if (micStartToken === currentStartToken) {
+          micStartPromise = null;
+          micStartToken = null;
+        }
+      }
+    })();
+    micStartPromise = currentStartPromise;
+    return currentStartPromise;
   }
 
   function createRootInputTurnId(): string {
     return `${ROOT_INPUT_TURN_PREFIX}${deps.createMessageId()}`;
+  }
+
+  function invalidateMicrophoneRuntimeStart(): void {
+    micStartCancelled = true;
+    microphoneRuntimeGeneration += 1;
   }
 
   function getOrCreateActiveMicTurnId(): string {
@@ -511,7 +587,6 @@ export function createAdapterMicrophoneRuntime(
     activeMicSeq = 0;
     audioStreamStarted = false;
     micCaptureOrigin = null;
-    activeMicCaptureToken = null;
     audioSequenceBroken = false;
     pendingPttRelease = false;
   }
@@ -525,8 +600,10 @@ export function createAdapterMicrophoneRuntime(
     stopMicrophoneCapture,
     setPttMode,
     setPttKeyBinding,
+    preparePttStandby,
     startPttCapture,
     stopPttCapture,
     cancelPendingStart,
+    dispose,
   };
 }

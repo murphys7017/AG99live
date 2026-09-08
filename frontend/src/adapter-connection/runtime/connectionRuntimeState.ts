@@ -4,6 +4,7 @@ export interface ConnectionRuntimeState {
   serverInfo: unknown;
   activeWsAddress: string;
   micCapturing: boolean;
+  microphoneStandby: boolean;
   assistantTextDeliveryTurnId: string | null;
   turnFinishedTurnId: string | null;
   turnFinishedSuccess: boolean;

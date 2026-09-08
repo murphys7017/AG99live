@@ -111,7 +111,7 @@ onMounted(() => {
             <h2>麦克风设备</h2>
           </div>
           <span class="settings-card__badge">
-            {{ bridgeState.snapshot.micCapturing ? "active" : "idle" }}
+            {{ bridgeState.snapshot.micCapturing ? "capturing" : bridgeState.snapshot.microphoneStandby ? "standby" : "idle" }}
           </span>
         </div>
 

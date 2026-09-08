@@ -19,7 +19,7 @@ AG99live 已经具备“回复期间表演”的完整骨架：AstrBot 生成回
   → LLM request / first token
   → 完整回复聚合
   → TTS 完成音频文件
-  → OutputSegment flush
+  → logical OutputSegment finalized and sent
   → 前端收到 segment
   → Timeline 建立
   → 音频 metadata ready
@@ -34,8 +34,26 @@ AG99live 已经具备“回复期间表演”的完整骨架：AstrBot 生成回
 - STT 等完整音频段和 `get_text` 返回；没有 partial STT。
 - `TurnCoordinator` 将 `enable_streaming` 设置为 `False`。
 - 回复侧使用完整 `Record` 文件，不是增量 TTS 或音频 chunk 流。
-- `OutputSegmentCoordinator` 在关闭整轮输出队列时 flush。
+- 增强版 Core 在一条逻辑消息的全部物理组件成功派发后调用
+  `complete_visible_message(message_id)`；`OutputSegmentCoordinator` 随即发送该原子段。
+  `close_turn_output_queue()` 只确认不存在 pending segment 后发送 `control.synth_finished`，不再承担
+  整轮 flush。
 - 浏览器音频先加载并取得 duration，再开始播放。
+
+麦克风首帧前还存在一个前端冷启动链路：
+
+```text
+PTT keydown
+  → getUserMedia（首次还可能弹出权限）
+  → 创建/恢复 AudioContext
+  → 加载 AudioWorklet module
+  → 创建并连接 source / worklet / sink 节点
+  → 第一段 PCM
+```
+
+PTT 模式现在会在运行时初始化后立即申请并保持 MediaStream、AudioContext 与 AudioWorklet；松键只关闭
+当前 `input.audio_stream`，不会关闭设备或音频图。因而首次启用仍可能包含权限等待，但后续按键不再重建
+采集运行时。这段等待与 VAD、STT 和后端 WebSocket 无关，必须单独测量 `PTT keydown -> first PCM`。
 
 可并行或前移的部分：
 
@@ -142,7 +160,8 @@ PTT 是最可靠的第一实验入口。自动 VAD 后续可增加轻量 speech 
 
 ## 6. Streaming Strategy
 
-当前已有音频输入 streaming、前端按段调度、动作 phrase segmentation 和后续动作接管，但回复侧不是流式：LLM streaming 被关闭，STT 等完整段，TTS 输出完整文件，OutputSegment 在整轮关闭时集中 flush。
+当前已有音频输入 streaming、前端按段调度、动作 phrase segmentation 和后续动作接管，但回复侧不是流式：LLM streaming 被关闭，STT 等完整段，TTS 输出完整文件。增强版 Core 已可在单条逻辑消息
+完成后立即发布原子 `OutputSegment`，但当前 Core 尚未产生能让第一句先封口的增量逻辑消息。
 
 推荐先做“短语级完整文件”，而不是立即做音频 chunk streaming：
 
@@ -272,6 +291,17 @@ LLM 应负责回复内容、表达态度、语义动作选择和需要上下文�
 
 ## 12. Recommended Evolution Path
 
+### Stage 0：测量与麦克风启动策略
+
+- 做什么：记录 PTT/text submit、`getUserMedia`、AudioContext ready、AudioWorklet ready 与 first PCM 的单调时钟。
+- 用户变化：不改变现有录音语义，只能定位按键后等待来自权限、设备打开、音频图还是后续链路。
+- 策略选择：PTT 模式期间保持已授权的 MediaStream、AudioContext 与 AudioWorklet；只在按住期间把 PCM
+  写入协议输入。用户已明确接受系统持续显示麦克风占用。
+- 边界：设备切换、PTT 模式关闭和应用释放必须立即释放资源；WebSocket 重连只结束当前逻辑输入会话，不重建
+  PTT 待机音频图。
+- 验证：记录首次授权与常驻运行时的 `keydown -> first PCM`，并确认未按键时不会创建 Turn、发送
+  `input.audio_stream_start` 或传输任何 PCM。
+
 ### Stage 1：即时注意反应
 
 - 做什么：埋基础 trace；PTT/text-submit 驱动 attention → listening → processing。
@@ -340,8 +370,9 @@ LLM 应负责回复内容、表达态度、语义动作选择和需要上下文�
 
 如果目标是让用户在第一次使用的 30 秒内明显感觉“它会立即回应我、状态连续”，优先顺序是：
 
-1. PTT/输入事件立即驱动 attention → listening → processing。
-2. PTT 按下立即停止当前回答并转入 listening。
-3. 正常说完后保留短暂姿态余韵，让下一次反应从当前状态接管。
+1. 先测量 PTT 常驻运行时的 `keydown -> first PCM`，确认它已不受设备和 AudioWorklet 冷启动影响。
+2. PTT/输入事件立即驱动 attention → listening → processing。
+3. PTT 按下立即停止当前回答并转入 listening。
 
-首句级 TTS 流水线紧随其后。它对真实首响最重要，但依赖配套 Core 的段封口和 TTS 行为，实施不确定性更高。
+正常说完后的短暂姿态余韵紧随其后；首句级 TTS 流水线仍是后续最重要的回复首响优化，但依赖配套 Core 的
+短语封口和 TTS 行为，实施不确定性更高。

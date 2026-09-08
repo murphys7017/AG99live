@@ -222,8 +222,10 @@ export function createAdapterConnection(
     stopMicrophoneCapture,
     setPttMode,
     setPttKeyBinding,
+    preparePttStandby,
     startPttCapture,
     stopPttCapture,
+    dispose: disposeMicrophoneRuntime,
   } = microphoneRuntime;
 
   function requirePlaybackAudioControl(): PlaybackTimelineAudioControl {
@@ -348,6 +350,9 @@ export function createAdapterConnection(
         });
         // 同步持久化的 PTT 模式到主进程 hook
         window.ag99desktop?.setPttMode?.(state.pttModeEnabled, { ...state.pttKeyBinding });
+        if (state.pttModeEnabled) {
+          void preparePttStandby();
+        }
       });
     }
 
@@ -490,6 +495,11 @@ export function createAdapterConnection(
       await runConnectionCleanupStepAsync(
         "dispose disconnect",
         () => disconnectInternal(true),
+        errors,
+      );
+      await runConnectionCleanupStepAsync(
+        "microphone runtime release",
+        () => disposeMicrophoneRuntime(),
         errors,
       );
       runConnectionCleanupStep(
