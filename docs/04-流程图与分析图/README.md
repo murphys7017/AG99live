@@ -68,7 +68,7 @@
   `06-一期完成边界与二期入口.md` 和 `18-二期角色表演系统总体规划.md` 为准。
 - AG99 Live2D Runtime 先形成 Cubism Motion / EyeBlink / Expression / drag / breath 的 base snapshot，再由 Parameter Mixer 组合 direct plan 与 lip-sync；Physics 只消费最终主动参数帧，不是 Mixer 输入。
 - 每条 WebSocket 连接必须先通过 `system.server_info.schema_manifest`；ModelSync 不接受 window/devtools 旁路写入。
-- 当前桌宠 WebSocket 与 HTTP 资源只支持同机 `127.0.0.1` / `localhost`；远程执行器连接是独立边界。
+- 当前桌宠 WebSocket 与 HTTP 资源只支持同机 `127.0.0.1` / `localhost`；保留的 Remote Operator 代码已冻结，不属于图中的当前主链路。
 
 ## 维护规则
 

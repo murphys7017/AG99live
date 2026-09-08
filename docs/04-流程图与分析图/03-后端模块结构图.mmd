@@ -14,7 +14,7 @@ flowchart TB
         PROMPT[Prompt Contributor<br/>能力 / profile / 上一动作 / 样本]:::boundary
         RESULT[Result Contributor<br/>effect_calls -> motion intent]:::boundary
         MPAY[payload_validation.py<br/>profile 能力与 resource 白名单校验]:::boundary
-        REMOTEOP[remote_operator.py<br/>远程能力 Prompt]:::boundary
+        REMOTEOP[remote_operator.py<br/>冻结的迁移遗留代码]:::boundary
         EFFECT --> PROMPT
         RESULT --> MPAY
     end
@@ -52,7 +52,7 @@ flowchart TB
         AUDIO[audio_runtime.py / media_service.py<br/>WAV 与媒体 URL]:::support
         SPEECH[speech_service.py<br/>TTS 协作]:::support
         HISTORY[history_service.py]:::support
-        REMOTE[remote_operator_runtime.py]:::support
+        REMOTE[remote_operator_runtime.py<br/>冻结的迁移遗留代码]:::support
     end
 
     subgraph PROTOCOL[protocol + transport：传输边界]

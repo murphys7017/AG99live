@@ -2,22 +2,41 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Protocol
 
 from astrbot.api import logger
 
 from ..motion.motion_intent import resolve_selected_semantic_axis_profile
-from ..motion.observation import record_motion_observation
+from ..motion.observation import MotionObservationPort, record_motion_observation
+from ..motion.resource_catalog import ModelInfoRuntimeContext
 from ..protocol.schema_versions import MOTION_INTENT_V4_SCHEMA_VERSION
 
 
 MAX_PROMPT_MOTION_HISTORY = 4
 
 
+class MotionObservationRuntimeContext(ModelInfoRuntimeContext, Protocol):
+    """Runtime fields required to project MotionLab observations."""
+
+    motion_lab_recorder: MotionObservationPort | None
+
+
+class MotionLabChatContextPort(Protocol):
+    """Recent chat projection used as optional MotionLab context."""
+
+    def to_list(self) -> list[dict[str, str]]: ...
+
+
 class MotionObservationRecorder:
     """Own observation projections without owning turn or playback state."""
 
-    def __init__(self, *, runtime_state: Any, session_state: Any, chat_buffer: Any) -> None:
+    def __init__(
+        self,
+        *,
+        runtime_state: MotionObservationRuntimeContext,
+        session_state: Any,
+        chat_buffer: MotionLabChatContextPort,
+    ) -> None:
         self.runtime_state = runtime_state
         self.session_state = session_state
         self.chat_buffer = chat_buffer
@@ -133,7 +152,7 @@ class MotionObservationRecorder:
                 turn_id,
             )
         return record_motion_observation(
-            getattr(self.runtime_state, "motion_lab_recorder", None),
+            self.runtime_state.motion_lab_recorder,
             event_type=event_type,
             conversation_uid=str(turn_id or "").strip() or None,
             turn_id=str(turn_id or "").strip(),
@@ -151,15 +170,7 @@ class MotionObservationRecorder:
         )
 
     def motion_lab_chat_context(self) -> list[dict[str, str]]:
-        to_list = getattr(self.chat_buffer, "to_list", None)
-        if not callable(to_list):
-            return []
-        try:
-            value = to_list()
-        except Exception:  # noqa: BLE001
-            logger.exception("MotionLab chat context snapshot failed")
-            return []
-        return value if isinstance(value, list) else []
+        return self.chat_buffer.to_list()
 
     def record_motion_slot(self, motion_slot: dict[str, Any], *, source: str) -> None:
         payload = motion_slot.get("payload")

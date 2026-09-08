@@ -43,6 +43,7 @@ flowchart TD
         TTS[TTS<br/>WAV Record + Record.text]:::backend
         PLAIN[Plain / semantic text<br/>canonical text 候选]:::backend
         BUFFER[PendingOutputSegment<br/>turn_id + message_id]:::backend
+        COMPLETE[complete_visible_message<br/>仅全部物理发送成功]:::backend
         BCHECK[文本冲突 / 多音频 / motion / curve 校验]:::backend
         MOTIONRESOLVE{动作预期与 payload 结果}:::backend
         MOTIONFAILSLOT[motion.state=failed<br/>保留明确 reason]:::failure
@@ -72,7 +73,7 @@ flowchart TD
         SCHEDULE --> BUFFER
         TTS --> BUFFER
         PLAIN --> BUFFER
-        BUFFER --> BCHECK --> MOTIONRESOLVE
+        BUFFER --> COMPLETE --> BCHECK --> MOTIONRESOLVE
         MOTIONRESOLVE -->|expected + valid| CURVECHECK
         MOTIONRESOLVE -->|not expected| MOTIONABSENTSLOT --> SEGMENT
         MOTIONRESOLVE -->|expected + missing/invalid| MOTIONFAILSLOT --> SEGMENT

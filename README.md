@@ -121,7 +121,7 @@ AG99live 会保留从模型原始九级输出到最终参数计划的关键阶�
 
 ### 3. Adapter 建立原子回复段
 
-Adapter 使用 `turn_id + message_id` 聚合文本、TTS、动作、speech cues 和其他输出。前端收到的是一个完整的 `output.segment.v4`，而不是几条彼此无法确认归属的独立事件。
+Adapter 使用 `turn_id + message_id` 聚合文本、TTS、动作、speech cues 和其他输出。增强版链路的契约要求 AstrBot 只在同一逻辑消息的全部物理发送成功后确认该 `message_id`，Adapter 随即发送一个完整的 `output.segment.v4`；它不等待同一 Turn 的后续回复。前端不会接收几条彼此无法确认归属的独立事件。
 
 ### 4. ModelEngine 编译参数
 
@@ -303,7 +303,9 @@ HTTP       127.0.0.1:12397
 - `engine.motion_intent.v4` 到 `engine.parameter_plan.v3` 的动作编译。
 - Live2D 参数动作、说话随动、口型和 Cubism Physics。
 - Profile Editor、动作实验室、历史和系统设置窗口。
-- B 站直播弹幕输入与可选远程操作委托。
+- B 站直播弹幕输入。
+
+远程执行器相关实现目前冻结，计划迁移到其他项目；它不属于 AG99live 的当前产品能力或后续开发范围。
 
 项目仍在持续开发，但后续工作属于二期动作质量、数据能力和发布体验建设，不再作为一期实现缺口。完整边界见 [一期完成边界与二期入口](./docs/01-架构与结构/06-一期完成边界与二期入口.md)。
 

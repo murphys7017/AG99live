@@ -5,6 +5,7 @@ from typing import Any
 
 from ..prompts.semantic_axis_prompt import profile_prompt_axes
 from .performance_curve import normalize_performance_curve_hint
+from .resource_catalog import ModelInfoRuntimeContext
 
 from ..protocol.schema_versions import (
     MOTION_INTENT_V4_SCHEMA_VERSION,
@@ -16,10 +17,10 @@ DEFAULT_MOTION_INTENT_DURATION_MS = 1000
 
 def resolve_selected_semantic_axis_profile(
     *,
-    runtime_state: Any,
+    runtime_state: ModelInfoRuntimeContext,
     require_prompt_axes: bool = True,
 ) -> dict[str, Any]:
-    model_info = getattr(runtime_state, "model_info", {})
+    model_info = runtime_state.model_info
     if not isinstance(model_info, dict):
         raise RuntimeError("SemanticAxisProfile unavailable: runtime_state.model_info is not an object.")
 

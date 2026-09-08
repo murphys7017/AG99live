@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -55,6 +56,74 @@ def test_normalize_performance_curve_hint_rejects_unknown_enums(
                 "energy": "medium",
             }
         )
+
+
+def test_performance_curve_coordinator_uses_explicit_runtime_port(
+    install_fake_astrbot,
+) -> None:
+    install_fake_astrbot()
+    from astrbot_plugin_ag99live_adapter.runtime.performance_curve_coordinator import (
+        PerformanceCurveCoordinator,
+    )
+
+    class Runtime:
+        def __init__(self) -> None:
+            self.cancelled_turn_ids: list[str | None] = []
+
+        def cancel_turn(self, turn_id: str | None) -> None:
+            self.cancelled_turn_ids.append(turn_id)
+
+        def owns_request(
+            self,
+            *,
+            turn_id: str | None,
+            request_id: str | None,
+        ) -> bool:
+            return (turn_id, request_id) == ("turn-1", "request-1")
+
+        def start(self, _request: Any) -> bool:
+            return False
+
+        def get_ready(
+            self,
+            *,
+            turn_id: str | None,
+            request_id: str | None,
+        ) -> dict[str, Any] | None:
+            del turn_id, request_id
+            return None
+
+        def discard_if_not_ready(
+            self,
+            *,
+            turn_id: str | None,
+            request_id: str | None,
+        ) -> bool:
+            del turn_id, request_id
+            return False
+
+        def clear(self, *, turn_id: str | None, request_id: str | None) -> None:
+            del turn_id, request_id
+
+    runtime = Runtime()
+    coordinator = PerformanceCurveCoordinator(
+        runtime=runtime,
+        is_enabled=lambda: False,
+        observations=SimpleNamespace(),
+    )
+
+    coordinator.cancel_turn("turn-1")
+
+    assert runtime.cancelled_turn_ids == ["turn-1"]
+    assert coordinator.owns_request(turn_id="turn-1", request_id="request-1") is True
+    assert coordinator.start_request(
+        turn_id="turn-1",
+        tts_turn_id="tts-turn-1",
+        message_id="message-1",
+        request_id="request-1",
+        assistant_text="不会启动。",
+        motion_payload={},
+    ) is None
 
 
 def test_performance_curve_runtime_resolves_provider_hint(

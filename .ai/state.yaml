@@ -3,7 +3,39 @@ task:
   risk: high
   phase: architecture_audit_followup
   status: source_complete_pending_live_acceptance
-  scope: "Fix source-confirmed audit findings: motion revision validation, required inbound SessionStore contract, unused internal entry points, fixed compiler stages, observation identity semantics, read-only SessionStore query projections, and a canonical Remote Operator target-policy parser. Audio ownership migration remains outside this change."
+  scope: "Fix source-confirmed audit findings: motion revision validation, required inbound SessionStore contract, unused internal entry points, fixed compiler stages, observation identity semantics, read-only SessionStore query projections, canonical Remote Operator target-policy parsing, and audio playback ownership migration."
+
+architecture_audit_low_risk_followup:
+  recorded_at: "2026-09-08"
+  scope:
+    - "Remove superseded architecture-review snapshots after their current facts are consolidated into the architecture and open-issue documents."
+    - "Narrow PerformanceCurveCoordinator dependencies to an explicit PerformanceCurveRuntime and enablement getter."
+    - "Narrow PerformanceCurveRuntime dependencies to an explicit typed runtime context."
+    - "Narrow official inline motion validation and resource catalog access to a typed model-info context."
+    - "Narrow MotionObservationRecorder dependencies to explicit model-info, MotionLab recorder, and chat-context ports."
+    - "Make platform-event output closure a required internal Adapter port instead of a silent getattr/callable probe."
+    - "Remove internal RuntimeState getattr probes from adapter termination and client-profile synchronization."
+    - "Narrow PerformanceCurveCoordinator observation access to explicit chat-context and MotionLab recording operations."
+    - "Enhanced Core now calls event.complete_visible_message(message_id=...) after delivery returns; Core still needs all-physical-deliveries-successful semantics before that callback. complete_visible_turn() remains the Turn-closing boundary."
+  non_actions:
+    - "Do not change frozen Remote Operator configuration reads or external AstrBot hook lifecycle without live hot-refresh evidence."
+    - "Do not remove Core metadata aliases without captured enhanced-Core and official-Core payloads."
+    - "Do not decide Performance Curve product retention without enablement, timeliness, cost, and visual-benefit measurements."
+  validation:
+    - "Focused Performance Curve and output-segment lifecycle tests passed (16 tests)."
+    - "Focused motion-validation and output-segment tests passed (8 tests)."
+    - "Focused platform event, proactive-output, and Performance Curve tests passed (15 tests)."
+    - "Changed Python modules compiled successfully and diff whitespace check passed."
+
+output_segment_finalization_review:
+  recorded_at: "2026-09-08"
+  finding: "The enhanced Core master branch now invokes complete_visible_message(message_id=...) from InteractionOutputController._deliver_visible_message() after delivery returns. Its delivery helper still treats partial physical success as overall success, so the callback must be restricted to all-physical-deliveries-successful semantics."
+  correction: "AG99 exposes complete_visible_message(message_id=...) and immediately emits that segment; complete_visible_turn() closes the Turn only after every segment has completed. No fallback or unified end-of-turn flush is retained."
+  validation:
+    - "Focused output-segment, platform-event, and proactive-output tests passed (10 tests)."
+    - "Changed output modules compiled successfully and diff whitespace check passed."
+  evidence_gap:
+    - "Core must distinguish complete physical delivery from partial success; then a live AstrBot run must confirm one immediate output.segment per logical message and control.synth_finished only after the final segment."
 
 remote_operator_config_consolidation:
   recorded_at: "2026-09-06"
@@ -22,12 +54,25 @@ architecture_audit_continuation:
     - "Remove the same-value scheduled_frontend_turn_id alias from the internal identity snapshot and use the event frontend turn ID directly."
     - "Return Vue deep-readonly session and segment views from TurnPlaybackSessionStore query APIs while keeping mutation private to store methods."
   non_actions:
-    - "Do not migrate audio runtime ownership from Adapter to Playback in this bounded continuation."
     - "Do not merge Remote Operator configuration parsing before tracing its Core lifecycle and external configuration consumers."
   validation:
     - "Renderer, WebSDK, and Node typechecks passed."
     - "Focused Python syntax checks passed for the changed interaction-motion modules."
     - "Diff whitespace check passed."
+
+audio_playback_ownership_migration:
+  recorded_at: "2026-09-07"
+  scope:
+    - "Move audio start, lip-sync binding, and audio/Timeline settlement from AdapterConnection into the conversation playback composition root."
+    - "Keep AdapterConnection limited to protocol-triggered audio control and presentation-event projection."
+  non_actions:
+    - "Do not change BrowserAudioSink, Timeline clock ownership, lip-sync runtime semantics, or protocol message handling."
+    - "Do not add a fallback player, secondary Timeline, or alternate cleanup path."
+  validation:
+    - "Renderer, WebSDK, and Node typechecks passed."
+    - "Source review confirms the existing interrupt and connection-cleanup callers invoke the same control methods, which preserve audio stop followed by Timeline settlement."
+  evidence_gap:
+    - "Live Electron audio, interrupt, lip-sync, and backend playback acknowledgement acceptance remain user-led."
 
 architecture_audit_followup:
   recorded_at: "2026-09-05"
@@ -96,14 +141,14 @@ context:
   confidence: high
   assumptions:
     - createConversationPlaybackRuntime is the only active AdapterConnection composition owner; no caller should recreate the removed useAdapterConnection lifecycle wrapper.
-    - Remote Operator remains an intentionally autonomous trusted-machine feature; targets must explicitly confirm unrestricted access before they can be registered or executed.
+    - Remote Operator code and configuration are frozen migration residue; they are not part of AG99live's current product path and must not gain new behavior here.
     - Speech audio analysis is owned by the active audio source and must continue when model LipSync parameters are absent or rejected.
     - Physics response scaling belongs to AG99 LAppModel and applies only to terminal Physics output deltas, excluding Physics inputs and semantic protected parameters.
     - PetDesktopRuntime is the sole composition owner for ConversationPlaybackRuntime disposal.
     - Phase one feature scope remains complete, but this does not imply that the current source is defect-free.
     - Only source-confirmed unresolved defects belong in the active defect register; resolved, invalid, speculative, and historical findings are removed.
     - Performance work must distinguish existing foundations from remaining implementation instead of describing completed capabilities as future work.
-    - Remote Operator, VTS recording, small-model training, Physics diagnostics, and productization keep their own boundaries and do not become Performance Director responsibilities.
+    - Frozen Remote Operator migration residue, VTS recording, small-model training, Physics diagnostics, and productization keep their own boundaries and do not become Performance Director responsibilities.
     - Segment-level output rejection must not close the WebSocket; session-store and connection infrastructure failures remain fatal.
     - The existing MotionLab outbound queue is the only persistence path for frontend rejection diagnostics.
     - A rejected atomic segment is a settled SessionStore fact: none of its individual materials are released, but it still participates in synth_finished and failed playback acknowledgement.

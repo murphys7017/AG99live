@@ -10,7 +10,6 @@ AG99live 的 AstrBot 插件侧实现。该目录负责协议桥接、Turn 生命
 - 管理 turn 生命周期，保证文本/语音/动作消息在同一轮次可追踪。
 - 扫描 Live2D 资源并产出结构化能力信息。
 - 生成并下发动作用载荷；统一走 AstrBot 交互中间件主链路，由 `ag99live.motion` Persona Effect 产出动作并通过 `client_objects` 下发。
-- 在增强版 AstrBot 中注入远程执行器能力，并把电脑/桌面/软件操作类请求委托给配置的 Codex app-server / Computer Use。
 
 ## 当前路线说明
 
@@ -27,8 +26,7 @@ AG99live 的 AstrBot 插件侧实现。该目录负责协议桥接、Turn 生命
   在同一台电脑上的部署。
 - 当前协议没有远程客户端认证、授权、TLS 和跨主机媒体 URL 保护，因此不能把 `host`
   改为局域网或公网地址来部署远程 AstrBot。
-- 远程执行器的 Codex app-server / OpenCode endpoint 是 Adapter 的另一条出站连接，
-  不改变桌宠传输仍为本机回环的边界。
+- 保留的 Remote Operator 配置与实现已冻结，计划迁移到其他项目；它不参与当前桌宠交互链路。
 - 后续远程 AstrBot 部署必须先定义 authenticated WSS/HTTPS、客户端身份、媒体授权和断线恢复，
   再同步修改 transport、URL 构造、配置 schema 和前端连接设置。
 
@@ -41,7 +39,7 @@ astrbot_plugin_ag99live_adapter/
 ├─ runtime/              # Turn、输出段、观察记录、可选曲线与 session/chat 状态
 ├─ services/             # 媒体、消息、语音服务
 ├─ motion/               # 动作意图生成与输出清洗
-├─ middleware/           # interaction 动作贡献、远程执行器 prompt/result 贡献
+├─ middleware/           # interaction 动作贡献（含冻结的远程执行器遗留代码）
 ├─ live2d/               # 扫描、缓存与分析
 ├─ tests/                # 单元测试
 ├─ live2ds/              # 模型资源
@@ -57,7 +55,7 @@ astrbot_plugin_ag99live_adapter/
 
 - 主模型在同一次 Persona 回复中生成 `spoken_reply` 与唯一 `ag99live.motion` effect；动作不由第二个
   对话模型或 TTS 阶段重新推断。
-- 交互中间件在 prompt contributor 中注入动作能力/运行态上下文，并注册 `ag99live.motion` Persona Effect；该 effect 只对具备 AG99live motion runtime 的直接前端会话开放，不进入其他平台或 Remote Operator 回灌事件的 Persona 契约。result contributor 从 `view.effect_calls` 消费该 effect 并返回 `client_objects`。
+- 交互中间件在 prompt contributor 中注入动作能力/运行态上下文，并注册 `ag99live.motion` Persona Effect；该 effect 只对具备 AG99live motion runtime 的直接前端会话开放，不进入其他平台回灌事件的 Persona 契约。result contributor 从 `view.effect_calls` 消费该 effect 并返回 `client_objects`。
 - `ag99live.motion` 只属于 Persona 输出契约，不进入 Router；Router 不注册该 effect，也不把它当作 Agent Tool。
 - 后端从 `platform_extras` / `client_objects` 中读取动作载荷，并与文本、音频一起广播到前端。
 - 任何额外动作来源都必须回到同一条 `engine.motion_*` 协议链路和同一 segment identity，不能绕过 ModelEngine 或 PlaybackTimeline。
@@ -68,13 +66,13 @@ astrbot_plugin_ag99live_adapter/
 
 - 插件入口检测 Interaction contributor 注册接口；可用时保持增强版 middleware-first 链路。
 - 官方 Core 不具备这些接口时，`on_llm_request` 注入同一套语义轴、参考样本和 V4 输出约束，并要求把动作包装进 `<@anim {"mode":"inline","intent":...}>`。
-- AstrBot `TurnDeliveryCoordinator` 在 `after_message_sent` Hook 返回后唯一调用平台事件的
-  `complete_visible_turn()`，由该事件关闭 Adapter 输出队列；默认关闭的 AstrBot 分段回复是当前支持边界。
+- 增强版 Core 的契约要求在同一逻辑消息的全部物理 `MessageChain` 成功派发后调用
+  `complete_visible_message(message_id=...)`；Adapter 立即发送该原子段。官方 Core 不提供这项消息级
+  生命周期，默认不启用分段回复，并继续只以 `complete_visible_turn()` 关闭整轮输出队列。
 - 标签外层只接受 `mode="inline"` 与 `intent`；裸 intent、`motion_payload`、`plan` 和其他历史包装字段会被拒绝。
 - 如果 `<@anim>` 内部 JSON、schema 或 v4 payload 无效，后端只记录拒绝原因，不生成替代动作。
 - 官方 Core 没有 `TTSState`、`tts_request_id` 或 TTS 失败通知。Adapter 只把最终 `Record` 当作音频成功事实；没有 `Record` 时只能声明无音频，不能伪造 `failed`。可选 performance curve 在此模式不启动。
-- 官方兼容模式不具备 Remote Operator 的 Prompt/Result contributor 生命周期，因此不创建 Runtime、
-  不探测配置的 endpoint，也不注入远程执行请求；相关配置只在增强版 AstrBot 中生效。
+- 官方兼容模式不具备增强版的 Prompt/Result contributor 生命周期；因此不启用仅依赖该生命周期的扩展能力。
 
 ### 动作效果输出
 
@@ -90,7 +88,7 @@ astrbot_plugin_ag99live_adapter/
 ## 与前端协同的关键点
 
 - 每条交互消息都带 `turn_id`，前后端只按这一个轮次 ID 做会话协调。
-- 每个 assistant segment 由非空 `turn_id + message_id` 标识；Core 可以把一条逻辑输出拆成多个物理 `MessageChain` 回调。Adapter 先把 Plain、Record.text 与 semantic text 归一化为唯一 canonical text，再聚合音频、图片、motion client object 与 speech cue；只有 Core 在全部物理组件派发结束后显式完成该 `message_id`，才原子发送一个 `output.segment.v4`。它不会等待同一 turn 的后续 assistant segment。
+- 每个 assistant segment 由非空 `turn_id + message_id` 标识；Adapter 先把 Plain、Record.text 与 semantic text 归一化为唯一 canonical text，再聚合音频、图片、motion client object 与 speech cue。增强版 Core 必须只在该逻辑消息的全部物理 `MessageChain` 均派发成功后调用 `event.complete_visible_message(message_id=...)`，Adapter 随即发送一个 `output.segment.v4`，不等待同一 turn 的后续 segment。
 - 隐藏动作传输标记在回复进入 TTS 前的输出规范化阶段清洗；原文只供官方 `<@anim>` 兼容解析。增强版 Core 只读监听 AstrBot TTS 生成状态并可下发 `audio.state=failed`；官方 Core 只依据最终 `Record` 投影音频成功，不模拟不存在的生命周期。
 - 正式动作位于 `output.segment.motion.payload`；前端原子提交完整段后，由 ModelEngine 把 intent 编译为 `engine.parameter_plan.v3`。
 - `system.server_info` 携带完整 schema manifest；前端只有在 manifest 与本地契约完全一致后才处理后续消息。
@@ -98,7 +96,7 @@ astrbot_plugin_ag99live_adapter/
 - `runtime_cache_errors` 只作为 `system.model_sync.payload` 根部的独立运行诊断下发，不复制进 `model_info`。
 - `system.semantic_axis_profile_saved` / `system.semantic_axis_profile_save_failed` 用于 Profile Editor 保存结果确认，不再依赖 `system.model_sync` 推断保存成败。
 - 一个 user input 对应一个 turn，但一个 turn 内可能输出多个 assistant segment。
-- `control.synth_finished` 表示该 turn 的原子输出队列关闭；每个 segment 可在自身完成时先行发送，到达前所有 segment 必须已发送或显式失败，到达后不接受新段或 late slot patch。
+- `control.synth_finished` 表示该 turn 的原子输出队列关闭；到达前所有 segment 都必须已经由 `complete_visible_message()` 发送，到达后不接受新段或 late slot patch。若 Core 在未完成的 segment 仍存在时关闭 turn，Adapter 发送 `control.error` 并终止该 turn，避免将不完整输出当作完成。
 - `ag99live_motion_schedule` 已表明本段应生成动作、但 effect 缺失或非法时，Adapter 必须下发
   `motion.state=failed`；只有明确未安排语义动作时才使用 `motion.state=absent`。
 - 前端在 `synth_finished` 已到、所有 segment 槽位 settled 且同一 Turn 不存在开放的 required
@@ -114,29 +112,9 @@ astrbot_plugin_ag99live_adapter/
 - 非流式 JSON 数组音频协议已删除；麦克风输入只接受当前流式协议。
 - 按键说话模式会以 `reason="ptt_release"` 结束本段录音；对插件侧来说它仍是一段普通麦克风输入。
 
-## 远程执行器 / Windows 操作
+## 冻结的远程执行器
 
-AG99live 远程执行器只在具备 Interaction Prompt/Result contributor 的增强版 AstrBot 中启用，当前走任务委托链路：
-
-```text
-用户请求操作电脑
-  -> remote_operator middleware 注入/仲裁
-    -> AstrBot core 输出 {"computer","profile","prompt"}
-      -> RemoteOperatorRuntime
-        -> Codex app-server WebSocket / Computer Use
-        -> OpenCode CLI / opencode serve
-```
-
-当前关键边界：
-
-- `_conf_schema.json` 的 `remote_operator.computer_entries` 配置执行器 key、用户可读名称、后端类型和固定执行参数。执行器只有在 `allow_unrestricted_access=true` 时才会上线；该开关表示明确允许绕过沙箱并自动批准命令、文件修改和权限申请，只能用于完全信任的电脑。
-- `backend=codex_app_server` 用于 Windows 桌面、应用、浏览器和 Computer Use 操作，endpoint 填 Codex app-server WebSocket 地址。
-- `backend=opencode` 用于代码、文件、命令、日志和项目开发任务；`model`、`variant`、`workdir` 均由配置锁定，不由聊天模型决定。
-- Adapter 会 probe endpoint 并只向 prompt 注入在线电脑。
-- 对桌面/软件/电脑操作类请求，remote operator middleware 会要求核心只输出三字段 JSON，不允许核心直接调用 shell、浏览器、CUA 或输出底层步骤。
-- `RemoteOperatorRuntime` 会查找 app-server 的 `computer-use:computer-use` skill，并把该 skill 与任务文本一起作为 turn 输入。
-- Windows 桌面观察、点击、输入等底层操作由 Codex app-server / Computer Use 执行；Adapter 不直接持有本机桌面操作权限。
-- 执行结果以 `remote_operator_result` 来源重新进入 AstrBot 事件，避免远程执行器结果再次触发远程执行器。
+仓库中仍保留 Remote Operator 的配置与实现，以便后续迁移到其他项目；AG99live 当前不再将其作为产品能力，也不在此继续设计、测试或扩展。历史边界与迁移提示见 [远程执行器接入设计](../docs/02-设计文档/07-远程执行器接入设计.md)。
 
 当前结构注意点：
 
@@ -150,7 +128,7 @@ AG99live 远程执行器只在具备 Interaction Prompt/Result contributor 的�
 - `live2d_input`：模型选择和图片输入冷却。
 - `performance_curve`：可选表演曲线的开关与专用 Provider。
 - `vad`：Silero VAD 的断句阈值和连续帧参数。
-- `remote_operator`：远程执行器路由、目标电脑和执行档位；支持 `codex_app_server` 与 `opencode`。
+- `remote_operator`：冻结的迁移遗留配置；当前 AG99live 不维护或扩展此项。
 
 配置结构已按职责重组；旧的平级配置键不会再被读取。开发阶段请直接按当前 Schema 重新生成或编辑插件配置，不保留旧路径兼容。
 

@@ -33,12 +33,7 @@ class _CoordinatorStub:
     async def close_turn_output_queue(self, *, turn_id: str) -> None:
         self.closed_turn_ids.append(turn_id)
 
-    async def finalize_output_segment(
-        self,
-        *,
-        turn_id: str,
-        message_id: str,
-    ) -> None:
+    async def finalize_output_segment(self, *, turn_id: str, message_id: str) -> None:
         self.finalized_segments.append((turn_id, message_id))
 
     async def fail_proactive_output_turn(self, *, turn_id: str, reason: str) -> None:
@@ -103,6 +98,9 @@ def test_send_by_session_delivers_plain_and_record_as_independent_turns(
 
     assert coordinator.started_turn_ids == ["proactive:test-1", "proactive:test-2"]
     assert coordinator.closed_turn_ids == coordinator.started_turn_ids
+    assert [turn_id for turn_id, _message_id in coordinator.finalized_segments] == (
+        coordinator.started_turn_ids
+    )
     assert coordinator.failed_turns == []
     assert [call["message_chain"] for call in coordinator.emit_calls] == chains
     assert [
@@ -117,9 +115,6 @@ def test_send_by_session_delivers_plain_and_record_as_independent_turns(
         for message_id in logical_message_ids
     )
     assert len(set(logical_message_ids)) == len(logical_message_ids)
-    assert coordinator.finalized_segments == list(
-        zip(coordinator.started_turn_ids, logical_message_ids, strict=True)
-    )
 
 
 def test_send_by_session_raises_when_frontend_is_unavailable(

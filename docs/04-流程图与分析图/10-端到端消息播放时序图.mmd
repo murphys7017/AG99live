@@ -83,6 +83,10 @@ sequenceDiagram
     Adapter->>Turn: emit_message_chain(turn_id, message_id)
     Turn->>Segment: 委托物理组件聚合
     Segment->>Buffer: 按 turn_id + message_id 合并物理组件
+    opt 增强版 Core
+        CoreQueue->>Adapter: complete_visible_message(message_id)<br/>仅全部物理发送成功
+        Adapter->>Turn: finalize_output_segment(turn_id, message_id)
+    end
     Segment->>Segment: 校验文本冲突、多音频、motion 与 curve
     alt 曲线在段出站前 ready
         Curve-->>CurveCoord: ready(hint)
@@ -243,12 +247,10 @@ sequenceDiagram
         end
     end
 
-    opt 官方 Core
-        CoreQueue->>CoreQueue: TurnDeliveryCoordinator<br/>分发 after_message_sent Hook
-        CoreQueue->>Adapter: event.complete_visible_turn()<br/>关闭本轮 Adapter 输出队列
-    end
+    CoreQueue->>CoreQueue: 完成本轮可见输出生命周期
+    CoreQueue->>Adapter: event.complete_visible_turn()<br/>关闭本轮 Adapter 输出队列
     Adapter->>Turn: close_turn_output_queue(turn_id)
-    Turn->>Segment: flush segments + synth_finished
+    Turn->>Segment: 断言没有 pending segment 后发送 synth_finished
     Segment->>Inbound: control.synth_finished(turn_id)<br/>所有 output.segment 发送完成后
     Inbound->>Store: assertOutputSegmentsResolved()
     alt 存在未解析段或不完整事实

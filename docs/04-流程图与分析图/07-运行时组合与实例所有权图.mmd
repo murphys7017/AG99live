@@ -31,21 +31,21 @@ flowchart TB
         TRANSPORT[WebSocket transport]:::adapter
         INBOUND[InboundRuntime]:::adapter
         AUDIOSTATE[Adapter audio UI state]:::adapter
-        ATC[AudioTimelineController]:::adapter
-        LIPRUNTIME[LipSyncRuntime<br/>每个音频 segment]:::resource
     end
 
     BROWSERAUDIO[BrowserAudioTimelineSink<br/>由 ConversationPlaybackRuntime 创建，播放时持有 AudioElement]:::resource
+    AUDIO_RUNTIME[ConversationPlaybackAudioRuntime<br/>音频启动 / 口型绑定 / 停止 / Timeline 结算]:::resource
+    LIPRUNTIME[LipSyncRuntime<br/>每个音频 segment]:::resource
 
     ADAPTER --> TRANSPORT
     ADAPTER --> INBOUND
     ADAPTER --> AUDIOSTATE
-    ADAPTER --> ATC
     PLAYBACK -->|创建并绑定| BROWSERAUDIO
-    ADAPTER -->|提供 text/audio execution ports| TL
-    TL -->|启动 segment audio sink| ATC
-    ATC --> BROWSERAUDIO
-    ATC --> LIPRUNTIME
+    PLAYBACK -->|创建并绑定| AUDIO_RUNTIME
+    ADAPTER -->|提供 text/UI projection 与 stop control ports| TL
+    TL -->|启动 segment audio sink| AUDIO_RUNTIME
+    AUDIO_RUNTIME --> BROWSERAUDIO
+    AUDIO_RUNTIME --> LIPRUNTIME
 
     subgraph TIMELINES[Timeline 按段持有]
         ENTRY[PlaybackTimelineEntry<br/>key = turn_id + message_id]:::singleton

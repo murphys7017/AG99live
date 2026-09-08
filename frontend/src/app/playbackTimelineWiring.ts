@@ -1,6 +1,10 @@
 import type { NormalizedMotionPayload } from "../types/motion.js";
 import type { OutputSegmentSpeechCue } from "../types/protocol.js";
 import type { AdapterPlaybackCompositionPort } from "../adapter-connection/useAdapterConnection.js";
+import {
+  createConversationPlaybackAudioRuntime,
+  type ConversationPlaybackAudioRuntime,
+} from "./conversationPlaybackAudioRuntime.js";
 import type { MotionTimelinePreparationResult } from "../model-engine/runtime/playbackClock.js";
 import type { PlaybackTimelineAudioSink } from "../playback-timeline/audioSink.js";
 import type { PlaybackTimelineSnapshot } from "../playback-timeline/contracts.js";
@@ -20,6 +24,10 @@ import {
 } from "../playback-integrations/modelEngineMotionSink.js";
 
 export type PlaybackTimelineWiringPort = PlaybackTimelineRuntime<NormalizedMotionPayload>;
+export interface PlaybackTimelineComposition {
+  playbackTimeline: PlaybackTimelineWiringPort;
+  audioControl: ConversationPlaybackAudioRuntime;
+}
 export interface PlaybackTimelineMotionEnginePort {
   ingestNormalizedPayload: PlaybackTimelineMotionSink["start"];
   interruptPlaybackSegment(turnId: string | null, messageId: string, reason: string): void;
@@ -38,22 +46,9 @@ export interface PlaybackTimelineMotionEnginePort {
 
 type SessionStore = ReturnType<typeof useTurnPlaybackSessionStore>;
 
-export interface PlaybackAudioCompositionPort {
-  releaseAudioForTimelinePlayback: (
-    audioUrl: string,
-    messageId: string,
-    turnId: string | null,
-  ) => boolean;
-  initializeAudioRuntime: (
-    runtime: PlaybackTimelineRuntime<NormalizedMotionPayload>,
-    audioSink: PlaybackTimelineAudioSink,
-  ) => void;
-}
-
 export function createAppPlaybackTimelineRuntime(options: {
   sessionStore: SessionStore;
   adapterPlayback: AdapterPlaybackCompositionPort;
-  audioPlayback: PlaybackAudioCompositionPort;
   motionSink: Pick<
     PlaybackTimelineSegmentMotionSink<NormalizedMotionPayload>,
     "start" | "interrupt"
@@ -69,8 +64,9 @@ export function createAppPlaybackTimelineRuntime(options: {
     messageId: string,
     playbackTimeline: PlaybackTimelineSnapshot,
   ) => void;
-}): PlaybackTimelineWiringPort {
-  const { sessionStore, adapterPlayback, audioPlayback } = options;
+}): PlaybackTimelineComposition {
+  const { sessionStore, adapterPlayback } = options;
+  let audioRuntime: ConversationPlaybackAudioRuntime | null = null;
   const runtime = createPlaybackTimelineRuntime<NormalizedMotionPayload>({
     segmentExecution: {
       session: {
@@ -86,8 +82,12 @@ export function createAppPlaybackTimelineRuntime(options: {
           adapterPlayback.failAssistantTextForPlayback,
       },
       audioSink: {
-        releaseAudioForPlayback:
-          audioPlayback.releaseAudioForTimelinePlayback,
+        releaseAudioForPlayback(audioUrl, messageId, turnId) {
+          if (!audioRuntime) {
+            throw new Error("Conversation audio runtime is not initialized.");
+          }
+          return audioRuntime.releaseAudioForTimelinePlayback(audioUrl, messageId, turnId);
+        },
       },
       motionSink: options.motionSink,
     },
@@ -105,9 +105,22 @@ export function createAppPlaybackTimelineRuntime(options: {
     onAudioTimelineDurationReady: options.onAudioTimelineDurationReady,
   });
 
-  audioPlayback.initializeAudioRuntime(runtime, options.audioSink);
+  audioRuntime = createConversationPlaybackAudioRuntime({
+    playbackTimelineRuntime: runtime,
+    audioSink: options.audioSink,
+    presentation: {
+      reportAudioPlaybackPreparing: adapterPlayback.reportAudioPlaybackPreparing,
+      reportAudioPlaybackStarted: adapterPlayback.reportAudioPlaybackStarted,
+      reportAudioPlaybackEnded: adapterPlayback.reportAudioPlaybackEnded,
+      reportAudioPlaybackFailed: adapterPlayback.reportAudioPlaybackFailed,
+      reportPlaybackHistory: adapterPlayback.reportPlaybackHistory,
+    },
+  });
 
-  return runtime;
+  return {
+    playbackTimeline: runtime,
+    audioControl: audioRuntime,
+  };
 }
 
 export function createPlaybackTimelineMotionRunTracker(

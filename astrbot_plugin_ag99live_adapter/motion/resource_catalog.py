@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, Protocol
+
+
+class ModelInfoRuntimeContext(Protocol):
+    """Current model projection required for semantic motion validation."""
+
+    model_info: dict[str, Any]
 
 
 def build_motion_resource_candidates(
     *,
-    runtime_state: Any,
+    runtime_state: ModelInfoRuntimeContext,
 ) -> list[dict[str, Any]]:
     model = _resolve_selected_model_payload(runtime_state)
     constraints = model.get("constraints") if isinstance(model, dict) else None
@@ -216,8 +222,10 @@ def _normalize_catalog_id(value: Any) -> str:
     return normalize_resource_id(value)
 
 
-def _resolve_selected_model_payload(runtime_state: Any) -> dict[str, Any]:
-    model_info = getattr(runtime_state, "model_info", None)
+def _resolve_selected_model_payload(
+    runtime_state: ModelInfoRuntimeContext,
+) -> dict[str, Any]:
+    model_info = runtime_state.model_info
     if not isinstance(model_info, dict):
         return {}
     selected_model = str(model_info.get("selected_model") or "").strip()

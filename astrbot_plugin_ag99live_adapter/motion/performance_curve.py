@@ -5,7 +5,7 @@ import json
 import re
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
 from astrbot.api import logger
 
@@ -46,10 +46,18 @@ class PerformanceCurveInput:
     chat_context: list[dict[str, str]]
 
 
+class PerformanceCurveRuntimeContext(Protocol):
+    """Runtime settings and observation sink required by the curve worker."""
+
+    enable_performance_curve: bool
+    selected_performance_curve_provider: Any
+    motion_lab_recorder: Any
+
+
 class PerformanceCurveRuntime:
     """Best-effort small-model runtime for symbolic performance curve hints."""
 
-    def __init__(self, *, runtime_state: Any) -> None:
+    def __init__(self, *, runtime_state: PerformanceCurveRuntimeContext) -> None:
         self.runtime_state = runtime_state
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._results: dict[str, dict[str, Any]] = {}
@@ -157,7 +165,7 @@ class PerformanceCurveRuntime:
         }
 
     async def _run(self, key: str, request: PerformanceCurveInput) -> None:
-        provider = getattr(self.runtime_state, "selected_performance_curve_provider", None)
+        provider = self.runtime_state.selected_performance_curve_provider
         if provider is None:
             self._record_failed(request, "provider_unavailable", latency_ms=0)
             self._drop_cached_key(key)
@@ -235,7 +243,7 @@ class PerformanceCurveRuntime:
         raw: dict[str, Any],
     ) -> bool:
         return record_motion_observation(
-            getattr(self.runtime_state, "motion_lab_recorder", None),
+            self.runtime_state.motion_lab_recorder,
             event_type=event_type,
             turn_id=request.turn_id,
             message_id=request.message_id,
@@ -251,7 +259,7 @@ class PerformanceCurveRuntime:
         )
 
     def _is_enabled(self) -> bool:
-        return bool(getattr(self.runtime_state, "enable_performance_curve", False))
+        return bool(self.runtime_state.enable_performance_curve)
 
     def _drop_current_task(self, key: str) -> None:
         current_task = asyncio.current_task()

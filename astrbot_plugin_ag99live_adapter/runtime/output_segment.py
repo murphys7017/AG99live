@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
+from time import perf_counter
 from typing import Any
 
 from ..protocol.speech_cues import normalize_speech_cues
@@ -30,9 +31,6 @@ class PendingOutputSegment:
     performance_curve_request_id: str = ""
     speech_cues: list[dict[str, Any]] = field(default_factory=list)
     finalized: bool = False
-    ready_at: float | None = None
-    flushed_at: float | None = None
-    flush_reason: str = ""
 
     def merge_text(self, value: str) -> None:
         self.text = _merge_unique_text(self.text, value, "text")
@@ -143,8 +141,8 @@ class PendingOutputSegment:
             "performance_curve_request_id",
         )
 
-    def finalize(self, *, ready_at: float) -> None:
-        """Seal one logical segment after Core confirms every physical delivery."""
+    def finalize(self) -> None:
+        """Seal this logical message after Core finishes its physical delivery."""
         if self.finalized:
             return
         if self.tts_status == "succeeded" and not self.audio_path:
@@ -168,7 +166,6 @@ class PendingOutputSegment:
         ):
             self.merge_motion_failure("motion_schedule_payload_missing")
         self.finalized = True
-        self.ready_at = ready_at
 
 
 def _merge_unique_text(current: str, incoming: str, field_name: str) -> str:

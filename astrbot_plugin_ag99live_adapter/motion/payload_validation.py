@@ -11,6 +11,7 @@ from .motion_intent import (
     resolve_selected_semantic_axis_profile,
 )
 from .resource_catalog import (
+    ModelInfoRuntimeContext,
     build_motion_resource_candidates,
     validate_motion_resource_id,
 )
@@ -22,7 +23,7 @@ from ..prompts.semantic_axis_prompt import (
 
 def normalize_motion_arguments_payload(
     raw_motion_arguments: dict[str, Any],
-    runtime_state: Any,
+    runtime_state: ModelInfoRuntimeContext,
     *,
     base_reason: str,
     append_resolution_reason,
@@ -113,7 +114,7 @@ def normalize_motion_arguments_payload(
 
 def validate_normalized_motion_intent_payload(
     payload: dict[str, Any],
-    runtime_state: Any,
+    runtime_state: ModelInfoRuntimeContext,
     *,
     base_reason: str,
     append_resolution_reason=None,

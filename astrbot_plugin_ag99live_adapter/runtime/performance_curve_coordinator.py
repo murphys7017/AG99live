@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Callable
+from typing import Any, Protocol
 
 from astrbot.api import logger
 
@@ -15,25 +16,61 @@ from ..motion.performance_curve import (
 from ..protocol.schema_versions import PERFORMANCE_CURVE_HINT_SCHEMA_VERSION
 
 
+class PerformanceCurveRuntimePort(Protocol):
+    """Curve lifecycle operations needed while one output is assembled."""
+
+    def cancel_turn(self, turn_id: str | None) -> None: ...
+
+    def owns_request(self, *, turn_id: str | None, request_id: str | None) -> bool: ...
+
+    def start(self, request: PerformanceCurveInput) -> bool: ...
+
+    def get_ready(
+        self,
+        *,
+        turn_id: str | None,
+        request_id: str | None,
+    ) -> dict[str, Any] | None: ...
+
+    def discard_if_not_ready(
+        self,
+        *,
+        turn_id: str | None,
+        request_id: str | None,
+    ) -> bool: ...
+
+    def clear(self, *, turn_id: str | None, request_id: str | None) -> None: ...
+
+
+class PerformanceCurveObservationPort(Protocol):
+    """Observation operations used by optional curve lifecycle work."""
+
+    def motion_lab_chat_context(self) -> list[dict[str, str]]: ...
+
+    def record_motion_lab_raw_event(self, **kwargs: Any) -> bool: ...
+
+
 class PerformanceCurveCoordinator:
     """Manage optional curve work without owning output or turn lifecycle."""
 
-    def __init__(self, *, runtime_state: Any, observations: Any) -> None:
-        self.runtime_state = runtime_state
+    def __init__(
+        self,
+        *,
+        runtime: PerformanceCurveRuntimePort,
+        is_enabled: Callable[[], bool],
+        observations: PerformanceCurveObservationPort,
+    ) -> None:
+        self._runtime = runtime
+        self._is_enabled = is_enabled
         self.observations = observations
 
     def cancel_turn(self, turn_id: str | None) -> None:
-        runtime = getattr(self.runtime_state, "performance_curve_runtime", None)
-        cancel_turn = getattr(runtime, "cancel_turn", None)
-        if callable(cancel_turn):
-            cancel_turn(turn_id)
+        self._runtime.cancel_turn(turn_id)
 
     def owns_request(self, *, turn_id: str | None, request_id: str | None) -> bool:
-        runtime = getattr(self.runtime_state, "performance_curve_runtime", None)
-        owns_request = getattr(runtime, "owns_request", None)
-        return bool(
-            callable(owns_request)
-            and owns_request(turn_id=turn_id, request_id=request_id)
+        return self._runtime.owns_request(
+            turn_id=turn_id,
+            request_id=request_id,
         )
 
     def cancel_turns(self, turn_ids: set[str]) -> list[str]:
@@ -59,7 +96,7 @@ class PerformanceCurveCoordinator:
         assistant_text: str,
         motion_payload: Any,
     ) -> str | None:
-        if not self.runtime_state.enable_performance_curve:
+        if not self._is_enabled():
             return None
 
         normalized_turn_id = str(turn_id or "").strip()
@@ -67,11 +104,8 @@ class PerformanceCurveCoordinator:
         normalized_message_id = str(message_id or "").strip()
         normalized_request_id = str(request_id or "").strip()
         normalized_assistant_text = str(assistant_text or "").strip()
-        runtime = getattr(self.runtime_state, "performance_curve_runtime", None)
         skip_reason = ""
-        if runtime is None:
-            skip_reason = "runtime_unavailable"
-        elif not isinstance(motion_payload, dict):
+        if not isinstance(motion_payload, dict):
             skip_reason = "pending_motion_payload_invalid"
         elif not normalized_turn_id:
             skip_reason = "turn_id_missing"
@@ -114,7 +148,7 @@ class PerformanceCurveCoordinator:
                 motion_effect_summary=motion_summary,
                 chat_context=self.observations.motion_lab_chat_context(),
             )
-            if runtime.start(request):
+            if self._runtime.start(request):
                 return normalized_request_id
         except Exception as exc:  # noqa: BLE001 - optional curve cannot block output.
             logger.exception(
@@ -155,21 +189,9 @@ class PerformanceCurveCoordinator:
         normalized_request_id = str(request_id or "").strip()
         if not normalized_request_id:
             return motion_payload
-        runtime = getattr(self.runtime_state, "performance_curve_runtime", None)
         normalized_turn_id = str(turn_id or "").strip()
-        if runtime is None:
-            self.record_outcome(
-                event_type="performance_curve.skipped",
-                reason="runtime_unavailable_before_egress",
-                turn_id=normalized_turn_id,
-                message_id=message_id,
-                assistant_text="",
-                tts_turn_id="",
-                request_id=normalized_request_id,
-            )
-            return motion_payload
         try:
-            hint = runtime.get_ready(
+            hint = self._runtime.get_ready(
                 turn_id=turn_id,
                 request_id=normalized_request_id,
             )
@@ -226,7 +248,6 @@ class PerformanceCurveCoordinator:
         if not request_id:
             return
         hint = payload.get("performance_curve_hint")
-        runtime = getattr(self.runtime_state, "performance_curve_runtime", None)
         try:
             if isinstance(hint, dict):
                 self.observations.record_motion_lab_raw_event(
@@ -247,7 +268,7 @@ class PerformanceCurveCoordinator:
                         ],
                     },
                 )
-            elif runtime is not None and runtime.discard_if_not_ready(
+            elif self._runtime.discard_if_not_ready(
                 turn_id=segment.turn_id,
                 request_id=request_id,
             ):
@@ -280,24 +301,23 @@ class PerformanceCurveCoordinator:
                 request_id=request_id,
             )
         finally:
-            if runtime is not None:
-                try:
-                    runtime.clear(turn_id=segment.turn_id, request_id=request_id)
-                except Exception as exc:  # noqa: BLE001 - optional curve cleanup.
-                    logger.exception(
-                        "Performance curve request cleanup failed: turn_id=%s request_id=%s",
-                        segment.turn_id,
-                        request_id,
-                    )
-                    self.record_outcome(
-                        event_type="performance_curve.failed",
-                        reason=f"clear_exception:{exc}",
-                        turn_id=segment.turn_id,
-                        message_id=segment.message_id,
-                        assistant_text=segment.semantic_text,
-                        tts_turn_id="",
-                        request_id=request_id,
-                    )
+            try:
+                self._runtime.clear(turn_id=segment.turn_id, request_id=request_id)
+            except Exception as exc:  # noqa: BLE001 - optional curve cleanup.
+                logger.exception(
+                    "Performance curve request cleanup failed: turn_id=%s request_id=%s",
+                    segment.turn_id,
+                    request_id,
+                )
+                self.record_outcome(
+                    event_type="performance_curve.failed",
+                    reason=f"clear_exception:{exc}",
+                    turn_id=segment.turn_id,
+                    message_id=segment.message_id,
+                    assistant_text=segment.semantic_text,
+                    tts_turn_id="",
+                    request_id=request_id,
+                )
 
     def record_outcome(
         self,

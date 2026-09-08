@@ -32,7 +32,7 @@ flowchart LR
     OBS[OBS / 直播采集]:::external
     BILI[Bilibili Live API]:::external
     ESP[ESP32 辅助显示]:::device
-    REMOTE[远程执行器 / Codex App Server]:::external
+    REMOTE[冻结的 Remote Operator<br/>待迁移遗留实现]:::external
 
     USER -->|文本 / 麦克风 / PTT| RENDERER
     USER -->|AstrBot 原生入口| CORE
@@ -64,4 +64,4 @@ flowchart LR
     CONFIG --> RENDERER
 
     RENDERER -.状态输出.-> ESP
-    AG99 -.受控任务委托.-> REMOTE
+    AG99 -.冻结代码，非当前产品链路.-> REMOTE

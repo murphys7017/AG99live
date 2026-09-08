@@ -56,10 +56,9 @@ export function createConversationPlaybackRuntime(options: {
     modelSync: options.modelSync,
     normalizeMotionPayload: options.normalizeMotionPayload,
   });
-  const playbackTimeline = createAppPlaybackTimelineRuntime({
+  const playbackComposition = createAppPlaybackTimelineRuntime({
     sessionStore: options.sessionStore,
     adapterPlayback: adapter.playback,
-    audioPlayback: adapter.audioPlayback,
     motionSink: requiredMotionTimelineSink,
     audioSink: createBrowserAudioTimelineSink(),
     onAudioTimelineStarted: (turnId, messageId, timeline) => {
@@ -73,6 +72,8 @@ export function createConversationPlaybackRuntime(options: {
       );
     },
   });
+  adapter.bindPlaybackAudioControl(playbackComposition.audioControl);
+  const playbackTimeline = playbackComposition.playbackTimeline;
 
   async function dispose(): Promise<void> {
     await adapter.dispose();

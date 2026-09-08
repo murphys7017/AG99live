@@ -1,10 +1,12 @@
+from __future__ import annotations
+
 import asyncio
 import importlib
 import sys
 import types
 
 
-def _install_message_component_stubs(monkeypatch) -> type:
+def _install_message_component_stubs(monkeypatch):
     components_module = types.ModuleType("astrbot.api.message_components")
 
     class Plain:
@@ -24,20 +26,19 @@ def _install_message_component_stubs(monkeypatch) -> type:
     components_module.Image = Image
     components_module.Record = Record
     monkeypatch.setitem(sys.modules, "astrbot.api.message_components", components_module)
-    return Plain, Image, Record
+    return Plain
 
 
-def test_output_segments_flush_before_turn_synth_finished(
+def test_completed_segment_does_not_wait_for_an_older_pending_segment(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
     install_fake_astrbot()
-    Plain, Image, Record = _install_message_component_stubs(monkeypatch)
+    Plain = _install_message_component_stubs(monkeypatch)
     module = importlib.import_module(
         "astrbot_plugin_ag99live_adapter.runtime.output_segment_coordinator"
     )
     module = importlib.reload(module)
-
     emitted: list[dict] = []
 
     async def send_json(envelope: dict) -> bool:
@@ -96,64 +97,24 @@ def test_output_segments_flush_before_turn_synth_finished(
 
     async def run_case() -> None:
         await coordinator.emit_message_chain(
-            [Record("first.wav", "first")],
+            [Plain("first")],
             turn_id="turn-1",
-            platform_extras={
-                "logical_message_id": "segment-1",
-                "semantic_text": "first",
-                "output_segment": {
-                    "turn_id": "turn-1",
-                    "message_id": "segment-1",
-                    "external_correlation_id": "turn-1",
-                    "tts": {
-                        "tts_request_id": "tts-1",
-                        "status": "succeeded",
-                        "failure_code": "",
-                        "turn_id": "turn-1",
-                        "message_id": "segment-1",
-                        "external_correlation_id": "turn-1",
-                    },
-                },
-                "audio_attachment": "present",
-            },
-        )
-        await coordinator.emit_message_chain(
-            [Image("first.png")],
-            turn_id="turn-1",
-            platform_extras={
-                "logical_message_id": "segment-1",
-                "semantic_text": "first",
-            },
+            platform_extras={"logical_message_id": "segment-1"},
         )
         await coordinator.emit_message_chain(
             [Plain("second")],
             turn_id="turn-1",
             platform_extras={"logical_message_id": "segment-2"},
         )
-        assert emitted == []
-        await coordinator.finalize_output_segment(
-            turn_id="turn-1",
-            message_id="segment-1",
-            flush_reason="logical_delivery_complete",
-        )
-        assert [envelope["type"] for envelope in emitted] == ["output.segment"]
-        assert emitted[0]["payload"]["text"] == {"state": "present", "content": "first"}
-        assert emitted[0]["payload"]["audio"]["state"] == "present"
-        assert emitted[0]["payload"]["images"] == ["first.png"]
         await coordinator.finalize_output_segment(
             turn_id="turn-1",
             message_id="segment-2",
-            flush_reason="logical_delivery_complete",
         )
-        await coordinator.emit_message_chain(
-            [Plain("first")],
+        assert [envelope["message_id"] for envelope in emitted] == ["segment-2"]
+        await coordinator.finalize_output_segment(
             turn_id="turn-1",
-            platform_extras={"logical_message_id": "segment-1"},
+            message_id="segment-1",
         )
-        assert [envelope["type"] for envelope in emitted] == [
-            "output.segment",
-            "output.segment",
-        ]
         await coordinator.close_turn_output_queue(turn_id="turn-1")
 
     asyncio.run(run_case())
@@ -164,6 +125,6 @@ def test_output_segments_flush_before_turn_synth_finished(
         "control.synth_finished",
     ]
     assert [envelope["message_id"] for envelope in emitted[:2]] == [
-        "segment-1",
         "segment-2",
+        "segment-1",
     ]

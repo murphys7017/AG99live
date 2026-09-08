@@ -20,18 +20,11 @@ import {
   sendText as sendTextAction,
 } from "./outbound/outboundActions.js";
 import { createAdapterOutboundClient } from "./outbound/outboundClient.js";
-import {
-  createAdapterAudioRuntime,
-  type AdapterAudioRuntime,
-} from "./runtime/audioRuntime.js";
 import { useAdapterMotionTuning } from "./motion-tuning/useAdapterMotionTuning.js";
 import {
   createAdapterMicrophoneRuntime,
 } from "./runtime/microphoneRuntime.js";
-import type { PlaybackTimelineAudioSink } from "../playback-timeline/audioSink.js";
-import type {
-  PlaybackTimelineRuntime,
-} from "../playback-timeline/playbackTimelineRuntime.js";
+import type { PlaybackTimelineAudioControl } from "../playback-timeline/audioPlaybackControl.js";
 import {
   buildConnectFailureMessage,
   buildConnectionCandidates,
@@ -52,10 +45,7 @@ import {
 import {
   createTextSegmentSink,
 } from "../playback-timeline/segmentReleaseSinks.js";
-import type {
-  MotionPayloadNormalizer,
-  NormalizedMotionPayload,
-} from "../types/motion.js";
+import type { MotionPayloadNormalizer } from "../types/motion.js";
 import type { MotionLabRawEventInput } from "../motion-lab/outboundQueue.js";
 import {
   type ModelSyncInstance,
@@ -119,7 +109,7 @@ export interface AdapterConnectionInstance {
 
 export interface AdapterConnectionCompositionInstance extends AdapterConnectionInstance {
   playback: AdapterPlaybackCompositionPort;
-  audioPlayback: AdapterAudioPlaybackPort;
+  bindPlaybackAudioControl: (control: PlaybackTimelineAudioControl) => void;
 }
 
 export interface AdapterPlaybackCompositionPort {
@@ -133,18 +123,11 @@ export interface AdapterPlaybackCompositionPort {
     turnId: string | null,
     reason: string,
   ) => boolean;
-}
-
-export interface AdapterAudioPlaybackPort {
-  releaseAudioForTimelinePlayback: (
-    audioUrl: string,
-    messageId: string,
-    turnId: string | null,
-  ) => boolean;
-  initializeAudioRuntime: (
-    runtime: PlaybackTimelineRuntime<NormalizedMotionPayload>,
-    audioSink: PlaybackTimelineAudioSink,
-  ) => void;
+  reportAudioPlaybackPreparing: () => void;
+  reportAudioPlaybackStarted: (turnId: string | null, durationMs: number | null) => void;
+  reportAudioPlaybackEnded: () => void;
+  reportAudioPlaybackFailed: (reason: string) => void;
+  reportPlaybackHistory: (text: string) => void;
 }
 
 interface CreateAdapterConnectionOptions {
@@ -177,7 +160,7 @@ export function createAdapterConnection(
     turnId: string | null,
   ) => void) | null = null;
   let detachPttHookStatusListener: (() => void) | null = null;
-  let audioRuntime: AdapterAudioRuntime | null = null;
+  let playbackAudioControl: PlaybackTimelineAudioControl | null = null;
 
   function buildMessageEnvelope<TPayload>(
     type: string,
@@ -243,42 +226,34 @@ export function createAdapterConnection(
     stopPttCapture,
   } = microphoneRuntime;
 
-  function requireAudioRuntime(): AdapterAudioRuntime {
-    if (!audioRuntime) {
-      throw new Error("PlaybackTimelineRuntime has not been attached to the adapter.");
+  function requirePlaybackAudioControl(): PlaybackTimelineAudioControl {
+    if (!playbackAudioControl) {
+      throw new Error("Playback audio control has not been attached to the adapter.");
     }
-    return audioRuntime;
+    return playbackAudioControl;
   }
 
-  function initializeAudioRuntime(
-    playbackTimelineRuntime: PlaybackTimelineRuntime<NormalizedMotionPayload>,
-    audioSink: PlaybackTimelineAudioSink,
-  ): void {
-    if (audioRuntime) {
-      throw new Error("PlaybackTimelineRuntime may only be attached once.");
+  function bindPlaybackAudioControl(control: PlaybackTimelineAudioControl): void {
+    if (playbackAudioControl) {
+      throw new Error("Playback audio control may only be attached once.");
     }
-    audioRuntime = createAdapterAudioRuntime({
-      state,
-      audioSink,
-      playbackTimelineRuntime,
-      pushHistory: pushHistory as (role: string, text: string) => void,
-    });
+    playbackAudioControl = control;
   }
 
   function stopAudioAndSettleTurn(turnId: string | null, reason: string): void {
-    requireAudioRuntime().stopAudioAndSettleTurn(turnId, reason);
+    requirePlaybackAudioControl().stopAudioAndSettleTurn(turnId, reason);
   }
 
   function stopAudioAndSettleAll(reason: string): void {
-    requireAudioRuntime().stopAudioAndSettleAll(reason);
+    requirePlaybackAudioControl().stopAudioAndSettleAll(reason);
   }
 
   function findActiveAudioSegment() {
-    return requireAudioRuntime().findActiveAudioSegment();
+    return requirePlaybackAudioControl().findActiveAudioSegment();
   }
 
   function findOpenAudioSegment() {
-    return requireAudioRuntime().findOpenAudioSegment();
+    return requirePlaybackAudioControl().findOpenAudioSegment();
   }
 
   const inboundRuntime = createAdapterInboundRuntime({
@@ -331,7 +306,7 @@ export function createAdapterConnection(
     stopAudioAndSettleTurn: (turnId: string | null, reason: string) =>
       stopAudioAndSettleTurn(turnId, reason),
     findOpenAudioSegment: () => findOpenAudioSegment(),
-    findOpenExecutionSegment: () => requireAudioRuntime().findOpenExecutionSegment(),
+    findOpenExecutionSegment: () => requirePlaybackAudioControl().findOpenExecutionSegment(),
     markTurnInterrupted: (turnId: string | null) => {
       if (sessionStore.getSession(turnId)) {
         sessionStore.markInterrupt(turnId);
@@ -747,18 +722,6 @@ export function createAdapterConnection(
     );
   }
 
-  function releaseAudioForTimelinePlayback(
-    audioUrl: string,
-    messageId: string,
-    turnId: string | null,
-  ): boolean {
-    return requireAudioRuntime().releaseAudioForTimelinePlayback(
-      audioUrl,
-      messageId,
-      turnId,
-    );
-  }
-
   function sendText(text: string): Promise<boolean> {
     return sendTextAction(outboundCtx, text);
   }
@@ -898,10 +861,36 @@ export function createAdapterConnection(
     playback: {
       releaseAssistantTextForPlayback,
       failAssistantTextForPlayback,
+      reportAudioPlaybackPreparing: () => {
+        state.isPlayingAudio = false;
+        state.statusMessage = "收到语音回复，正在准备播放。";
+        pushHistory("system", state.statusMessage);
+      },
+      reportAudioPlaybackStarted: (turnId, durationMs) => {
+        state.isPlayingAudio = true;
+        state.statusMessage = "收到语音回复，正在播放。";
+        console.info(
+          "[Connection] audio playback started. turn_id=",
+          turnId,
+          "duration_ms=",
+          durationMs,
+        );
+      },
+      reportAudioPlaybackEnded: () => {
+        state.isPlayingAudio = false;
+      },
+      reportAudioPlaybackFailed: (reason) => {
+        state.isPlayingAudio = false;
+        state.lastError = reason === "audio_autoplay_blocked"
+          ? "浏览器拒绝自动播放语音。"
+          : "音频播放失败。";
+        state.statusMessage = "语音播放失败，已回传结束状态。";
+        pushHistory("error", state.lastError);
+      },
+      reportPlaybackHistory: (text) => {
+        pushHistory("system", text);
+      },
     },
-    audioPlayback: {
-      releaseAudioForTimelinePlayback,
-      initializeAudioRuntime,
-    },
+    bindPlaybackAudioControl,
   };
 }

@@ -404,11 +404,10 @@ class OLVPetPlatformAdapter(Platform):
         if self.remote_operator_runtime is not None:
             await self.remote_operator_runtime.stop()
         await self.transport.stop()
-        motion_lab_recorder = getattr(self.runtime_state, "motion_lab_recorder", None)
-        close_motion_lab = getattr(motion_lab_recorder, "close", None)
         try:
-            if callable(close_motion_lab):
-                await close_motion_lab()
+            motion_lab_recorder = self.runtime_state.motion_lab_recorder
+            if motion_lab_recorder is not None:
+                await motion_lab_recorder.close()
         finally:
             self._event_loop = None
 
@@ -468,11 +467,11 @@ class OLVPetPlatformAdapter(Platform):
 
     def _sync_client_profile_from_runtime_state(self) -> None:
         self.client_uid = normalize_client_uid(
-            getattr(self.runtime_state, "client_uid", self.client_uid),
+            self.runtime_state.client_uid,
             DEFAULT_CLIENT_UID,
         )
         self.client_nickname = normalize_client_nickname(
-            getattr(self.runtime_state, "client_nickname", self.client_nickname),
+            self.runtime_state.client_nickname,
             DEFAULT_CLIENT_NICKNAME,
         )
         self.session_state.client_uid = self.client_uid
