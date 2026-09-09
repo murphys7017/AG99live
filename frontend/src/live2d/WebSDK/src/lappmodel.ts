@@ -52,10 +52,11 @@ import {
 } from "./directparameterplan";
 import {
   type ActiveDirectParameterFrameState,
+  type ActiveInteractionGazeState,
   type ActiveInteractionSwayState,
   type DirectSemanticParameterBinding,
 } from "./parametermixer";
-import type { InteractionSwayInput } from "../../../types/live2d-runtime";
+import type { InteractionGazeInput, InteractionSwayInput } from "../../../types/live2d-runtime";
 import {
   ActiveParameterRuntime,
   type ActiveParameterFrameFailure,
@@ -1941,48 +1942,7 @@ export class LAppModel extends CubismUserModel {
     if (!this._model || this._state != LoadStep.CompleteSetup) {
       return false;
     }
-    const bindings: ActiveInteractionSwayState["bindings"] = [];
-    const seenParameterIndices = new Set<number>();
-    for (const binding of input.bindings) {
-      const parameterIdRaw = binding.parameterId.trim();
-      const parameterIndex = this.resolveWritableParameterIndex(parameterIdRaw);
-      if (parameterIndex === null || seenParameterIndices.has(parameterIndex)) {
-        return false;
-      }
-      const minValue = this._model.getParameterMinimumValue(parameterIndex);
-      const maxValue = this._model.getParameterMaximumValue(parameterIndex);
-      if (
-        !Number.isFinite(minValue)
-        || !Number.isFinite(maxValue)
-        || minValue > maxValue
-        || ![binding.neutralValue, binding.negativeValue, binding.positiveValue].every(
-          (value) => Number.isFinite(value) && value >= minValue && value <= maxValue,
-        )
-      ) {
-        return false;
-      }
-      seenParameterIndices.add(parameterIndex);
-      bindings.push({
-        axisId: input.axisId,
-        parameterIdRaw,
-        parameterIndex,
-        neutralValue: binding.neutralValue,
-        negativeValue: binding.negativeValue,
-        positiveValue: binding.positiveValue,
-        weight: binding.weight,
-        presentation: {
-          parameterId: parameterIdRaw,
-          initialValue: this._model.getParameterValueByIndex(parameterIndex),
-          neutralValue: binding.neutralValue,
-          maxVelocity: binding.maxVelocity,
-          maxAcceleration: binding.maxAcceleration,
-          response: binding.response,
-          drivenOffset: null,
-          velocity: 0,
-          lastElapsedMs: null,
-        },
-      });
-    }
+    const bindings = this.createInteractionBindings(input);
     if (!bindings.length || !Number.isFinite(input.cycleMs) || input.cycleMs <= 0) {
       return false;
     }
@@ -2007,6 +1967,93 @@ export class LAppModel extends CubismUserModel {
 
   public stopInteractionSway(): void {
     this._activeParameterRuntime.stopInteractionSway();
+  }
+
+  public startInteractionGaze(input: InteractionGazeInput): boolean {
+    if (!this._model || this._state != LoadStep.CompleteSetup || !Number.isFinite(input.targetRatio)) {
+      return false;
+    }
+    const bindings = this.createInteractionBindings(input);
+    if (!bindings.length) {
+      return false;
+    }
+    this._activeParameterRuntime.startInteractionGaze({
+      targetRatio: Math.max(-1, Math.min(1, input.targetRatio)),
+      elapsedMs: 0,
+      bindings,
+      timing: this.createPersistentInteractionTiming(),
+    });
+    return true;
+  }
+
+  public updateInteractionGaze(targetRatio: number): void {
+    this._activeParameterRuntime.updateInteractionGaze(targetRatio);
+  }
+
+  public stopInteractionGaze(): void {
+    this._activeParameterRuntime.stopInteractionGaze();
+  }
+
+  private createInteractionBindings(
+    input: Pick<InteractionSwayInput, "axisId" | "bindings">,
+  ): ActiveInteractionSwayState["bindings"] {
+    if (!this._model) {
+      return [];
+    }
+    const bindings: ActiveInteractionSwayState["bindings"] = [];
+    const seenParameterIndices = new Set<number>();
+    for (const binding of input.bindings) {
+      const parameterIdRaw = binding.parameterId.trim();
+      const parameterIndex = this.resolveWritableParameterIndex(parameterIdRaw);
+      if (parameterIndex === null || seenParameterIndices.has(parameterIndex)) {
+        return [];
+      }
+      const minValue = this._model.getParameterMinimumValue(parameterIndex);
+      const maxValue = this._model.getParameterMaximumValue(parameterIndex);
+      if (
+        !Number.isFinite(minValue)
+        || !Number.isFinite(maxValue)
+        || minValue > maxValue
+        || ![binding.neutralValue, binding.negativeValue, binding.positiveValue].every(
+          (value) => Number.isFinite(value) && value >= minValue && value <= maxValue,
+        )
+      ) {
+        return [];
+      }
+      seenParameterIndices.add(parameterIndex);
+      bindings.push({
+        axisId: input.axisId,
+        parameterIdRaw,
+        parameterIndex,
+        neutralValue: binding.neutralValue,
+        negativeValue: binding.negativeValue,
+        positiveValue: binding.positiveValue,
+        weight: binding.weight,
+        presentation: {
+          parameterId: parameterIdRaw,
+          initialValue: this._model.getParameterValueByIndex(parameterIndex),
+          neutralValue: binding.neutralValue,
+          maxVelocity: binding.maxVelocity,
+          maxAcceleration: binding.maxAcceleration,
+          response: binding.response,
+          drivenOffset: null,
+          velocity: 0,
+          lastElapsedMs: null,
+        },
+      });
+    }
+    return bindings;
+  }
+
+  private createPersistentInteractionTiming(): ActiveInteractionGazeState["timing"] {
+    return {
+      durationMs: Number.MAX_SAFE_INTEGER,
+      blendInMs: 0,
+      holdMs: Number.MAX_SAFE_INTEGER,
+      blendOutMs: 0,
+      curvePreset: "smooth_hold",
+      totalMs: Number.MAX_SAFE_INTEGER,
+    };
   }
 
   private resolveSpeechPoseModulation(

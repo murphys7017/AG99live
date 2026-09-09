@@ -11,7 +11,7 @@ import type {
   DirectParameterPlanStartOptions,
   DirectParameterPlanTerminalStatus,
 } from "./directparameterplan";
-import type { InteractionSwayInput } from "../../../types/live2d-runtime";
+import type { InteractionGazeInput, InteractionSwayInput } from "../../../types/live2d-runtime";
 
 export interface MotionResourceLifecycleCallbacks {
   playbackClockReader?: { getElapsedMs: () => number | null };
@@ -127,6 +127,18 @@ export class LAppAdapter {
 
   public stopInteractionSway(): void {
     this.getModel()?.stopInteractionSway();
+  }
+
+  public startInteractionGaze(input: InteractionGazeInput): boolean {
+    return this.getModel()?.startInteractionGaze(input) ?? false;
+  }
+
+  public updateInteractionGaze(targetRatio: number): void {
+    this.getModel()?.updateInteractionGaze(targetRatio);
+  }
+
+  public stopInteractionGaze(): void {
+    this.getModel()?.stopInteractionGaze();
   }
 
   public writeExternalAudioSignalSource(

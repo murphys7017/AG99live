@@ -34,6 +34,12 @@ export interface InteractionSwayInput {
   }>;
 }
 
+export interface InteractionGazeInput {
+  axisId: string;
+  targetRatio: number;
+  bindings: InteractionSwayInput["bindings"];
+}
+
 export interface MotionResourceLifecycleCallbacks {
   playbackClockReader?: { getElapsedMs: () => number | null };
   onStarted?: () => void;
@@ -70,6 +76,9 @@ declare global {
       getDirectParameterPlanError?: () => string;
       startInteractionSway?: (input: InteractionSwayInput) => boolean;
       stopInteractionSway?: () => void;
+      startInteractionGaze?: (input: InteractionGazeInput) => boolean;
+      updateInteractionGaze?: (targetRatio: number) => void;
+      stopInteractionGaze?: () => void;
       beginExternalAudioSignalSource?: (
         sourceId: string,
         options?: {

@@ -416,6 +416,23 @@ function watchWindowShortcuts(window: BrowserWindow): void {
 }
 
 function setupIpc(): void {
+  ipcMain.handle("desktop:get-pet-cursor-target", async () => {
+    const petWindow = windowManager.getWindow("pet");
+    if (!petWindow || petWindow.isDestroyed() || !petWindow.isVisible()) {
+      return null;
+    }
+    const cursor = screen.getCursorScreenPoint();
+    const bounds = petWindow.getBounds();
+    const horizontalRatio = Math.max(
+      -1,
+      Math.min(
+        1,
+        (cursor.x - (bounds.x + bounds.width / 2)) / Math.max(1, bounds.width * 1.5),
+      ),
+    );
+    return { x: cursor.x, y: cursor.y, horizontalRatio };
+  });
+
   ipcMain.on("desktop:runtime-bridge-message", (event, payload: unknown) => {
     broadcastToOtherWindows(
       event.sender,

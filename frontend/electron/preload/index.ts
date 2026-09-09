@@ -39,6 +39,7 @@ function listLocalAdapterHosts(): string[] {
 }
 
 const api = {
+  getPetCursorTarget: () => ipcRenderer.invoke("desktop:get-pet-cursor-target"),
   showContextMenu: (position?: {
     x?: number;
     y?: number;

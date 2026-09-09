@@ -11,11 +11,12 @@ import {
 
 export const PARAMETER_MIX_PRIORITY = {
   interactionSway: 50,
+  interactionGaze: 60,
   directPlan: 100,
   lipSync: 200,
 } as const;
 
-export type ParameterContributionOwner = "interaction_sway" | "direct_plan" | "lip_sync";
+export type ParameterContributionOwner = "interaction_sway" | "interaction_gaze" | "direct_plan" | "lip_sync";
 export type ParameterFrameOwner = ParameterContributionOwner | "mixed";
 
 export interface DirectSemanticParameterBinding {
@@ -75,6 +76,13 @@ export interface ActiveInteractionSwayState {
   releaseMs: number;
   elapsedMs: number;
   releaseStartedAtMs: number | null;
+  bindings: ActiveInteractionSwayBinding[];
+  timing: DirectParameterExecutionPlan["timing"];
+}
+
+export interface ActiveInteractionGazeState {
+  targetRatio: number;
+  elapsedMs: number;
   bindings: ActiveInteractionSwayBinding[];
   timing: DirectParameterExecutionPlan["timing"];
 }
@@ -154,6 +162,7 @@ export interface ActiveParameterFrameInput {
   model: CubismModel | null;
   directPlan: ActiveDirectParameterFrameState | null;
   interactionSway: ActiveInteractionSwayState | null;
+  interactionGaze: ActiveInteractionGazeState | null;
   lipSyncEnabled: boolean;
   lipSyncActive: boolean;
   lipSyncIntensity: number;
@@ -195,6 +204,7 @@ export class ActiveParameterMixer {
       return { ok: false, owner: "direct_plan", reason: directPlan.failure };
     }
     const interactionSway = this.collectInteractionSwayContributions(input.interactionSway);
+    const interactionGaze = this.collectInteractionGazeContributions(input.interactionGaze);
     const lipSyncContributions = this.collectLipSyncContributions(input, model);
     if (typeof lipSyncContributions === "string") {
       return { ok: false, owner: "lip_sync", reason: lipSyncContributions };
@@ -202,6 +212,7 @@ export class ActiveParameterMixer {
 
     const contributions = [
       ...interactionSway.contributions,
+      ...interactionGaze.contributions,
       ...directPlan.contributions,
       ...lipSyncContributions,
     ];
@@ -374,9 +385,11 @@ export class ActiveParameterMixer {
       const hasLipSyncContribution = orderedContributions.some(
         (contribution) => contribution.owner === "lip_sync",
       );
-      const presentationContribution = orderedContributions
-        .filter((contribution) => contribution.owner !== "lip_sync" && contribution.presentation)
-        .at(-1);
+      const presentationContributions = orderedContributions
+        .filter((contribution) => contribution.owner !== "lip_sync" && contribution.presentation);
+      const presentationContribution = presentationContributions.length > 0
+        ? presentationContributions[presentationContributions.length - 1]
+        : undefined;
       let presentedValue = directOnlyTargetValue;
       if (presentationContribution?.presentation) {
         presentedValue = releaseEligible
@@ -525,6 +538,33 @@ export class ActiveParameterMixer {
           node: binding.presentation,
           elapsedMs: sway.elapsedMs,
           timing: sway.timing,
+        },
+      })),
+    };
+  }
+
+  private collectInteractionGazeContributions(
+    gaze: ActiveInteractionGazeState | null,
+  ): { contributions: ParameterContribution[] } {
+    if (!gaze) {
+      return { contributions: [] };
+    }
+    const targetRatio = Math.max(-1, Math.min(1, gaze.targetRatio));
+    return {
+      contributions: gaze.bindings.map((binding) => ({
+        parameterIdRaw: binding.parameterIdRaw,
+        parameterIndex: binding.parameterIndex,
+        owner: "interaction_gaze" as const,
+        source: `interaction_gaze:${binding.axisId}`,
+        value: targetRatio >= 0
+          ? interpolate(binding.neutralValue, binding.positiveValue, targetRatio)
+          : interpolate(binding.neutralValue, binding.negativeValue, -targetRatio),
+        weight: binding.weight,
+        priority: PARAMETER_MIX_PRIORITY.interactionGaze,
+        presentation: {
+          node: binding.presentation,
+          elapsedMs: gaze.elapsedMs,
+          timing: gaze.timing,
         },
       })),
     };
@@ -681,7 +721,10 @@ function validateContribution(
 function isParameterContributionOwner(
   owner: unknown,
 ): owner is ParameterContributionOwner {
-  return owner === "interaction_sway" || owner === "direct_plan" || owner === "lip_sync";
+  return owner === "interaction_sway"
+    || owner === "interaction_gaze"
+    || owner === "direct_plan"
+    || owner === "lip_sync";
 }
 
 function resolveContributionValue(

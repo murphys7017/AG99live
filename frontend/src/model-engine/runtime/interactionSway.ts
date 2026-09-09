@@ -1,5 +1,8 @@
 import type { ModelSummary } from "../../types/protocol.js";
-import type { InteractionSwayInput } from "../../types/live2d-runtime.d.ts";
+import type {
+  InteractionGazeInput,
+  InteractionSwayInput,
+} from "../../types/live2d-runtime.d.ts";
 import type {
   SemanticAxisDefinition,
   SemanticAxisProfile,
@@ -60,6 +63,50 @@ export function buildThinkingSwayInput(model: ModelSummary): InteractionSwayInpu
   };
 }
 
+export function buildCursorGazeInput(
+  model: ModelSummary,
+  targetRatio: number,
+): InteractionGazeInput | null {
+  const profile = model.semantic_axis_profile;
+  const axis = profile ? selectGazeAxis(profile) : null;
+  if (!axis || !Number.isFinite(targetRatio)) {
+    return null;
+  }
+  const negativeValue = axis.level_anchors?.["-1"];
+  const positiveValue = axis.level_anchors?.["1"];
+  if (!Number.isFinite(negativeValue) || !Number.isFinite(positiveValue)) {
+    return null;
+  }
+  const bindings: InteractionGazeInput["bindings"] = [];
+  for (const binding of axis.parameter_bindings) {
+    const neutral = mapSemanticBindingValue(axis, binding, axis.neutral);
+    const negative = mapSemanticBindingValue(axis, binding, Number(negativeValue));
+    const positive = mapSemanticBindingValue(axis, binding, Number(positiveValue));
+    if (!neutral.ok || !negative.ok || !positive.ok) {
+      return null;
+    }
+    const dynamics = mapSemanticBindingDynamics(axis, binding);
+    bindings.push({
+      parameterId: binding.parameter_id,
+      neutralValue: neutral.targetValue,
+      negativeValue: negative.targetValue,
+      positiveValue: positive.targetValue,
+      weight: binding.default_weight,
+      maxVelocity: dynamics.max_velocity,
+      maxAcceleration: dynamics.max_acceleration,
+      response: dynamics.response,
+    });
+  }
+  if (!bindings.length) {
+    return null;
+  }
+  return {
+    axisId: axis.id,
+    targetRatio: Math.max(-1, Math.min(1, targetRatio)),
+    bindings,
+  };
+}
+
 function selectLateralAxis(profile: SemanticAxisProfile): SemanticAxisDefinition | null {
   return profile.axes
     .filter((axis) => (
@@ -69,6 +116,18 @@ function selectLateralAxis(profile: SemanticAxisProfile): SemanticAxisDefinition
       && lateralAxisPriority(axis) !== null
     ))
     .sort((left, right) => lateralAxisPriority(left)! - lateralAxisPriority(right)!)[0]
+    ?? null;
+}
+
+function selectGazeAxis(profile: SemanticAxisProfile): SemanticAxisDefinition | null {
+  return profile.axes
+    .filter((axis) => (
+      (axis.control_role === "primary" || axis.control_role === "hint")
+      && hasLateralAnchors(axis)
+      && axis.parameter_bindings.length > 0
+      && gazeAxisPriority(axis) !== null
+    ))
+    .sort((left, right) => gazeAxisPriority(left)! - gazeAxisPriority(right)!)[0]
     ?? null;
 }
 
@@ -86,5 +145,14 @@ function lateralAxisPriority(axis: SemanticAxisDefinition): number | null {
   if (id === "head_roll") return 1;
   if (id === "body_yaw" || id === "body_roll") return 2;
   if (/(?:gaze|yaw|roll|左右|扭头|摇摆)/u.test(`${id} ${text}`)) return 3;
+  return null;
+}
+
+function gazeAxisPriority(axis: SemanticAxisDefinition): number | null {
+  const id = axis.id.toLowerCase();
+  const text = `${axis.label} ${axis.description} ${axis.usage_notes}`.toLowerCase();
+  if (id === "gaze_x") return 0;
+  if (id === "head_yaw") return 1;
+  if (/(?:gaze|视线|眼神|扭头|yaw)/u.test(`${id} ${text}`)) return 2;
   return null;
 }

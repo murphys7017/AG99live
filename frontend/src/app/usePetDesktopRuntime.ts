@@ -51,6 +51,7 @@ import {
   type MotionLabRawEventInput,
 } from "../motion-lab/outboundQueue";
 import { createConversationPlaybackRuntime } from "./createConversationPlaybackRuntime";
+import { useCursorGaze } from "./useCursorGaze";
 
 export interface PetDesktopRuntime {
   sessionStore: ReturnType<typeof useTurnPlaybackSessionStore>;
@@ -68,6 +69,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
   const sessionStore = useTurnPlaybackSessionStore();
   const modelSync = createModelSync();
   const { state, selectedModel, selectedSemanticAxisProfile } = modelSync;
+  useCursorGaze(selectedModel);
   const conversationPlayback = createConversationPlaybackRuntime({
     sessionStore,
     modelSync,

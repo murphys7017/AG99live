@@ -4,6 +4,7 @@ import type { csmVector } from "@framework/type/csmvector";
 import {
   ActiveParameterMixer,
   type ActiveDirectParameterFrameState,
+  type ActiveInteractionGazeState,
   type ActiveInteractionSwayState,
   type ParameterFrameOwner,
 } from "./parametermixer";
@@ -33,10 +34,12 @@ export class ActiveParameterRuntime {
   private readonly mixer = new ActiveParameterMixer();
   private readonly speechSignals = new SpeechSignalRuntime();
   private interactionSway: ActiveInteractionSwayState | null = null;
+  private interactionGaze: ActiveInteractionGazeState | null = null;
 
   public reset(): void {
     this.speechSignals.reset();
     this.interactionSway = null;
+    this.interactionGaze = null;
   }
 
   public startInteractionSway(state: ActiveInteractionSwayState): void {
@@ -47,6 +50,20 @@ export class ActiveParameterRuntime {
     if (this.interactionSway && this.interactionSway.releaseStartedAtMs === null) {
       this.interactionSway.releaseStartedAtMs = this.interactionSway.elapsedMs;
     }
+  }
+
+  public startInteractionGaze(state: ActiveInteractionGazeState): void {
+    this.interactionGaze = state;
+  }
+
+  public updateInteractionGaze(targetRatio: number): void {
+    if (this.interactionGaze && Number.isFinite(targetRatio)) {
+      this.interactionGaze.targetRatio = Math.max(-1, Math.min(1, targetRatio));
+    }
+  }
+
+  public stopInteractionGaze(): void {
+    this.interactionGaze = null;
   }
 
   public beginExternalAudioSignalSource(
@@ -93,9 +110,13 @@ export class ActiveParameterRuntime {
         this.interactionSway = null;
       }
     }
+    if (this.interactionGaze) {
+      this.interactionGaze.elapsedMs += Math.max(0, input.deltaTimeSeconds) * 1000;
+    }
     const execution = this.mixer.resolveActiveFrame({
       ...input,
       interactionSway: this.interactionSway,
+      interactionGaze: this.interactionGaze,
       getSpeechAudioGain: (axisId) => this.speechSignals.getSpeechAudioGain(axisId),
     });
     if (execution.ok === false) {

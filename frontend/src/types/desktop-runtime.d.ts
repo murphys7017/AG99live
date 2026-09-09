@@ -13,6 +13,11 @@ import type {
 } from "./desktop";
 
 export interface Ag99DesktopApi {
+  getPetCursorTarget: () => Promise<{
+    x: number;
+    y: number;
+    horizontalRatio: number;
+  } | null>;
   showContextMenu: (position?: {
     x?: number;
     y?: number;
