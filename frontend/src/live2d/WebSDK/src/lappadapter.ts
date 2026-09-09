@@ -11,6 +11,7 @@ import type {
   DirectParameterPlanStartOptions,
   DirectParameterPlanTerminalStatus,
 } from "./directparameterplan";
+import type { InteractionSwayInput } from "../../../types/live2d-runtime";
 
 export interface MotionResourceLifecycleCallbacks {
   playbackClockReader?: { getElapsedMs: () => number | null };
@@ -118,6 +119,14 @@ export class LAppAdapter {
       throw new Error("live2d_model_unavailable");
     }
     model.beginExternalAudioSignalSource(sourceId, options);
+  }
+
+  public startInteractionSway(input: InteractionSwayInput): boolean {
+    return this.getModel()?.startInteractionSway(input) ?? false;
+  }
+
+  public stopInteractionSway(): void {
+    this.getModel()?.stopInteractionSway();
   }
 
   public writeExternalAudioSignalSource(

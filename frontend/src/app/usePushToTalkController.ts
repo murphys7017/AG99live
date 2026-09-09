@@ -13,6 +13,7 @@ export interface PushToTalkAdapterPort {
   };
   startPttCapture: () => Promise<DesktopPttAckStatus>;
   stopPttCapture: () => Promise<DesktopPttAckStatus>;
+  onPttIntent?: () => void;
 }
 
 export interface PushToTalkController {
@@ -34,12 +35,17 @@ export function usePushToTalkController(adapter: PushToTalkAdapterPort): PushToT
 
   function onPttKeyUp(event: KeyboardEvent): void {
     console.info("[PTT] keyup key=%s pttMode=%s", event.key, adapter.state.pttModeEnabled);
+    const matchesBinding = matchesPttKeyBinding(event, adapter.state.pttKeyBinding);
     if (!adapter.state.pttModeEnabled) {
       return;
     }
-    if (matchesPttKeyBinding(event, adapter.state.pttKeyBinding)) {
+    if (matchesBinding) {
       console.info("[PTT] stopping mic capture");
-      void adapter.stopPttCapture();
+      void adapter.stopPttCapture().then((status) => {
+        if (status === "stopped") {
+          adapter.onPttIntent?.();
+        }
+      });
     }
   }
 
@@ -71,7 +77,11 @@ export function usePushToTalkController(adapter: PushToTalkAdapterPort): PushToT
     }
     console.info("[PTT] IPC keyup");
     reportPttEvent(payload, "received");
-    void handlePttIpcCaptureStop(payload);
+    void handlePttIpcCaptureStop(payload).then((status) => {
+      if (status === "stopped") {
+        adapter.onPttIntent?.();
+      }
+    });
   }
 
   async function handlePttIpcCaptureStart(payload: DesktopPttEventPayload): Promise<void> {
@@ -82,11 +92,14 @@ export function usePushToTalkController(adapter: PushToTalkAdapterPort): PushToT
     }
   }
 
-  async function handlePttIpcCaptureStop(payload: DesktopPttEventPayload): Promise<void> {
+  async function handlePttIpcCaptureStop(payload: DesktopPttEventPayload): Promise<DesktopPttAckStatus> {
     try {
-      reportPttEvent(payload, await adapter.stopPttCapture());
+      const status = await adapter.stopPttCapture();
+      reportPttEvent(payload, status);
+      return status;
     } catch (error) {
       reportPttEvent(payload, "failed", getErrorMessage(error));
+      return "failed";
     }
   }
 

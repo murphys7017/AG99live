@@ -52,8 +52,10 @@ import {
 } from "./directparameterplan";
 import {
   type ActiveDirectParameterFrameState,
+  type ActiveInteractionSwayState,
   type DirectSemanticParameterBinding,
 } from "./parametermixer";
+import type { InteractionSwayInput } from "../../../types/live2d-runtime";
 import {
   ActiveParameterRuntime,
   type ActiveParameterFrameFailure,
@@ -699,6 +701,7 @@ export class LAppModel extends CubismUserModel {
       const frameResult = this._activeParameterRuntime.applyFrame({
         model: this._model,
         directPlan: this._directParameterPlanState,
+        deltaTimeSeconds,
         lipSyncEnabled: this._lipsync === true,
         lipSyncActive: audioSignals.lipSyncActive,
         lipSyncIntensity: audioSignals.lipSyncIntensity,
@@ -1932,6 +1935,78 @@ export class LAppModel extends CubismUserModel {
       this._model,
       this._lipSyncIds,
     );
+  }
+
+  public startInteractionSway(input: InteractionSwayInput): boolean {
+    if (!this._model || this._state != LoadStep.CompleteSetup) {
+      return false;
+    }
+    const bindings: ActiveInteractionSwayState["bindings"] = [];
+    const seenParameterIndices = new Set<number>();
+    for (const binding of input.bindings) {
+      const parameterIdRaw = binding.parameterId.trim();
+      const parameterIndex = this.resolveWritableParameterIndex(parameterIdRaw);
+      if (parameterIndex === null || seenParameterIndices.has(parameterIndex)) {
+        return false;
+      }
+      const minValue = this._model.getParameterMinimumValue(parameterIndex);
+      const maxValue = this._model.getParameterMaximumValue(parameterIndex);
+      if (
+        !Number.isFinite(minValue)
+        || !Number.isFinite(maxValue)
+        || minValue > maxValue
+        || ![binding.neutralValue, binding.negativeValue, binding.positiveValue].every(
+          (value) => Number.isFinite(value) && value >= minValue && value <= maxValue,
+        )
+      ) {
+        return false;
+      }
+      seenParameterIndices.add(parameterIndex);
+      bindings.push({
+        axisId: input.axisId,
+        parameterIdRaw,
+        parameterIndex,
+        neutralValue: binding.neutralValue,
+        negativeValue: binding.negativeValue,
+        positiveValue: binding.positiveValue,
+        weight: binding.weight,
+        presentation: {
+          parameterId: parameterIdRaw,
+          initialValue: this._model.getParameterValueByIndex(parameterIndex),
+          neutralValue: binding.neutralValue,
+          maxVelocity: binding.maxVelocity,
+          maxAcceleration: binding.maxAcceleration,
+          response: binding.response,
+          drivenOffset: null,
+          velocity: 0,
+          lastElapsedMs: null,
+        },
+      });
+    }
+    if (!bindings.length || !Number.isFinite(input.cycleMs) || input.cycleMs <= 0) {
+      return false;
+    }
+    this._activeParameterRuntime.startInteractionSway({
+      cycleMs: input.cycleMs,
+      attackMs: Math.max(0, input.attackMs),
+      releaseMs: Math.max(0, input.releaseMs),
+      elapsedMs: 0,
+      releaseStartedAtMs: null,
+      bindings,
+      timing: {
+        durationMs: Number.MAX_SAFE_INTEGER,
+        blendInMs: 0,
+        holdMs: Number.MAX_SAFE_INTEGER,
+        blendOutMs: 0,
+        curvePreset: "smooth_hold",
+        totalMs: Number.MAX_SAFE_INTEGER,
+      },
+    });
+    return true;
+  }
+
+  public stopInteractionSway(): void {
+    this._activeParameterRuntime.stopInteractionSway();
   }
 
   private resolveSpeechPoseModulation(

@@ -13,6 +13,27 @@ export type MotionPlaybackStartResult =
   | { status: "rejected"; reason: string }
   | { status: "started"; runId: string };
 
+export interface InteractionSwayInput {
+  axisId: string;
+  cycleMs: number;
+  attackMs: number;
+  releaseMs: number;
+  bindings: Array<{
+    parameterId: string;
+    neutralValue: number;
+    negativeValue: number;
+    positiveValue: number;
+    weight: number;
+    maxVelocity: number;
+    maxAcceleration: number;
+    response: { kind: "bounded" } | {
+      kind: "spring";
+      frequency_hz: number;
+      damping_ratio: number;
+    };
+  }>;
+}
+
 export interface MotionResourceLifecycleCallbacks {
   playbackClockReader?: { getElapsedMs: () => number | null };
   onStarted?: () => void;
@@ -47,6 +68,8 @@ declare global {
       ) => boolean;
       stopDirectParameterPlan?: (reason?: string, status?: DirectParameterPlanTerminalStatus) => void;
       getDirectParameterPlanError?: () => string;
+      startInteractionSway?: (input: InteractionSwayInput) => boolean;
+      stopInteractionSway?: () => void;
       beginExternalAudioSignalSource?: (
         sourceId: string,
         options?: {

@@ -41,6 +41,7 @@ import {
   startSpeechOnlyMotionRequest,
   type PreparedSemanticMotionPayload,
 } from "./runtime/motionStart.js";
+import { buildThinkingSwayInput } from "./runtime/interactionSway.js";
 
 function buildSpeechCueKey(cues: readonly OutputSegmentSpeechCue[]): string {
   return cues
@@ -104,6 +105,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     playPlan: dependencies.playPlan,
     playMotionResource: dependencies.playMotionResource,
     getPlayerMessage: dependencies.getPlayerMessage,
+    stopInteractionSway: dependencies.stopInteractionSway,
     onPlanStarted: (event) => {
       activePlaybackRun = {
         runId: event.runId,
@@ -488,6 +490,28 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     return startCompiledPreviewPlan(result.plan, semanticMotion, requestId);
   }
 
+  function startThinkingSway(
+    source: "ptt" | "text",
+  ): boolean {
+    const selectedModel = dependencies.getSelectedModel();
+    if (!selectedModel) {
+      return false;
+    }
+    const input = buildThinkingSwayInput(selectedModel);
+    if (!input) {
+      console.warn("[InteractionSway] no usable lateral semantic axis.", { source });
+      return false;
+    }
+    const started = dependencies.startInteractionSway(input);
+    console.info("[InteractionSway] thinking sway requested.", {
+      source,
+      axisId: input.axisId,
+      bindingCount: input.bindings.length,
+      started,
+    });
+    return started;
+  }
+
   function handlePlaybackTerminal(
     event: ModelEnginePlaybackTerminalEvent,
   ): ModelEngineActivePlaybackRun | null {
@@ -573,6 +597,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     preparePlaybackTimeline,
     handlePlaybackTimelineStarted,
     previewCompiledSemanticMotion,
+    startThinkingSway,
     handlePlaybackTerminal,
     interruptPlaybackSegment,
     stop,

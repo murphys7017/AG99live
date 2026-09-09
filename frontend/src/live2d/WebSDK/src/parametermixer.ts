@@ -10,11 +10,12 @@ import {
 } from "./parameterpresentation";
 
 export const PARAMETER_MIX_PRIORITY = {
+  interactionSway: 50,
   directPlan: 100,
   lipSync: 200,
 } as const;
 
-export type ParameterContributionOwner = "direct_plan" | "lip_sync";
+export type ParameterContributionOwner = "interaction_sway" | "direct_plan" | "lip_sync";
 export type ParameterFrameOwner = ParameterContributionOwner | "mixed";
 
 export interface DirectSemanticParameterBinding {
@@ -55,6 +56,27 @@ export interface ActiveDirectParameterFrameState {
   diagnosticFrameCount: number;
   /** Set only after every binding has activated and the active target settled. */
   releaseStartedAtMs: number | null;
+}
+
+export interface ActiveInteractionSwayBinding {
+  axisId: string;
+  parameterIdRaw: string;
+  parameterIndex: number;
+  neutralValue: number;
+  negativeValue: number;
+  positiveValue: number;
+  weight: number;
+  presentation: ParameterPresentationNode;
+}
+
+export interface ActiveInteractionSwayState {
+  cycleMs: number;
+  attackMs: number;
+  releaseMs: number;
+  elapsedMs: number;
+  releaseStartedAtMs: number | null;
+  bindings: ActiveInteractionSwayBinding[];
+  timing: DirectParameterExecutionPlan["timing"];
 }
 
 export interface ParameterContribution {
@@ -131,6 +153,7 @@ export interface DirectPlanContributionCollection {
 export interface ActiveParameterFrameInput {
   model: CubismModel | null;
   directPlan: ActiveDirectParameterFrameState | null;
+  interactionSway: ActiveInteractionSwayState | null;
   lipSyncEnabled: boolean;
   lipSyncActive: boolean;
   lipSyncIntensity: number;
@@ -171,12 +194,17 @@ export class ActiveParameterMixer {
     if (directPlan.failure) {
       return { ok: false, owner: "direct_plan", reason: directPlan.failure };
     }
+    const interactionSway = this.collectInteractionSwayContributions(input.interactionSway);
     const lipSyncContributions = this.collectLipSyncContributions(input, model);
     if (typeof lipSyncContributions === "string") {
       return { ok: false, owner: "lip_sync", reason: lipSyncContributions };
     }
 
-    const contributions = [...directPlan.contributions, ...lipSyncContributions];
+    const contributions = [
+      ...interactionSway.contributions,
+      ...directPlan.contributions,
+      ...lipSyncContributions,
+    ];
     const resolution = this.resolveFrame(
       contributions,
       this.captureParameterBaseSnapshots(model, contributions),
@@ -346,9 +374,9 @@ export class ActiveParameterMixer {
       const hasLipSyncContribution = orderedContributions.some(
         (contribution) => contribution.owner === "lip_sync",
       );
-      const presentationContribution = orderedContributions.find(
-        (contribution) => contribution.owner !== "lip_sync" && contribution.presentation,
-      );
+      const presentationContribution = orderedContributions
+        .filter((contribution) => contribution.owner !== "lip_sync" && contribution.presentation)
+        .at(-1);
       let presentedValue = directOnlyTargetValue;
       if (presentationContribution?.presentation) {
         presentedValue = releaseEligible
@@ -459,6 +487,46 @@ export class ActiveParameterMixer {
       releaseEligible: planState.releaseStartedAtMs !== null
         && elapsedMs >= planState.releaseStartedAtMs + Math.max(0, planState.timing.blendOutMs),
       released: false,
+    };
+  }
+
+  private collectInteractionSwayContributions(
+    sway: ActiveInteractionSwayState | null,
+  ): { contributions: ParameterContribution[] } {
+    if (!sway) {
+      return { contributions: [] };
+    }
+    const releaseElapsedMs = sway.releaseStartedAtMs === null
+      ? null
+      : sway.elapsedMs - sway.releaseStartedAtMs;
+    if (releaseElapsedMs !== null && releaseElapsedMs >= sway.releaseMs) {
+      return { contributions: [] };
+    }
+    const attackWeight = sway.attackMs <= 0
+      ? 1
+      : smoothstep(Math.min(1, sway.elapsedMs / sway.attackMs));
+    const releaseWeight = releaseElapsedMs === null || sway.releaseMs <= 0
+      ? 1
+      : smoothstep(1 - Math.max(0, releaseElapsedMs) / sway.releaseMs);
+    const phase = (sway.elapsedMs % sway.cycleMs) / sway.cycleMs;
+    const lateralOffset = Math.sin(phase * Math.PI * 2);
+    return {
+      contributions: sway.bindings.map((binding) => ({
+        parameterIdRaw: binding.parameterIdRaw,
+        parameterIndex: binding.parameterIndex,
+        owner: "interaction_sway" as const,
+        source: `interaction_sway:${binding.axisId}`,
+        value: lateralOffset >= 0
+          ? interpolate(binding.neutralValue, binding.positiveValue, lateralOffset)
+          : interpolate(binding.neutralValue, binding.negativeValue, -lateralOffset),
+        weight: binding.weight * attackWeight * releaseWeight,
+        priority: PARAMETER_MIX_PRIORITY.interactionSway,
+        presentation: {
+          node: binding.presentation,
+          elapsedMs: sway.elapsedMs,
+          timing: sway.timing,
+        },
+      })),
     };
   }
 
@@ -613,7 +681,7 @@ function validateContribution(
 function isParameterContributionOwner(
   owner: unknown,
 ): owner is ParameterContributionOwner {
-  return owner === "direct_plan" || owner === "lip_sync";
+  return owner === "interaction_sway" || owner === "direct_plan" || owner === "lip_sync";
 }
 
 function resolveContributionValue(
@@ -626,6 +694,10 @@ function resolveContributionValue(
 
 function clamp(value: number, minValue: number, maxValue: number): number {
   return Math.max(minValue, Math.min(maxValue, value));
+}
+
+function interpolate(start: number, end: number, progress: number): number {
+  return start + (end - start) * Math.max(0, Math.min(1, progress));
 }
 
 function resolveParameterOwnershipWeight(

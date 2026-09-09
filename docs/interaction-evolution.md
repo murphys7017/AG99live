@@ -4,7 +4,7 @@
 
 AG99live 已经具备“回复期间表演”的完整骨架：AstrBot 生成回复，Adapter 聚合 `OutputSegment`，前端用 `PlaybackTimeline` 协调音频、动作和口型，`ModelEngine` 编译语义动作，Live2D runtime 逐帧执行。
 
-当前主要缺口不是动作数量，而是交互因果感。用户开口后，角色没有一个已接入的即时注意反应；角色通常要等 STT、AstrBot、LLM、TTS 和输出段准备完成后，才表现出与本次输入有关的动作。因此体验更像“背景中会动的播放器”，而不是“先注意到用户、再理解并回答的角色”。
+当前主要缺口不是动作数量，而是完整的交互因果感。文本提交与 PTT 结束录音后会进入本地 `thinking sway`：角色在后端等待期间保持轻微、慢速的左右摆动；首段回复动作启动时，该贡献在参数混合器内退场并由回复动作接管。自动可信 speech-start 与首句级音频仍未接入，因此从“注意到用户”到“理解并回答”的连续状态还不完整。
 
 ## 2. Latency Map
 
@@ -302,13 +302,14 @@ LLM 应负责回复内容、表达态度、语义动作选择和需要上下文�
 - 验证：记录首次授权与常驻运行时的 `keydown -> first PCM`，并确认未按键时不会创建 Turn、发送
   `input.audio_stream_start` 或传输任何 PCM。
 
-### Stage 1：即时注意反应
+### Stage 1：思考摆动
 
-- 做什么：埋基础 trace；PTT/text-submit 驱动 attention → listening → processing。
-- 用户变化：输入后立即看到角色接应。
+- 已完成：桌宠文本提交、弹幕文本提交和 PTT 结束录音均启动 `thinking sway`。它从当前模型的语义轴档案选择可用的横向轴，并作为 `interaction_sway` 原始贡献进入 `ActiveParameterMixer`。
+- 边界：它不创建动作计划、播放器、Timeline、后端 Turn 或 MotionLab 历史。回复计划开始时请求其在 Mixer 内退场；最终参数继续只经由 `ParameterPresentation` 和唯一主动参数写入到达模型。
+- 待完成：将 thinking 收束到明确的 interaction phase，并增加可信 speech-start。
+- 验证：控制台以 `[InteractionSway]` 输出来源、轴和绑定数；实机测量文本提交 / PTT keyup 到首个摆动帧，并检查首段回复动作接管是否平滑。
 - 协议/模型调用：不需要改变协议，不增加模型调用。
-- 风险：反应 plan 与回答 plan 争抢 direct plan。
-- 验证：TTFR、接管是否平滑、重复输入和低帧率行为。
+- 风险：思考贡献必须只使用横向语义轴，且在回复计划激活时及时让权，不能影响口型、Physics 或回复动作的所有权。
 
 ### Stage 2：打断即让出话语权
 

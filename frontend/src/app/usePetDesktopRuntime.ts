@@ -204,6 +204,12 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       },
     }),
     stopPlan: (reason) => motionPlayer.stopPlan(reason),
+    startInteractionSway: (input) => (
+      window.getLAppAdapter?.().startInteractionSway?.(input) ?? false
+    ),
+    stopInteractionSway: () => {
+      window.getLAppAdapter?.().stopInteractionSway?.();
+    },
     onMotionRejected: ({ turnId, messageId, reason }) =>
       playbackTimeline.rejectMotionBeforeStart(turnId, messageId, reason),
     canStartSpeechOnlyMotion: (turnId, messageId) => {
@@ -410,10 +416,22 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       state.runtimeCacheErrors,
     ),
   );
-  const pushToTalk = usePushToTalkController(adapter);
+  const startThinkingSway = (source: "ptt" | "text"): void => {
+    modelEngine.startThinkingSway(source);
+  };
+  const pushToTalk = usePushToTalkController({
+    ...adapter,
+    onPttIntent: () => startThinkingSway("ptt"),
+  });
   let snapshotPublisher: ReturnType<typeof createPetRuntimeSnapshotPublisher> | null = null;
   const bilibiliLive = useBilibiliLiveRuntime({
-    sendText: (text) => adapter.sendText(text),
+    sendText: async (text) => {
+      const sent = await adapter.sendText(text);
+      if (sent) {
+        startThinkingSway("text");
+      }
+      return sent;
+    },
     pushHistory: (role, text) => adapter.pushHistory(role, text),
     onStatusChanged: () => {
       snapshotPublisher?.publishRuntimeSnapshot();
@@ -454,6 +472,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       state: modelEngine.state,
       previewCompiledSemanticMotion: modelEngine.previewCompiledSemanticMotion,
     },
+    onTextSubmit: () => startThinkingSway("text"),
     snapshotPublisher,
     saveMotionTuningSample,
     deleteMotionTuningSample,

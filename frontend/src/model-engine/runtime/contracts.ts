@@ -21,6 +21,7 @@ import type {
 import type { MotionFeedback } from "../compiler/contracts.js";
 import type { ModelEngineSettings } from "../settings.js";
 import type { SpeechOnlyMotionRequest } from "./speechOnlyMotion.js";
+import type { InteractionSwayInput } from "../../types/live2d-runtime.d.ts";
 
 export type ModelEngineStatus =
   | "idle"
@@ -120,6 +121,7 @@ export interface MotionStartDependencies {
     options: PlayMotionResourceOptions,
   ) => MotionPlaybackStartResult;
   getPlayerMessage?: () => string;
+  stopInteractionSway: () => void;
   onPlanStarted: (event: ModelEnginePlanStartedEvent) => void;
   onMotionRejected: (event: {
     turnId: string;
@@ -169,6 +171,7 @@ export interface MotionRuntimeStateController {
 
 export interface ModelEngineDependencies extends MotionStartDependencies {
   stopPlan: (reason?: string) => void;
+  startInteractionSway: (input: InteractionSwayInput) => boolean;
   canStartSpeechOnlyMotion: (
     turnId: string | null,
     messageId: string,

@@ -4,6 +4,7 @@ import type { csmVector } from "@framework/type/csmvector";
 import {
   ActiveParameterMixer,
   type ActiveDirectParameterFrameState,
+  type ActiveInteractionSwayState,
   type ParameterFrameOwner,
 } from "./parametermixer";
 import {
@@ -31,9 +32,21 @@ export interface ActiveParameterFrameResult {
 export class ActiveParameterRuntime {
   private readonly mixer = new ActiveParameterMixer();
   private readonly speechSignals = new SpeechSignalRuntime();
+  private interactionSway: ActiveInteractionSwayState | null = null;
 
   public reset(): void {
     this.speechSignals.reset();
+    this.interactionSway = null;
+  }
+
+  public startInteractionSway(state: ActiveInteractionSwayState): void {
+    this.interactionSway = state;
+  }
+
+  public stopInteractionSway(): void {
+    if (this.interactionSway && this.interactionSway.releaseStartedAtMs === null) {
+      this.interactionSway.releaseStartedAtMs = this.interactionSway.elapsedMs;
+    }
   }
 
   public beginExternalAudioSignalSource(
@@ -64,13 +77,25 @@ export class ActiveParameterRuntime {
   public applyFrame(input: {
     model: CubismModel | null;
     directPlan: ActiveDirectParameterFrameState | null;
+    deltaTimeSeconds: number;
     lipSyncEnabled: boolean;
     lipSyncActive: boolean;
     lipSyncIntensity: number;
     lipSyncParameterIds: csmVector<CubismIdHandle>;
   }): ActiveParameterFrameResult {
+    if (this.interactionSway) {
+      this.interactionSway.elapsedMs += Math.max(0, input.deltaTimeSeconds) * 1000;
+      if (
+        this.interactionSway.releaseStartedAtMs !== null
+        && this.interactionSway.elapsedMs
+          >= this.interactionSway.releaseStartedAtMs + this.interactionSway.releaseMs
+      ) {
+        this.interactionSway = null;
+      }
+    }
     const execution = this.mixer.resolveActiveFrame({
       ...input,
+      interactionSway: this.interactionSway,
       getSpeechAudioGain: (axisId) => this.speechSignals.getSpeechAudioGain(axisId),
     });
     if (execution.ok === false) {

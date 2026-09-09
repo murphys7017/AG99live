@@ -482,6 +482,7 @@ function startMotionResourceExecution(
         if (!normalizedRunId) {
           return;
         }
+        dependencies.stopInteractionSway();
         notifiedStarted = true;
         const successMessage = buildSuccessMessage(context, dependencies);
         state.setState("playing", successMessage, diagnostics);
@@ -590,6 +591,7 @@ function startCompilableMotionPayload(
         if (!normalizedRunId) {
           return;
         }
+        dependencies.stopInteractionSway();
         notifiedStarted = true;
         const eventBase = {
           plan,
