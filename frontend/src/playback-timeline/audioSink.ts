@@ -22,7 +22,9 @@ export interface PlaybackTimelineAudioElementContext {
 }
 
 export interface PlaybackTimelineAudioStartCallbacks {
-  onAudioElementCreated?: (event: PlaybackTimelineAudioElementContext) => void;
+  onAudioElementCreated?: (
+    event: PlaybackTimelineAudioElementContext,
+  ) => Promise<void> | void;
   onAudioElementDisposed?: () => void;
   onDurationChanged?: (durationMs: number | null) => void;
   onPlaybackStarted?: (event: AudioPlaybackStartedEvent) => void;
@@ -80,11 +82,10 @@ async function startBrowserAudioPlayback(
 
   const audio = new Audio();
   audio.crossOrigin = "anonymous";
-  audio.preload = "auto";
   audio.src = audioUrl;
   activeAudioElement = audio;
   const clock = adaptClock(createAudioElementPlaybackClock(audio));
-  callbacks.onAudioElementCreated?.({
+  await callbacks.onAudioElementCreated?.({
     audioUrl,
     audio,
     clock,
@@ -101,16 +102,8 @@ async function startBrowserAudioPlayback(
     resolveDurationReady = resolve;
     rejectDurationReady = reject;
   });
-  let resolvePlaybackReady!: () => void;
-  let rejectPlaybackReady!: (error: unknown) => void;
-  const playbackReady = new Promise<void>((resolve, reject) => {
-    resolvePlaybackReady = resolve;
-    rejectPlaybackReady = reject;
-  });
   const cancelStart = () => {
-    const error = new DOMException("Audio playback stopped before start.", "AbortError");
-    rejectDurationReady(error);
-    rejectPlaybackReady(error);
+    rejectDurationReady(new DOMException("Audio playback stopped before start.", "AbortError"));
   };
   activeAudioStartCancel = cancelStart;
 
@@ -142,31 +135,16 @@ async function startBrowserAudioPlayback(
     return false;
   };
 
-  const syncPlaybackReadyFromElement = (): boolean => {
-    if (audio.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) {
-      resolvePlaybackReady();
-      return true;
-    }
-    return false;
-  };
-
   const markPlaybackStarted = () => {
     if (playbackStartNotified || activeAudioElement !== audio) {
       return;
     }
     playbackStartNotified = true;
     syncDurationFromElement();
-    requestAnimationFrame(() => {
-      if (activeAudioElement !== audio) {
-        return;
-      }
-      callbacks.onPlaybackStarted?.({
-        // This callback starts visual consumers. Preserve the actual media
-        // origin even though it yields one frame to let audio render first.
-        startedAtMs: performance.now() - Math.max(0, audio.currentTime * 1000),
-        durationMs: resolvedDurationMs,
-        clock,
-      });
+    callbacks.onPlaybackStarted?.({
+      startedAtMs: performance.now(),
+      durationMs: resolvedDurationMs,
+      clock,
     });
   };
 
@@ -177,16 +155,6 @@ async function startBrowserAudioPlayback(
         return;
       }
       syncDurationFromElement();
-    },
-    { once: true },
-  );
-
-  audio.addEventListener(
-    "canplay",
-    () => {
-      if (activeAudioElement === audio) {
-        syncPlaybackReadyFromElement();
-      }
     },
     { once: true },
   );
@@ -231,7 +199,6 @@ async function startBrowserAudioPlayback(
         readyState: audio.readyState,
       });
       rejectDurationReady(new Error("Audio metadata could not be loaded."));
-      rejectPlaybackReady(new Error("Audio playback data could not be loaded."));
       cleanup();
       if (playbackStartNotified) {
         callbacks.onError?.();
@@ -243,7 +210,6 @@ async function startBrowserAudioPlayback(
   try {
     audio.load();
     await durationReady;
-    await playbackReady;
     if (activeAudioElement !== audio) {
       throw new DOMException("Audio playback stopped before start.", "AbortError");
     }

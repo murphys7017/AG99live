@@ -56,14 +56,15 @@ export function createPlaybackTimelineAudioSegmentSink(options: {
       activeLipSyncSink = lipSyncSink;
       try {
         await options.audioSink.start(audioUrl, {
-          onAudioElementCreated: (event) => {
+          onAudioElementCreated: async (event) => {
             console.info("[PlaybackTimeline] audio element created; attaching lip sync.", {
               turnId,
               messageId,
               audioUrl,
             });
             lipSyncSink.attachAudio(event);
-            callbacks.onAudioElementCreated?.(event);
+            await lipSyncSink.prepare();
+            await callbacks.onAudioElementCreated?.(event);
           },
           onAudioElementDisposed: () => {
             if (lipSyncSink.dispose) {

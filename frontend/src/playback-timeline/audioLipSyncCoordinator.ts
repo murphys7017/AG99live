@@ -8,6 +8,7 @@ import type {
 
 export interface PlaybackTimelineAudioLipSyncSink {
   attachAudio(event: PlaybackTimelineAudioElementContext): void;
+  prepare(): Promise<void>;
   start(): void;
   completeAfterAudioEnded(): void;
   failAfterAudioError(): void;
@@ -88,6 +89,9 @@ export function createPlaybackTimelineAudioLipSyncSink(options: {
         getAudioCurrentTimeSeconds: event.getAudioCurrentTimeSeconds,
         isCurrentAudio: event.isCurrentAudio,
       });
+    },
+    async prepare() {
+      await lipSyncRuntime.prepare();
     },
     start() {
       void lipSyncRuntime.resume();

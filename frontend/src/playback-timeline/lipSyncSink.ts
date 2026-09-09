@@ -9,6 +9,7 @@ export interface PlaybackTimelineLipSyncAttachOptions {
 
 export interface PlaybackTimelineLipSyncSink {
   attachAudio(options: PlaybackTimelineLipSyncAttachOptions): void;
+  prepare(): Promise<void>;
   resume(): Promise<void>;
   stop(): void;
 }
@@ -27,6 +28,7 @@ export interface PlaybackTimelineLipSyncRuntime {
     PlaybackTimelineLipSyncAttachOptions,
     "onStarted" | "onUnavailable"
   >): void;
+  prepare(): Promise<void>;
   resume(): Promise<void>;
   completeAfterAudioEnded(): void;
   failAfterAudioError(): void;
@@ -89,6 +91,16 @@ export function createPlaybackTimelineLipSyncRuntime(
     async resume() {
       try {
         await sink.resume();
+      } catch (error) {
+        const name = error instanceof Error && error.name
+          ? error.name
+          : "unknown";
+        settleTerminal("failed", `lip_sync_resume_failed:${name}`);
+      }
+    },
+    async prepare() {
+      try {
+        await sink.prepare();
       } catch (error) {
         const name = error instanceof Error && error.name
           ? error.name

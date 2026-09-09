@@ -7,9 +7,12 @@ const SPEECH_ANALYSIS_BAND_MAX_HZ = 4200;
 const SPEECH_EMPHASIS_BAND_MIN_HZ = 900;
 const SPEECH_EMPHASIS_RATIO_FLOOR = 0.24;
 const SPEECH_EMPHASIS_RATIO_SPAN = 0.24;
+const SPEECH_OUTPUT_FADE_INITIAL_GAIN = 0.86;
+const SPEECH_OUTPUT_FADE_DURATION_SECONDS = 0.04;
 
 interface LiveLipSyncRuntime {
-  resume: () => Promise<void>;
+  prepare: () => Promise<void>;
+  startOutput: () => void;
   stop: () => void;
 }
 
@@ -30,6 +33,24 @@ export function createLive2DLipSyncTimelineSink(): PlaybackTimelineLipSyncSink {
     liveRuntime = null;
     markActiveStarted = null;
     markActiveUnavailable = null;
+  }
+
+  async function prepare(): Promise<void> {
+    if (!liveRuntime) {
+      return;
+    }
+    try {
+      await liveRuntime.prepare();
+    } catch (error) {
+      const reason = error instanceof Error && error.message.trim()
+        ? error.message.trim()
+        : `lip_sync_resume_failed:${error instanceof Error && error.name ? error.name : "unknown"}`;
+      console.error("[Live2D] lip sync audio preparation failed.", {
+        reason,
+        error,
+      });
+      markActiveUnavailable?.(reason, false);
+    }
   }
 
   return {
@@ -76,23 +97,11 @@ export function createLive2DLipSyncTimelineSink(): PlaybackTimelineLipSyncSink {
       }
     },
     async resume() {
-      if (!liveRuntime) {
-        return;
-      }
-      try {
-        await liveRuntime.resume();
-        markActiveStarted?.();
-      } catch (error) {
-        const reason = error instanceof Error && error.message.trim()
-          ? error.message.trim()
-          : `lip_sync_resume_failed:${error instanceof Error && error.name ? error.name : "unknown"}`;
-        console.error("[Live2D] lip sync resume failed without degradation.", {
-          reason,
-          error,
-        });
-        markActiveUnavailable?.(reason, false);
-      }
+      await prepare();
+      liveRuntime?.startOutput();
+      markActiveStarted?.();
     },
+    prepare,
     stop,
   };
 }
@@ -179,15 +188,19 @@ function startLiveLipSync(
     const analyser = audioContext.createAnalyser();
     analyser.fftSize = 1024;
     analyser.smoothingTimeConstant = 0.28;
+    const outputGain = audioContext.createGain();
+    outputGain.gain.value = SPEECH_OUTPUT_FADE_INITIAL_GAIN;
     const source = audioContext.createMediaElementSource(audio);
     source.connect(analyser);
-    analyser.connect(audioContext.destination);
+    analyser.connect(outputGain);
+    outputGain.connect(audioContext.destination);
 
     const samples = new Uint8Array(analyser.fftSize);
     const frequencyBins = new Uint8Array(analyser.frequencyBinCount);
     let animationFrameId: number | null = null;
     let stopped = false;
     let firstFrameLogged = false;
+    let outputStarted = false;
 
     const tick = () => {
       if (stopped || !isCurrentAudio()) {
@@ -240,7 +253,7 @@ function startLiveLipSync(
     animationFrameId = window.requestAnimationFrame(tick);
 
     sourceRuntime = {
-      resume: async () => {
+      prepare: async () => {
         if (audioContext.state === "suspended") {
           try {
             await audioContext.resume();
@@ -252,7 +265,27 @@ function startLiveLipSync(
             throw new Error(`lip_sync_resume_failed:${name}`);
           }
         }
+        console.info("[Live2D] speech audio analysis prepared before media playback.", {
+          audioContextState: audioContext.state,
+        });
         return;
+      },
+      startOutput: () => {
+        if (stopped || outputStarted) {
+          return;
+        }
+        outputStarted = true;
+        const now = audioContext.currentTime;
+        outputGain.gain.cancelScheduledValues(now);
+        outputGain.gain.setValueAtTime(SPEECH_OUTPUT_FADE_INITIAL_GAIN, now);
+        outputGain.gain.linearRampToValueAtTime(
+          1,
+          now + SPEECH_OUTPUT_FADE_DURATION_SECONDS,
+        );
+        console.info("[Live2D] speech audio output fade started.", {
+          initialGain: SPEECH_OUTPUT_FADE_INITIAL_GAIN,
+          fadeMs: SPEECH_OUTPUT_FADE_DURATION_SECONDS * 1000,
+        });
       },
       stop: () => {
         stopped = true;
@@ -268,6 +301,11 @@ function startLiveLipSync(
         }
         try {
           analyser.disconnect();
+        } catch (_error) {
+          // Browser audio graph teardown can race with element disposal.
+        }
+        try {
+          outputGain.disconnect();
         } catch (_error) {
           // Browser audio graph teardown can race with element disposal.
         }

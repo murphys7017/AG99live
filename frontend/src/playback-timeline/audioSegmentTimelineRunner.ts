@@ -57,13 +57,13 @@ export function createPlaybackTimelineAudioSegmentRunner<TMotionPayload = unknow
         );
 
         await options.audioSegmentSink.start(audioUrl, turnId, messageId, {
-          onAudioElementCreated: (event) => {
+          onAudioElementCreated: async (event) => {
             options.runtime.attachAudioTimelineClock(
               turnId,
               messageId,
               event.clock,
             );
-            callbacks.onAudioElementCreated?.(event);
+            await callbacks.onAudioElementCreated?.(event);
           },
           onDurationChanged: (durationMs) => {
             options.runtime.markAudioTimelineDuration(
