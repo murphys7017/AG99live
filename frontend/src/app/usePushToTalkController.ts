@@ -13,7 +13,6 @@ export interface PushToTalkAdapterPort {
   };
   startPttCapture: () => Promise<DesktopPttAckStatus>;
   stopPttCapture: () => Promise<DesktopPttAckStatus>;
-  onPttIntent?: () => void;
 }
 
 export interface PushToTalkController {
@@ -41,11 +40,7 @@ export function usePushToTalkController(adapter: PushToTalkAdapterPort): PushToT
     }
     if (matchesBinding) {
       console.info("[PTT] stopping mic capture");
-      void adapter.stopPttCapture().then((status) => {
-        if (status === "stopped") {
-          adapter.onPttIntent?.();
-        }
-      });
+      void adapter.stopPttCapture();
     }
   }
 
@@ -77,11 +72,7 @@ export function usePushToTalkController(adapter: PushToTalkAdapterPort): PushToT
     }
     console.info("[PTT] IPC keyup");
     reportPttEvent(payload, "received");
-    void handlePttIpcCaptureStop(payload).then((status) => {
-      if (status === "stopped") {
-        adapter.onPttIntent?.();
-      }
-    });
+    void handlePttIpcCaptureStop(payload);
   }
 
   async function handlePttIpcCaptureStart(payload: DesktopPttEventPayload): Promise<void> {

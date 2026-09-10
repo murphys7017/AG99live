@@ -90,12 +90,25 @@ class MessageFactory:
         normalized_raw_message = dict(raw_message)
         resolved_image_inputs: list[dict[str, str]] = []
         failed_image_diagnostics: list[dict[str, Any]] = []
+        desktop_snapshot_component_indexes: list[int] = []
+        payload = raw_message.get("payload")
+        desktop_snapshot_requested = bool(
+            payload.get("desktop_snapshot_requested", False)
+            if isinstance(payload, dict)
+            else False
+        )
 
         for image_payload in accepted_images:
             image_component, diagnostic = self.media_service.convert_image_component_with_diagnostic(
                 image_payload
             )
             if image_component is not None:
+                if self._is_desktop_snapshot(image_payload):
+                    image_component = self.media_service.cache_desktop_snapshot(
+                        client_uid=self.client_uid,
+                        image_component=image_component,
+                    )
+                    desktop_snapshot_component_indexes.append(len(abm.message))
                 abm.message.append(image_component)
                 image_ref = (
                     (getattr(image_component, "file", "") or "").strip()
@@ -109,8 +122,34 @@ class MessageFactory:
             if diagnostic:
                 failed_image_diagnostics.append(dict(diagnostic))
 
+        reused_desktop_snapshot = False
+        if desktop_snapshot_requested and not images:
+            cached_snapshot = self.media_service.get_latest_desktop_snapshot_component(
+                client_uid=self.client_uid,
+            )
+            if cached_snapshot is not None:
+                desktop_snapshot_component_indexes.append(len(abm.message))
+                abm.message.append(cached_snapshot)
+                image_ref = (getattr(cached_snapshot, "file", "") or "").strip()
+                if image_ref:
+                    resolved_image_inputs.append(
+                        {"type": "input_image", "image_url": image_ref}
+                    )
+                reused_desktop_snapshot = True
+                logger.info(
+                    "Reused latest desktop snapshot after frontend capture was unavailable: "
+                    "client_uid=%s",
+                    self.client_uid,
+                )
+
         if resolved_image_inputs:
             normalized_raw_message["resolved_images"] = resolved_image_inputs
+        if desktop_snapshot_component_indexes:
+            normalized_raw_message["desktop_snapshot_component_indexes"] = (
+                desktop_snapshot_component_indexes
+            )
+        if reused_desktop_snapshot:
+            normalized_raw_message["reused_desktop_snapshot"] = True
         dropped_image_count = sum(
             1 for item in image_diagnostics if item.get("reason") == "cooldown_window"
         )
@@ -133,6 +172,13 @@ class MessageFactory:
             )
 
         return abm
+
+    @staticmethod
+    def _is_desktop_snapshot(image_payload: Any) -> bool:
+        return (
+            isinstance(image_payload, dict)
+            and str(image_payload.get("source") or "").strip() == "screen"
+        )
 
     def _apply_image_cooldown(self, images: list[Any]) -> tuple[list[Any], list[dict[str, Any]]]:
         if not images:

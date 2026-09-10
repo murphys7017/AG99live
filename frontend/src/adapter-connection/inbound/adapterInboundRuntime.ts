@@ -37,6 +37,7 @@ export interface AdapterInboundRuntimeDeps {
     message: string,
     envelope: ProtocolEnvelope<unknown>,
   ) => void;
+  notifyTurnLifecycle: (event: { phase: "started" | "terminal"; turnId: string }) => void;
 }
 
 export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
@@ -153,6 +154,7 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
       findActiveAudioSegment: () => deps.findActiveAudioSegment(),
       normalizeMotionPayload: deps.normalizeMotionPayload,
       startMicrophoneCapture: (origin) => deps.startMicrophoneCapture(origin),
+      notifyTurnLifecycle: (event) => deps.notifyTurnLifecycle(event),
       reportedProtocolWarnings,
       buildInboundEventContext: () => buildInboundEventContext(),
     };

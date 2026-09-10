@@ -67,7 +67,6 @@ export interface DesktopRuntimeCommandDeps {
       requestId: string,
     ) => boolean;
   };
-  onTextSubmit?: () => void;
   snapshotPublisher: DesktopRuntimeSnapshotPublisherPort;
   saveMotionTuningSample: (sample: DesktopMotionTuningSample) => void;
   deleteMotionTuningSample: (sampleId: string) => void;
@@ -148,11 +147,7 @@ export function createDesktopRuntimeCommandHandler(
         if (!command.text.trim()) {
           return;
         }
-        void deps.adapter.sendText(command.text).then((sent) => {
-          if (sent) {
-            deps.onTextSubmit?.();
-          }
-        });
+        void deps.adapter.sendText(command.text);
         return;
       case "interrupt":
         deps.modelEngine.stop("interrupted");

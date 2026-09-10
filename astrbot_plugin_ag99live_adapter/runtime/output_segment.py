@@ -16,6 +16,7 @@ class OutputSegmentConflictError(ValueError):
 class PendingOutputSegment:
     turn_id: str
     message_id: str
+    sequence: int | None = None
     text: str = ""
     semantic_text: str = ""
     audio_path: str = ""
@@ -31,6 +32,15 @@ class PendingOutputSegment:
     performance_curve_request_id: str = ""
     speech_cues: list[dict[str, Any]] = field(default_factory=list)
     finalized: bool = False
+
+    def merge_sequence(self, value: int) -> None:
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise ValueError(f"output_segment_sequence_invalid:{self.message_id}")
+        if self.sequence is not None and self.sequence != value:
+            raise OutputSegmentConflictError(
+                f"output_segment_sequence_conflict:{self.message_id}"
+            )
+        self.sequence = value
 
     def merge_text(self, value: str) -> None:
         self.text = _merge_unique_text(self.text, value, "text")
@@ -165,6 +175,8 @@ class PendingOutputSegment:
             and not self.motion_failure_reason
         ):
             self.merge_motion_failure("motion_schedule_payload_missing")
+        if self.sequence is None:
+            raise ValueError(f"output_segment_sequence_missing:{self.message_id}")
         self.finalized = True
 
 

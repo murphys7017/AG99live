@@ -121,7 +121,7 @@ AG99live 会保留从模型原始九级输出到最终参数计划的关键阶�
 
 ### 3. Adapter 建立原子回复段
 
-Adapter 使用 `turn_id + message_id` 聚合文本、TTS、动作、speech cues 和其他输出。增强版链路的契约要求 AstrBot 只在同一逻辑消息的全部物理发送成功后确认该 `message_id`，Adapter 随即发送一个完整的 `output.segment.v4`；它不等待同一 Turn 的后续回复。前端不会接收几条彼此无法确认归属的独立事件。
+Adapter 使用 `turn_id + message_id` 聚合文本、TTS、动作、speech cues 和其他输出。增强版链路的契约要求 AstrBot 只在同一逻辑消息的全部物理发送成功后确认该 `message_id`，Adapter 随即发送一个完整的 `output.segment.v5`；它不等待同一 Turn 的后续回复。前端不会接收几条彼此无法确认归属的独立事件。
 
 ### 4. ModelEngine 编译参数
 
@@ -208,7 +208,7 @@ Profile Editor 不是普通的参数面板，而是模型能力和动作语义�
 flowchart LR
     U["文字 / 麦克风 / 直播弹幕"] --> A["AstrBot"]
     A --> P["主模型：文本 + speech_cues + ag99live.motion"]
-    P --> S["output.segment.v4"]
+    P --> S["output.segment.v5"]
     S --> T["PlaybackTimeline"]
     T --> AU["音频与字幕"]
     T --> M["ModelEngine"]

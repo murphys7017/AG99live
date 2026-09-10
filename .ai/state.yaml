@@ -1,9 +1,11 @@
 task:
   class: refactor
   risk: high
-  phase: architecture_audit_followup
+  phase: flow_integrity_repair
   status: source_complete_pending_live_acceptance
-  scope: "Fix source-confirmed audit findings: motion revision validation, required inbound SessionStore contract, unused internal entry points, fixed compiler stages, observation identity semantics, read-only SessionStore query projections, canonical Remote Operator target-policy parsing, and audio playback ownership migration."
+  scope: "Repair source-confirmed flow defects: ordered multi-segment delivery, turn-owned thinking sway release, natural direct-plan presentation release, and resilient desktop snapshot reuse."
+  validation: "Focused output-segment, platform-event, and media-service tests passed (11 tests); frontend renderer/WebSDK/Node typechecks, protocol manifest check, Python compileall, and diff whitespace check passed."
+  evidence_gap: "Live AstrBot + Electron acceptance must still verify ordered multi-segment playback, thinking-sway release on every terminal path, direct-plan release after paused/ended audio, and cached desktop-snapshot reuse after frontend capture failure."
 
 architecture_audit_low_risk_followup:
   recorded_at: "2026-09-08"
@@ -16,7 +18,7 @@ architecture_audit_low_risk_followup:
     - "Make platform-event output closure a required internal Adapter port instead of a silent getattr/callable probe."
     - "Remove internal RuntimeState getattr probes from adapter termination and client-profile synchronization."
     - "Narrow PerformanceCurveCoordinator observation access to explicit chat-context and MotionLab recording operations."
-    - "Enhanced Core now calls event.complete_visible_message(message_id=...) after delivery returns; Core still needs all-physical-deliveries-successful semantics before that callback. complete_visible_turn() remains the Turn-closing boundary."
+    - "Enhanced Core now calls event.complete_visible_message(message_id=...) only after delivery.all_succeeded; complete_visible_turn() remains the Turn-closing boundary."
   non_actions:
     - "Do not change frozen Remote Operator configuration reads or external AstrBot hook lifecycle without live hot-refresh evidence."
     - "Do not remove Core metadata aliases without captured enhanced-Core and official-Core payloads."
@@ -29,13 +31,13 @@ architecture_audit_low_risk_followup:
 
 output_segment_finalization_review:
   recorded_at: "2026-09-08"
-  finding: "The enhanced Core master branch now invokes complete_visible_message(message_id=...) from InteractionOutputController._deliver_visible_message() after delivery returns. Its delivery helper still treats partial physical success as overall success, so the callback must be restricted to all-physical-deliveries-successful semantics."
+  finding: "The enhanced Core master branch invokes complete_visible_message(message_id=...) from InteractionOutputController._deliver_visible_message() only when output_segment_id and delivery.all_succeeded are true."
   correction: "AG99 exposes complete_visible_message(message_id=...) and immediately emits that segment; complete_visible_turn() closes the Turn only after every segment has completed. No fallback or unified end-of-turn flush is retained."
   validation:
     - "Focused output-segment, platform-event, and proactive-output tests passed (10 tests)."
     - "Changed output modules compiled successfully and diff whitespace check passed."
   evidence_gap:
-    - "Core must distinguish complete physical delivery from partial success; then a live AstrBot run must confirm one immediate output.segment per logical message and control.synth_finished only after the final segment."
+    - "AstrBot commits e8ef66758 and 655037725 make all_succeeded require at least one physical delivery and zero failures, and gate both completion and visible-message fingerprint recording on that result. A live run must still confirm one immediate output.segment per logical message and control.synth_finished only after the final segment."
 
 remote_operator_config_consolidation:
   recorded_at: "2026-09-06"

@@ -29,7 +29,7 @@ def _install_message_component_stubs(monkeypatch):
     return Plain
 
 
-def test_completed_segment_does_not_wait_for_an_older_pending_segment(
+def test_finalized_segments_flush_in_logical_message_order(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -99,18 +99,24 @@ def test_completed_segment_does_not_wait_for_an_older_pending_segment(
         await coordinator.emit_message_chain(
             [Plain("first")],
             turn_id="turn-1",
-            platform_extras={"logical_message_id": "segment-1"},
+            platform_extras={
+                "logical_message_id": "segment-1",
+                "logical_segment_index": 0,
+            },
         )
         await coordinator.emit_message_chain(
             [Plain("second")],
             turn_id="turn-1",
-            platform_extras={"logical_message_id": "segment-2"},
+            platform_extras={
+                "logical_message_id": "segment-2",
+                "logical_segment_index": 1,
+            },
         )
         await coordinator.finalize_output_segment(
             turn_id="turn-1",
             message_id="segment-2",
         )
-        assert [envelope["message_id"] for envelope in emitted] == ["segment-2"]
+        assert emitted == []
         await coordinator.finalize_output_segment(
             turn_id="turn-1",
             message_id="segment-1",
@@ -125,6 +131,6 @@ def test_completed_segment_does_not_wait_for_an_older_pending_segment(
         "control.synth_finished",
     ]
     assert [envelope["message_id"] for envelope in emitted[:2]] == [
-        "segment-2",
         "segment-1",
+        "segment-2",
     ]

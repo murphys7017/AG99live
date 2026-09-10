@@ -40,6 +40,7 @@ export interface InboundRuntimeDispatchDeps {
   findActiveAudioSegment: () => { turnId: string | null; messageId: string } | null;
   startMicrophoneCapture: (origin?: "manual" | "ptt" | "auto") => Promise<boolean>;
   reportRuntimeProtocolViolation: (message: string) => void;
+  notifyTurnLifecycle: (event: { phase: "started" | "terminal"; turnId: string }) => void;
 }
 
 type InboundRuntimeEvent = Extract<
@@ -97,6 +98,7 @@ function applyTurnStarted(
   s.turnFinishedReason = "";
   s.statusMessage = "后端正在处理这一轮对话。";
   deps.pushHistory("system", s.statusMessage);
+  deps.notifyTurnLifecycle({ phase: "started", turnId: event.turnId });
 }
 
 function applyTurnFinished(
@@ -123,6 +125,9 @@ function applyTurnFinished(
   s.turnFinishedTurnId = event.turnId;
   s.turnFinishedSuccess = event.success;
   s.turnFinishedReason = event.reason;
+  if (event.turnId) {
+    deps.notifyTurnLifecycle({ phase: "terminal", turnId: event.turnId });
+  }
 
   if (event.success) {
     s.statusMessage = "本轮对话已完成。";
@@ -161,6 +166,9 @@ function applyInterrupt(
   }
   s.statusMessage = "当前轮次已中断。";
   deps.pushHistory("system", s.statusMessage);
+  if (interruptedTurnId) {
+    deps.notifyTurnLifecycle({ phase: "terminal", turnId: interruptedTurnId });
+  }
 }
 
 function applyStartMic(deps: InboundRuntimeDispatchDeps): void {

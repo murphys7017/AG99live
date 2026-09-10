@@ -60,6 +60,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     lastStartReason: "",
   });
   let activePlaybackRun: ModelEngineActivePlaybackRun | null = null;
+  let thinkingSwayTurnId: string | null = null;
   const preparedSemanticMotions = new Map<string, {
     durationMs: number;
     assistantText: string;
@@ -114,6 +115,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
         messageId: event.messageId.trim(),
         payloadKind: event.payloadKind,
       };
+      releaseThinkingSway(event.turnId);
       dependencies.onPlanStarted(event);
     },
     onMotionRejected: (event) => {
@@ -490,26 +492,41 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     return startCompiledPreviewPlan(result.plan, semanticMotion, requestId);
   }
 
-  function startThinkingSway(
-    source: "ptt" | "text",
-  ): boolean {
+  function startThinkingSway(turnId: string): boolean {
+    const normalizedTurnId = normalizeTurnId(turnId);
+    if (!normalizedTurnId) {
+      return false;
+    }
     const selectedModel = dependencies.getSelectedModel();
     if (!selectedModel) {
       return false;
     }
     const input = buildThinkingSwayInput(selectedModel);
     if (!input) {
-      console.warn("[InteractionSway] no usable lateral semantic axis.", { source });
+      console.warn("[InteractionSway] no usable lateral semantic axis.", { turnId: normalizedTurnId });
       return false;
     }
+    releaseThinkingSway();
     const started = dependencies.startInteractionSway(input);
+    if (started) {
+      thinkingSwayTurnId = normalizedTurnId;
+    }
     console.info("[InteractionSway] thinking sway requested.", {
-      source,
+      turnId: normalizedTurnId,
       axisId: input.axisId,
       bindingCount: input.bindings.length,
       started,
     });
     return started;
+  }
+
+  function releaseThinkingSway(turnId: string | null = null): void {
+    const normalizedTurnId = normalizeTurnId(turnId);
+    if (thinkingSwayTurnId && normalizedTurnId && thinkingSwayTurnId !== normalizedTurnId) {
+      return;
+    }
+    dependencies.stopInteractionSway();
+    thinkingSwayTurnId = null;
   }
 
   function handlePlaybackTerminal(
@@ -566,6 +583,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
   function stop(reason = "stopped"): void {
     runtimeScheduler.clearAllPendingPayloads();
     preparedSemanticMotions.clear();
+    releaseThinkingSway();
     stopActivePlayback(
       reason,
       reason === "stopped"
@@ -598,6 +616,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     handlePlaybackTimelineStarted,
     previewCompiledSemanticMotion,
     startThinkingSway,
+    releaseThinkingSway,
     handlePlaybackTerminal,
     interruptPlaybackSegment,
     stop,

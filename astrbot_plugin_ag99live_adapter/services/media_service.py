@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import mimetypes
 import os
 from pathlib import Path
@@ -30,11 +31,14 @@ import numpy as np
 from astrbot.api import logger
 from astrbot.api.message_components import Image
 from astrbot.core.utils.astrbot_path import get_astrbot_temp_path
+from astrbot.core.utils.path_util import file_uri_to_path
 from pydub import AudioSegment
 
 AUDIO_CACHE_MAX_FILES = 120
 AUDIO_CACHE_MAX_AGE_SECONDS = 6 * 60 * 60
 AUDIO_CACHE_TRIM_PROTECTION_SECONDS = 10 * 60
+DESKTOP_SNAPSHOT_MAX_FILES_PER_CLIENT = 8
+DESKTOP_SNAPSHOT_MAX_AGE_SECONDS = 6 * 60 * 60
 FRONTEND_IMAGE_MAX_BYTES = 10 * 1024 * 1024
 FRONTEND_IMAGE_ALLOWED_SUFFIXES = {
     ".png",
@@ -73,6 +77,7 @@ class MediaService:
         self.input_image_dir = (
             Path(get_astrbot_temp_path()) / "olv_pet_adapter" / "input_images"
         )
+        self.desktop_snapshot_cache_dir = self.input_image_dir / "desktop_snapshots"
         self._audio_buffer_chunks_by_segment: dict[str, list[np.ndarray]] = {}
         self._audio_buffer_lock = asyncio.Lock()
         self._audio_cache_cleanup_lock = threading.Lock()
@@ -197,6 +202,49 @@ class MediaService:
             return None, diagnostic or _build_image_diagnostic("unsupported_image_payload")
         return None, _build_image_diagnostic("unsupported_image_payload")
 
+    def cache_desktop_snapshot(self, *, client_uid: str, image_component):
+        """Persist one captured desktop image and return the private cached component."""
+        image_ref = str(getattr(image_component, "file", "") or "").strip()
+        if image_ref.startswith("file:"):
+            image_ref = file_uri_to_path(image_ref)
+        image_path = Path(image_ref)
+        if not image_path.is_file():
+            return image_component
+
+        try:
+            source_path = image_path.resolve(strict=True)
+        except OSError:
+            return image_component
+
+        suffix = source_path.suffix.lower()
+        if suffix not in FRONTEND_IMAGE_ALLOWED_SUFFIXES:
+            return image_component
+
+        snapshot_dir = self._desktop_snapshot_dir(client_uid)
+        snapshot_dir.mkdir(parents=True, exist_ok=True)
+        snapshot_path = snapshot_dir / f"snapshot_{time.time_ns()}_{uuid4().hex}{suffix}"
+        try:
+            shutil.copy2(source_path, snapshot_path)
+        except OSError as exc:
+            logger.warning("Failed to persist desktop snapshot `%s`: %s", source_path, exc)
+            return image_component
+
+        self._cleanup_desktop_snapshot_cache(snapshot_dir)
+        logger.debug("Persisted desktop snapshot to private cache: %s", snapshot_path)
+        return Image.fromFileSystem(path=str(snapshot_path.resolve()))
+
+    def get_latest_desktop_snapshot_component(self, *, client_uid: str):
+        """Return the newest still-valid desktop snapshot for this desktop client."""
+        snapshot_dir = self._desktop_snapshot_dir(client_uid)
+        if not snapshot_dir.is_dir():
+            return None
+
+        self._cleanup_desktop_snapshot_cache(snapshot_dir)
+        candidates = self._desktop_snapshot_files(snapshot_dir)
+        if not candidates:
+            return None
+        return Image.fromFileSystem(path=str(candidates[0][0]))
+
     def save_audio_buffer_to_temp_wav(
         self,
         audio_buffer: np.ndarray,
@@ -227,6 +275,43 @@ class MediaService:
 
     def _prepare_audio_cache_dir(self) -> None:
         self.audio_cache_dir.mkdir(parents=True, exist_ok=True)
+
+    def _desktop_snapshot_dir(self, client_uid: str) -> Path:
+        normalized_client_uid = str(client_uid or "").strip() or "default"
+        client_key = hashlib.sha256(normalized_client_uid.encode("utf-8")).hexdigest()[:16]
+        return self.desktop_snapshot_cache_dir / client_key
+
+    def _desktop_snapshot_files(self, snapshot_dir: Path) -> list[tuple[Path, float]]:
+        files: list[tuple[Path, float]] = []
+        for entry in snapshot_dir.iterdir():
+            try:
+                if (
+                    entry.is_file()
+                    and entry.suffix.lower() in FRONTEND_IMAGE_ALLOWED_SUFFIXES
+                ):
+                    files.append((entry, entry.stat().st_mtime))
+            except OSError:
+                continue
+        return sorted(files, key=lambda item: item[1], reverse=True)
+
+    def _cleanup_desktop_snapshot_cache(self, snapshot_dir: Path) -> None:
+        now = time.time()
+        snapshots = self._desktop_snapshot_files(snapshot_dir)
+        for entry, modified_at in snapshots:
+            if now - modified_at <= DESKTOP_SNAPSHOT_MAX_AGE_SECONDS:
+                continue
+            try:
+                entry.unlink(missing_ok=True)
+            except OSError as exc:
+                logger.warning("Failed to remove expired desktop snapshot `%s`: %s", entry, exc)
+
+        for entry, _modified_at in self._desktop_snapshot_files(snapshot_dir)[
+            DESKTOP_SNAPSHOT_MAX_FILES_PER_CLIENT:
+        ]:
+            try:
+                entry.unlink(missing_ok=True)
+            except OSError as exc:
+                logger.warning("Failed to trim desktop snapshot `%s`: %s", entry, exc)
 
     def _cleanup_audio_cache(self) -> None:
         """音频缓存两段清理。

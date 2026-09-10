@@ -165,6 +165,35 @@ def test_prompt_annotations_mark_screen_image_as_desktop_snapshot(
     assert annotations["message.1"]["semantic_type"] == "desktop_snapshot"
 
 
+def test_prompt_annotations_mark_cached_desktop_snapshot(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_platform_event_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_platform_event_module()
+    message_obj = type(
+        "MessageObjectStub",
+        (),
+        {
+            "message": [Plain("hello"), Image()],
+            "raw_message": {
+                "payload": {"text": "hello", "images": []},
+                "desktop_snapshot_component_indexes": [1],
+            },
+        },
+    )()
+    event = module.OLVPetPlatformEvent(
+        "hello",
+        message_obj,
+        {},
+        "desktop-client",
+        AdapterStub(),
+    )
+
+    annotations = event.get_extra("prompt_input_item_annotations")
+    assert annotations["message.1"]["semantic_type"] == "desktop_snapshot"
+
+
 def test_send_message_with_extras_only_uses_adapter_emit_path(
     install_fake_astrbot,
     monkeypatch,
@@ -200,7 +229,10 @@ def test_send_message_with_extras_only_uses_adapter_emit_path(
 
     assert len(adapter.emit_calls) == 1
     assert adapter.emit_calls[0]["turn_id"] == "turn-1"
-    assert adapter.emit_calls[0]["platform_extras"] == {"visible_message_id": "msg-1"}
+    assert adapter.emit_calls[0]["platform_extras"] == {
+        "visible_message_id": "msg-1",
+        "logical_segment_index": 0,
+    }
     assert platform_extras == {"visible_message_id": "msg-1"}
     assert event._has_send_oper is True
     assert event.send_operation_count == 1

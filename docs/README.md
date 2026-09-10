@@ -7,7 +7,7 @@
 | 边界 | 当前版本 |
 | --- | --- |
 | WebSocket 信封 | `v2` |
-| 原子输出段 | `output.segment.v4` |
+| 原子输出段 | `output.segment.v5` |
 | 增强 Core 输出完成 | 逻辑消息完成只可在全部物理发送成功后调用 `complete_visible_message(message_id)`；`control.synth_finished` 只关闭 Turn |
 | 语义动作意图 | `engine.motion_intent.v4` |
 | 模型参数计划 | `engine.parameter_plan.v3` |

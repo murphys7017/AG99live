@@ -22,7 +22,7 @@ import {
   PROTOCOL_SCHEMA_MANIFEST,
   PROTOCOL_VERSION,
   SCHEMA_MOTION_INTENT_V4,
-  SCHEMA_OUTPUT_SEGMENT_V4,
+  SCHEMA_OUTPUT_SEGMENT_V5,
 } from "../../types/protocolSchema.generated.js";
 import {
   asRecord,
@@ -64,16 +64,20 @@ export function parseOutputSegmentPayload(
 ): PayloadParseResult<OutputSegmentPayload> {
   const record = parseObjectPayload(envelope);
   if (!record.ok) return record;
-  if (record.payload.schema_version !== SCHEMA_OUTPUT_SEGMENT_V4) {
-    return invalidPayload(envelope.type, "payload.schema_version", SCHEMA_OUTPUT_SEGMENT_V4);
+  if (record.payload.schema_version !== SCHEMA_OUTPUT_SEGMENT_V5) {
+    return invalidPayload(envelope.type, "payload.schema_version", SCHEMA_OUTPUT_SEGMENT_V5);
   }
   const rootKeys = validateExactKeys(
     envelope.type,
     "payload",
     record.payload,
-    ["schema_version", "text", "audio", "motion", "speech", "images", "speaker_name", "avatar"],
+    ["schema_version", "sequence", "text", "audio", "motion", "speech", "images", "speaker_name", "avatar"],
   );
   if (!rootKeys.ok) return rootKeys;
+  const sequence = record.payload.sequence;
+  if (typeof sequence !== "number" || !Number.isSafeInteger(sequence) || sequence < 0) {
+    return invalidPayload(envelope.type, "payload.sequence", "non-negative safe integer");
+  }
   const text = parseSegmentTextSlot(envelope.type, record.payload.text);
   if (!text.ok) return text;
   const audio = parseSegmentAudioSlot(envelope.type, record.payload.audio);
@@ -101,7 +105,8 @@ export function parseOutputSegmentPayload(
   return {
     ok: true,
     payload: {
-      schema_version: SCHEMA_OUTPUT_SEGMENT_V4,
+      schema_version: SCHEMA_OUTPUT_SEGMENT_V5,
+      sequence,
       text: text.payload,
       audio: audio.payload,
       motion: motion.payload,

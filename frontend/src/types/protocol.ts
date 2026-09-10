@@ -6,7 +6,7 @@ export {
   SCHEMA_MODEL_INFO_V3,
   SCHEMA_MOTION_INTENT_V4,
   SCHEMA_MOTION_TUNING_SAMPLE_V2,
-  SCHEMA_OUTPUT_SEGMENT_V4,
+  SCHEMA_OUTPUT_SEGMENT_V5,
   SCHEMA_PARAMETER_ACTION_LIBRARY_V2,
   SCHEMA_PARAMETER_PLAN_V3,
   SCHEMA_PERFORMANCE_CURVE_HINT_V1,
@@ -20,7 +20,7 @@ import {
   SCHEMA_MODEL_INFO_V3,
   SCHEMA_MOTION_INTENT_V4,
   SCHEMA_MOTION_TUNING_SAMPLE_V2,
-  SCHEMA_OUTPUT_SEGMENT_V4,
+  SCHEMA_OUTPUT_SEGMENT_V5,
   SCHEMA_PARAMETER_ACTION_LIBRARY_V2,
   SCHEMA_PARAMETER_PLAN_V3,
   SCHEMA_PERFORMANCE_CURVE_HINT_V1,
@@ -91,7 +91,8 @@ export type OutputSegmentSpeechSlot =
   | { state: "absent" };
 
 export interface OutputSegmentPayload {
-  schema_version: typeof SCHEMA_OUTPUT_SEGMENT_V4;
+  schema_version: typeof SCHEMA_OUTPUT_SEGMENT_V5;
+  sequence: number;
   text: OutputSegmentTextSlot;
   audio: OutputSegmentAudioSlot;
   motion: OutputSegmentMotionSlot;

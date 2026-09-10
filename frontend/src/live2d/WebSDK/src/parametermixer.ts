@@ -54,6 +54,7 @@ export interface ActiveDirectParameterFrameState {
   timing: DirectParameterExecutionPlan["timing"];
   semanticBindings: DirectSemanticParameterBinding[];
   playbackClockReader: { getElapsedMs: () => number | null };
+  presentationElapsedMs: number;
   diagnosticFrameCount: number;
   /** Set only after every binding has activated and the active target settled. */
   releaseStartedAtMs: number | null;
@@ -140,6 +141,7 @@ export type ActiveParameterMixerResolution =
   | {
       ok: true;
       parameters: ResolvedParameterFrameEntry[];
+      directPresentationSettled: boolean;
     }
   | {
       ok: false;
@@ -161,6 +163,7 @@ export interface DirectPlanContributionCollection {
 export interface ActiveParameterFrameInput {
   model: CubismModel | null;
   directPlan: ActiveDirectParameterFrameState | null;
+  deltaTimeSeconds: number;
   interactionSway: ActiveInteractionSwayState | null;
   interactionGaze: ActiveInteractionGazeState | null;
   lipSyncEnabled: boolean;
@@ -199,6 +202,7 @@ export class ActiveParameterMixer {
     const directPlan = this.collectDirectPlanContributions(
       input.directPlan,
       input.getSpeechAudioGain,
+      input.deltaTimeSeconds,
     );
     if (directPlan.failure) {
       return { ok: false, owner: "direct_plan", reason: directPlan.failure };
@@ -219,7 +223,6 @@ export class ActiveParameterMixer {
     const resolution = this.resolveFrame(
       contributions,
       this.captureParameterBaseSnapshots(model, contributions),
-      directPlan.releaseEligible,
     );
     if (resolution.ok === false) {
       return {
@@ -231,7 +234,7 @@ export class ActiveParameterMixer {
 
     const directPlanExecution = {
       ...directPlan,
-      released: directPlan.releaseEligible,
+      released: directPlan.releaseEligible && resolution.directPresentationSettled,
     };
 
     if (
@@ -267,7 +270,6 @@ export class ActiveParameterMixer {
   public resolveFrame(
     contributions: readonly ParameterContribution[],
     baseSnapshots: ReadonlyMap<number, ParameterBaseSnapshot>,
-    releaseEligible = false,
   ): ActiveParameterMixerResolution {
     const grouped = new Map<number, {
       parameterIdRaw: string;
@@ -307,6 +309,7 @@ export class ActiveParameterMixer {
     }
 
     const parameters: ResolvedParameterFrameEntry[] = [];
+    let directPresentationSettled = true;
     const orderedGroups = [...grouped.entries()]
       .sort(([leftIndex], [rightIndex]) => leftIndex - rightIndex);
     for (const [parameterIndex, group] of orderedGroups) {
@@ -392,15 +395,17 @@ export class ActiveParameterMixer {
         : undefined;
       let presentedValue = directOnlyTargetValue;
       if (presentationContribution?.presentation) {
-        presentedValue = releaseEligible
-          ? baseValue
-          : resolveParameterPresentationFrame(
-              presentationContribution.presentation.node,
-              directOnlyTargetValue,
-              baseValue,
-              presentationContribution.presentation.elapsedMs,
-              presentationContribution.presentation.timing,
-            ).drivenValue;
+        const presentation = resolveParameterPresentationFrame(
+          presentationContribution.presentation.node,
+          directOnlyTargetValue,
+          baseValue,
+          presentationContribution.presentation.elapsedMs,
+          presentationContribution.presentation.timing,
+        );
+        presentedValue = presentation.drivenValue;
+        if (presentationContribution.owner === "direct_plan") {
+          directPresentationSettled &&= presentation.settled;
+        }
       }
       // Keep the active response state current, but never delay lip-sync output.
       const finalValue = hasLipSyncContribution ? mixedTargetValue : presentedValue;
@@ -419,12 +424,13 @@ export class ActiveParameterMixer {
       });
     }
 
-    return { ok: true, parameters };
+    return { ok: true, parameters, directPresentationSettled };
   }
 
   private collectDirectPlanContributions(
     planState: ActiveDirectParameterFrameState | null,
     getSpeechAudioGain: (axisId: string) => number,
+    deltaTimeSeconds: number,
   ): DirectPlanContributionCollection {
     if (!planState) {
       return {
@@ -439,19 +445,15 @@ export class ActiveParameterMixer {
       };
     }
 
-    const elapsedMs = planState.playbackClockReader.getElapsedMs();
-    if (elapsedMs === null || !Number.isFinite(elapsedMs)) {
-      return {
-        contributions: [],
-        failure: "parameter_plan_clock_unavailable",
-        shouldLogFrame: false,
-        elapsedMs: null,
-        allBindingsActivated: false,
-        nominalReleaseReached: false,
-        releaseEligible: false,
-        released: false,
-      };
-    }
+    const clockElapsedMs = planState.playbackClockReader.getElapsedMs();
+    const hasUsableClock = clockElapsedMs !== null && Number.isFinite(clockElapsedMs);
+    // Follow the audio clock while it is usable, including pauses. Only after the
+    // clock becomes unavailable do we advance from render time to finish the release.
+    const elapsedMs = hasUsableClock
+      ? Math.max(planState.presentationElapsedMs, clockElapsedMs)
+      : planState.presentationElapsedMs
+        + Math.max(0, deltaTimeSeconds) * 1000;
+    planState.presentationElapsedMs = elapsedMs;
 
     const shouldLogFrame = planState.diagnosticFrameCount < 2;
     const contributions: ParameterContribution[] = [];
@@ -481,7 +483,7 @@ export class ActiveParameterMixer {
         priority: PARAMETER_MIX_PRIORITY.directPlan,
         presentation: {
           node: item.presentation,
-          elapsedMs,
+          elapsedMs: planState.presentationElapsedMs,
           timing: planState.timing,
         },
       });

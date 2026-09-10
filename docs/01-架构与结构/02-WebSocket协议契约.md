@@ -113,14 +113,15 @@ control.turn_finished
 
 | 类型 | 载荷 | 需要 `message_id` |
 | --- | --- | --- |
-| `output.segment` | `output.segment.v4` 原子段，见下文 | 是 |
+| `output.segment` | `output.segment.v5` 原子段，见下文 | 是 |
 | `output.transcription` | `{ text: string }` | 否 |
 
-`output.segment.v4` 的结构：
+`output.segment.v5` 的结构：
 
 ```json
 {
-  "schema_version": "output.segment.v4",
+  "schema_version": "output.segment.v5",
+  "sequence": 0,
   "text": { "state": "present", "content": "唯一助手文本 / 语音字幕" },
   "audio": {
     "state": "present",
@@ -148,7 +149,7 @@ control.turn_finished
 }
 ```
 
-`text`、`audio`、`motion` 都必须使用显式 tagged slot：`present | absent | failed`，不得省略；`speech` 使用 `present | absent`，只承载 provider-neutral 的短语级语音 cue，不承载 TTS 文本、音频 URL 或 Live2D 参数。`speech.state=present` 时必须包含 `1..8` 个 cue，没有 cue 时必须使用 `absent`，不能发送空的 `present`。表演曲线只有一个执行来源：`motion.payload.performance_curve_hint`；顶层 `performance_curve` 和段发送后的独立曲线 patch 都属于非法协议。
+`sequence` 是同一 `turn_id` 内从 `0` 开始的连续非负安全整数。Adapter 只会按连续 sequence 发送已经 finalize 的段，前端据此收到与 AstrBot 逻辑消息相同的顺序。`text`、`audio`、`motion` 都必须使用显式 tagged slot：`present | absent | failed`，不得省略；`speech` 使用 `present | absent`，只承载 provider-neutral 的短语级语音 cue，不承载 TTS 文本、音频 URL 或 Live2D 参数。`speech.state=present` 时必须包含 `1..8` 个 cue，没有 cue 时必须使用 `absent`，不能发送空的 `present`。表演曲线只有一个执行来源：`motion.payload.performance_curve_hint`；顶层 `performance_curve` 和段发送后的独立曲线 patch 都属于非法协议。
 
 motion slot 的语义必须保持严格区分：
 
@@ -162,9 +163,9 @@ motion slot 的语义必须保持严格区分：
 Adapter 通过内部 `ag99live_motion_schedule` 判断该段是否预期动作。已安排动作但 payload
 缺失时必须生成 `motion.state=failed`，不能因为最终没有 motion object 就写成 `absent`。
 
-`output.segment.v1/v2/v3` 不再兼容接收；前后端必须同时使用 v4，避免同时维护正文和音频字幕两份文本事实。
+`output.segment.v1/v2/v3/v4` 不再兼容接收；前后端必须同时使用 v5，避免同时维护正文和音频字幕两份文本事实。
 
-`output.segment.v4` 是封闭协议：根对象以及 `text`、`audio`、`motion`、`speech` slot 只允许契约声明字段。`caption_text`、顶层 `performance_curve` 或其他未知字段必须在前端入站边界直接拒绝，不得静默丢弃。
+`output.segment.v5` 是封闭协议：根对象以及 `text`、`audio`、`motion`、`speech` slot 只允许契约声明字段。`caption_text`、顶层 `performance_curve` 或其他未知字段必须在前端入站边界直接拒绝，不得静默丢弃。
 
 AstrBot 内部 Plain、Record、图片与 motion client object 可以物理分离，但 Adapter 必须先按 `turn_id + message_id` 聚合，再发送一个 `output.segment`。增强版 Core 只有在同一逻辑消息的全部物理发送成功后才调用 `complete_visible_message(message_id)`；若部分发送失败，不得确认该段。TTS 物理分片通过组件 `delivery_metadata.output_segment.message_id` 归入各自逻辑段；其中 AstrBot TTS turn、逻辑 message、`tts_request_id` 与 AG99 前端 turn correlation 必须一致，不一致时拒绝整段。没有段级元数据的普通标准输出才使用 `standard_reply`。只有 `complete_visible_turn()` 可以关闭输出队列。Plain 文本、Persona semantic text 与 `Record.text` 都归一化到同一个 `text.content`；值不一致时整段报冲突。`audio` slot 只承载媒体 URL，不再拥有第二份 caption。
 

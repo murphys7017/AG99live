@@ -9,6 +9,7 @@ from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 
 from .core_compatibility import get_prompt_annotation_capabilities
+from .runtime.message_utils import resolve_platform_segment_message_id
 
 
 class OutputSegmentDeliveryPort(Protocol):
@@ -40,6 +41,8 @@ class OLVPetPlatformEvent(AstrMessageEvent):
             "logical_message_id": "standard_reply",
         }
         self._direct_output_sequence = 0
+        self._logical_segment_indexes: dict[str, int] = {}
+        self._next_logical_segment_index = 0
         self._attach_prompt_annotations(message_obj=message_obj)
 
     async def send(self, message):
@@ -79,6 +82,12 @@ class OLVPetPlatformEvent(AstrMessageEvent):
             )
         ):
             resolved_platform_extras.update(self._standard_output_platform_extras)
+        message_id = resolve_platform_segment_message_id(resolved_platform_extras)
+        sequence = self._logical_segment_indexes.get(message_id)
+        if sequence is None:
+            sequence = self._allocate_logical_segment_index()
+            self._logical_segment_indexes[message_id] = sequence
+        resolved_platform_extras["logical_segment_index"] = sequence
         if bool(self.get_extra("_ag99live_official_inline_motion_expected", False)):
             metadata = resolved_platform_extras.get("metadata")
             resolved_metadata = dict(metadata) if isinstance(metadata, dict) else {}
@@ -142,6 +151,11 @@ class OLVPetPlatformEvent(AstrMessageEvent):
     def _is_stop_requested(self) -> bool:
         return bool(self.get_extra("agent_stop_requested", False))
 
+    def _allocate_logical_segment_index(self) -> int:
+        index = self._next_logical_segment_index
+        self._next_logical_segment_index += 1
+        return index
+
     def _attach_prompt_annotations(self, *, message_obj: Any) -> None:
         capabilities = get_prompt_annotation_capabilities()
         annotations: dict[str, dict[str, str]] = {
@@ -183,6 +197,14 @@ def _resolve_desktop_snapshot_component_indexes(message_obj: Any) -> set[int]:
     raw_message = getattr(message_obj, "raw_message", None)
     if not isinstance(raw_message, dict):
         return set()
+
+    cached_indexes = raw_message.get("desktop_snapshot_component_indexes")
+    if isinstance(cached_indexes, list):
+        return {
+            index
+            for index in cached_indexes
+            if isinstance(index, int) and index >= 0
+        }
 
     payload = raw_message.get("payload")
     if not isinstance(payload, dict):

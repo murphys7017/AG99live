@@ -1845,6 +1845,7 @@ export class LAppModel extends CubismUserModel {
       timing: parsed.timing,
       semanticBindings,
       playbackClockReader,
+      presentationElapsedMs: 0,
       diagnosticFrameCount: 0,
       releaseStartedAtMs: null,
       runId: runId || ('direct-plan-' + Date.now() + '-' + Math.random().toString(36).slice(2)),

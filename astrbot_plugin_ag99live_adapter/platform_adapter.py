@@ -262,7 +262,8 @@ class OLVPetPlatformAdapter(Platform):
                 turn_id=turn_id,
                 unified_msg_origin=str(session),
                 platform_extras={
-                    "logical_message_id": message_id
+                    "logical_message_id": message_id,
+                    "logical_segment_index": 0,
                 },
             )
             await self.turn_coordinator.finalize_output_segment(

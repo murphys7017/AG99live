@@ -418,22 +418,17 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       state.runtimeCacheErrors,
     ),
   );
-  const startThinkingSway = (source: "ptt" | "text"): void => {
-    modelEngine.startThinkingSway(source);
-  };
-  const pushToTalk = usePushToTalkController({
-    ...adapter,
-    onPttIntent: () => startThinkingSway("ptt"),
+  adapter.setTurnLifecycleObserver((event) => {
+    if (event.phase === "started") {
+      modelEngine.startThinkingSway(event.turnId);
+      return;
+    }
+    modelEngine.releaseThinkingSway(event.turnId);
   });
+  const pushToTalk = usePushToTalkController(adapter);
   let snapshotPublisher: ReturnType<typeof createPetRuntimeSnapshotPublisher> | null = null;
   const bilibiliLive = useBilibiliLiveRuntime({
-    sendText: async (text) => {
-      const sent = await adapter.sendText(text);
-      if (sent) {
-        startThinkingSway("text");
-      }
-      return sent;
-    },
+    sendText: (text) => adapter.sendText(text),
     pushHistory: (role, text) => adapter.pushHistory(role, text),
     onStatusChanged: () => {
       snapshotPublisher?.publishRuntimeSnapshot();
@@ -474,7 +469,6 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       state: modelEngine.state,
       previewCompiledSemanticMotion: modelEngine.previewCompiledSemanticMotion,
     },
-    onTextSubmit: () => startThinkingSway("text"),
     snapshotPublisher,
     saveMotionTuningSample,
     deleteMotionTuningSample,
@@ -497,6 +491,10 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
   onBeforeUnmount(async () => {
     const cleanupErrors: unknown[] = [];
     const cleanupSteps: Array<readonly [string, () => void]> = [
+      ["Thinking sway release", () => {
+        adapter.setTurnLifecycleObserver(null);
+        modelEngine.releaseThinkingSway();
+      }],
       ["MotionLab reconnect watch stop", stopMotionLabReconnectWatch],
       ["MotionLab recorded handler detach", () => {
         adapter.setMotionLabRawEventRecordedHandler(null);

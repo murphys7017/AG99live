@@ -97,7 +97,7 @@ sequenceDiagram
     end
 
     loop 每个完整逻辑段
-        Segment->>Inbound: output.segment.v4<br/>唯一 text / audio URL / motion / speech / images 完整 slots
+        Segment->>Inbound: output.segment.v5<br/>唯一 text / audio URL / motion / speech / images 完整 slots
         Segment->>Observations: 记录 assistant_output 与 motion slot
         Inbound->>Inbound: parser 校验信封、身份与 slot 结构
         alt 信封或 slot 结构非法

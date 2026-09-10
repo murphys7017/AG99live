@@ -62,6 +62,11 @@ type SessionStore = ReturnType<typeof useTurnPlaybackSessionStore>;
 type AdapterHistory = ReturnType<typeof useAdapterHistory>;
 type AdapterMotionTuning = ReturnType<typeof useAdapterMotionTuning>;
 
+export interface AdapterTurnLifecycleEvent {
+  phase: "started" | "terminal";
+  turnId: string;
+}
+
 export interface AdapterConnectionInstance {
   readonly state: DeepReadonly<ReturnType<typeof createAdapterConnectionState>>;
   readonly modelSync: ModelSyncInstance;
@@ -92,6 +97,9 @@ export interface AdapterConnectionInstance {
   ) => void;
   setMotionLabRawEventReporter: (
     handler: ((payload: MotionLabRawEventInput, turnId: string | null) => void) | null,
+  ) => void;
+  setTurnLifecycleObserver: (
+    observer: ((event: AdapterTurnLifecycleEvent) => void) | null,
   ) => void;
   sendPlaybackFinishedForCurrentGroup: (
     turnId: string | null,
@@ -159,6 +167,7 @@ export function createAdapterConnection(
     payload: MotionLabRawEventInput,
     turnId: string | null,
   ) => void) | null = null;
+  let turnLifecycleObserver: ((event: AdapterTurnLifecycleEvent) => void) | null = null;
   let detachPttHookStatusListener: (() => void) | null = null;
   let playbackAudioControl: PlaybackTimelineAudioControl | null = null;
 
@@ -282,7 +291,7 @@ export function createAdapterConnection(
         message_id: envelope.message_id,
         source_route: "adapter_inbound",
         phase: "output_segment_rejected",
-        payload_kind: "output.segment.v4",
+        payload_kind: "output.segment.v5",
         raw: {
           reason: message,
           type: envelope.type,
@@ -292,6 +301,7 @@ export function createAdapterConnection(
         },
       }, envelope.turn_id);
     },
+    notifyTurnLifecycle: (event) => turnLifecycleObserver?.(event),
   });
 
   const outboundClient = createAdapterOutboundClient({
@@ -578,8 +588,8 @@ export function createAdapterConnection(
               cleanupErrors,
             );
           }
-        });
-      },
+      });
+    },
       onError: (nextSocket, opened) => {
         if (socket !== nextSocket || attemptSerial !== connectAttemptSerial) {
           return;
@@ -736,6 +746,12 @@ export function createAdapterConnection(
     return sendTextAction(outboundCtx, text);
   }
 
+  function setTurnLifecycleObserver(
+    observer: ((event: AdapterTurnLifecycleEvent) => void) | null,
+  ): void {
+    turnLifecycleObserver = observer;
+  }
+
   function interruptCurrentTurn(): boolean {
     return sendInterrupt(outboundCtx);
   }
@@ -849,6 +865,7 @@ export function createAdapterConnection(
     connect,
     disconnect,
     sendText,
+    setTurnLifecycleObserver,
     interruptCurrentTurn,
     sendSemanticAxisProfileSave,
     requestHistoryList,

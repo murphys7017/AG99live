@@ -2,10 +2,17 @@ from __future__ import annotations
 
 import importlib
 import struct
+from types import SimpleNamespace
+from urllib.parse import unquote, urlparse
 import wave
 
 
-def _install_media_service_dependencies(install_fake_astrbot, monkeypatch) -> None:
+def _install_media_service_dependencies(
+    install_fake_astrbot,
+    monkeypatch,
+    *,
+    temp_root,
+) -> None:
     install_fake_astrbot()
     message_components = importlib.import_module("types").ModuleType(
         "astrbot.api.message_components"
@@ -30,16 +37,36 @@ def _install_media_service_dependencies(install_fake_astrbot, monkeypatch) -> No
     astrbot_path_module = importlib.import_module("types").ModuleType(
         "astrbot.core.utils.astrbot_path"
     )
-    astrbot_path_module.get_astrbot_temp_path = lambda: "."
+    astrbot_path_module.get_astrbot_temp_path = lambda: str(temp_root)
     monkeypatch.setitem(
         importlib.import_module("sys").modules,
         "astrbot.core.utils.astrbot_path",
         astrbot_path_module,
     )
 
+    path_util_module = importlib.import_module("types").ModuleType(
+        "astrbot.core.utils.path_util"
+    )
+
+    def file_uri_to_path(file_uri: str) -> str:
+        parsed = urlparse(file_uri)
+        path = unquote(parsed.path)
+        return path[1:] if len(path) > 2 and path[0] == "/" and path[2] == ":" else path
+
+    path_util_module.file_uri_to_path = file_uri_to_path
+    monkeypatch.setitem(
+        importlib.import_module("sys").modules,
+        "astrbot.core.utils.path_util",
+        path_util_module,
+    )
+
 
 def _create_media_service(install_fake_astrbot, monkeypatch, tmp_path):
-    _install_media_service_dependencies(install_fake_astrbot, monkeypatch)
+    _install_media_service_dependencies(
+        install_fake_astrbot,
+        monkeypatch,
+        temp_root=tmp_path / "astrbot-temp",
+    )
     module = importlib.import_module("astrbot_plugin_ag99live_adapter.services.media_service")
     MediaService = module.MediaService
     return MediaService(
@@ -113,3 +140,50 @@ def test_cache_audio_file_falls_back_to_conversion_for_non_pcm_wav(
 
     assert calls == [f"from_file:{source_path}", "export:wav"]
     assert importlib.import_module("pathlib").Path(cached_path).read_bytes() == b"converted-wav"
+
+
+def test_desktop_snapshot_cache_reuses_latest_snapshot_for_same_client(
+    install_fake_astrbot,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    media_service = _create_media_service(install_fake_astrbot, monkeypatch, tmp_path)
+    source_path = tmp_path / "desktop.jpg"
+    source_path.write_bytes(b"desktop-snapshot")
+
+    cached = media_service.cache_desktop_snapshot(
+        client_uid="desktop-client",
+        image_component=SimpleNamespace(file=str(source_path)),
+    )
+    cached_path = importlib.import_module("pathlib").Path(cached["path"])
+
+    assert cached_path.read_bytes() == b"desktop-snapshot"
+    assert "input_images" in cached_path.parts
+    assert cached_path != source_path
+    latest = media_service.get_latest_desktop_snapshot_component(
+        client_uid="desktop-client"
+    )
+    assert importlib.import_module("pathlib").Path(latest["path"]).resolve() == cached_path
+
+
+def test_desktop_snapshot_cache_accepts_file_uri_components(
+    install_fake_astrbot,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    media_service = _create_media_service(install_fake_astrbot, monkeypatch, tmp_path)
+    source_path = tmp_path / "desktop.jpg"
+    source_path.write_bytes(b"desktop-snapshot")
+
+    cached = media_service.cache_desktop_snapshot(
+        client_uid="desktop-client",
+        image_component=SimpleNamespace(file=source_path.as_uri()),
+    )
+    cached_path = importlib.import_module("pathlib").Path(cached["path"])
+
+    assert cached_path.read_bytes() == b"desktop-snapshot"
+    assert cached_path != source_path
+    latest = media_service.get_latest_desktop_snapshot_component(
+        client_uid="desktop-client"
+    )
+    assert importlib.import_module("pathlib").Path(latest["path"]).resolve() == cached_path

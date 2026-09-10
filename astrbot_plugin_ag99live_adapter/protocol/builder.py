@@ -248,6 +248,7 @@ def build_output_segment(
     *,
     turn_id: str | None,
     message_id: str,
+    sequence: int,
     text: dict[str, Any],
     audio: dict[str, Any],
     motion: dict[str, Any],
@@ -263,6 +264,7 @@ def build_output_segment(
         source=SOURCE_ADAPTER,
         payload={
             "schema_version": OUTPUT_SEGMENT_SCHEMA_VERSION,
+            "sequence": sequence,
             "text": text,
             "audio": audio,
             "motion": motion,

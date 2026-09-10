@@ -65,6 +65,8 @@ class OutputSegmentCoordinator:
         self._finish_turn = finish_turn
         self._mark_turn_timing = mark_turn_timing
         self._pending_segments: dict[str, PendingOutputSegment] = {}
+        self._segment_sequences: dict[str, dict[int, str]] = {}
+        self._next_sequence_by_turn: dict[str, int] = {}
         self._flushed_segment_keys: set[str] = set()
         self._turn_locks: dict[str, asyncio.Lock] = {}
         self._closing_turn_ids: set[str] = set()
@@ -73,6 +75,8 @@ class OutputSegmentCoordinator:
 
     def reset(self) -> None:
         self._pending_segments.clear()
+        self._segment_sequences.clear()
+        self._next_sequence_by_turn.clear()
         self._flushed_segment_keys.clear()
         self._turn_locks.clear()
         self._closing_turn_ids.clear()
@@ -95,6 +99,8 @@ class OutputSegmentCoordinator:
         self._flushed_segment_keys.difference_update(
             key for key in self._flushed_segment_keys if key.startswith(prefix)
         )
+        self._segment_sequences.pop(turn_id, None)
+        self._next_sequence_by_turn.pop(turn_id, None)
         self._turn_locks.pop(turn_id, None)
         self._closing_turn_ids.discard(turn_id)
         self._closed_turn_ids.discard(turn_id)
@@ -124,6 +130,14 @@ class OutputSegmentCoordinator:
                     segment_message_id,
                 )
                 return
+            segment_sequence = _require_segment_sequence(
+                extras.get("logical_segment_index")
+            )
+            self._register_segment_sequence(
+                turn_id=normalized_turn_id,
+                message_id=segment_message_id,
+                sequence=segment_sequence,
+            )
             self._mark_turn_timing(normalized_turn_id, "emit_started_at")
             texts, picture_paths, record_paths, record_texts = extract_outbound_message_parts(
                 message_chain
@@ -151,6 +165,7 @@ class OutputSegmentCoordinator:
                 raw_reply_text=raw_reply_text,
             )
             segment = self._get_pending_segment(normalized_turn_id, segment_message_id)
+            segment.merge_sequence(segment_sequence)
             segment.merge_text(canonical_text)
             segment.merge_semantic_text(canonical_text)
             segment.merge_images(picture_paths)
@@ -213,7 +228,7 @@ class OutputSegmentCoordinator:
                     f"output_segment_missing:{normalized_turn_id}:{normalized_message_id}"
                 )
             segment.finalize()
-            await self._flush_segment(segment)
+            await self._flush_finalized_segments_in_order(normalized_turn_id)
 
     async def close_turn_output_queue(self, *, turn_id: str) -> None:
         normalized_turn_id = _require_turn_id_value(turn_id)
@@ -333,6 +348,8 @@ class OutputSegmentCoordinator:
         }, ""
 
     async def _flush_segment(self, segment: PendingOutputSegment) -> None:
+        if segment.sequence is None:
+            raise RuntimeError(f"output_segment_sequence_missing:{segment.message_id}")
         audio_slot: dict[str, Any] = {"state": "absent"}
         if segment.audio_path:
             _, audio_url = await asyncio.to_thread(
@@ -358,6 +375,7 @@ class OutputSegmentCoordinator:
             build_output_segment(
                 turn_id=segment.turn_id,
                 message_id=segment.message_id,
+                sequence=segment.sequence,
                 text=text_slot,
                 audio=audio_slot,
                 motion=motion_slot,
@@ -396,6 +414,38 @@ class OutputSegmentCoordinator:
         if audio_slot["state"] == "present":
             self._mark_turn_timing(segment.turn_id, "audio_payload_sent_at")
 
+    async def _flush_finalized_segments_in_order(self, turn_id: str) -> None:
+        next_sequence = self._next_sequence_by_turn.setdefault(turn_id, 0)
+        while True:
+            message_id = self._segment_sequences.get(turn_id, {}).get(next_sequence)
+            if message_id is None:
+                return
+            segment = self._pending_segments.get(self._segment_key(turn_id, message_id))
+            if segment is None:
+                raise RuntimeError(
+                    f"output_segment_sequence_state_missing:{turn_id}:{next_sequence}"
+                )
+            if not segment.finalized:
+                return
+            await self._flush_segment(segment)
+            next_sequence += 1
+            self._next_sequence_by_turn[turn_id] = next_sequence
+
+    def _register_segment_sequence(
+        self,
+        *,
+        turn_id: str,
+        message_id: str,
+        sequence: int,
+    ) -> None:
+        sequences = self._segment_sequences.setdefault(turn_id, {})
+        existing_message_id = sequences.get(sequence)
+        if existing_message_id is not None and existing_message_id != message_id:
+            raise ValueError(
+                f"output_segment_sequence_conflict:{turn_id}:{sequence}"
+            )
+        sequences[sequence] = message_id
+
     def _get_turn_lock(self, turn_id: str) -> asyncio.Lock:
         return self._turn_locks.setdefault(turn_id, asyncio.Lock())
 
@@ -412,7 +462,6 @@ class OutputSegmentCoordinator:
             ),
             None,
         )
-
     def _build_motion_slot(self, segment: PendingOutputSegment) -> dict[str, Any]:
         if segment.motion_payload is None:
             if segment.motion_failure_reason:
@@ -439,6 +488,12 @@ class OutputSegmentCoordinator:
             "source": segment.motion_source,
             "payload": payload,
         }
+
+
+def _require_segment_sequence(value: Any) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError("output_segment_sequence_missing_or_invalid")
+    return value
 
 
 def _require_turn_id_value(turn_id: str | None) -> str:

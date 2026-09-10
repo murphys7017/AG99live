@@ -93,7 +93,8 @@ export async function sendText(ctx: OutboundActionContext, text: string): Promis
     return false;
   }
 
-  const desktopCapture = ctx.state.desktopScreenshotOnSendEnabled
+  const desktopSnapshotRequested = ctx.state.desktopScreenshotOnSendEnabled;
+  const desktopCapture = desktopSnapshotRequested
     ? await captureRealtimeDesktopScreenshot()
     : null;
   const turnId = ctx.createMessageId();
@@ -101,6 +102,7 @@ export async function sendText(ctx: OutboundActionContext, text: string): Promis
   const sent = ctx.outboundClient.send("input.text", {
     text: outboundText,
     images: desktopCapture ? [desktopCapture] : [],
+    desktop_snapshot_requested: desktopSnapshotRequested,
   }, turnId);
   if (!sent) {
     ctx.state.lastError = "当前还没有连上适配器，文本未发送。";
@@ -112,7 +114,9 @@ export async function sendText(ctx: OutboundActionContext, text: string): Promis
   ctx.state.lastError = "";
   ctx.state.statusMessage = desktopCapture
     ? "文本和实时桌面截图已发送，等待后端回复。"
-    : "文本已发送，等待后端回复。";
+    : desktopSnapshotRequested
+      ? "实时桌面截图抓取失败，文本已发送；后端会尝试使用最近一次桌面快照。"
+      : "文本已发送，等待后端回复。";
   ctx.pushHistory("user", message);
   return true;
 }
