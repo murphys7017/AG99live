@@ -4,6 +4,7 @@ import json
 from typing import Any
 
 from ...core_compatibility import get_interaction_capabilities
+from .companion import append_official_companion_prompt
 from .prompt_builder import (
     _build_motion_capability_prompt_payload,
     _build_motion_decision_contract_text,
@@ -137,6 +138,7 @@ def append_official_inline_motion_prompt(event: Any, request: Any) -> bool:
             "Live2D Motion Context:\n"
             + json.dumps(runtime_payload, ensure_ascii=False, separators=(",", ":"))
         )
+    append_official_companion_prompt(request)
     current_system_prompt = str(getattr(request, "system_prompt", "") or "").rstrip()
     request.system_prompt = "\n\n".join(
         part for part in (current_system_prompt, *sections) if part

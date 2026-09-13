@@ -1,4 +1,4 @@
-"""Minimal HTTP static resource server for the desktop VTuber adapter."""
+"""Minimal HTTP static resource server for the desktop AG99live body adapter."""
 
 from __future__ import annotations
 
@@ -125,12 +125,12 @@ class StaticResourceServer:
         self._server = ThreadingHTTPServer((self.host, self.port), handler_cls)
         self._thread = threading.Thread(
             target=self._server.serve_forever,
-            name=f"desktop_vtuber_static_{self.port}",
+            name=f"desktop_ag99live_static_{self.port}",
             daemon=True,
         )
         self._thread.start()
         logger.info(
-            f"Desktop VTuber static resources listening on http://{self.host}:{self.port}"
+            f"Desktop AG99live static resources listening on http://{self.host}:{self.port}"
         )
 
     def stop(self) -> None:

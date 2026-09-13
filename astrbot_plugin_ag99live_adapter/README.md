@@ -1,7 +1,11 @@
 # astrbot_plugin_ag99live_adapter
 
-AG99live 的 AstrBot 插件侧实现。该目录负责协议桥接、Turn 生命周期、媒体处理、Live2D 扫描，
-以及把 Persona 回复产生的文本、TTS 和动作意图聚合为前端可消费的原子输出段。
+AG99live 的 AstrBot 插件侧实现。AG99live 是 AstrBot 的桌面身体，本目录负责把 AstrBot 的人格回应
+连接到桌宠式伴侣的 Live2D 表现：协议桥接、Turn 生命周期、媒体处理、Live2D 扫描，以及把 Persona
+回复产生的文本、TTS 和动作意图聚合为前端可消费的原子输出段。
+
+AstrBot 仍然拥有核心人格、记忆和对话决策；AG99live 不建立平行人格，只负责让这些回应通过桌面上的
+身体、声音、视线、动作和表情与用户相处。直播弹幕是可接入的消息来源，不是本项目的产品身份。
 
 ## 核心职责
 

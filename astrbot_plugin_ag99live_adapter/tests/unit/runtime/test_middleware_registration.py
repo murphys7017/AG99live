@@ -82,6 +82,7 @@ def test_register_ag99live_interaction_contributors_keeps_motion_and_remote(
         "ag99live.remote_operator.prompt",
     ]
     assert [item.plugin_id for item in prompt_contributors] == [
+        "ag99live.companion_identity.prompt",
         "ag99live.motion.prompt",
         "ag99live.remote_operator.prompt",
     ]
@@ -200,6 +201,60 @@ def test_motion_static_prompt_extensions_target_persona(
         extension.meta["targets"] == ["persona", "core"]
         for extension in extensions
     )
+
+
+def test_companion_identity_prompt_targets_persona_and_core(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_middleware_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = importlib.import_module(
+        "astrbot_plugin_ag99live_adapter.middleware.interaction_motion.companion"
+    )
+    module = importlib.reload(module)
+
+    class PromptExtension:
+        def __init__(self, **kwargs) -> None:
+            self.__dict__.update(kwargs)
+
+    monkeypatch.setattr(
+        module,
+        "get_interaction_capabilities",
+        lambda: types.SimpleNamespace(prompt_extension=PromptExtension),
+    )
+    monkeypatch.setattr(module, "_resolve_motion_runtime_bundle", lambda event: object())
+    monkeypatch.setattr(module, "_should_contribute_motion_prompt", lambda view: True)
+
+    extensions = asyncio.run(
+        module.AG99liveCompanionIdentityPromptContributor().collect(
+            object(), object(), object()
+        )
+    )
+
+    assert len(extensions) == 1
+    extension = extensions[0]
+    assert extension.plugin_id == "ag99live.companion_identity.prompt"
+    assert extension.mount == "system"
+    assert extension.meta["targets"] == ["persona", "core"]
+    assert "AstrBot 在桌面上的身体" in extension.value
+    assert "虚拟主播" in extension.value
+
+
+def test_official_companion_identity_prompt_is_appended(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_middleware_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = importlib.import_module(
+        "astrbot_plugin_ag99live_adapter.middleware.interaction_motion.companion"
+    )
+    module = importlib.reload(module)
+    request = types.SimpleNamespace(system_prompt="existing system prompt")
+
+    module.append_official_companion_prompt(request)
+
+    assert request.system_prompt.startswith("existing system prompt\n\n")
+    assert "桌宠式的长期陪伴者" in request.system_prompt
 
 
 def test_enhanced_interaction_requires_dynamic_effect_schema_support(

@@ -6,8 +6,8 @@ flowchart LR
     classDef storage fill:#fff3d6,stroke:#9a6b14,color:#513807
     classDef device fill:#f3e6ec,stroke:#8b4865,color:#4b2637
 
-    USER[用户 / 主播]:::person
-    AUDIENCE[直播间观众]:::person
+    USER[用户]:::person
+    AUDIENCE[外部互动用户]:::person
 
     subgraph ASTR[ AstrBot 运行环境 ]
         CORE[AstrBot Core<br/>事件总线 / Router / Persona Runtime / TTS]:::external

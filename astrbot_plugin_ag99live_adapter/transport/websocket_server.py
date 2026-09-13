@@ -64,7 +64,7 @@ class WebSocketTransport:
         再 to_thread 起 static_server，最后 websockets.serve。CancelledError
         与其它异常都会在退出前调 stop() 回收静态服务器与 WS 句柄，再重新抛。
         """
-        logger.debug("Desktop VTuber Adapter transport starting")
+        logger.debug("Desktop AG99live body adapter transport starting")
         try:
             import websockets  # type: ignore
 
@@ -86,7 +86,7 @@ class WebSocketTransport:
             )
             await self._ws_server.wait_closed()
         except asyncio.CancelledError:
-            logger.debug("Desktop VTuber Adapter transport cancelled")
+            logger.debug("Desktop AG99live body adapter transport cancelled")
             await self.stop()
             raise
         except Exception:
