@@ -134,3 +134,7 @@ def test_finalized_segments_flush_in_logical_message_order(
         "segment-1",
         "segment-2",
     ]
+    coordinator._flushed_segment_keys.add("turn-2|segment-1")
+    coordinator.clear_turn("turn-1")
+
+    assert coordinator._flushed_segment_keys == {"turn-2|segment-1"}

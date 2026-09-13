@@ -96,9 +96,10 @@ class OutputSegmentCoordinator:
         for key in tuple(self._pending_segments):
             if key.startswith(prefix):
                 self._pending_segments.pop(key, None)
-        self._flushed_segment_keys.difference_update(
+        flushed_keys_for_turn = tuple(
             key for key in self._flushed_segment_keys if key.startswith(prefix)
         )
+        self._flushed_segment_keys.difference_update(flushed_keys_for_turn)
         self._segment_sequences.pop(turn_id, None)
         self._next_sequence_by_turn.pop(turn_id, None)
         self._turn_locks.pop(turn_id, None)
