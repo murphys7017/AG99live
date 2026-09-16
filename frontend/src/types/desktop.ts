@@ -378,6 +378,8 @@ export interface DesktopRuntimeSnapshot {
   backendHistoryLoading: boolean;
   backendHistoryStatusMessage: string;
   bilibiliLiveStatus: BilibiliLiveStatus;
+  manualPreviewText: string;
+  latestAssistantFeedback: DesktopAssistantFeedbackState;
 }
 
 export interface DesktopMicrophoneDevice {
@@ -452,6 +454,11 @@ export interface DesktopMotionPreviewStatus {
   reason?: string;
 }
 
+export interface DesktopAssistantFeedbackState {
+  available: boolean;
+  approved: boolean;
+}
+
 export type DesktopRuntimeCommand =
   | { type: "set_address"; address: string }
   | { type: "set_desktop_screenshot_on_send"; enabled: boolean }
@@ -480,4 +487,13 @@ export type DesktopRuntimeCommand =
     type: "preview_compiled_semantic_motion";
     requestId: string;
     semanticMotion: CompiledSemanticMotion;
-  };
+    assistantText?: string;
+  }
+  | {
+    type: "preview_recorded_parameter_plan";
+    requestId: string;
+    plan: MotionPlanPayload;
+    semanticMotion: CompiledSemanticMotion;
+    assistantText: string;
+  }
+  | { type: "approve_latest_assistant_segment" };

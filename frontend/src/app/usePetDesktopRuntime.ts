@@ -5,6 +5,7 @@ import {
   onMounted,
   provide,
   reactive,
+  ref,
   watch,
   type ComputedRef,
   type InjectionKey,
@@ -44,7 +45,7 @@ import { useDesktopContextMenu } from "./useDesktopContextMenu";
 import { createDesktopRuntimeCommandHandler } from "../desktop-bridge/useDesktopRuntimeCommandHandler";
 import { usePushToTalkController } from "./usePushToTalkController";
 import { useBilibiliLiveRuntime } from "../bilibili-live/useBilibiliLiveRuntime";
-import { isTerminalPhase } from "../turn-playback/session";
+import { isSegmentLocallySettled, isTerminalPhase } from "../turn-playback/session";
 import {
   createIndexedDbMotionLabPendingEventStore,
   createMotionLabOutboundQueue,
@@ -78,6 +79,9 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
   const { adapter, playbackTimeline } = conversationPlayback;
   const bridge = useDesktopBridge();
   const motionPlayer = usePreviewMotionPlayer();
+  const manualPreviewText = ref("");
+  let manualPreviewRequestId = "";
+  const approvedAssistantSegmentKeys = reactive(new Set<string>());
   const motionEngineSettings = reactive(
     cloneModelEngineSettings(bridge.state.snapshot.motionEngineSettings),
   );
@@ -115,6 +119,77 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       console.error("[MotionLab]", message, error);
       adapter.pushHistory("error", message);
     });
+  }
+  function findLatestCompletedAssistantSegment(): {
+    turnId: string;
+    messageId: string;
+    assistantText: string;
+  } | null {
+    const sessions = sessionStore.getSessions();
+    for (let sessionIndex = sessions.length - 1; sessionIndex >= 0; sessionIndex -= 1) {
+      const session = sessions[sessionIndex];
+      const turnId = session.turnId?.trim() ?? "";
+      if (!turnId) {
+        continue;
+      }
+      for (let segmentIndex = session.segmentOrder.length - 1; segmentIndex >= 0; segmentIndex -= 1) {
+        const messageId = session.segmentOrder[segmentIndex];
+        const segment = session.segments.get(messageId);
+        const assistantText = segment?.text.content?.trim() ?? "";
+        if (!segment || !assistantText || !isSegmentLocallySettled(segment)) {
+          continue;
+        }
+        return { turnId, messageId, assistantText };
+      }
+    }
+    return null;
+  }
+  const latestAssistantFeedback = computed(() => {
+    const segment = findLatestCompletedAssistantSegment();
+    if (!segment) {
+      return { available: false, approved: false };
+    }
+    const key = `${segment.turnId}:${segment.messageId}`;
+    return {
+      available: true,
+      approved: approvedAssistantSegmentKeys.has(key),
+    };
+  });
+  function beginManualPreviewPresentation(requestId: string, assistantText: string): void {
+    manualPreviewRequestId = requestId.trim();
+    manualPreviewText.value = assistantText.trim();
+  }
+  function clearManualPreviewPresentation(requestId: string): void {
+    if (manualPreviewRequestId !== requestId.trim()) {
+      return;
+    }
+    manualPreviewRequestId = "";
+    manualPreviewText.value = "";
+  }
+  function approveLatestAssistantSegment(): boolean {
+    const segment = findLatestCompletedAssistantSegment();
+    if (!segment) {
+      return false;
+    }
+    const segmentKey = `${segment.turnId}:${segment.messageId}`;
+    if (approvedAssistantSegmentKeys.has(segmentKey)) {
+      return false;
+    }
+    approvedAssistantSegmentKeys.add(segmentKey);
+    sendMotionLabEvent({
+      event_type: "motion.feedback_positive",
+      message_id: segment.messageId,
+      source_route: "pet_overlay",
+      phase: "assistant_segment_feedback",
+      assistant_text: segment.assistantText,
+      raw: {
+        feedback: "positive",
+        interaction: "overlay_thumbs_up",
+        turnId: segment.turnId,
+        messageId: segment.messageId,
+      },
+    }, segment.turnId);
+    return true;
   }
   const motionRecord = {
     getSelectedModel: () => selectedModel,
@@ -169,6 +244,8 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       if (completedRun?.origin !== "manual_preview") {
         return;
       }
+      clearManualPreviewPresentation(completedRun.messageId);
+      snapshotPublisher?.publishRuntimeSnapshot();
       const status: DesktopMotionPreviewStatus["status"] = event.status;
       bridge.publishMotionPreviewStatus({
         requestId: completedRun.messageId,
@@ -457,6 +534,8 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     connectionLabel,
     stageMessage,
     aiState,
+    manualPreviewText,
+    latestAssistantFeedback,
     bilibiliLiveStatus: () => bilibiliLive.getStatus(),
   });
 
@@ -468,11 +547,14 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       stop: (reason) => modelEngine.stop(reason),
       state: modelEngine.state,
       previewCompiledSemanticMotion: modelEngine.previewCompiledSemanticMotion,
+      previewRecordedParameterPlan: modelEngine.previewRecordedParameterPlan,
     },
     snapshotPublisher,
     saveMotionTuningSample,
     deleteMotionTuningSample,
     publishMotionPreviewStatus: bridge.publishMotionPreviewStatus,
+    beginManualPreviewPresentation,
+    approveLatestAssistantSegment,
     setBilibiliLiveSettings: bilibiliLive.applySettings,
   });
 

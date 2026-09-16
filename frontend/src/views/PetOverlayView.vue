@@ -27,11 +27,21 @@ const aiStateLabel = computed(() => {
 });
 
 const previewText = computed(() => {
+  if (bridge.state.snapshot.manualPreviewText.trim()) {
+    return bridge.state.snapshot.manualPreviewText.trim();
+  }
   if (bridge.state.snapshot.lastAssistantText.trim()) {
     return bridge.state.snapshot.lastAssistantText.trim();
   }
   return bridge.state.snapshot.connectionStatusMessage;
 });
+const canApproveLatestAssistantSegment = computed(() =>
+  bridge.state.snapshot.latestAssistantFeedback.available
+  && !bridge.state.snapshot.latestAssistantFeedback.approved,
+);
+const latestAssistantSegmentApproved = computed(() =>
+  bridge.state.snapshot.latestAssistantFeedback.approved,
+);
 
 const isMicCapturing = computed(() => bridge.state.snapshot.micCapturing);
 const voiceActive = computed(() =>
@@ -60,6 +70,13 @@ function handleInterrupt(): void {
 
 function handleMicrophoneToggle(): void {
   bridge.sendCommand({ type: "toggle_mic_capture" });
+}
+
+function handleApproveLatestAssistantSegment(): void {
+  if (!canApproveLatestAssistantSegment.value) {
+    return;
+  }
+  bridge.sendCommand({ type: "approve_latest_assistant_segment" });
 }
 
 function showContextMenu(event: MouseEvent): void {
@@ -195,6 +212,29 @@ onBeforeUnmount(() => {
               <path d="M19 11a7 7 0 0 1-14 0" />
               <path d="M12 18v4" />
               <path d="M8 22h8" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            class="overlay-card__icon-button overlay-card__icon-button--feedback"
+            :data-active="latestAssistantSegmentApproved"
+            :disabled="!canApproveLatestAssistantSegment"
+            :title="latestAssistantSegmentApproved ? '已赞同最近一条回复' : '赞同最近一条回复'"
+            @click="handleApproveLatestAssistantSegment"
+          >
+            <svg
+              class="overlay-card__icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M7 10v10" />
+              <path d="M3 10h4v10H3z" />
+              <path d="M7 20h9.2a2 2 0 0 0 1.94-1.5l1.5-6A2 2 0 0 0 17.7 10H14l.6-3.1A2.5 2.5 0 0 0 12.15 4L7 10Z" />
             </svg>
           </button>
           <button

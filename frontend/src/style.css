@@ -1811,6 +1811,11 @@ img {
   color: rgba(255, 255, 255, 0.96);
 }
 
+.overlay-card__icon-button--feedback[data-active="true"] {
+  background: rgba(126, 181, 255, 0.26);
+  color: rgba(255, 255, 255, 0.96);
+}
+
 .overlay-card__icon-button,
 .overlay-card__send {
   cursor: pointer;
@@ -1827,6 +1832,15 @@ img {
 .overlay-card__icon-button:active,
 .overlay-card__send:active {
   transform: translateY(1px);
+}
+
+.overlay-card__icon-button:disabled {
+  cursor: default;
+  opacity: 0.42;
+}
+
+.overlay-card__icon-button:disabled:hover {
+  background: rgba(255, 255, 255, 0.12);
 }
 
 .overlay-card__icon {

@@ -5,6 +5,7 @@ import {
   type Live2dPresentationSettings,
 } from "../live2d-renderer/settings";
 import type {
+  DesktopAssistantFeedbackState,
   DesktopBaseActionPreview,
   DesktopBackendHistoryMessage,
   DesktopBackendHistorySummary,
@@ -90,6 +91,8 @@ interface PetRuntimeSnapshotPublisherOptions {
   connectionLabel: ComputedRef<string>;
   stageMessage: ComputedRef<string>;
   aiState: ComputedRef<string>;
+  manualPreviewText: Ref<string>;
+  latestAssistantFeedback: ComputedRef<DesktopAssistantFeedbackState>;
   bilibiliLiveStatus: () => BilibiliLiveStatus;
 }
 
@@ -192,6 +195,8 @@ export function createPetRuntimeSnapshotPublisher(
         stageMessage: options.stageMessage.value,
         aiState: options.aiState.value,
         lastUpdated: options.modelSyncState.lastUpdated,
+        manualPreviewText: options.manualPreviewText.value,
+        latestAssistantFeedback: { ...options.latestAssistantFeedback.value },
       };
   }
 

@@ -1,5 +1,6 @@
 import { cloneJson } from "../utils/cloneJson.js";
 import type {
+  DesktopAssistantFeedbackState,
   DesktopBackendHistoryMessage,
   DesktopBackendHistorySummary,
   DesktopHistoryEntry,
@@ -81,6 +82,8 @@ export interface DesktopRuntimeSnapshotInput {
   stageMessage: string;
   aiState: string;
   lastUpdated: string;
+  manualPreviewText: string;
+  latestAssistantFeedback: DesktopAssistantFeedbackState;
 }
 
 export interface DesktopRuntimeSnapshotOutput {
@@ -116,6 +119,8 @@ export interface DesktopRuntimeSnapshotOutput {
   backendHistoryLoading: boolean;
   backendHistoryStatusMessage: string;
   bilibiliLiveStatus: BilibiliLiveStatus;
+  manualPreviewText: string;
+  latestAssistantFeedback: DesktopAssistantFeedbackState;
 }
 
 // ── Builders ───────────────────────────────────────────────────────
@@ -205,5 +210,7 @@ export function buildDesktopRuntimeSnapshot(
     backendHistoryLoading: p.backendHistoryLoading,
     backendHistoryStatusMessage: p.backendHistoryStatusMessage,
     bilibiliLiveStatus: { ...p.bilibiliLiveStatus },
+    manualPreviewText: input.manualPreviewText,
+    latestAssistantFeedback: { ...input.latestAssistantFeedback },
   };
 }

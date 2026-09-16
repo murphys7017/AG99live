@@ -10,6 +10,7 @@ import type {
 import type {
   SystemSemanticAxisProfileSavePayload,
 } from "../types/protocol.js";
+import type { MotionPlanPayload } from "../types/protocol.js";
 import type { CompiledSemanticMotion } from "../types/compiledSemanticMotion.js";
 import { cloneJson } from "../utils/cloneJson.js";
 import {
@@ -66,11 +67,18 @@ export interface DesktopRuntimeCommandDeps {
       semanticMotion: CompiledSemanticMotion,
       requestId: string,
     ) => boolean;
+    previewRecordedParameterPlan: (
+      plan: MotionPlanPayload,
+      semanticMotion: CompiledSemanticMotion,
+      requestId: string,
+    ) => boolean;
   };
   snapshotPublisher: DesktopRuntimeSnapshotPublisherPort;
   saveMotionTuningSample: (sample: DesktopMotionTuningSample) => void;
   deleteMotionTuningSample: (sampleId: string) => void;
   publishMotionPreviewStatus: (status: DesktopMotionPreviewStatus) => void;
+  beginManualPreviewPresentation: (requestId: string, assistantText: string) => void;
+  approveLatestAssistantSegment: () => boolean;
   setBilibiliLiveSettings: (settings: BilibiliLiveSettings) => void;
 }
 
@@ -181,9 +189,42 @@ export function createDesktopRuntimeCommandHandler(
             status: "rejected",
             reason: deps.modelEngine.state.lastCompileReason || deps.modelEngine.state.message,
           });
+          return;
         }
+        deps.beginManualPreviewPresentation(
+          command.requestId,
+          command.assistantText ?? "",
+        );
+        deps.snapshotPublisher.publishRuntimeSnapshot();
         return;
       }
+      case "preview_recorded_parameter_plan": {
+        deps.publishMotionPreviewStatus({
+          requestId: command.requestId,
+          source: "compiled_semantic_motion",
+          status: "requested",
+        });
+        if (!deps.modelEngine.previewRecordedParameterPlan(
+          command.plan,
+          command.semanticMotion,
+          command.requestId,
+        )) {
+          deps.publishMotionPreviewStatus({
+            requestId: command.requestId,
+            source: "compiled_semantic_motion",
+            status: "rejected",
+            reason: deps.modelEngine.state.lastCompileReason || deps.modelEngine.state.message,
+          });
+          return;
+        }
+        deps.beginManualPreviewPresentation(command.requestId, command.assistantText);
+        deps.snapshotPublisher.publishRuntimeSnapshot();
+        return;
+      }
+      case "approve_latest_assistant_segment":
+        deps.approveLatestAssistantSegment();
+        deps.snapshotPublisher.publishRuntimeSnapshot();
+        return;
     }
   }
 

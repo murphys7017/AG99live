@@ -21,6 +21,7 @@ import type {
   CompiledSemanticMotion,
 } from "../types/compiledSemanticMotion.js";
 import { compileModelParameterPlan } from "./compiler/compileModelParameterPlan.js";
+import { parseSemanticParameterPlan } from "./planParser.js";
 import type {
   ModelEngineDependencies,
   ModelEngineActivePlaybackRun,
@@ -492,6 +493,38 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     return startCompiledPreviewPlan(result.plan, semanticMotion, requestId);
   }
 
+  function previewRecordedParameterPlan(
+    plan: MotionPlanPayload,
+    semanticMotion: CompiledSemanticMotion,
+    requestId: string,
+  ): boolean {
+    const selectedModel = dependencies.getSelectedModel();
+    if (!selectedModel) {
+      state.lastCompileReason = "missing_selected_model";
+      return false;
+    }
+    const parsed = parseSemanticParameterPlan(plan);
+    if (!parsed.ok) {
+      state.lastCompileReason = `manual_preview_recorded_plan_invalid:${parsed.reason}`;
+      state.lastCompileDiagnostics = semanticMotion.diagnostics;
+      return false;
+    }
+    const profile = selectedModel.semantic_axis_profile;
+    if (
+      !profile
+      || parsed.value.model_id !== profile.model_id
+      || parsed.value.profile_id !== profile.profile_id
+      || parsed.value.profile_revision !== profile.revision
+    ) {
+      state.lastCompileReason = "manual_preview_recorded_plan_profile_mismatch";
+      state.lastCompileDiagnostics = semanticMotion.diagnostics;
+      return false;
+    }
+    state.lastCompileReason = "";
+    state.lastCompileDiagnostics = semanticMotion.diagnostics;
+    return startCompiledPreviewPlan(parsed.value, semanticMotion, requestId);
+  }
+
   function startThinkingSway(turnId: string): boolean {
     const normalizedTurnId = normalizeTurnId(turnId);
     if (!normalizedTurnId) {
@@ -615,6 +648,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     preparePlaybackTimeline,
     handlePlaybackTimelineStarted,
     previewCompiledSemanticMotion,
+    previewRecordedParameterPlan,
     startThinkingSway,
     releaseThinkingSway,
     handlePlaybackTerminal,

@@ -39,6 +39,11 @@ const props = defineProps<{
 const emit = defineEmits<{
   requestMotionTuningSamplesSync: [];
   previewCompiledSemanticMotion: [semanticMotion: CompiledSemanticMotion];
+  previewRecordedParameterPlan: [
+    plan: SemanticParameterPlan,
+    semanticMotion: CompiledSemanticMotion,
+    assistantText: string,
+  ];
   saveMotionTuningSample: [sample: DesktopMotionTuningSample];
   deleteMotionTuningSample: [sampleId: string];
 }>();
@@ -512,12 +517,17 @@ function playAdjustedIntent(): void {
 
 function playRecordedPlan(): void {
   const record = selectedDraftSource.value?.record;
-  if (!record?.semanticMotion) {
+  if (!record?.semanticMotion || !record.plan) {
     playStatusText.value = "当前没有可重放的历史动作计划。";
     return;
   }
 
-  emit("previewCompiledSemanticMotion", cloneJson(record.semanticMotion));
+  emit(
+    "previewRecordedParameterPlan",
+    cloneJson(record.plan),
+    cloneJson(record.semanticMotion),
+    record.assistantText,
+  );
   playStatusText.value = "";
 }
 

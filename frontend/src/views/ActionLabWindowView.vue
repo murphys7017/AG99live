@@ -10,6 +10,7 @@ import type {
   DesktopMotionTuningSample,
 } from "../types/desktop";
 import type { CompiledSemanticMotion } from "../types/compiledSemanticMotion";
+import type { SemanticParameterPlan } from "../types/protocol";
 import type { SemanticAxisProfile } from "../types/semantic-axis-profile";
 
 const bridge = useDesktopBridge();
@@ -64,6 +65,20 @@ function previewCompiledSemanticMotion(semanticMotion: CompiledSemanticMotion): 
   });
 }
 
+function previewRecordedParameterPlan(
+  plan: SemanticParameterPlan,
+  semanticMotion: CompiledSemanticMotion,
+  assistantText: string,
+): void {
+  bridge.sendCommand({
+    type: "preview_recorded_parameter_plan",
+    requestId: createPreviewRequestId(),
+    plan,
+    semanticMotion,
+    assistantText,
+  });
+}
+
 function saveMotionTuningSample(sample: DesktopMotionTuningSample): void {
   bridge.sendCommand({
     type: "save_motion_tuning_sample",
@@ -97,6 +112,7 @@ onMounted(() => {
         :effective-examples="effectiveExamples"
         @request-motion-tuning-samples-sync="sendRuntimeCommand('request_motion_tuning_samples_sync')"
         @preview-compiled-semantic-motion="previewCompiledSemanticMotion"
+        @preview-recorded-parameter-plan="previewRecordedParameterPlan"
         @save-motion-tuning-sample="saveMotionTuningSample"
         @delete-motion-tuning-sample="deleteMotionTuningSample"
       />

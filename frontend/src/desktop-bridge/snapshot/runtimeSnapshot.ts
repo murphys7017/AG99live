@@ -95,6 +95,11 @@ export const defaultSnapshot: DesktopRuntimeSnapshot = {
   backendHistoryLoading: false,
   backendHistoryStatusMessage: "等待桌宠窗口同步后端历史。",
   bilibiliLiveStatus: { ...DEFAULT_BILIBILI_LIVE_STATUS },
+  manualPreviewText: "",
+  latestAssistantFeedback: {
+    available: false,
+    approved: false,
+  },
 };
 
 export function safeNormalizeSnapshot(
@@ -186,6 +191,22 @@ export function normalizeSnapshot(snapshot: DesktopRuntimeSnapshot): DesktopRunt
     backendHistoryStatusMessage: normalizeText(snapshot.backendHistoryStatusMessage),
     bilibiliLiveStatus: normalizeBilibiliLiveStatus(snapshot.bilibiliLiveStatus),
     pttHookStatus: normalizePttHookStatus(snapshot.pttHookStatus),
+    manualPreviewText: normalizeText(snapshot.manualPreviewText),
+    latestAssistantFeedback: normalizeAssistantFeedbackState(
+      snapshot.latestAssistantFeedback,
+    ),
+  };
+}
+
+function normalizeAssistantFeedbackState(
+  value: unknown,
+): DesktopRuntimeSnapshot["latestAssistantFeedback"] {
+  if (!isObject(value)) {
+    return { ...defaultSnapshot.latestAssistantFeedback };
+  }
+  return {
+    available: Boolean(value.available),
+    approved: Boolean(value.approved),
   };
 }
 
