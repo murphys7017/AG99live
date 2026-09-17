@@ -7,6 +7,21 @@ task:
   validation: "Focused output-segment, platform-event, and media-service tests passed (11 tests); frontend renderer/WebSDK/Node typechecks, protocol manifest check, Python compileall, and diff whitespace check passed."
   evidence_gap: "Live AstrBot + Electron acceptance must still verify ordered multi-segment playback, thinking-sway release on every terminal path, direct-plan release after paused/ended audio, and cached desktop-snapshot reuse after frontend capture failure."
 
+speech_output_runtime_migration:
+  recorded_at: "2026-09-17"
+  scope:
+    - "Own one renderer-local AudioContext at ConversationPlaybackRuntime scope and retain it between TTS segments."
+    - "Keep the per-segment HTMLAudioElement as the PlaybackTimeline clock while creating and releasing only its MediaElementSource, analyser, and gain nodes per segment."
+    - "Move audio-context wake-up, 80 ms post-resume output warm-up, and the existing 0.86-to-1.0 gain ramp over 40 ms from Live2D lip-sync to the output runtime."
+  non_actions:
+    - "Do not change AstrBot, TTS generation, public-cache copying, WebSocket payloads, or Timeline clock semantics."
+    - "Do not add a second queue or audio player; native media playback remains only the existing degradation path when Web Audio attachment itself is unavailable."
+  validation:
+    - "Renderer typecheck and diff whitespace check passed."
+    - "Source review covers normal completion, replacement during warm-up, interruption, output-runtime disposal, and unavailable lip-sync behavior."
+  evidence_gap:
+    - "Live Electron acceptance must verify first TTS after launch, output after several idle minutes, sequential segments, and interruption/replacement with speech beginning \"行行行\"."
+
 architecture_audit_low_risk_followup:
   recorded_at: "2026-09-08"
   scope:

@@ -1,18 +1,14 @@
 import type {
   PlaybackTimelineLipSyncSink,
 } from "../playback-timeline/lipSyncSink.js";
+import type { SpeechOutputSession } from "../playback-timeline/speechOutputRuntime.js";
 
 const SPEECH_ANALYSIS_BAND_MIN_HZ = 160;
 const SPEECH_ANALYSIS_BAND_MAX_HZ = 4200;
 const SPEECH_EMPHASIS_BAND_MIN_HZ = 900;
 const SPEECH_EMPHASIS_RATIO_FLOOR = 0.24;
 const SPEECH_EMPHASIS_RATIO_SPAN = 0.24;
-const SPEECH_OUTPUT_FADE_INITIAL_GAIN = 0.86;
-const SPEECH_OUTPUT_FADE_DURATION_SECONDS = 0.04;
-
 interface LiveLipSyncRuntime {
-  prepare: () => Promise<void>;
-  startOutput: () => void;
   stop: () => void;
 }
 
@@ -36,21 +32,7 @@ export function createLive2DLipSyncTimelineSink(): PlaybackTimelineLipSyncSink {
   }
 
   async function prepare(): Promise<void> {
-    if (!liveRuntime) {
-      return;
-    }
-    try {
-      await liveRuntime.prepare();
-    } catch (error) {
-      const reason = error instanceof Error && error.message.trim()
-        ? error.message.trim()
-        : `lip_sync_resume_failed:${error instanceof Error && error.name ? error.name : "unknown"}`;
-      console.error("[Live2D] lip sync audio preparation failed.", {
-        reason,
-        error,
-      });
-      markActiveUnavailable?.(reason, false);
-    }
+    // Speech output activation is owned by the audio sink, not lip-sync analysis.
   }
 
   return {
@@ -81,7 +63,7 @@ export function createLive2DLipSyncTimelineSink(): PlaybackTimelineLipSyncSink {
       markActiveStarted = markStarted;
       markActiveUnavailable = markUnavailable;
       const result = startLiveLipSync(
-        options.audio,
+        options.speechOutput,
         options.isCurrentAudio,
         sourceId,
         markUnavailable,
@@ -98,7 +80,6 @@ export function createLive2DLipSyncTimelineSink(): PlaybackTimelineLipSyncSink {
     },
     async resume() {
       await prepare();
-      liveRuntime?.startOutput();
       markActiveStarted?.();
     },
     prepare,
@@ -107,7 +88,7 @@ export function createLive2DLipSyncTimelineSink(): PlaybackTimelineLipSyncSink {
 }
 
 function startLiveLipSync(
-  audio: HTMLAudioElement,
+  speechOutput: SpeechOutputSession | null,
   isCurrentAudio: () => boolean,
   sourceId: string,
   onRuntimeFailure: (reason: string, degraded: boolean) => void,
@@ -171,36 +152,19 @@ function startLiveLipSync(
     }
   };
 
-  const AudioContextCtor = window.AudioContext
-    ?? (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-  if (!AudioContextCtor) {
+  if (!speechOutput) {
     endSignalSource();
-    return reportLipSyncFailure("lip_sync_audio_context_unavailable");
+    return reportLipSyncFailure("speech_output_runtime_unavailable");
   }
 
   try {
-    const audioContext = new AudioContextCtor();
-    if (typeof audioContext.createMediaElementSource !== "function") {
-      void audioContext.close?.();
-      endSignalSource();
-      return reportLipSyncFailure("lip_sync_media_element_source_unavailable");
-    }
-    const analyser = audioContext.createAnalyser();
-    analyser.fftSize = 1024;
-    analyser.smoothingTimeConstant = 0.28;
-    const outputGain = audioContext.createGain();
-    outputGain.gain.value = SPEECH_OUTPUT_FADE_INITIAL_GAIN;
-    const source = audioContext.createMediaElementSource(audio);
-    source.connect(analyser);
-    analyser.connect(outputGain);
-    outputGain.connect(audioContext.destination);
+    const analyser = speechOutput.analyser;
 
     const samples = new Uint8Array(analyser.fftSize);
     const frequencyBins = new Uint8Array(analyser.frequencyBinCount);
     let animationFrameId: number | null = null;
     let stopped = false;
     let firstFrameLogged = false;
-    let outputStarted = false;
 
     const tick = () => {
       if (stopped || !isCurrentAudio()) {
@@ -218,7 +182,7 @@ function startLiveLipSync(
       const speechEnergyValue = Math.max(0, Math.min(1, (rms - 0.008) * 5.5));
       const speechEmphasisValue = resolveSpeechEmphasisValue(
         frequencyBins,
-        audioContext.sampleRate,
+        speechOutput.sampleRate,
       );
       try {
         writeAudioSignalSource(sourceId, {
@@ -253,40 +217,6 @@ function startLiveLipSync(
     animationFrameId = window.requestAnimationFrame(tick);
 
     sourceRuntime = {
-      prepare: async () => {
-        if (audioContext.state === "suspended") {
-          try {
-            await audioContext.resume();
-          } catch (error) {
-            const name = error instanceof Error && error.name
-              ? error.name
-              : "unknown";
-            sourceRuntime?.stop();
-            throw new Error(`lip_sync_resume_failed:${name}`);
-          }
-        }
-        console.info("[Live2D] speech audio analysis prepared before media playback.", {
-          audioContextState: audioContext.state,
-        });
-        return;
-      },
-      startOutput: () => {
-        if (stopped || outputStarted) {
-          return;
-        }
-        outputStarted = true;
-        const now = audioContext.currentTime;
-        outputGain.gain.cancelScheduledValues(now);
-        outputGain.gain.setValueAtTime(SPEECH_OUTPUT_FADE_INITIAL_GAIN, now);
-        outputGain.gain.linearRampToValueAtTime(
-          1,
-          now + SPEECH_OUTPUT_FADE_DURATION_SECONDS,
-        );
-        console.info("[Live2D] speech audio output fade started.", {
-          initialGain: SPEECH_OUTPUT_FADE_INITIAL_GAIN,
-          fadeMs: SPEECH_OUTPUT_FADE_DURATION_SECONDS * 1000,
-        });
-      },
       stop: () => {
         stopped = true;
         if (animationFrameId !== null) {
@@ -294,22 +224,6 @@ function startLiveLipSync(
           animationFrameId = null;
         }
         endSignalSource();
-        try {
-          source.disconnect();
-        } catch (_error) {
-          // Browser audio graph teardown can race with element disposal.
-        }
-        try {
-          analyser.disconnect();
-        } catch (_error) {
-          // Browser audio graph teardown can race with element disposal.
-        }
-        try {
-          outputGain.disconnect();
-        } catch (_error) {
-          // Browser audio graph teardown can race with element disposal.
-        }
-        void audioContext.close?.();
       },
     };
     return {

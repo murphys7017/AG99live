@@ -5,6 +5,7 @@ import {
 } from "../adapter-connection/useAdapterConnection.js";
 import type { ModelSyncInstance } from "../adapter-connection/model-sync/useModelSync.js";
 import { createBrowserAudioTimelineSink } from "../playback-timeline/audioSink.js";
+import { createSpeechOutputRuntime } from "../playback-timeline/speechOutputRuntime.js";
 import type { PlaybackTimelineSegmentMotionSink } from "../playback-timeline/segmentJob.js";
 import type {
   MotionPayloadNormalizer,
@@ -56,11 +57,12 @@ export function createConversationPlaybackRuntime(options: {
     modelSync: options.modelSync,
     normalizeMotionPayload: options.normalizeMotionPayload,
   });
+  const speechOutputRuntime = createSpeechOutputRuntime();
   const playbackComposition = createAppPlaybackTimelineRuntime({
     sessionStore: options.sessionStore,
     adapterPlayback: adapter.playback,
     motionSink: requiredMotionTimelineSink,
-    audioSink: createBrowserAudioTimelineSink(),
+    audioSink: createBrowserAudioTimelineSink({ speechOutputRuntime }),
     onAudioTimelineStarted: (turnId, messageId, timeline) => {
       requireMotionRuntime().handleAudioTimelineStarted(turnId, messageId, timeline);
     },
@@ -76,8 +78,21 @@ export function createConversationPlaybackRuntime(options: {
   const playbackTimeline = playbackComposition.playbackTimeline;
 
   async function dispose(): Promise<void> {
-    await adapter.dispose();
+    const errors: unknown[] = [];
+    try {
+      await adapter.dispose();
+    } catch (error) {
+      errors.push(error);
+    }
+    try {
+      await speechOutputRuntime.dispose();
+    } catch (error) {
+      errors.push(error);
+    }
     motionRuntime = null;
+    if (errors.length > 0) {
+      throw errors[0];
+    }
   }
 
   return {

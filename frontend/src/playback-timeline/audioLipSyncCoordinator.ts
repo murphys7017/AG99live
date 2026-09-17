@@ -88,6 +88,7 @@ export function createPlaybackTimelineAudioLipSyncSink(options: {
         audio: event.audio,
         getAudioCurrentTimeSeconds: event.getAudioCurrentTimeSeconds,
         isCurrentAudio: event.isCurrentAudio,
+        speechOutput: event.speechOutput,
       });
     },
     async prepare() {

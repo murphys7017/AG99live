@@ -1,8 +1,11 @@
+import type { SpeechOutputSession } from "./speechOutputRuntime.js";
+
 export interface PlaybackTimelineLipSyncAttachOptions {
   audioUrl: string;
   audio: HTMLAudioElement;
   getAudioCurrentTimeSeconds: () => number;
   isCurrentAudio: () => boolean;
+  speechOutput: SpeechOutputSession | null;
   onStarted: () => void;
   onUnavailable: (reason: string, degraded: boolean) => void;
 }
