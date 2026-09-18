@@ -45,7 +45,7 @@ class AG99liveCompanionIdentityPromptContributor:
                 meta={
                     "scope": "static",
                     "node_type": "ag99live_companion_identity",
-                    "targets": ["persona", "core"],
+                    "targets": ["persona"],
                 },
             )
         ]

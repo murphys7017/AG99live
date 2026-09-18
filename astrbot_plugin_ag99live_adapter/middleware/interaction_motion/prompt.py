@@ -59,7 +59,7 @@ class AG99liveMotionPromptContributor:
                 meta={
                     "scope": "static",
                     "node_type": "ag99live_motion_decision_contract",
-                    "targets": ["persona", "core"],
+                    "targets": ["persona"],
                 },
             ),
             capabilities.prompt_extension(
@@ -74,7 +74,7 @@ class AG99liveMotionPromptContributor:
                 meta={
                     "scope": "static",
                     "node_type": "ag99live_motion_capability",
-                    "targets": ["persona", "core"],
+                    "targets": ["persona"],
                 },
             ),
         ]

@@ -184,13 +184,10 @@ def test_motion_static_prompt_extensions_target_persona(
     )
 
     assert [extension.mount for extension in extensions] == ["system", "system"]
-    assert all(
-        extension.meta["targets"] == ["persona", "core"]
-        for extension in extensions
-    )
+    assert all(extension.meta["targets"] == ["persona"] for extension in extensions)
 
 
-def test_companion_identity_prompt_targets_persona_and_core(
+def test_companion_identity_prompt_targets_persona(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -221,7 +218,7 @@ def test_companion_identity_prompt_targets_persona_and_core(
     extension = extensions[0]
     assert extension.plugin_id == "ag99live.companion_identity.prompt"
     assert extension.mount == "system"
-    assert extension.meta["targets"] == ["persona", "core"]
+    assert extension.meta["targets"] == ["persona"]
     assert "AstrBot 在桌面上的身体" in extension.value
     assert "虚拟主播" in extension.value
 
