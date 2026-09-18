@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import Any
 
 from .prompt_references import (
@@ -356,28 +355,3 @@ def _normalize_axis_range(value: Any, fallback: list[float] | None) -> list[floa
     ):
         return [float(value[0]), float(value[1])]
     return fallback
-
-def _resolve_prompt_purpose(view: Any) -> str:
-    """Read the prompt purpose from the AstrBot view.
-
-    Returns ``"context_collection"`` or ``"unknown"`` under the current
-    AstrBot prompt-contributor contract.
-    """
-    purpose = _normalize_optional_string(getattr(view, "purpose", None))
-    if purpose:
-        return purpose
-    metadata = getattr(view, "metadata", None)
-    if isinstance(metadata, Mapping):
-        purpose = _normalize_optional_string(metadata.get("purpose"))
-    elif callable(getattr(metadata, "get", None)):
-        purpose = _normalize_optional_string(metadata.get("purpose"))
-    if purpose:
-        return purpose
-    return "unknown"
-
-def _should_contribute_motion_prompt(view: Any) -> bool:
-    """Inject motion capability while AstrBot collects persona-targeted context.
-
-    This keeps router and other prompt lanes clean of ag99live motion metadata.
-    """
-    return _resolve_prompt_purpose(view) == "context_collection"

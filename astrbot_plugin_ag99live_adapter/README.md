@@ -17,6 +17,12 @@ AstrBot 仍然拥有核心人格、记忆和对话决策；AG99live 不建立平
 
 ## 当前路线说明
 
+- 增强版 AstrBot 的 Prompt 统一使用 `register_prompt_extension_collector`：
+  身份和动作能力维持原有 `persona/core` 目标，动作动态上下文显式使用 `persona`，
+  Remote Operator 提示仅进入 `core`。不再注册 Interaction Prompt Contributor。
+  `ag99live.motion` 仍为必发 Persona Effect，参数 schema 在当前事件上解析；
+  已准入后的准备错误由 Core 显式报告，不允许静默取消动作契约。
+
 - 后端当前主职责是把 `ag99live.motion` 的九级 `axis_levels` 严格归一化为 `engine.motion_intent.v4`，并通过 middleware-first 链路稳定送到前端。
 - 前端 `ModelEngine` 负责把 intent 编译为 `engine.parameter_plan.v3`。
 - 说话时的 plan 级补偿由前端 compile 侧 `SpeechPoseStage` 承接。

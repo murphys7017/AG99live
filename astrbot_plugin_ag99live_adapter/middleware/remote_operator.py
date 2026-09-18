@@ -111,18 +111,6 @@ _REMOTE_OPERATOR_ACTION_PATTERN = re.compile(
 )
 
 
-class AG99liveRemoteOperatorPromptContributor:
-    plugin_id = "ag99live.remote_operator.prompt"
-    priority = 35
-
-    async def collect(self, event, plugin_context, view):
-        del plugin_context, view
-
-        return collect_remote_operator_prompt_extension(
-            event, plugin_id=self.plugin_id, targets=["core"]
-        )
-
-
 class AG99liveRemoteOperatorPromptExtensionCollector:
     plugin_id = "ag99live.remote_operator.prompt"
     priority = 35
@@ -130,7 +118,9 @@ class AG99liveRemoteOperatorPromptExtensionCollector:
     async def collect(self, event, plugin_context, config=None, *, provider_request=None):
         del plugin_context, config, provider_request
 
-        extension = collect_remote_operator_prompt_extension(event, plugin_id=self.plugin_id)
+        extension = collect_remote_operator_prompt_extension(
+            event, plugin_id=self.plugin_id, targets=["core"]
+        )
         return [extension] if extension is not None else []
 
 
@@ -190,11 +180,9 @@ class AG99liveRemoteOperatorResultContributor:
 
 
 def register_remote_operator_interaction_contributors(context: Any) -> None:
-    # The Interaction contributor owns this prompt; a second collector would
-    # produce a conflicting extension.system slot in the same context pack.
-    register_prompt = getattr(context, "register_interaction_prompt_contributor", None)
+    register_prompt = getattr(context, "register_prompt_extension_collector", None)
     if callable(register_prompt):
-        register_prompt(AG99liveRemoteOperatorPromptContributor())
+        register_prompt(AG99liveRemoteOperatorPromptExtensionCollector())
     register_result = getattr(context, "register_interaction_result_contributor", None)
     if callable(register_result):
         register_result(AG99liveRemoteOperatorResultContributor())

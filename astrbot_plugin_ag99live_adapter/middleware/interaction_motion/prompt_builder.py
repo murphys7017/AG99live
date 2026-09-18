@@ -248,9 +248,7 @@ def _build_motion_runtime_payload(
     runtime_state: Any,
     *,
     capability_payload: dict[str, Any],
-    view: Any,
 ) -> tuple[dict[str, Any], list[str]]:
-    del view
     payload: dict[str, Any] = {}
     reference_resolution = _build_motion_runtime_reference_examples(
         event=event,

@@ -11,10 +11,7 @@ from .prompt_builder import (
     _build_motion_runtime_payload,
     _build_motion_static_capability_payload,
 )
-from .prompt_context import (
-    _record_motion_prompt_reference_observation,
-    _should_contribute_motion_prompt,
-)
+from .prompt_context import _record_motion_prompt_reference_observation
 from .shared import (
     _resolve_motion_runtime_bundle,
 )
@@ -23,8 +20,8 @@ class AG99liveMotionPromptContributor:
     plugin_id = "ag99live.motion.prompt"
     priority = 40
 
-    async def collect(self, event, plugin_context, view):
-        del plugin_context
+    async def collect(self, event, plugin_context, config=None, *, provider_request=None):
+        del plugin_context, config, provider_request
 
         capabilities = get_interaction_capabilities()
         if capabilities is None:
@@ -32,9 +29,6 @@ class AG99liveMotionPromptContributor:
 
         bundle = _resolve_motion_runtime_bundle(event)
         if bundle is None:
-            return None
-
-        if not _should_contribute_motion_prompt(view):
             return None
 
         static_capability_payload = _build_motion_static_capability_payload(
@@ -45,7 +39,6 @@ class AG99liveMotionPromptContributor:
             bundle.turn_coordinator,
             bundle.runtime_state,
             capability_payload=static_capability_payload,
-            view=view,
         )
         _record_motion_prompt_reference_observation(
             bundle=bundle,
@@ -97,6 +90,7 @@ class AG99liveMotionPromptContributor:
                     meta={
                         "scope": "dynamic",
                         "node_type": "live2d_previous_motion",
+                        "targets": ["persona"],
                     },
                 )
             )
@@ -113,7 +107,6 @@ def append_official_inline_motion_prompt(event: Any, request: Any) -> bool:
         bundle.turn_coordinator,
         bundle.runtime_state,
         capability_payload=capability_payload,
-        view=None,
     )
     _record_motion_prompt_reference_observation(
         bundle=bundle,

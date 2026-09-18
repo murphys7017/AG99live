@@ -16,7 +16,7 @@ from .scheduling import (
 
 def register_ag99live_interaction_contributors(context: Any) -> None:
     _register_ag99live_motion_persona_effect(context)
-    register_prompt = context.register_interaction_prompt_contributor
+    register_prompt = context.register_prompt_extension_collector
     register_result = context.register_interaction_result_contributor
     register_prompt(AG99liveCompanionIdentityPromptContributor())
     register_prompt(AG99liveMotionPromptContributor())

@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any
 
 from ...core_compatibility import get_interaction_capabilities
-from .prompt_context import _should_contribute_motion_prompt
 from .shared import _resolve_motion_runtime_bundle
 
 
@@ -25,17 +24,14 @@ class AG99liveCompanionIdentityPromptContributor:
     plugin_id = "ag99live.companion_identity.prompt"
     priority = 30
 
-    async def collect(self, event, plugin_context, view):
-        del plugin_context
+    async def collect(self, event, plugin_context, config=None, *, provider_request=None):
+        del plugin_context, config, provider_request
 
         capabilities = get_interaction_capabilities()
         if capabilities is None:
             return None
 
         if _resolve_motion_runtime_bundle(event) is None:
-            return None
-
-        if not _should_contribute_motion_prompt(view):
             return None
 
         return [

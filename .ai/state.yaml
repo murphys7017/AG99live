@@ -1,3 +1,21 @@
+plugin_prompt_migration:
+  date: '2026-09-18'
+  status: implemented_pending_live_acceptance
+  scope: >-
+    Migrate motion, companion identity, and remote operator prompt registration to the
+    sole AstrBot Prompt Extension collector API. Preserve prompt content and target
+    declarations; remove retired Interaction prompt registration and cleanup calls.
+  non_goals: Motion/audio protocol changes, application startup.
+  review: >-
+    Final scoped review found no new blocking issue; user authorized commit.
+    Skip the automatic full-directory deployment hook for this commit; the scoped
+    runtime sync above is already complete and verified.
+  validation: >-
+    Registration smoke (1) and static motion/identity target checks (2) passed.
+    Fatal/undefined-name Ruff, compileall, and diff whitespace checks passed.
+    Nine changed runtime/documentation files synced to AstrBot's deployed plugin
+    and SHA256 verified; tests remain in the source repository. Live OLV acceptance
+    not run; no application restart.
 task:
   class: refactor
   risk: high

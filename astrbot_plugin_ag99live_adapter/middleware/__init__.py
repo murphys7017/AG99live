@@ -20,7 +20,6 @@ def _remove_existing_ag99live_interaction_contributors(context: Any) -> None:
     module_prefixes = _registration_module_prefixes()
     remover_names = (
         "remove_prompt_extension_collectors_by_module_prefix",
-        "remove_interaction_prompt_contributors_by_module_prefix",
         "remove_interaction_result_contributors_by_module_prefix",
     )
     for remover_name in remover_names:

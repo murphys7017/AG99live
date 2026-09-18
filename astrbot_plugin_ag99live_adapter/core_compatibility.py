@@ -74,7 +74,7 @@ def supports_interaction_contributors(context: Any) -> bool:
         get_interaction_capabilities() is not None
         and callable(getattr(context, "register_persona_effect", None))
         and callable(
-            getattr(context, "register_interaction_prompt_contributor", None)
+            getattr(context, "register_prompt_extension_collector", None)
         )
         and callable(
             getattr(context, "register_interaction_result_contributor", None)
