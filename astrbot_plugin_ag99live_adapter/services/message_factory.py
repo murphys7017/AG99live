@@ -26,11 +26,13 @@ class MessageFactory:
     def __init__(
         self,
         *,
+        self_id: str,
         client_uid: str,
         nickname: str = DEFAULT_CLIENT_NICKNAME,
         media_service,
         image_cooldown_seconds_getter: Callable[[], int],
     ) -> None:
+        self.self_id = self_id
         self.client_uid = client_uid
         self.nickname = normalize_client_nickname(nickname)
         self.media_service = media_service
@@ -60,7 +62,7 @@ class MessageFactory:
 
         流程：
           1. _apply_image_cooldown 过滤掉冷却窗口内的图片，余下的 accepted；
-          2. 构造 AstrBotMessage（type=FRIEND_MESSAGE, self_id="olv_pet_adapter"，
+          2. 构造 AstrBotMessage（type=FRIEND_MESSAGE, self_id=平台实例 ID，
              session_id=client_uid），Plain(text) 放在 abm.message 头部；
           3. 每张 accepted image 走 media_service.convert_image_component_with_diagnostic，
              成功时追加到 abm.message 并把 ref 收集到 resolved_image_inputs
@@ -81,7 +83,7 @@ class MessageFactory:
 
         abm = AstrBotMessage()
         abm.type = MessageType.FRIEND_MESSAGE
-        abm.self_id = "olv_pet_adapter"
+        abm.self_id = self.self_id
         abm.session_id = self.client_uid
         abm.message_id = str(uuid4())
         abm.message_str = text

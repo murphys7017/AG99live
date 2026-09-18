@@ -90,6 +90,7 @@ class OLVPetPlatformAdapter(Platform):
         super().__init__(platform_config, event_queue)
         self.config = platform_config
         self.settings = platform_settings or {}
+        self.platform_id = str(self.config["id"]).strip()
 
         self.host = LOOPBACK_BIND_HOST
         self.port = int(get_config_value(self.config, "port", 12396))
@@ -123,6 +124,7 @@ class OLVPetPlatformAdapter(Platform):
             plugin_config_loader=get_plugin_config_snapshot,
             host=self.host,
             http_port=self.http_port,
+            platform_id=self.platform_id,
             client_uid=self.client_uid,
             live2ds_dir=LIVE2DS_DIR,
             runtime_cache_dir=RUNTIME_CACHE_DIR,
@@ -150,6 +152,7 @@ class OLVPetPlatformAdapter(Platform):
             image_cache_dir=IMAGE_CACHE_DIR,
         )
         self.message_factory = MessageFactory(
+            self_id=self.platform_id,
             client_uid=self.client_uid,
             nickname=self.client_nickname,
             media_service=self.media_service,
@@ -160,7 +163,7 @@ class OLVPetPlatformAdapter(Platform):
         )
         self.history_bridge = ConversationHistoryBridge(
             plugin_context=self._plugin_context,
-            platform_id="olv_pet_adapter",
+            platform_id=self.platform_id,
             client_uid=self.client_uid,
             speaker_name=self.speaker_name,
             chat_buffer=self.chat_buffer,
@@ -224,7 +227,7 @@ class OLVPetPlatformAdapter(Platform):
         metadata = PlatformMetadata(
             name="olv_pet_adapter",
             description="AG99live desktop adapter",
-            id="olv_pet_adapter",
+            id=self.platform_id,
         )
         # Older AstrBot constructors reject this newer keyword but accept metadata extensions.
         metadata.support_personal_runtime = True

@@ -70,9 +70,12 @@ def _build_adapter(monkeypatch, coordinator: _CoordinatorStub, adapter_module):
 
 def test_metadata_declares_personal_runtime_support(adapter_module) -> None:
     adapter = object.__new__(adapter_module.OLVPetPlatformAdapter)
+    adapter.platform_id = "aki"
 
     metadata = adapter.meta()
 
+    assert metadata.name == "olv_pet_adapter"
+    assert metadata.id == "aki"
     assert metadata.support_proactive_message is True
     assert metadata.support_personal_runtime is True
 

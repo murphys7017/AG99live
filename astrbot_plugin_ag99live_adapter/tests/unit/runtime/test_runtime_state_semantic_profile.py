@@ -29,6 +29,7 @@ def test_runtime_state_keeps_current_config_when_loader_has_no_snapshot(
         plugin_config_loader=lambda: None,
         host="127.0.0.1",
         http_port=12397,
+        platform_id="aki",
         client_uid="desktop-client",
         live2ds_dir=tmp_path / "live2ds",
     )
@@ -63,6 +64,7 @@ def test_runtime_state_injects_semantic_profile_into_model_sync(
         plugin_config_loader=None,
         host="127.0.0.1",
         http_port=12397,
+        platform_id="aki",
         client_uid="desktop-client",
         live2ds_dir=tmp_path / "live2ds",
     )
@@ -111,6 +113,7 @@ def test_runtime_state_exposes_runtime_cache_segment_errors_in_model_sync(
         plugin_config_loader=None,
         host="127.0.0.1",
         http_port=12397,
+        platform_id="aki",
         client_uid="desktop-client",
         live2ds_dir=tmp_path / "live2ds",
         runtime_cache_dir=cache_dir,
@@ -174,6 +177,7 @@ def test_runtime_state_invalidates_old_scan_cache_version(
         plugin_config_loader=None,
         host="127.0.0.1",
         http_port=12397,
+        platform_id="aki",
         client_uid="desktop-client",
         live2ds_dir=tmp_path / "live2ds",
         runtime_cache_dir=cache_dir,

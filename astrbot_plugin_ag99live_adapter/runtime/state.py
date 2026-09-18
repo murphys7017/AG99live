@@ -59,6 +59,7 @@ class RuntimeState:
         plugin_config_loader: Callable[[], PluginConfigSnapshot | None] | None,
         host: str,
         http_port: int,
+        platform_id: str,
         client_uid: str,
         live2ds_dir: Any,
         runtime_cache_dir: Path | None = None,
@@ -67,6 +68,7 @@ class RuntimeState:
         self.platform_config = platform_config
         self.host = host
         self.http_port = http_port
+        self.platform_id = platform_id
         self.live2ds_dir = live2ds_dir
         self.runtime_cache_dir = Path(runtime_cache_dir) if runtime_cache_dir is not None else None
         self.state_dir = Path(state_dir) if state_dir is not None else None
@@ -307,7 +309,7 @@ class RuntimeState:
         provider = self.plugin_context.get_using_stt_provider(
             umo=str(
                 MessageSession(
-                    platform_name="olv_pet_adapter",
+                    platform_name=self.platform_id,
                     message_type=MessageType.FRIEND_MESSAGE,
                     session_id=self.client_uid,
                 )
