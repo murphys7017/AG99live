@@ -103,9 +103,10 @@ def test_handle_binary_audio_stream_chunk_transcribes_on_stream_end(
         runtime_state=SimpleNamespace(resolve_stt_provider=lambda: SttProviderStub()),
         create_vad_engine=lambda: None,
         send_json=send_json,
-        build_message_object=lambda *, text, raw_message: {
+        build_message_object=lambda *, text, raw_message, images=None: {
             "text": text,
             "raw_message": raw_message,
+            "images": images,
         },
         on_vad_speech_started=ignore_vad_speech_started,
     )
@@ -135,7 +136,13 @@ def test_handle_binary_audio_stream_chunk_transcribes_on_stream_end(
             MessageStub(
                 dropped=False,
                 turn_id="input:binary",
-                payload={"stream_id": "mic:test", "reason": "ptt_release", "capture_mode": "ptt"},
+                payload={
+                    "stream_id": "mic:test",
+                    "reason": "ptt_release",
+                    "capture_mode": "ptt",
+                    "images": [{"source": "screen", "data": "data:image/jpeg;base64,AA=="}],
+                    "desktop_snapshot_requested": True,
+                },
             )
         )
     )
@@ -143,6 +150,9 @@ def test_handle_binary_audio_stream_chunk_transcribes_on_stream_end(
     assert result["text"] == "hello from stt"
     assert result["raw_message"]["payload"]["stream_id"] == "mic:test"
     assert result["raw_message"]["payload"]["audio_sample_rate"] == 16000
+    assert result["images"] == [
+        {"source": "screen", "data": "data:image/jpeg;base64,AA=="}
+    ]
     assert sent_messages[0]["type"] == "output.transcription"
     assert sent_messages[0]["turn_id"] == "input:binary"
 
@@ -171,9 +181,10 @@ def test_handle_manual_binary_audio_stream_chunk_uses_vad_segments(
         runtime_state=SimpleNamespace(resolve_stt_provider=lambda: SttProviderStub()),
         create_vad_engine=lambda: vad_engine,
         send_json=send_json,
-        build_message_object=lambda *, text, raw_message: {
+        build_message_object=lambda *, text, raw_message, images=None: {
             "text": text,
             "raw_message": raw_message,
+            "images": images,
         },
         on_vad_speech_started=on_vad_speech_started,
     )
@@ -224,7 +235,9 @@ def test_handle_binary_audio_stream_end_dropped_reports_input_error(
         runtime_state=SimpleNamespace(resolve_stt_provider=lambda: SttProviderStub()),
         create_vad_engine=lambda: None,
         send_json=send_json,
-        build_message_object=lambda *, text, raw_message: build_calls.append((text, raw_message)),
+        build_message_object=lambda *, text, raw_message, images=None: build_calls.append(
+            (text, raw_message)
+        ),
         on_vad_speech_started=ignore_vad_speech_started,
     )
 

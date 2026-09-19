@@ -21,6 +21,7 @@ import {
 } from "../core/pttKeyBinding.js";
 import type { DesktopPttKeyBinding } from "../../types/desktop.js";
 import { buildAudioStreamChunkFrame, float32ToPcm16le } from "./audioStreamFrame.js";
+import { captureRealtimeDesktopScreenshot } from "../outbound/desktopCapture.js";
 
 export type MicrophoneCaptureOrigin = "manual" | "ptt" | "auto";
 export type PttCaptureCommandResult = "started" | "stopped" | "discarded" | "ignored" | "failed";
@@ -31,6 +32,7 @@ type MicrophoneStartFailureReason =
   | "start_error";
 
 export interface AdapterMicrophoneRuntimeState {
+  desktopScreenshotOnSendEnabled: boolean;
   microphoneDeviceId: string;
   microphoneDevices: MicrophoneDeviceInfo[];
   micCapturing: boolean;
@@ -92,6 +94,14 @@ export function createAdapterMicrophoneRuntime(
   let micCaptureOrigin: MicrophoneCaptureOrigin | null = null;
   let pendingPttRelease = false;
   let lastStartFailureReason: MicrophoneStartFailureReason = "none";
+  let audioStreamEndChain: Promise<void> = Promise.resolve();
+
+  function enqueueAudioStreamEnd(task: () => Promise<void>): Promise<void> {
+    const scheduledTask = audioStreamEndChain.then(task);
+    // A failed stream must not prevent a later capture from closing its own stream.
+    audioStreamEndChain = scheduledTask.catch(() => undefined);
+    return scheduledTask;
+  }
 
   function sendMicrophoneAudioChunk(chunk: MicrophoneAudioChunk): void {
     // A PTT standby owns the device but must never create a Turn or transmit
@@ -380,6 +390,11 @@ export function createAdapterMicrophoneRuntime(
     const shouldEndAudioStream = audioStreamStarted;
     const inputSequenceBroken = audioSequenceBroken;
     const inputSocket = deps.getSocket();
+    const desktopSnapshotRequested = inputCaptureMode === "ptt"
+      && deps.state.desktopScreenshotOnSendEnabled
+      && shouldEndAudioStream
+      && !inputSequenceBroken
+      && inputSocket?.readyState === WebSocket.OPEN;
     clearMicCaptureSession();
 
     let captureStopError: unknown = null;
@@ -403,17 +418,30 @@ export function createAdapterMicrophoneRuntime(
         protocolError = new Error("audio_stream_started_without_stream_id");
       } else {
         try {
-          inputSocket.send(JSON.stringify(deps.buildEnvelope(
-            "input.audio_stream_end",
-            {
-              stream_id: inputStreamId,
-              reason,
-              dropped: inputSequenceBroken,
-              last_seq: inputLastSequence,
-              capture_mode: inputCaptureMode,
-            },
-            inputTurnId,
-          )));
+          await enqueueAudioStreamEnd(async () => {
+            const desktopCapture = desktopSnapshotRequested
+              ? await captureRealtimeDesktopScreenshot()
+              : null;
+            if (
+              deps.getSocket() !== inputSocket
+              || inputSocket.readyState !== WebSocket.OPEN
+            ) {
+              throw new Error("audio_stream_connection_changed_during_capture");
+            }
+            inputSocket.send(JSON.stringify(deps.buildEnvelope(
+              "input.audio_stream_end",
+              {
+                stream_id: inputStreamId,
+                reason,
+                dropped: inputSequenceBroken,
+                last_seq: inputLastSequence,
+                capture_mode: inputCaptureMode,
+                images: desktopCapture ? [desktopCapture] : [],
+                desktop_snapshot_requested: desktopSnapshotRequested,
+              },
+              inputTurnId,
+            )));
+          });
         } catch (error) {
           protocolError = error;
         }

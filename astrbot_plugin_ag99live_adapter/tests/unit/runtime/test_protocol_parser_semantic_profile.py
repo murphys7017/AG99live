@@ -170,6 +170,50 @@ def test_parse_inbound_message_rejects_removed_raw_audio_data_protocol() -> None
         )
 
 
+def test_parse_inbound_message_accepts_audio_stream_end_desktop_snapshot() -> None:
+    envelope = parse_inbound_message(
+        _message(
+            "input.audio_stream_end",
+            {
+                "stream_id": "mic:ptt-1",
+                "reason": "ptt_release",
+                "dropped": False,
+                "last_seq": 3,
+                "capture_mode": "ptt",
+                "images": [{"source": "screen", "data": "data:image/jpeg;base64,AA=="}],
+                "desktop_snapshot_requested": True,
+            },
+        )
+    )
+
+    assert envelope.payload["images"] == [
+        {"source": "screen", "data": "data:image/jpeg;base64,AA=="}
+    ]
+    assert envelope.payload["desktop_snapshot_requested"] is True
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("images", "not-a-list"),
+        ("desktop_snapshot_requested", "true"),
+    ],
+)
+def test_parse_inbound_message_rejects_invalid_audio_stream_end_desktop_snapshot(
+    field: str,
+    value: object,
+) -> None:
+    payload = {
+        "stream_id": "mic:ptt-1",
+        "reason": "ptt_release",
+        "capture_mode": "ptt",
+    }
+    payload[field] = value
+
+    with pytest.raises(ProtocolError, match=f"payload.{field}"):
+        parse_inbound_message(_message("input.audio_stream_end", payload))
+
+
 def test_parse_inbound_message_rejects_engine_parameter_plan_preview() -> None:
     with pytest.raises(ProtocolError, match="Unsupported message type"):
         parse_inbound_message(

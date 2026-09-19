@@ -215,6 +215,21 @@ def _validate_payload(message_type: str, payload: dict[str, Any]) -> None:
         if "last_seq" in payload:
             _require_payload_non_negative_int(message_type, payload, "last_seq")
         _validate_capture_mode(message_type, payload)
+        images = payload.get("images", [])
+        if images is None:
+            payload["images"] = []
+        elif not isinstance(images, list):
+            raise ProtocolError(
+                "`input.audio_stream_end` requires `payload.images` to be a list when provided."
+            )
+        desktop_snapshot_requested = payload.get("desktop_snapshot_requested")
+        if desktop_snapshot_requested is not None and not isinstance(
+            desktop_snapshot_requested, bool
+        ):
+            raise ProtocolError(
+                "`input.audio_stream_end` requires `payload.desktop_snapshot_requested` "
+                "to be a boolean when provided."
+            )
         return
 
     if message_type == TYPE_SYSTEM_SEMANTIC_AXIS_PROFILE_SAVE:

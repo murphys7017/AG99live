@@ -370,7 +370,12 @@ class SpeechIngressService:
         if stream_id:
             normalized_payload["stream_id"] = stream_id
         normalized_raw_message["payload"] = normalized_payload
-        return self._build_message_object(text=text, raw_message=normalized_raw_message)
+        images = normalized_payload.get("images", [])
+        if not isinstance(images, list):
+            raise ValueError("audio input images must be a list")
+        return self._build_message_object(
+            text=text, raw_message=normalized_raw_message, images=images
+        )
 
     async def _build_message_from_vad_segment(self, message):
         segment_id = self._resolve_audio_segment_id(message)

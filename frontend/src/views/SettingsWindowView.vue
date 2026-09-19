@@ -406,7 +406,7 @@ onMounted(() => {
         <div class="settings-card__header">
           <div>
             <p class="settings-card__eyebrow">多模态</p>
-            <h2>发送时附带桌面截图</h2>
+            <h2>发送消息时附带桌面截图</h2>
           </div>
           <span class="settings-card__badge">
             {{ desktopScreenshotOnSendEnabled ? "enabled" : "disabled" }}
@@ -422,7 +422,7 @@ onMounted(() => {
           />
           <span class="settings-toggle__control" aria-hidden="true"></span>
           <span class="settings-toggle__copy">
-            发送文本时自动附带一张实时桌面截图，帮助模型理解当前屏幕内容。
+            发送文本或按键说话时自动附带一张实时桌面截图，帮助模型理解当前屏幕内容。
           </span>
         </label>
 

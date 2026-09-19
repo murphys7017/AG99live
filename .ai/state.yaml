@@ -25,6 +25,21 @@ task:
   validation: "Focused output-segment, platform-event, and media-service tests passed (11 tests); frontend renderer/WebSDK/Node typechecks, protocol manifest check, Python compileall, and diff whitespace check passed."
   evidence_gap: "Live AstrBot + Electron acceptance must still verify ordered multi-segment playback, thinking-sway release on every terminal path, direct-plan release after paused/ended audio, and cached desktop-snapshot reuse after frontend capture failure."
 
+desktop_snapshot_ptt_input:
+  recorded_at: "2026-09-20"
+  scope:
+    - "Attach an optional realtime desktop snapshot to a completed PTT audio stream so the eventual transcription and image enter one AstrBot message."
+    - "Serialize screenshot capture and input.audio_stream_end delivery in PTT release order."
+  non_actions:
+    - "Do not attach screenshots to manual or auto microphone streams."
+    - "Do not alter audio frame sequencing, STT, screenshot cache reuse, or desktop-capture bridge behavior."
+  validation:
+    - "Focused SpeechIngress and protocol-parser checks pass (15 tests), covering image propagation and malformed desktop-snapshot payload rejection."
+    - "Frontend renderer/WebSDK/Node typechecks and `git diff --check` pass."
+  evidence_gap:
+    - "Live Electron plus AstrBot verification must confirm rapid consecutive PTT releases preserve transcription order and carry the release-time desktop image."
+    - "The optional AstrBot plugin structure checker is not present at `scripts/check_astrbot_plugin.py` in this repository."
+
 speech_output_runtime_migration:
   recorded_at: "2026-09-17"
   scope:

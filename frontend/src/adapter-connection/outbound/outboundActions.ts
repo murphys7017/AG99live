@@ -18,6 +18,10 @@ import {
   normalizeTurnIdForComparison,
 } from "../core/turnIds.js";
 import type { AdapterOutboundClient } from "./outboundClient.js";
+import {
+  captureRealtimeDesktopScreenshot,
+  type DesktopCaptureImagePayload,
+} from "./desktopCapture.js";
 
 export interface MotionLabRawEventPayload {
   event_id: string;
@@ -61,13 +65,6 @@ export interface OutboundActionContext {
   findOpenExecutionSegment: () => { turnId: string | null; messageId: string } | null;
   markTurnInterrupted: (turnId: string | null) => void;
   createMessageId: () => string;
-}
-
-interface DesktopCaptureImagePayload {
-  data: string;
-  mime_type: "image/jpeg";
-  source: "screen";
-  captured_at: string;
 }
 
 /**
@@ -135,21 +132,6 @@ function getInterruptibleTurnId(ctx: OutboundActionContext): string | null {
     return openExecutionTurnId;
   }
   return normalizeTurnIdForComparison(ctx.state.currentTurnId);
-}
-
-async function captureRealtimeDesktopScreenshot(): Promise<DesktopCaptureImagePayload | null> {
-  const captureDesktopScreenshot = window.ag99desktop?.captureDesktopScreenshot;
-  if (!captureDesktopScreenshot) {
-    return null;
-  }
-
-  try {
-    const result = await captureDesktopScreenshot();
-    return result ?? null;
-  } catch (error) {
-    console.warn("[DesktopCapture] Failed to capture realtime desktop screenshot", error);
-    return null;
-  }
 }
 
 function buildDesktopAwareText(
