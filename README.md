@@ -52,7 +52,7 @@ AG99live 选择了一条更基础但更可控的路线：让模型表达“应�
 
 ## 推荐使用配套优化版 AstrBot
 
-AG99live 推荐使用由项目维护者同步优化的 [AstrBot 配套分支](https://github.com/murphys7017/AstrBot/tree/codex/unify-prompt-context-pipeline)，而不是直接使用官方上游版本。
+AG99live 推荐使用由项目维护者同步优化的 [AstrBot 配套分支](https://github.com/murphys7017/AstrBot)，而不是直接使用官方上游版本。
 
 这不是一个无关的替代发行版。为了配合 AG99live 的响应速度、动作准确性和消息时序，配套版本针对以下基础链路做过持续调整：
 
