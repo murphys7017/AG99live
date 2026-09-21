@@ -241,10 +241,6 @@ export function createBrowserAudioTimelineSink(options: {
     );
 
     try {
-      await speechOutput?.prepare();
-      if (activeAudioElement !== audio) {
-        throw new DOMException("Audio playback stopped before start.", "AbortError");
-      }
       await callbacks.onAudioElementCreated?.({
         audioUrl,
         audio,
@@ -255,6 +251,13 @@ export function createBrowserAudioTimelineSink(options: {
       });
       audio.load();
       await durationReady;
+      if (activeAudioElement !== audio) {
+        throw new DOMException("Audio playback stopped before start.", "AbortError");
+      }
+      // Prime the persistent output path only after this segment is decoded and
+      // immediately before media playback. Priming earlier can let a dormant
+      // device close again while the file is loading, which cuts its opening.
+      await speechOutput?.prepare();
       if (activeAudioElement !== audio) {
         throw new DOMException("Audio playback stopped before start.", "AbortError");
       }

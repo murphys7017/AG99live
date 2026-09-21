@@ -168,7 +168,45 @@ class MediaService:
             return False
         if sample_width <= 0 or channel_count <= 0 or sample_rate <= 0:
             return False
-        return True
+        return self._has_complete_riff_payload(source_path)
+
+    @staticmethod
+    def _has_complete_riff_payload(source_path: Path) -> bool:
+        """Return whether a RIFF/WAVE file declares the bytes it actually contains.
+
+        Some streaming TTS providers leave both RIFF and data lengths as
+        ``0xFFFFFFFF``. Python's ``wave`` module accepts that PCM stream, but
+        browser decoders must estimate its timeline instead of receiving a
+        complete WAV container. Route those files through pydub so the public
+        cache always exposes a normal finite WAV.
+        """
+        try:
+            file_size = source_path.stat().st_size
+            with source_path.open("rb") as source_file:
+                header = source_file.read(12)
+                if (
+                    len(header) != 12
+                    or header[:4] != b"RIFF"
+                    or header[8:] != b"WAVE"
+                    or int.from_bytes(header[4:8], "little") != file_size - 8
+                ):
+                    return False
+
+                found_data_chunk = False
+                while source_file.tell() + 8 <= file_size:
+                    chunk_header = source_file.read(8)
+                    chunk_id = chunk_header[:4]
+                    chunk_size = int.from_bytes(chunk_header[4:], "little")
+                    remaining_bytes = file_size - source_file.tell()
+                    padded_chunk_size = chunk_size + (chunk_size % 2)
+                    if padded_chunk_size > remaining_bytes:
+                        return False
+                    if chunk_id == b"data":
+                        found_data_chunk = True
+                    source_file.seek(padded_chunk_size, os.SEEK_CUR)
+                return found_data_chunk and source_file.tell() == file_size
+        except OSError:
+            return False
 
     def convert_image_component(self, image_payload):
         image_component, _ = self.convert_image_component_with_diagnostic(image_payload)

@@ -142,6 +142,38 @@ def test_cache_audio_file_falls_back_to_conversion_for_non_pcm_wav(
     assert importlib.import_module("pathlib").Path(cached_path).read_bytes() == b"converted-wav"
 
 
+def test_cache_audio_file_converts_pcm_wav_with_streaming_lengths(
+    install_fake_astrbot,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    media_service = _create_media_service(install_fake_astrbot, monkeypatch, tmp_path)
+    source_path = tmp_path / "streaming-source.wav"
+    source_bytes = bytearray(_write_pcm_wav(source_path))
+    source_bytes[4:8] = b"\xff\xff\xff\xff"
+    data_chunk_offset = source_bytes.index(b"data")
+    source_bytes[data_chunk_offset + 4 : data_chunk_offset + 8] = b"\xff\xff\xff\xff"
+    source_path.write_bytes(source_bytes)
+    module = importlib.import_module("astrbot_plugin_ag99live_adapter.services.media_service")
+    calls: list[str] = []
+
+    class FakeAudioSegment:
+        def export(self, target_path, format: str):
+            calls.append(f"export:{format}")
+            importlib.import_module("pathlib").Path(target_path).write_bytes(b"normalized-wav")
+
+    def fake_from_file(path):
+        calls.append(f"from_file:{path}")
+        return FakeAudioSegment()
+
+    monkeypatch.setattr(module.AudioSegment, "from_file", fake_from_file)
+
+    cached_path, _audio_url = media_service.cache_audio_file(str(source_path))
+
+    assert calls == [f"from_file:{source_path}", "export:wav"]
+    assert importlib.import_module("pathlib").Path(cached_path).read_bytes() == b"normalized-wav"
+
+
 def test_desktop_snapshot_cache_reuses_latest_snapshot_for_same_client(
     install_fake_astrbot,
     monkeypatch,

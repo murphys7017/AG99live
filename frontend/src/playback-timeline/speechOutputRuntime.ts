@@ -1,6 +1,7 @@
 const SPEECH_OUTPUT_FADE_INITIAL_GAIN = 0.86;
 const SPEECH_OUTPUT_FADE_DURATION_SECONDS = 0.04;
-const SPEECH_OUTPUT_WARMUP_MS = 80;
+const SPEECH_OUTPUT_PRIMER_DURATION_SECONDS = 0.35;
+const SPEECH_OUTPUT_REPRIME_IDLE_MS = 30_000;
 
 export interface SpeechOutputSession {
   readonly analyser: AnalyserNode;
@@ -19,6 +20,7 @@ export function createSpeechOutputRuntime(): SpeechOutputRuntime {
   let audioContext: AudioContext | null = null;
   let activeSession: SpeechOutputSession | null = null;
   let outputWarmed = false;
+  let lastOutputActivityAtMs: number | null = null;
   let disposed = false;
 
   function requireAudioContext(): AudioContext {
@@ -39,6 +41,31 @@ export function createSpeechOutputRuntime(): SpeechOutputRuntime {
     return audioContext;
   }
 
+  function primeOutput(context: AudioContext): Promise<void> {
+    const source = context.createBufferSource();
+    const frameCount = Math.ceil(
+      context.sampleRate * SPEECH_OUTPUT_PRIMER_DURATION_SECONDS,
+    );
+    const buffer = context.createBuffer(1, frameCount, context.sampleRate);
+    // Keep the primer technically non-silent so Chromium keeps the device path active,
+    // while remaining far below an audible level.
+    buffer.getChannelData(0)[0] = 1 / 32768;
+    source.buffer = buffer;
+    source.connect(context.destination);
+
+    return new Promise<void>((resolve) => {
+      source.addEventListener(
+        "ended",
+        () => {
+          source.disconnect();
+          resolve();
+        },
+        { once: true },
+      );
+      source.start();
+    });
+  }
+
   async function prepareOutput(context: AudioContext): Promise<void> {
     if (context.state === "closed") {
       throw new Error("speech_output_audio_context_closed");
@@ -47,17 +74,19 @@ export function createSpeechOutputRuntime(): SpeechOutputRuntime {
     if (resumed) {
       await context.resume();
     }
-    const needsWarmup = !outputWarmed || resumed;
-    if (needsWarmup) {
-      await new Promise<void>((resolve) => {
-        window.setTimeout(resolve, SPEECH_OUTPUT_WARMUP_MS);
-      });
+    const now = performance.now();
+    const needsPrimer = !outputWarmed
+      || resumed
+      || lastOutputActivityAtMs === null
+      || now - lastOutputActivityAtMs >= SPEECH_OUTPUT_REPRIME_IDLE_MS;
+    if (needsPrimer) {
+      await primeOutput(context);
       outputWarmed = true;
     }
     console.info("[SpeechOutput] output runtime prepared.", {
       audioContextState: context.state,
       resumed,
-      warmupMs: needsWarmup ? SPEECH_OUTPUT_WARMUP_MS : 0,
+      primerMs: needsPrimer ? SPEECH_OUTPUT_PRIMER_DURATION_SECONDS * 1000 : 0,
     });
   }
 
@@ -107,6 +136,7 @@ export function createSpeechOutputRuntime(): SpeechOutputRuntime {
           if (activeSession === session) {
             activeSession = null;
           }
+          lastOutputActivityAtMs = performance.now();
           try {
             source.disconnect();
           } catch (_error) {
