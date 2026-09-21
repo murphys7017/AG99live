@@ -17,6 +17,8 @@ class OutputSegmentDeliveryPort(Protocol):
 
     async def close_turn_output_queue(self, *, turn_id: str) -> None: ...
 
+    async def abort_turn_from_backend(self, *, turn_id: str, reason: str) -> int: ...
+
 
 class PlatformEventAdapterPort(Protocol):
     turn_coordinator: OutputSegmentDeliveryPort
@@ -126,6 +128,16 @@ class OLVPetPlatformEvent(AstrMessageEvent):
             if inspect.isawaitable(result):
                 await result
         await self._close_frontend_turn_output_queue()
+
+    async def abort_visible_turn(self, *, reason: str) -> None:
+        """Close this frontend turn before a superseding Core turn begins."""
+        turn_id = str(self.get_extra("output_correlation_id", "") or "").strip()
+        if not turn_id:
+            return
+        await self.adapter.turn_coordinator.abort_turn_from_backend(
+            turn_id=turn_id,
+            reason=reason,
+        )
 
     async def complete_visible_message(self, *, message_id: str) -> None:
         """Finalize a Core-delivered logical message without closing its Turn."""

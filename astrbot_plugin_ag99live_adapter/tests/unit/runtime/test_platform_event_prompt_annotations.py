@@ -39,6 +39,26 @@ def _install_platform_event_astrbot_stubs(install_fake_astrbot, monkeypatch) -> 
     event_module.AstrMessageEvent = AstrMessageEvent
     monkeypatch.setitem(sys.modules, "astrbot.api.event", event_module)
 
+    message_components_module = types.ModuleType("astrbot.api.message_components")
+
+    class PlainComponent:
+        pass
+
+    class ImageComponent:
+        pass
+
+    class RecordComponent:
+        pass
+
+    message_components_module.Plain = PlainComponent
+    message_components_module.Image = ImageComponent
+    message_components_module.Record = RecordComponent
+    monkeypatch.setitem(
+        sys.modules,
+        "astrbot.api.message_components",
+        message_components_module,
+    )
+
     prompt_module = types.ModuleType("astrbot.core.prompt")
     prompt_module.INPUT_ITEM_ANNOTATIONS_EXTRA_KEY = "prompt_input_item_annotations"
     prompt_module.INPUT_TEXT_ANNOTATION_KEY = "input.text"
@@ -66,9 +86,11 @@ class AdapterStub:
         self.emit_calls = []
         self.closed_output_queues: list[str] = []
         self.finalized_segments: list[tuple[str, str]] = []
+        self.aborted_turns: list[tuple[str, str]] = []
         self.turn_coordinator = types.SimpleNamespace(
             close_turn_output_queue=self._close_turn_output_queue,
             finalize_output_segment=self._finalize_output_segment,
+            abort_turn_from_backend=self._abort_turn_from_backend,
         )
 
     async def emit_message_chain(self, **kwargs) -> None:
@@ -79,6 +101,10 @@ class AdapterStub:
 
     async def _finalize_output_segment(self, *, turn_id: str, message_id: str) -> None:
         self.finalized_segments.append((turn_id, message_id))
+
+    async def _abort_turn_from_backend(self, *, turn_id: str, reason: str) -> int:
+        self.aborted_turns.append((turn_id, reason))
+        return 1
 
 
 def _build_event(module, *, images: list[dict] | None):
@@ -264,3 +290,18 @@ def test_standard_send_aggregates_parts_without_closing_output_queue(
 
     asyncio.run(event.complete_visible_turn())
     assert adapter.closed_output_queues == ["turn-1"]
+
+
+def test_abort_visible_turn_routes_to_frontend_turn_coordinator(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_platform_event_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_platform_event_module()
+    event = _build_event(module, images=[])
+
+    asyncio.run(event.abort_visible_turn(reason="superseded_by_new_user_input"))
+
+    assert event.adapter.aborted_turns == [
+        ("turn-1", "superseded_by_new_user_input")
+    ]

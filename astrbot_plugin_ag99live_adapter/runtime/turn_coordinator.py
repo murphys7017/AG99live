@@ -130,6 +130,7 @@ class TurnCoordinator:
             observations=self.motion_observations,
         )
         self._turn_terminal_results: dict[str, tuple[bool, str | None] | None] = {}
+        self._terminating_turn_ids: set[str] = set()
         self._active_vad_turn_by_capture_turn: dict[str, str] = {}
         self.output_segments = OutputSegmentCoordinator(
             runtime_state=self.runtime_state,
@@ -402,6 +403,9 @@ class TurnCoordinator:
     async def _commit_inbound_message(self, message_obj, *, turn_id: str | None = None) -> None:
         async with self._turn_lock:
             normalized_turn_id = self._require_turn_id_value(turn_id)
+            await self._abort_active_frontend_turn_before_new_input(
+                next_turn_id=normalized_turn_id,
+            )
             backend_turn_id = self._resolve_backend_turn_id(message_obj, frontend_turn_id=normalized_turn_id)
             turn_identity_map = getattr(self, "turn_identity_map", None)
             if turn_identity_map is not None:
@@ -472,6 +476,25 @@ class TurnCoordinator:
                 current_turn_id,
             )
 
+    async def _abort_active_frontend_turn_before_new_input(
+        self,
+        *,
+        next_turn_id: str,
+    ) -> None:
+        """End an older visible turn before announcing a replacement turn.
+
+        This is intentionally an adapter-side lifecycle transition.  It keeps
+        the client from observing two active playback queues while Core later
+        cancels the superseded execution through Personal Runtime.
+        """
+        active_turn_id = self.session_state.current_turn_id
+        if not active_turn_id or active_turn_id == next_turn_id:
+            return
+        await self.abort_turn_from_backend(
+            turn_id=active_turn_id,
+            reason="superseded_by_new_user_input",
+        )
+
     async def submit_system_text_input(
         self,
         text: str,
@@ -540,32 +563,56 @@ class TurnCoordinator:
         if not resolved_turn_id:
             raise ValueError("interrupt_turn_id_missing")
 
-        stopped_count = 0
-        event = self._events_by_turn_id.get(resolved_turn_id)
-        if event is not None:
-            set_extra = getattr(event, "set_extra", None)
-            if callable(set_extra):
-                set_extra("agent_stop_requested", True)
-            stop_event = getattr(event, "stop_event", None)
-            if callable(stop_event):
-                stop_event()
-                stopped_count = 1
-        await self._send_json(
-            build_control_interrupt(
-                turn_id=resolved_turn_id,
-            )
-        )
-        await self._finish_turn(
+        stopped_count = await self.abort_turn_from_backend(
             turn_id=resolved_turn_id,
-            success=False,
             reason="interrupted",
         )
-
         logger.info(
             "Processed control.interrupt for turn_id=%s stopped_events=%s",
             resolved_turn_id,
             stopped_count,
         )
+
+    async def abort_turn_from_backend(self, *, turn_id: str, reason: str) -> int:
+        """Terminate a frontend turn after AstrBot accepts a superseding input.
+
+        The normal inbound ``control.interrupt`` path and Core-side
+        preemption must publish the same client protocol facts. Otherwise an
+        old playback queue remains open while the next AstrBot turn begins.
+        """
+        resolved_turn_id = self._require_turn_id_value(turn_id)
+        normalized_reason = str(reason or "").strip() or "interrupted"
+        if (
+            resolved_turn_id in self._turn_terminal_results
+            or resolved_turn_id in self._terminating_turn_ids
+        ):
+            return 0
+
+        self._terminating_turn_ids.add(resolved_turn_id)
+        stopped_count = 0
+        try:
+            event = self._events_by_turn_id.get(resolved_turn_id)
+            if event is not None:
+                set_extra = getattr(event, "set_extra", None)
+                if callable(set_extra):
+                    set_extra("agent_stop_requested", True)
+                stop_event = getattr(event, "stop_event", None)
+                if callable(stop_event):
+                    stop_event()
+                    stopped_count = 1
+            await self._send_json(
+                build_control_interrupt(
+                    turn_id=resolved_turn_id,
+                )
+            )
+            await self._finish_turn(
+                turn_id=resolved_turn_id,
+                success=False,
+                reason=normalized_reason,
+            )
+            return stopped_count
+        finally:
+            self._terminating_turn_ids.discard(resolved_turn_id)
 
     def _allows_official_inline_anim_compat(self) -> bool:
         runtime_state = getattr(self, "runtime_state", None)
