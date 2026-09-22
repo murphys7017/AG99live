@@ -2,6 +2,8 @@ const SPEECH_OUTPUT_FADE_INITIAL_GAIN = 0.86;
 const SPEECH_OUTPUT_FADE_DURATION_SECONDS = 0.04;
 const SPEECH_OUTPUT_PRIMER_DURATION_SECONDS = 0.35;
 const SPEECH_OUTPUT_REPRIME_IDLE_MS = 30_000;
+const SPEECH_OUTPUT_KEEPALIVE_GAIN = 1 / 1_000_000;
+const SPEECH_OUTPUT_KEEPALIVE_FREQUENCY_HZ = 20;
 
 export interface SpeechOutputSession {
   readonly analyser: AnalyserNode;
@@ -21,6 +23,8 @@ export function createSpeechOutputRuntime(): SpeechOutputRuntime {
   let activeSession: SpeechOutputSession | null = null;
   let outputWarmed = false;
   let lastOutputActivityAtMs: number | null = null;
+  let keepAliveSource: OscillatorNode | null = null;
+  let keepAliveGain: GainNode | null = null;
   let disposed = false;
 
   function requireAudioContext(): AudioContext {
@@ -66,6 +70,22 @@ export function createSpeechOutputRuntime(): SpeechOutputRuntime {
     });
   }
 
+  function ensureOutputKeepAlive(context: AudioContext): void {
+    if (keepAliveSource) {
+      return;
+    }
+
+    const source = context.createOscillator();
+    const gain = context.createGain();
+    source.frequency.value = SPEECH_OUTPUT_KEEPALIVE_FREQUENCY_HZ;
+    gain.gain.value = SPEECH_OUTPUT_KEEPALIVE_GAIN;
+    source.connect(gain);
+    gain.connect(context.destination);
+    source.start();
+    keepAliveSource = source;
+    keepAliveGain = gain;
+  }
+
   async function prepareOutput(context: AudioContext): Promise<void> {
     if (context.state === "closed") {
       throw new Error("speech_output_audio_context_closed");
@@ -74,6 +94,7 @@ export function createSpeechOutputRuntime(): SpeechOutputRuntime {
     if (resumed) {
       await context.resume();
     }
+    ensureOutputKeepAlive(context);
     const now = performance.now();
     const needsPrimer = !outputWarmed
       || resumed
@@ -167,6 +188,15 @@ export function createSpeechOutputRuntime(): SpeechOutputRuntime {
       const context = audioContext;
       audioContext = null;
       if (context && context.state !== "closed") {
+        try {
+          keepAliveSource?.stop();
+        } catch (_error) {
+          // The source may already be stopped while the context is closing.
+        }
+        keepAliveSource?.disconnect();
+        keepAliveGain?.disconnect();
+        keepAliveSource = null;
+        keepAliveGain = null;
         await context.close();
       }
     },

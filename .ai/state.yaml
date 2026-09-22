@@ -56,10 +56,10 @@ speech_output_runtime_migration:
     - "Live Electron acceptance must verify first TTS after launch, output after several idle minutes, sequential segments, and interruption/replacement with speech beginning \"行行行\"."
 
 speech_output_onset_reliability:
-  recorded_at: "2026-09-21"
+  recorded_at: "2026-09-22"
   scope:
     - "Normalize streaming PCM WAV containers with placeholder RIFF/data sizes before browser delivery."
-    - "Prime the persistent Web Audio output with an inaudible rendered buffer after context resume and after a long idle period, once the segment is decoded and immediately before playback."
+    - "Keep the persistent Web Audio output graph alive with an inaudible oscillator; also render a short primer after context resume and after a long idle period, once the segment is decoded and immediately before playback."
   non_actions:
     - "Do not change TTS text, segment ordering, Timeline clock ownership, or playback completion semantics."
   validation:
@@ -68,7 +68,7 @@ speech_output_onset_reliability:
   evidence:
     - "The affected TTS WAV contains the complete opening word at 111-417 ms, but both RIFF and data lengths are 0xFFFFFFFF."
   evidence_gap:
-    - "Live Electron playback must confirm the full opening word is audible after launch and after more than 30 seconds idle."
+    - "Live Electron playback must confirm the full opening word is audible after launch, after more than 30 seconds idle, and across segment replacement with the resident output graph."
 
 architecture_audit_low_risk_followup:
   recorded_at: "2026-09-08"
