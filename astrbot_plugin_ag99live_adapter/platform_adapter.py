@@ -25,11 +25,9 @@ from .services.frontend_system_service import FrontendSystemCommandHandler
 from .services.history_service import ConversationHistoryBridge
 from .services.media_service import MediaService
 from .services.message_factory import MessageFactory
-from .services.remote_operator_runtime import RemoteOperatorRuntime
 from .transport.static_routes import build_static_routes, list_background_files
 from .runtime.plugin_runtime import (
     get_config_value,
-    get_plugin_config,
     get_plugin_config_snapshot,
     get_plugin_context,
 )
@@ -73,7 +71,6 @@ class OLVPetPlatformAdapter(Platform):
       - MediaService — 音频流缓冲 / 缓存 / 图片落地；
       - MessageFactory — 协议消息 → AstrBotMessage；
       - ChatBuffer / ConversationHistoryBridge / FrontendSystemCommandHandler — 业务组合；
-      - RemoteOperatorRuntime — 增强版 Core 的远程操作注入入口；
       - WebSocketTransport — 单连接 WebSocket 入口；
       - TurnCoordinator — 协议 + 轮次中枢（详细职责见 turn_coordinator.py）。
 
@@ -185,17 +182,6 @@ class OLVPetPlatformAdapter(Platform):
             send_motion_tuning_samples_state=self._send_motion_tuning_samples_state,
             on_disconnect=self._handle_transport_disconnect,
         )
-        self.remote_operator_runtime: RemoteOperatorRuntime | None = None
-        if self.runtime_state.interaction_contributors_available:
-            self.remote_operator_runtime = RemoteOperatorRuntime(
-                plugin_config_loader=lambda: get_config_value(
-                    get_plugin_config() or {},
-                    "remote_operator",
-                    {},
-                ),
-                submit_system_text_input=self._submit_remote_operator_system_text_input,
-            )
-
         self.turn_coordinator = TurnCoordinator(
             session_state=self.session_state,
             turn_identity_map=self.turn_identity_map,
@@ -244,8 +230,6 @@ class OLVPetPlatformAdapter(Platform):
     async def run(self):
         self._event_loop = asyncio.get_running_loop()
         try:
-            if self.remote_operator_runtime is not None:
-                self.remote_operator_runtime.start()
             await self.transport.start()
         except asyncio.CancelledError:
             await self.terminate()
@@ -405,8 +389,6 @@ class OLVPetPlatformAdapter(Platform):
 
     async def terminate(self) -> None:
         logger.info("AG99live adapter terminate() called")
-        if self.remote_operator_runtime is not None:
-            await self.remote_operator_runtime.stop()
         await self.transport.stop()
         try:
             motion_lab_recorder = self.runtime_state.motion_lab_recorder
@@ -414,13 +396,6 @@ class OLVPetPlatformAdapter(Platform):
                 await motion_lab_recorder.close()
         finally:
             self._event_loop = None
-
-    async def _submit_remote_operator_system_text_input(
-        self,
-        text: str,
-        metadata: dict[str, Any],
-    ) -> None:
-        await self.turn_coordinator.submit_system_text_input(text, metadata)
 
     async def _send_json(self, payload: dict[str, Any]) -> bool:
         return await self.transport.send_json(payload)

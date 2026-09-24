@@ -35,7 +35,7 @@ def _install_middleware_astrbot_stubs(install_fake_astrbot, monkeypatch) -> None
     monkeypatch.setitem(sys.modules, "astrbot.core.interaction", interaction_module)
 
 
-def test_register_ag99live_interaction_contributors_keeps_motion_and_remote(
+def test_register_ag99live_interaction_contributors_keeps_motion_only(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -72,11 +72,9 @@ def test_register_ag99live_interaction_contributors_keeps_motion_and_remote(
     assert [item.plugin_id for item in prompt_collectors] == [
         "ag99live.companion_identity.prompt",
         "ag99live.motion.prompt",
-        "ag99live.remote_operator.prompt",
     ]
     assert [item.plugin_id for item in result_contributors] == [
         "ag99live.motion.result",
-        "ag99live.remote_operator.result",
     ]
 
 

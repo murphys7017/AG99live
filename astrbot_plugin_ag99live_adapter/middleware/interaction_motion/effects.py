@@ -230,20 +230,8 @@ def _resource_ids_for_schema(runtime_state: Any, *, resource_type: str) -> list[
 
 
 def _is_ag99live_motion_effect_event(event: Any) -> bool:
-    if _resolve_motion_runtime_bundle(event) is None:
-        return False
+    return _resolve_motion_runtime_bundle(event) is not None
 
-    get_extra = getattr(event, "get_extra", None)
-    if callable(get_extra) and (
-        get_extra("ag99live_input_source") == "remote_operator_result"
-    ):
-        return False
-
-    message_obj = getattr(event, "message_obj", None)
-    raw_message = getattr(message_obj, "raw_message", None)
-    if isinstance(raw_message, Mapping):
-        return raw_message.get("ag99live_input_source") != "remote_operator_result"
-    return True
 
 def _resolve_persona_effect_motion_payload_with_reason(
     event: Any,

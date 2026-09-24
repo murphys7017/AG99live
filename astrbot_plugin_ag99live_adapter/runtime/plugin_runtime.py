@@ -58,10 +58,6 @@ def set_plugin_config(config: Mapping[str, Any] | None) -> None:
         _plugin_config_path = config_path if isinstance(config_path, str) and config_path else None
 
 
-def get_plugin_config() -> dict[str, Any]:
-    return deepcopy(get_plugin_config_snapshot().config)
-
-
 def get_plugin_config_snapshot() -> PluginConfigSnapshot:
     with _state_lock:
         disk_snapshot = _load_plugin_config_from_disk(

@@ -58,28 +58,23 @@ class MyPlugin(Star):
                 "AG99live official AstrBot compatibility enabled: "
                 "Persona Effect and TTS lifecycle hooks are unavailable; "
                 "using <@anim> V4 and final Record audio facts; "
-                "optional performance curve generation and Remote Operator are disabled."
+                "optional performance curve generation is disabled."
             )
 
     @filter.on_llm_request()
-    async def arbitrate_remote_operator_tools(
+    async def append_official_inline_motion_prompt(
         self,
         event: AstrMessageEvent,
         request: ProviderRequest,
     ) -> None:
-        if self._official_core_compatibility:
-            from .middleware.interaction_motion import (
-                append_official_inline_motion_prompt,
-            )
-
-            append_official_inline_motion_prompt(event, request)
+        if not self._official_core_compatibility:
             return
 
-        from .middleware.remote_operator import (
-            arbitrate_remote_operator_tools_for_request,
+        from .middleware.interaction_motion import (
+            append_official_inline_motion_prompt as append_prompt,
         )
 
-        arbitrate_remote_operator_tools_for_request(event, request)
+        append_prompt(event, request)
 
     @filter.on_decorating_result()
     async def sanitize_hidden_output_markup(

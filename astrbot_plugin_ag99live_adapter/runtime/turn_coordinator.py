@@ -47,14 +47,13 @@ from ..protocol.builder import (
 )
 from ..protocol.binary_audio import parse_binary_audio_frame
 from ..protocol.constants import (
-    SOURCE_ADAPTER,
     TYPE_CONTROL_INTERRUPT,
     TYPE_CONTROL_PLAYBACK_FINISHED,
     TYPE_INPUT_AUDIO_STREAM_END,
     TYPE_INPUT_AUDIO_STREAM_START,
     TYPE_INPUT_TEXT,
 )
-from ..protocol.parser import build_message_envelope, parse_inbound_message
+from ..protocol.parser import parse_inbound_message
 from ..services.speech_service import SpeechIngressService
 from .image_diagnostics import (
     emit_image_input_diagnostics,
@@ -440,7 +439,6 @@ class TurnCoordinator:
                 if callable(set_extra):
                     set_extra("enable_streaming", False)
                     set_extra("output_correlation_id", current_turn_id)
-                self._apply_raw_message_metadata_to_event(event, message_obj)
                 self._events_by_turn_id[current_turn_id] = event
                 self._commit_event(event)
             except Exception:
@@ -494,56 +492,6 @@ class TurnCoordinator:
             turn_id=active_turn_id,
             reason="superseded_by_new_user_input",
         )
-
-    async def submit_system_text_input(
-        self,
-        text: str,
-        metadata: dict[str, Any] | None = None,
-    ) -> None:
-        """从后端侧主动注入一条文本作为新一轮交互（用于 remote operator 等中间件）。
-
-        等价于"前端发了一条 input.text"：分配 turn_id 前缀 remote-operator:、
-        组装一份完整信封、通过 _build_message_object 合成 message 对象、
-        再走 _commit_inbound_message 进入轮次生命周期。空文本直接 return。
-        metadata 会合并进 raw_message，供下游识别注入来源（如 ag99live_input_source）。
-        """
-        normalized_text = str(text or "").strip()
-        if not normalized_text:
-            return
-        message_id = uuid4().hex
-        raw_message = build_message_envelope(
-            TYPE_INPUT_TEXT,
-            source=SOURCE_ADAPTER,
-            message_id=message_id,
-            turn_id=f"remote-operator:{message_id}",
-            payload={
-                "text": normalized_text,
-                "images": [],
-            },
-        )
-        if isinstance(metadata, dict):
-            raw_message.update(metadata)
-        message_obj = self._build_message_object(
-            text=normalized_text,
-            raw_message=raw_message,
-            images=[],
-        )
-        await self._commit_inbound_message(
-            message_obj,
-            turn_id=str(raw_message.get("turn_id") or ""),
-        )
-
-    @staticmethod
-    def _apply_raw_message_metadata_to_event(event: Any, message_obj: Any) -> None:
-        raw_message = getattr(message_obj, "raw_message", None)
-        if not isinstance(raw_message, dict):
-            return
-        set_extra = getattr(event, "set_extra", None)
-        if not callable(set_extra):
-            return
-        for key in ("ag99live_input_source", "remote_operator"):
-            if key in raw_message:
-                set_extra(key, raw_message[key])
 
     async def _emit_image_input_diagnostics(
         self,

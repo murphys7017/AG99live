@@ -3,7 +3,6 @@ from __future__ import annotations
 import importlib
 import struct
 from types import SimpleNamespace
-from urllib.parse import unquote, urlparse
 import wave
 
 
@@ -42,22 +41,6 @@ def _install_media_service_dependencies(
         importlib.import_module("sys").modules,
         "astrbot.core.utils.astrbot_path",
         astrbot_path_module,
-    )
-
-    path_util_module = importlib.import_module("types").ModuleType(
-        "astrbot.core.utils.path_util"
-    )
-
-    def file_uri_to_path(file_uri: str) -> str:
-        parsed = urlparse(file_uri)
-        path = unquote(parsed.path)
-        return path[1:] if len(path) > 2 and path[0] == "/" and path[2] == ":" else path
-
-    path_util_module.file_uri_to_path = file_uri_to_path
-    monkeypatch.setitem(
-        importlib.import_module("sys").modules,
-        "astrbot.core.utils.path_util",
-        path_util_module,
     )
 
 

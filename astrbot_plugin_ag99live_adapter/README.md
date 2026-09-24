@@ -18,8 +18,7 @@ AstrBot 仍然拥有核心人格、记忆和对话决策；AG99live 不建立平
 ## 当前路线说明
 
 - 增强版 AstrBot 的 Prompt 统一使用 `register_prompt_extension_collector`：
-  身份和动作能力维持原有 `persona/core` 目标，动作动态上下文显式使用 `persona`，
-  Remote Operator 提示仅进入 `core`。不再注册 Interaction Prompt Contributor。
+  身份和动作能力维持原有 `persona/core` 目标，动作动态上下文显式使用 `persona`。
   `ag99live.motion` 仍为必发 Persona Effect，参数 schema 在当前事件上解析；
   已准入后的准备错误由 Core 显式报告，不允许静默取消动作契约。
 
@@ -36,7 +35,6 @@ AstrBot 仍然拥有核心人格、记忆和对话决策；AG99live 不建立平
   在同一台电脑上的部署。
 - 当前协议没有远程客户端认证、授权、TLS 和跨主机媒体 URL 保护，因此不能把 `host`
   改为局域网或公网地址来部署远程 AstrBot。
-- 保留的 Remote Operator 配置与实现已冻结，计划迁移到其他项目；它不参与当前桌宠交互链路。
 - 后续远程 AstrBot 部署必须先定义 authenticated WSS/HTTPS、客户端身份、媒体授权和断线恢复，
   再同步修改 transport、URL 构造、配置 schema 和前端连接设置。
 
@@ -49,7 +47,7 @@ astrbot_plugin_ag99live_adapter/
 ├─ runtime/              # Turn、输出段、观察记录、可选曲线与 session/chat 状态
 ├─ services/             # 媒体、消息、语音服务
 ├─ motion/               # 动作意图生成与输出清洗
-├─ middleware/           # interaction 动作贡献（含冻结的远程执行器遗留代码）
+├─ middleware/           # interaction 动作贡献
 ├─ live2d/               # 扫描、缓存与分析
 ├─ tests/                # 单元测试
 ├─ live2ds/              # 模型资源
@@ -122,24 +120,12 @@ astrbot_plugin_ag99live_adapter/
 - 非流式 JSON 数组音频协议已删除；麦克风输入只接受当前流式协议。
 - 按键说话模式会以 `reason="ptt_release"` 结束本段录音；对插件侧来说它仍是一段普通麦克风输入。
 
-## 冻结的远程执行器
-
-仓库中仍保留 Remote Operator 的配置与实现，以便后续迁移到其他项目；AG99live 当前不再将其作为产品能力，也不在此继续设计、测试或扩展。历史边界与迁移提示见 [远程执行器接入设计](../docs/02-设计文档/07-远程执行器接入设计.md)。
-
-当前结构注意点：
-
-- 文档语义要求 `synth_finished` 是 turn 级输出队列关闭信号。
-- 如果同一 turn 内会多次输出 assistant segment，后端必须确保最后一个 segment 之后才发送 `synth_finished`。
-- 这不是单条音频生成完成信号，也不是整轮完成信号。
-
 ## 关键配置
 
 - `general`：桌面端身份与会话缓存。
 - `live2d_input`：模型选择和图片输入冷却。
 - `performance_curve`：可选表演曲线的开关与专用 Provider。
 - `vad`：Silero VAD 的断句阈值和连续帧参数。
-- `remote_operator`：冻结的迁移遗留配置；当前 AG99live 不维护或扩展此项。
-
 配置结构已按职责重组；旧的平级配置键不会再被读取。开发阶段请直接按当前 Schema 重新生成或编辑插件配置，不保留旧路径兼容。
 
 当前 Persona Effect 的参考策略：

@@ -22,7 +22,7 @@ import re
 import shutil
 import threading
 import time
-from urllib.parse import unquote
+from urllib.parse import unquote, urlparse
 from uuid import uuid4
 import wave
 
@@ -31,7 +31,6 @@ import numpy as np
 from astrbot.api import logger
 from astrbot.api.message_components import Image
 from astrbot.core.utils.astrbot_path import get_astrbot_temp_path
-from astrbot.core.utils.path_util import file_uri_to_path
 from pydub import AudioSegment
 
 AUDIO_CACHE_MAX_FILES = 120
@@ -244,7 +243,7 @@ class MediaService:
         """Persist one captured desktop image and return the private cached component."""
         image_ref = str(getattr(image_component, "file", "") or "").strip()
         if image_ref.startswith("file:"):
-            image_ref = file_uri_to_path(image_ref)
+            image_ref = _file_uri_to_local_path(image_ref)
         image_path = Path(image_ref)
         if not image_path.is_file():
             return image_component
@@ -417,8 +416,8 @@ class MediaService:
         if not payload:
             return None, _build_image_diagnostic("empty_image_payload")
 
-        if payload.startswith("file:///"):
-            source_path = Path(unquote(payload.replace("file:///", "", 1)))
+        if payload.startswith("file:"):
+            source_path = Path(_file_uri_to_local_path(payload))
             return self._copy_allowed_frontend_image_to_cache(source_path, mime_type)
 
         if os.path.exists(payload):
@@ -552,6 +551,23 @@ class MediaService:
             (self.olv_dir / "backgrounds").resolve(),
             temp_root,
         )
+
+
+def _file_uri_to_local_path(value: str) -> str:
+    parsed = urlparse(value)
+    if parsed.scheme.lower() != "file":
+        raise ValueError("file_uri_scheme_invalid")
+
+    path = unquote(parsed.path)
+    host = parsed.netloc.strip()
+    if host and host.lower() != "localhost":
+        path = f"//{host}{path}"
+    elif os.name == "nt" and len(path) >= 3 and path[0] == "/" and path[2] == ":":
+        path = path[1:]
+
+    if not path:
+        raise ValueError("file_uri_path_missing")
+    return path
 
 
 def _build_image_diagnostic(reason: str) -> dict[str, str]:

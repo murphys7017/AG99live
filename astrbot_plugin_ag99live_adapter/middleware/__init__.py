@@ -10,12 +10,12 @@ def register_ag99live_interaction_contributors(context: Any) -> bool:
     from .interaction_motion import (
         register_ag99live_interaction_contributors as _register_motion_contributors,
     )
-    from .remote_operator import register_remote_operator_interaction_contributors
 
     _remove_existing_ag99live_interaction_contributors(context)
     _register_motion_contributors(context)
-    register_remote_operator_interaction_contributors(context)
     return True
+
+
 def _remove_existing_ag99live_interaction_contributors(context: Any) -> None:
     module_prefixes = _registration_module_prefixes()
     remover_names = (

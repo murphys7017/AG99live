@@ -86,18 +86,6 @@ def _install_main_astrbot_stubs(install_fake_astrbot, monkeypatch) -> None:
     star_module.Star = Star
     monkeypatch.setitem(sys.modules, "astrbot.api.star", star_module)
 
-    remote_operator_module = types.ModuleType(
-        "astrbot_plugin_ag99live_adapter.middleware.remote_operator"
-    )
-    remote_operator_module.arbitrate_remote_operator_tools_for_request = (
-        lambda _event, _request: None
-    )
-    monkeypatch.setitem(
-        sys.modules,
-        "astrbot_plugin_ag99live_adapter.middleware.remote_operator",
-        remote_operator_module,
-    )
-
 
 def test_main_plugin_normalizes_output_and_starts_curve_on_tts_generating(
     install_fake_astrbot,
