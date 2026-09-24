@@ -202,7 +202,6 @@ Profile Editor 不是普通的参数面板，而是模型能力和动作语义�
 - 独立的透明 Live2D 窗口和输入窗口。
 - 对话历史、系统设置、动作实验室和 Profile Editor 独立窗口。
 - B 站直播弹幕批量输入，可作为普通对话 turn 进入同一回复链路。
-- 可选的远程电脑操作委托，将桌面任务交给 Codex app-server / Computer Use 或 OpenCode 执行器。
 
 ## 一次互动如何完成
 
