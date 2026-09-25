@@ -12,7 +12,7 @@
 | 语义动作意图 | `engine.motion_intent.v4` |
 | 模型参数计划 | `engine.parameter_plan.v3` |
 | V4 motion resource | `motion_resource_id` inside `engine.motion_intent.v4` |
-| 模型能力投影 | `live2d_scan.v3` |
+| 模型能力投影 | `live2d_scan.v4` |
 | 语义轴档案 | `ag99.semantic_axis_profile.v3` |
 | 语义轴关系图 | `ag99.semantic_axis_relation_graph.v1` |
 | 语音随动档案 | `ag99.voice_following_profile.v3` |

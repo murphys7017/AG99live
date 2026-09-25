@@ -161,9 +161,7 @@ SPECIAL_EXPRESSION_KEYWORDS = {
     "eyemask",
 }
 
-ADAPTIVE_PARAMETER_PROFILE_SCHEMA_VERSION = "adaptive_parameter_profile.v1"
 CALIBRATION_PROFILE_SCHEMA_VERSION = "direct_parameter_calibration.v1"
-MODEL_SUMMARY_SCHEMA_VERSION = "live2d_model_summary.v1"
 PARAMETER_ACTION_MAX_ATOMS_PER_PARAMETER = 24
 
 # Speech-following capability tuning. Gesture timing is planned by ModelEngine;
@@ -220,7 +218,6 @@ def scan_live2d_models(
             )
         return {
             "schema_version": SCAN_SCHEMA_VERSION,
-            "driver_priority": ["parameters", "expression", "motion"],
             "selected_model": "",
             "available_models": [],
             "models": [],
@@ -246,7 +243,6 @@ def scan_live2d_models(
     selected = _pick_selected_model(models, normalized_selected_model_name)
     return {
         "schema_version": SCAN_SCHEMA_VERSION,
-        "driver_priority": ["parameters", "expression", "motion"],
         "selected_model": selected,
         "available_models": [item["name"] for item in models],
         "models": models,
@@ -266,14 +262,6 @@ def _scan_single_model(model_dir: Path, *, base_url: str) -> dict[str, Any] | No
     )
     cdi_payload = _load_json_file(cdi_path) if cdi_path is not None else {}
     motion_catalog = _load_motion_catalog(model_dir / "motion_catalog.json")
-    resource_scan = _scan_model_resources(
-        model_dir=model_dir,
-        model3_path=model3_path,
-        cdi_path=cdi_path,
-        model_payload=model_payload,
-        motion_catalog=motion_catalog,
-    )
-
     parameter_scan = _build_parameter_scan(cdi_payload)
     parameter_lookup = {
         item["id"]: item for item in parameter_scan["parameters"] if item.get("id")
@@ -285,7 +273,7 @@ def _scan_single_model(model_dir: Path, *, base_url: str) -> dict[str, Any] | No
         parameter_lookup=parameter_lookup,
         expression_catalog=motion_catalog.get("expressions", {}),
     )
-    expression_scan = _apply_expression_hints_to_parameters(
+    _apply_expression_hints_to_parameters(
         parameter_scan=parameter_scan,
         expressions=expressions,
     )
@@ -299,13 +287,13 @@ def _scan_single_model(model_dir: Path, *, base_url: str) -> dict[str, Any] | No
         parameter_scan=parameter_scan,
         motions=motions,
     )
-    adaptive_parameter_profile = _build_adaptive_parameter_profile(
+    calibration_input = _build_calibration_input(
         parameter_scan=parameter_scan,
         motions=motions,
         parameter_action_library=parameter_action_library,
     )
     calibration_profile = _build_calibration_profile(
-        adaptive_parameter_profile=adaptive_parameter_profile,
+        calibration_input=calibration_input,
     )
     voice_following_profile = _build_voice_following_profile(
         model_id=model_dir.name,
@@ -315,36 +303,15 @@ def _scan_single_model(model_dir: Path, *, base_url: str) -> dict[str, Any] | No
     for motion in motions:
         motion.pop("components", None)
 
-    engine_hints = _build_engine_hints(
-        parameter_scan=parameter_scan,
-        expressions=expressions,
-        motions=motions,
-    )
-    model_summary = _build_model_summary(
-        resource_scan=resource_scan,
-        parameter_scan=parameter_scan,
-        expressions=expressions,
-        motions=motions,
-        parameter_action_library=parameter_action_library,
-        adaptive_parameter_profile=adaptive_parameter_profile,
-        calibration_profile=calibration_profile,
-        voice_following_profile=voice_following_profile,
-        engine_hints=engine_hints,
-    )
-
     selected_icon = _select_icon(model_dir)
     return {
         "name": model_dir.name,
         "root_path": f"/live2ds/{model_dir.name}",
-        "model_path": _relative_to(model_dir, model3_path),
+        "model_path": model3_path.relative_to(model_dir).as_posix(),
         "model_url": _to_static_url(base_url, model_dir, model3_path),
         "icon_url": _to_static_url(base_url, model_dir, selected_icon) if selected_icon else "",
-        "resource_scan": resource_scan,
-        "summary": model_summary,
         "parameter_scan": parameter_scan,
-        "expression_scan": expression_scan,
         "parameter_action_library": parameter_action_library,
-        "adaptive_parameter_profile": adaptive_parameter_profile,
         "calibration_profile": calibration_profile,
         "voice_following_profile": voice_following_profile,
         "motion_resource_pool": motion_resource_pool,
@@ -352,69 +319,6 @@ def _scan_single_model(model_dir: Path, *, base_url: str) -> dict[str, Any] | No
             "expressions": expressions,
             "motions": motions,
         },
-        "engine_hints": engine_hints,
-    }
-
-
-def _scan_model_resources(
-    *,
-    model_dir: Path,
-    model3_path: Path,
-    cdi_path: Path | None,
-    model_payload: dict[str, Any],
-    motion_catalog: dict[str, Any],
-) -> dict[str, Any]:
-    file_references = model_payload.get("FileReferences", {})
-    texture_files = [
-        str(item).replace("\\", "/")
-        for item in file_references.get("Textures", [])
-        if str(item).strip()
-    ]
-    expression_files = sorted(
-        {
-            str(item.get("File") or "").strip().replace("\\", "/")
-            for item in file_references.get("Expressions", [])
-            if isinstance(item, dict) and str(item.get("File") or "").strip()
-        }
-    )
-    motion_groups: dict[str, int] = {}
-    motion_files: list[str] = []
-    for group_name, items in file_references.get("Motions", {}).items():
-        if not isinstance(items, list):
-            continue
-        files = [
-            str(item.get("File") or "").strip().replace("\\", "/")
-            for item in items
-            if isinstance(item, dict) and str(item.get("File") or "").strip()
-        ]
-        motion_groups[str(group_name or "").strip() or "default"] = len(files)
-        motion_files.extend(files)
-
-    vtube_profiles = sorted(path.name for path in model_dir.glob("*.vtube.json"))
-    physics_path = _resolve_optional_path(
-        model_dir,
-        model3_path.with_suffix("").with_suffix(".physics3.json"),
-        "*.physics3.json",
-    )
-    return {
-        "model3_file": _relative_to(model_dir, model3_path),
-        "cdi3_file": _relative_to(model_dir, cdi_path) if cdi_path else "",
-        "physics3_file": _relative_to(model_dir, physics_path) if physics_path else "",
-        "texture_count": len(texture_files),
-        "texture_files": texture_files,
-        "expression_count": len(expression_files),
-        "expression_files": expression_files,
-        "motion_count": len(sorted(set(motion_files))),
-        "motion_files": sorted(set(motion_files)),
-        "motion_groups": [
-            {"name": name, "count": count}
-            for name, count in sorted(motion_groups.items(), key=lambda pair: (-pair[1], pair[0]))
-        ],
-        "vtube_profile_count": len(vtube_profiles),
-        "vtube_profiles": vtube_profiles,
-        "has_motion_catalog": bool(
-            motion_catalog.get("motions") or motion_catalog.get("expressions")
-        ),
     }
 
 
@@ -629,16 +533,11 @@ def _apply_expression_hints_to_parameters(
     *,
     parameter_scan: dict[str, Any],
     expressions: list[dict[str, Any]],
-) -> dict[str, Any]:
+) -> None:
     parameter_entries = parameter_scan["parameters"]
     parameter_stats: dict[str, dict[str, Any]] = {}
-    category_counts: Counter[str] = Counter()
-    blend_counts: Counter[str] = Counter()
-    domain_usage: Counter[str] = Counter()
-    channel_usage: Counter[str] = Counter()
 
     for expression in expressions:
-        category_counts[str(expression.get("category") or "supplement")] += 1
         for parameter in expression.get("parameters", []):
             parameter_id = str(parameter.get("id") or "").strip()
             if not parameter_id:
@@ -663,18 +562,9 @@ def _apply_expression_hints_to_parameters(
             blend_value = str(parameter.get("blend") or "").strip()
             if blend_value:
                 stats["blends"].add(blend_value)
-                blend_counts[blend_value] += 1
             if len(stats["examples"]) < 5:
                 stats["examples"].append(str(expression.get("name") or parameter_id))
 
-            domain_value = str(parameter.get("domain") or "").strip()
-            if domain_value:
-                domain_usage[domain_value] += 1
-            for channel_name in parameter.get("channels", []):
-                if channel_name:
-                    channel_usage[str(channel_name)] += 1
-
-    expression_driven_parameters: list[dict[str, Any]] = []
     for entry in parameter_entries:
         stats = parameter_stats.get(entry["id"])
         if not stats:
@@ -687,41 +577,6 @@ def _apply_expression_hints_to_parameters(
         entry["expression_blends"] = sorted(stats["blends"])
         entry["expression_examples"] = stats["examples"]
         entry["expression_profile"] = _infer_expression_parameter_profile(entry)
-        expression_driven_parameters.append(
-            {
-                "parameter_id": entry["id"],
-                "parameter_name": entry["name"],
-                "domain": entry["domain"],
-                "kind": entry["kind"],
-                "usage_count": entry["expression_usage_count"],
-                "max_abs_value": entry["expression_max_abs_value"],
-                "profile": entry["expression_profile"],
-            }
-        )
-
-    base_expression_names = sorted(
-        expression["name"]
-        for expression in expressions
-        if expression.get("category") == "base_emotion"
-    )
-    special_state_names = sorted(
-        expression["name"]
-        for expression in expressions
-        if expression.get("category") == "special_state"
-    )
-    return {
-        "total_expressions": len(expressions),
-        "category_counts": _counter_to_ranked_list(category_counts),
-        "blend_counts": _counter_to_ranked_list(blend_counts),
-        "domain_usage": _counter_to_ranked_list(domain_usage),
-        "channel_usage": _counter_to_ranked_list(channel_usage),
-        "base_expression_names": base_expression_names,
-        "special_state_names": special_state_names,
-        "expression_driven_parameters": sorted(
-            expression_driven_parameters,
-            key=lambda item: (-item["usage_count"], -item["max_abs_value"], item["parameter_id"]),
-        )[:20],
-    }
 
 
 def _scan_motions(
@@ -994,7 +849,7 @@ def _build_parameter_action_library(
     }
 
 
-def _build_adaptive_parameter_profile(
+def _build_calibration_input(
     *,
     parameter_scan: dict[str, Any],
     motions: list[dict[str, Any]],
@@ -1303,84 +1158,24 @@ def _build_adaptive_parameter_profile(
         if channel_profile.get("available")
     ]
 
-    runtime_axis_ranges = {
-        str(item["axis"]): {
-            "parameter_id": str(item["parameter_id"] or ""),
-            "parameter_name": str(item["parameter_name"] or ""),
-            "baseline": float(item["baseline"]),
-            "min": float(item["recommended_execution_range"]["min"]),
-            "max": float(item["recommended_execution_range"]["max"]),
-            "confidence": str(item["recommended_execution_range"]["confidence"]),
-            "recommended": bool(item.get("recommended", False)),
-            "safe_to_apply": bool(item.get("safe_to_apply", False)),
-            "source": str(item.get("source") or ""),
-            "skip_reason": str(item.get("skip_reason") or ""),
-        }
-        for item in key_axes
-    }
-
     return {
-        "schema_version": ADAPTIVE_PARAMETER_PROFILE_SCHEMA_VERSION,
-        "analysis": {
-            "status": "seeded" if motions or parameter_profiles else "empty",
-            "mode": "rule_seed",
-            "source_components": [
-                "parameter_scan",
-                "motions",
-                "parameter_action_library",
-            ],
-        },
-        "summary": {
-            "profiled_parameter_count": len(parameter_profiles),
-            "observed_parameter_count": len(
-                [item for item in parameter_profiles if int(item["observation_count"]) > 0]
-            ),
-            "available_channel_count": len(
-                [item for item in channel_profiles if bool(item["available"])]
-            ),
-            "observed_channel_count": len(
-                [item for item in channel_profiles if int(item["observation_count"]) > 0]
-            ),
-            "recommended_axis_count": len(
-                [
-                    item
-                    for item in key_axes
-                    if bool(item.get("recommended"))
-                ]
-            ),
-        },
         "channels": channel_profiles,
-        "parameters": parameter_profiles,
         "key_axes": key_axes,
-        "runtime_summary": {
-            "axis_parameter_map": {
-                axis_name: str(axis_payload["parameter_id"])
-                for axis_name, axis_payload in runtime_axis_ranges.items()
-                if str(axis_payload["parameter_id"]).strip()
-                and bool(axis_payload.get("recommended"))
-            },
-            "axis_execution_ranges": runtime_axis_ranges,
-            "channel_direction_preferences": {
-                str(item["channel"]): str(item.get("directionality", {}).get("dominant") or "none")
-                for item in channel_profiles
-                if bool(item.get("available"))
-            },
-        },
     }
 
 
 def _build_calibration_profile(
     *,
-    adaptive_parameter_profile: dict[str, Any],
+    calibration_input: dict[str, Any],
 ) -> dict[str, Any]:
     channels = {
         str(item.get("channel") or "").strip(): item
-        for item in adaptive_parameter_profile.get("channels", [])
+        for item in calibration_input.get("channels", [])
         if isinstance(item, dict) and str(item.get("channel") or "").strip()
     }
     axes: dict[str, dict[str, Any]] = {}
 
-    for key_axis in adaptive_parameter_profile.get("key_axes", []):
+    for key_axis in calibration_input.get("key_axes", []):
         if not isinstance(key_axis, dict):
             continue
         axis_name = str(key_axis.get("axis") or "").strip()
@@ -1667,88 +1462,6 @@ def _build_axis_execution_range(
     }
 
 
-def _build_model_summary(
-    *,
-    resource_scan: dict[str, Any],
-    parameter_scan: dict[str, Any],
-    expressions: list[dict[str, Any]],
-    motions: list[dict[str, Any]],
-    parameter_action_library: dict[str, Any],
-    adaptive_parameter_profile: dict[str, Any],
-    calibration_profile: dict[str, Any],
-    voice_following_profile: dict[str, Any],
-    engine_hints: dict[str, Any],
-) -> dict[str, Any]:
-    return {
-        "schema_version": MODEL_SUMMARY_SCHEMA_VERSION,
-        "resources": {
-            "texture_count": int(resource_scan.get("texture_count") or 0),
-            "expression_count": int(resource_scan.get("expression_count") or 0),
-            "motion_count": int(resource_scan.get("motion_count") or 0),
-            "vtube_profile_count": int(resource_scan.get("vtube_profile_count") or 0),
-        },
-        "parameters": {
-            "total": int(parameter_scan.get("total_parameters") or 0),
-            "drivable": int(parameter_scan.get("drivable_parameters") or 0),
-            "standard_channel_count": len(parameter_scan.get("standard_channels", {})),
-            "available_standard_channel_count": len(
-                [
-                    item
-                    for item in parameter_scan.get("standard_channels", {}).values()
-                    if isinstance(item, dict) and bool(item.get("available"))
-                ]
-            ),
-        },
-        "expressions": {
-            "count": len(expressions),
-            "base_emotion_count": len(
-                [
-                    item
-                    for item in expressions
-                    if str(item.get("category") or "") in {"base_emotion", "emotion_overlay"}
-                ]
-            ),
-        },
-        "motions": {
-            "count": len(motions),
-            "parameter_driver_component_count": int(
-                parameter_action_library.get("summary", {}).get("driver_component_count") or 0
-            ),
-            "parameter_action_atom_count": int(
-                parameter_action_library.get("summary", {}).get("selected_atom_count") or 0
-            ),
-        },
-        "engine": {
-            "recommended_mode": str(engine_hints.get("recommended_mode") or ""),
-            "available_channels": list(engine_hints.get("available_channels", [])),
-        },
-        "adaptive_parameter_profile": {
-            "schema_version": str(adaptive_parameter_profile.get("schema_version") or ""),
-            "summary": dict(adaptive_parameter_profile.get("summary") or {}),
-            "runtime_summary": dict(adaptive_parameter_profile.get("runtime_summary") or {}),
-        },
-        "calibration_profile": {
-            "schema_version": str(calibration_profile.get("schema_version") or ""),
-            "axis_count": len(
-                [
-                    axis_name
-                    for axis_name, payload in (calibration_profile.get("axes") or {}).items()
-                    if str(axis_name).strip() and isinstance(payload, dict)
-                ]
-            ),
-        },
-        "voice_following_profile": {
-            "schema_version": str(voice_following_profile.get("schema_version") or ""),
-            "channel_count": int(
-                voice_following_profile.get("summary", {}).get("channel_count") or 0
-            ),
-            "available_channels": list(
-                voice_following_profile.get("summary", {}).get("available_channels") or []
-            ),
-        },
-    }
-
-
 def _round_float(value: Any) -> float:
     try:
         return round(float(value), 4)
@@ -1987,44 +1700,6 @@ def _map_semantic_polarity(*, channel_name: str, polarity: str) -> str:
     if channel_name.startswith("eye_smile") or channel_name == "mouth_smile":
         return "smile_more" if polarity == "positive" else "smile_less"
     return polarity
-
-
-def _build_engine_hints(
-    *,
-    parameter_scan: dict[str, Any],
-    expressions: list[dict[str, Any]],
-    motions: list[dict[str, Any]],
-) -> dict[str, Any]:
-    available_channels = [
-        channel_name
-        for channel_name, channel_payload in parameter_scan["standard_channels"].items()
-        if channel_payload["available"]
-    ]
-    base_expressions = [
-        item["name"]
-        for item in expressions
-        if item.get("category") in {"base_emotion", "emotion_overlay"}
-    ]
-    fallback_motions = [
-        item["name"]
-        for item in motions
-        if item.get("category") in {"idle", "talk", "expressive"}
-    ]
-    if len(available_channels) >= 6:
-        recommended_mode = "parameter_primary"
-    elif base_expressions:
-        recommended_mode = "expression_supported"
-    else:
-        recommended_mode = "motion_fallback"
-
-    return {
-        "driver_priority": ["parameters", "expression", "motion"],
-        "recommended_mode": recommended_mode,
-        "available_channels": available_channels,
-        "base_expression_count": len(base_expressions),
-        "fallback_motion_count": len(fallback_motions),
-        "motion_decomposition_level": "parameter_track" if motions else "none",
-    }
 
 
 def _build_standard_channel_map(
@@ -2288,10 +1963,6 @@ def _resolve_optional_path(model_dir: Path, preferred_path: Path, fallback_patte
     if preferred_path.exists():
         return preferred_path
     return _find_first(model_dir, fallback_pattern)
-
-
-def _relative_to(model_dir: Path, path: Path) -> str:
-    return str(path.relative_to(model_dir)).replace("\\", "/")
 
 
 def _to_static_url(base_url: str, model_dir: Path, path: Path) -> str:

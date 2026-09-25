@@ -100,7 +100,7 @@ astrbot_plugin_ag99live_adapter/
 - 隐藏动作传输标记在回复进入 TTS 前的输出规范化阶段清洗；原文只供官方 `<@anim>` 兼容解析。增强版 Core 只读监听 AstrBot TTS 生成状态并可下发 `audio.state=failed`；官方 Core 只依据最终 `Record` 投影音频成功，不模拟不存在的生命周期。
 - 正式动作位于 `output.segment.motion.payload`；前端原子提交完整段后，由 ModelEngine 把 intent 编译为 `engine.parameter_plan.v3`。
 - `system.server_info` 携带完整 schema manifest；前端只有在 manifest 与本地契约完全一致后才处理后续消息。
-- `system.model_sync` 使用 `live2d_scan.v3`，只下发前端运行需要的模型资源摘要、参数扫描、包含原始 SDK locator 的 resource constraints、`parameter_action_library`、`semantic_axis_profile` 和 `voice_following_profile`。后端分析中间产物不跨 WebSocket 复制。
+- `system.model_sync` 使用 `live2d_scan.v4`，只下发前端运行需要的参数扫描、包含原始 SDK locator 的 resource constraints、`parameter_action_library`、`semantic_axis_profile` 和 `voice_following_profile`。扫描期分析中间量不跨 WebSocket，也不写入运行缓存。
 - `runtime_cache_errors` 只作为 `system.model_sync.payload` 根部的独立运行诊断下发，不复制进 `model_info`。
 - `system.semantic_axis_profile_saved` / `system.semantic_axis_profile_save_failed` 用于 Profile Editor 保存结果确认，不再依赖 `system.model_sync` 推断保存成败。
 - 一个 user input 对应一个 turn，但一个 turn 内可能输出多个 assistant segment。

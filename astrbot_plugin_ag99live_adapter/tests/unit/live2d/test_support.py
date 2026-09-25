@@ -52,7 +52,7 @@ def _make_component(
     }
 
 
-def build_seed_inputs(*, reinforce_primary_observations: bool = False) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+def build_seed_inputs() -> tuple[dict[str, Any], list[dict[str, Any]]]:
     standard_channels: dict[str, dict[str, Any]] = {}
     for spec in live2d_scan.STANDARD_CHANNEL_SPECS:
         standard_channels[spec["name"]] = {
@@ -246,100 +246,33 @@ def build_seed_inputs(*, reinforce_primary_observations: bool = False) -> tuple[
             ],
         },
     ]
-    if reinforce_primary_observations:
-        motions.append(
-            {
-                "name": "head_driver_repeat",
-                "file": "Motions/head_driver_repeat.motion3.json",
-                "group": "default",
-                "category": "expressive",
-                "catalog_tags": ["demo", "head", "repeat"],
-                "timeline_profile": {
-                    "intro_energy": 0.7,
-                    "middle_energy": 0.6,
-                    "outro_energy": 0.2,
-                    "peak_window": {"start_ratio": 0.25, "end_ratio": 0.7},
-                    "motion_trait": "follow_through",
-                },
-                "components": [
-                    _make_component(
-                        component_id="head_pos_repeat",
-                        channel="head_yaw",
-                        domain="head",
-                        parameter_id="ParamAngleX",
-                        energy_score=0.82,
-                        strength="medium",
-                        trait="ramp",
-                        polarity="positive",
-                    )
-                ],
-            }
-        )
     return parameter_scan, motions
 
 
-def build_seed_parameter_action_library() -> dict[str, Any]:
-    parameter_scan, motions = build_seed_inputs()
-    return live2d_scan._build_parameter_action_library(
-        parameter_scan=deepcopy(parameter_scan),
-        motions=deepcopy(motions),
-    )
-
-
-def build_seed_adaptive_parameter_profile() -> dict[str, Any]:
-    parameter_scan, motions = build_seed_inputs()
-    return live2d_scan._build_adaptive_parameter_profile(
-        parameter_scan=deepcopy(parameter_scan),
-        motions=deepcopy(motions),
-        parameter_action_library=build_seed_parameter_action_library(),
-    )
-
-
-def build_seed_calibration_profile() -> dict[str, Any]:
-    return live2d_scan._build_calibration_profile(
-        adaptive_parameter_profile=build_seed_adaptive_parameter_profile(),
-    )
-
-
 def build_seed_model_info() -> dict[str, Any]:
-    return build_seed_model_info_with_options()
-
-
-def build_seed_model_info_with_options(
-    *,
-    reinforce_primary_observations: bool = False,
-) -> dict[str, Any]:
-    parameter_scan, motions = build_seed_inputs(
-        reinforce_primary_observations=reinforce_primary_observations,
-    )
+    parameter_scan, motions = build_seed_inputs()
     parameter_action_library = live2d_scan._build_parameter_action_library(
         parameter_scan=deepcopy(parameter_scan),
         motions=deepcopy(motions),
     )
-    expression_scan = live2d_scan._apply_expression_hints_to_parameters(
-        parameter_scan=deepcopy(parameter_scan),
+    live2d_scan._apply_expression_hints_to_parameters(
+        parameter_scan=parameter_scan,
         expressions=[],
     )
-    adaptive_parameter_profile = live2d_scan._build_adaptive_parameter_profile(
+    calibration_input = live2d_scan._build_calibration_input(
         parameter_scan=deepcopy(parameter_scan),
         motions=deepcopy(motions),
         parameter_action_library=deepcopy(parameter_action_library),
     )
     calibration_profile = live2d_scan._build_calibration_profile(
-        adaptive_parameter_profile=deepcopy(adaptive_parameter_profile),
+        calibration_input=deepcopy(calibration_input),
     )
     voice_following_profile = live2d_scan._build_voice_following_profile(
         model_id="DemoModel",
         parameter_scan=deepcopy(parameter_scan),
     )
-    engine_hints = live2d_scan._build_engine_hints(
-        parameter_scan=deepcopy(parameter_scan),
-        expressions=[],
-        motions=deepcopy(motions),
-    )
     return {
-        "schema_version": "live2d_scan.v3",
-        "driver_priority": ["parameters", "expression", "motion"],
+        "schema_version": "live2d_scan.v4",
         "selected_model": "DemoModel",
         "available_models": ["DemoModel"],
         "models": [
@@ -349,45 +282,11 @@ def build_seed_model_info_with_options(
                 "model_path": "Demo.model3.json",
                 "model_url": "http://127.0.0.1:12397/live2ds/DemoModel/Demo.model3.json",
                 "icon_url": "",
-                "resource_scan": {
-                    "model3_file": "Demo.model3.json",
-                    "cdi3_file": "",
-                    "physics3_file": "",
-                    "texture_count": 0,
-                    "texture_files": [],
-                    "expression_count": 0,
-                    "expression_files": [],
-                    "motion_count": len(motions),
-                    "motion_files": [],
-                    "motion_groups": [],
-                    "vtube_profile_count": 0,
-                    "vtube_profiles": [],
-                    "has_motion_catalog": False,
-                },
                 "parameter_scan": deepcopy(parameter_scan),
-                "expression_scan": expression_scan,
                 "parameter_action_library": parameter_action_library,
                 "constraints": {"expressions": [], "motions": []},
-                "adaptive_parameter_profile": adaptive_parameter_profile,
                 "calibration_profile": calibration_profile,
                 "voice_following_profile": voice_following_profile,
-                "engine_hints": engine_hints,
-                "summary": live2d_scan._build_model_summary(
-                    resource_scan={
-                        "texture_count": 0,
-                        "expression_count": 0,
-                        "motion_count": len(motions),
-                        "vtube_profile_count": 0,
-                    },
-                    parameter_scan=deepcopy(parameter_scan),
-                    expressions=[],
-                    motions=deepcopy(motions),
-                    parameter_action_library=deepcopy(parameter_action_library),
-                    adaptive_parameter_profile=deepcopy(adaptive_parameter_profile),
-                    calibration_profile=deepcopy(calibration_profile),
-                    voice_following_profile=deepcopy(voice_following_profile),
-                    engine_hints=engine_hints,
-                ),
             }
         ],
     }

@@ -1,12 +1,10 @@
 import type {
   ExpressionConstraint,
-  ExpressionScanPayload,
   ModelSummary,
   MotionConstraint,
   ParameterActionLibrary,
   ParameterScanPayload,
   ProtocolEnvelope,
-  ResourceScanPayload,
   RuntimeCacheErrorsPayload,
   SystemModelSyncPayload,
   VoiceFollowingProfile,
@@ -16,7 +14,7 @@ import type {
   SemanticAxisRelationRule,
 } from "../../types/semantic-axis-profile.js";
 import {
-  SCHEMA_MODEL_INFO_V3,
+  SCHEMA_MODEL_INFO_V4,
   SCHEMA_PARAMETER_ACTION_LIBRARY_V2,
   SCHEMA_SEMANTIC_AXIS_PROFILE_V3,
   SCHEMA_SEMANTIC_AXIS_RELATION_GRAPH_V1,
@@ -56,18 +54,17 @@ export function parseSystemModelSyncPayload(
     modelInfoRecord,
     [
       "schema_version",
-      "driver_priority",
       "selected_model",
       "available_models",
       "models",
     ],
   );
   if (!modelInfoKeys.ok) return modelInfoKeys;
-  if (modelInfoRecord.schema_version !== SCHEMA_MODEL_INFO_V3) {
+  if (modelInfoRecord.schema_version !== SCHEMA_MODEL_INFO_V4) {
     return invalidPayload(
       envelope.type,
       "payload.model_info.schema_version",
-      SCHEMA_MODEL_INFO_V3,
+      SCHEMA_MODEL_INFO_V4,
     );
   }
 
@@ -77,12 +74,6 @@ export function parseSystemModelSyncPayload(
     "payload.model_info.selected_model",
   );
   if (!selectedModel.ok) return selectedModel;
-  const driverPriority = parseStringArray(
-    envelope.type,
-    modelInfoRecord.driver_priority,
-    "payload.model_info.driver_priority",
-  );
-  if (!driverPriority.ok) return driverPriority;
   const availableModels = parseStringArray(
     envelope.type,
     modelInfoRecord.available_models,
@@ -146,8 +137,7 @@ export function parseSystemModelSyncPayload(
     ok: true,
     payload: {
       model_info: {
-        schema_version: SCHEMA_MODEL_INFO_V3,
-        driver_priority: driverPriority.payload,
+        schema_version: SCHEMA_MODEL_INFO_V4,
         selected_model: selectedModel.payload,
         available_models: availableModels.payload,
         models,
@@ -170,14 +160,11 @@ function parseModelSummary(
     "model_path",
     "model_url",
     "icon_url",
-    "resource_scan",
     "parameter_scan",
-    "expression_scan",
     "parameter_action_library",
     "constraints",
     "semantic_axis_profile",
     "voice_following_profile",
-    "engine_hints",
   ]);
   if (!modelKeys.ok) return modelKeys;
 
@@ -196,12 +183,8 @@ function parseModelSummary(
     return invalidPayload(type, `${path}.icon_url`, "empty string or absolute HTTP(S) URL");
   }
 
-  const resourceScan = parseResourceScan(type, record.resource_scan, `${path}.resource_scan`);
-  if (!resourceScan.ok) return resourceScan;
   const parameterScan = parseParameterScan(type, record.parameter_scan, `${path}.parameter_scan`);
   if (!parameterScan.ok) return parameterScan;
-  const expressionScan = parseExpressionScan(type, record.expression_scan, `${path}.expression_scan`);
-  if (!expressionScan.ok) return expressionScan;
   const parameterActionLibrary = parseParameterActionLibrary(
     type,
     record.parameter_action_library,
@@ -210,22 +193,6 @@ function parseModelSummary(
   if (!parameterActionLibrary.ok) return parameterActionLibrary;
   const constraints = parseModelConstraints(type, record.constraints, `${path}.constraints`);
   if (!constraints.ok) return constraints;
-
-  const engineHints = asRecord(record.engine_hints);
-  if (!engineHints) return invalidPayload(type, `${path}.engine_hints`, "object");
-  const engineShape = validateFields(type, engineHints, `${path}.engine_hints`, {
-    driver_priority: "array",
-    recommended_mode: "string",
-    available_channels: "array",
-    base_expression_count: "number",
-    fallback_motion_count: "number",
-    motion_decomposition_level: "string",
-  });
-  if (!engineShape.ok) return engineShape;
-  for (const key of ["driver_priority", "available_channels"] as const) {
-    const parsed = parseStringArray(type, engineHints[key], `${path}.engine_hints.${key}`);
-    if (!parsed.ok) return parsed;
-  }
 
   const semanticProfile = parseOptionalSemanticAxisProfile(
     type,
@@ -263,53 +230,13 @@ function parseModelSummary(
       model_path: strings.model_path,
       model_url: strings.model_url,
       icon_url: strings.icon_url,
-      resource_scan: resourceScan.payload,
       parameter_scan: parameterScan.payload,
-      expression_scan: expressionScan.payload,
       parameter_action_library: parameterActionLibrary.payload,
       constraints: constraints.payload,
       semantic_axis_profile: semanticProfile.payload,
       voice_following_profile: voiceProfile.payload,
-      engine_hints: {
-        driver_priority: engineHints.driver_priority as string[],
-        recommended_mode: engineHints.recommended_mode as string,
-        available_channels: engineHints.available_channels as string[],
-        base_expression_count: engineHints.base_expression_count as number,
-        fallback_motion_count: engineHints.fallback_motion_count as number,
-        motion_decomposition_level: engineHints.motion_decomposition_level as string,
-      },
     },
   };
-}
-
-function parseResourceScan(
-  type: string,
-  value: unknown,
-  path: string,
-): PayloadParseResult<ResourceScanPayload> {
-  const record = asRecord(value);
-  if (!record) return invalidPayload(type, path, "object");
-  const shape = validateFields(type, record, path, {
-    model3_file: "string",
-    cdi3_file: "string",
-    physics3_file: "string",
-    texture_count: "number",
-    texture_files: "array",
-    expression_count: "number",
-    expression_files: "array",
-    motion_count: "number",
-    motion_files: "array",
-    motion_groups: "array",
-    vtube_profile_count: "number",
-    vtube_profiles: "array",
-    has_motion_catalog: "boolean",
-  });
-  if (!shape.ok) return shape;
-  for (const key of ["texture_files", "expression_files", "motion_files", "vtube_profiles"] as const) {
-    const parsed = parseStringArray(type, record[key], `${path}.${key}`);
-    if (!parsed.ok) return parsed;
-  }
-  return { ok: true, payload: record as unknown as ResourceScanPayload };
 }
 
 function parseParameterScan(
@@ -333,28 +260,6 @@ function parseParameterScan(
   });
   return shape.ok
     ? { ok: true, payload: record as unknown as ParameterScanPayload }
-    : shape;
-}
-
-function parseExpressionScan(
-  type: string,
-  value: unknown,
-  path: string,
-): PayloadParseResult<ExpressionScanPayload> {
-  const record = asRecord(value);
-  if (!record) return invalidPayload(type, path, "object");
-  const shape = validateFields(type, record, path, {
-    total_expressions: "number",
-    category_counts: "array",
-    blend_counts: "array",
-    domain_usage: "array",
-    channel_usage: "array",
-    base_expression_names: "array",
-    special_state_names: "array",
-    expression_driven_parameters: "array",
-  });
-  return shape.ok
-    ? { ok: true, payload: record as unknown as ExpressionScanPayload }
     : shape;
 }
 

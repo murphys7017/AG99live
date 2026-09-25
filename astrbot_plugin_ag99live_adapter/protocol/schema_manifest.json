@@ -1,7 +1,7 @@
 {
   "protocol_version": "v2",
   "schemas": {
-    "model_info": "live2d_scan.v3",
+    "model_info": "live2d_scan.v4",
     "motion_intent": "engine.motion_intent.v4",
     "motion_tuning_sample": "ag99.motion_tuning_sample.v2",
     "output_segment": "output.segment.v5",

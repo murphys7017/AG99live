@@ -632,7 +632,6 @@ class RuntimeState:
 def _project_frontend_model_info(model_info: dict[str, Any]) -> dict[str, Any]:
     root_fields = (
         "schema_version",
-        "driver_priority",
         "selected_model",
         "available_models",
     )
@@ -654,14 +653,11 @@ def _project_frontend_model_info(model_info: dict[str, Any]) -> dict[str, Any]:
         "model_path",
         "model_url",
         "icon_url",
-        "resource_scan",
         "parameter_scan",
-        "expression_scan",
         "parameter_action_library",
         "constraints",
         "semantic_axis_profile",
         "voice_following_profile",
-        "engine_hints",
     )
     models = model_info.get("models")
     if not isinstance(models, list):

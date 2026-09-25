@@ -3,7 +3,7 @@ import type { SemanticAxisProfile } from "./semantic-axis-profile";
 export {
   PROTOCOL_SCHEMA_MANIFEST,
   PROTOCOL_SCHEMAS,
-  SCHEMA_MODEL_INFO_V3,
+  SCHEMA_MODEL_INFO_V4,
   SCHEMA_MOTION_INTENT_V4,
   SCHEMA_MOTION_TUNING_SAMPLE_V2,
   SCHEMA_OUTPUT_SEGMENT_V5,
@@ -17,7 +17,7 @@ export {
 import {
   PROTOCOL_SCHEMA_MANIFEST,
   PROTOCOL_VERSION,
-  SCHEMA_MODEL_INFO_V3,
+  SCHEMA_MODEL_INFO_V4,
   SCHEMA_MOTION_INTENT_V4,
   SCHEMA_MOTION_TUNING_SAMPLE_V2,
   SCHEMA_OUTPUT_SEGMENT_V5,
@@ -211,41 +211,6 @@ export interface ExpressionConstraint {
   catalog_id: string;
   catalog_expose_as_resource: boolean;
   parameter_ids: string[];
-}
-
-export interface ExpressionScanPayload {
-  total_expressions: number;
-  category_counts: Array<{ name: string; count: number }>;
-  blend_counts: Array<{ name: string; count: number }>;
-  domain_usage: Array<{ name: string; count: number }>;
-  channel_usage: Array<{ name: string; count: number }>;
-  base_expression_names: string[];
-  special_state_names: string[];
-  expression_driven_parameters: Array<{
-    parameter_id: string;
-    parameter_name: string;
-    domain: string;
-    kind: string;
-    usage_count: number;
-    max_abs_value: number;
-    profile: string;
-  }>;
-}
-
-export interface ResourceScanPayload {
-  model3_file: string;
-  cdi3_file: string;
-  physics3_file: string;
-  texture_count: number;
-  texture_files: string[];
-  expression_count: number;
-  expression_files: string[];
-  motion_count: number;
-  motion_files: string[];
-  motion_groups: Array<{ name: string; count: number }>;
-  vtube_profile_count: number;
-  vtube_profiles: string[];
-  has_motion_catalog: boolean;
 }
 
 export interface MotionConstraint {
@@ -539,9 +504,7 @@ export interface ModelSummary {
   model_path: string;
   model_url: string;
   icon_url: string;
-  resource_scan: ResourceScanPayload;
   parameter_scan: ParameterScanPayload;
-  expression_scan: ExpressionScanPayload;
   parameter_action_library: ParameterActionLibrary;
   constraints: {
     expressions: ExpressionConstraint[];
@@ -549,14 +512,6 @@ export interface ModelSummary {
   };
   semantic_axis_profile?: SemanticAxisProfile | null;
   voice_following_profile?: VoiceFollowingProfile | null;
-  engine_hints: {
-    driver_priority: string[];
-    recommended_mode: string;
-    available_channels: string[];
-    base_expression_count: number;
-    fallback_motion_count: number;
-    motion_decomposition_level: string;
-  };
 }
 
 export interface RuntimeCacheErrorsPayload {
@@ -566,8 +521,7 @@ export interface RuntimeCacheErrorsPayload {
 }
 
 export interface ModelSyncInfo {
-  schema_version: typeof SCHEMA_MODEL_INFO_V3;
-  driver_priority: string[];
+  schema_version: typeof SCHEMA_MODEL_INFO_V4;
   selected_model: string;
   available_models: string[];
   models: ModelSummary[];

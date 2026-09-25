@@ -1,3 +1,14 @@
+model_sync_projection_cleanup:
+  recorded_at: "2026-09-25"
+  scope:
+    - "Remove scan payloads that have no runtime consumer: engine recommendations, resource_scan, expression_scan, and the full adaptive parameter profile projection."
+    - "Keep calibration_profile, motion resource locators, parameter action library, and voice-following profile because current runtime consumers require them."
+    - "Advance the strict model capability contract to live2d_scan.v4 so persisted v3 scans are discarded and rescanned instead of being tolerated through a compatibility path."
+  validation:
+    - "Protocol manifest check, Python compileall, full frontend typecheck, focused RuntimeState seed tests, and diff whitespace check pass."
+  evidence_gap:
+    - "The standalone inbound-protocol and inbound-events scripts cannot compile the vendored Cubism Framework under their existing strict test tsconfig; full frontend typecheck remains green."
+
 plugin_prompt_migration:
   date: '2026-09-18'
   status: implemented_pending_live_acceptance

@@ -497,7 +497,7 @@ onMounted(() => {
             <h2>{{ bridgeState.modelProjectionSnapshot.selectedModelName || "等待模型同步" }}</h2>
           </div>
           <span class="settings-card__badge">
-            {{ bridgeState.modelProjectionSnapshot.recommendedMode || "await-sync" }}
+            {{ bridgeState.modelProjectionSnapshot.lastUpdated ? "已同步" : "await-sync" }}
           </span>
         </div>
 

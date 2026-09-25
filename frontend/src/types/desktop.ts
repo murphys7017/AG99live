@@ -325,7 +325,6 @@ export interface DesktopProfileAuthoringSnapshot {
 export interface DesktopModelProjectionSnapshot {
   selectedModelName: string;
   selectedModelIconUrl: string;
-  recommendedMode: string;
   lastUpdated: string;
   runtimeSemanticAxisProfile: SemanticAxisProfile | null;
   baseActionPreview: DesktopBaseActionPreview | null;

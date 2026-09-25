@@ -13,7 +13,6 @@ import {
 export const defaultModelProjectionSnapshot: DesktopModelProjectionSnapshot = {
   selectedModelName: "",
   selectedModelIconUrl: "",
-  recommendedMode: "",
   lastUpdated: "",
   runtimeSemanticAxisProfile: null,
   baseActionPreview: null,
@@ -48,7 +47,6 @@ export function normalizeModelProjectionSnapshot(
     ...snapshot,
     selectedModelName: normalizeText(snapshot.selectedModelName),
     selectedModelIconUrl: normalizeText(snapshot.selectedModelIconUrl),
-    recommendedMode: normalizeText(snapshot.recommendedMode),
     lastUpdated: normalizeText(snapshot.lastUpdated),
     runtimeSemanticAxisProfile: cloneSemanticAxisProfile(
       snapshot.runtimeSemanticAxisProfile,

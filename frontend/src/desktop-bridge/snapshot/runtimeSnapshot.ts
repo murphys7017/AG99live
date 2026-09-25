@@ -125,36 +125,7 @@ export function normalizeSnapshot(snapshot: DesktopRuntimeSnapshot): DesktopRunt
   if (!Number.isInteger(snapshot._revision) || snapshot._revision < 0) {
     throw new Error("runtime_snapshot_revision_invalid");
   }
-  const {
-    selectedModelName: _selectedModelName,
-    selectedModelIconUrl: _selectedModelIconUrl,
-    recommendedMode: _recommendedMode,
-    runtimeSemanticAxisProfile: _runtimeSemanticAxisProfile,
-    baseActionPreview: _baseActionPreview,
-    activeSessionId: _activeSessionId,
-    activeSessionPhase: _activeSessionPhase,
-    activeSessionTextReady: _activeSessionTextReady,
-    activeSessionAudioTerminal: _activeSessionAudioTerminal,
-    activeSessionMotionStarted: _activeSessionMotionStarted,
-    activeSessionMotionCompleted: _activeSessionMotionCompleted,
-    activeSessionSynthFinished: _activeSessionSynthFinished,
-    activeSessionTurnFinished: _activeSessionTurnFinished,
-    ...runtimeSnapshot
-  } = snapshot as DesktopRuntimeSnapshot & {
-    selectedModelName?: unknown;
-    selectedModelIconUrl?: unknown;
-    recommendedMode?: unknown;
-    runtimeSemanticAxisProfile?: unknown;
-    baseActionPreview?: unknown;
-    activeSessionId?: unknown;
-    activeSessionPhase?: unknown;
-    activeSessionTextReady?: unknown;
-    activeSessionAudioTerminal?: unknown;
-    activeSessionMotionStarted?: unknown;
-    activeSessionMotionCompleted?: unknown;
-    activeSessionSynthFinished?: unknown;
-    activeSessionTurnFinished?: unknown;
-  };
+  const runtimeSnapshot = snapshot;
   const historyEntries = Array.isArray(snapshot.historyEntries)
     ? snapshot.historyEntries
     : [];
@@ -269,9 +240,21 @@ function normalizeBilibiliLiveStatusKind(
 
 function rejectUnsupportedRuntimeSnapshotFields(snapshot: DesktopRuntimeSnapshot): void {
   const unsupportedFields = [
+    "selectedModelName",
+    "selectedModelIconUrl",
     "selectedSemanticAxisProfile",
     "latestSemanticAxisProfileSaveResult",
+    "runtimeSemanticAxisProfile",
+    "baseActionPreview",
     "motionTuningSamples",
+    "activeSessionId",
+    "activeSessionPhase",
+    "activeSessionTextReady",
+    "activeSessionAudioTerminal",
+    "activeSessionMotionStarted",
+    "activeSessionMotionCompleted",
+    "activeSessionSynthFinished",
+    "activeSessionTurnFinished",
   ].filter((field) => field in (snapshot as unknown as Record<string, unknown>));
   if (unsupportedFields.length) {
     throw new Error(

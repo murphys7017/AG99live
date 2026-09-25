@@ -267,8 +267,6 @@ export function createPetRuntimeSnapshotPublisher(
     return {
       selectedModelName: model?.name ?? "",
       selectedModelIconUrl: model?.icon_url ?? "",
-      recommendedMode:
-        model?.engine_hints.recommended_mode ?? "",
       lastUpdated: options.modelSyncState.lastUpdated,
       runtimeSemanticAxisProfile: options.selectedSemanticAxisProfile.value
         ? cloneJson(options.selectedSemanticAxisProfile.value)
@@ -291,7 +289,6 @@ export function createPetRuntimeSnapshotPublisher(
       options.modelSyncState.lastUpdated,
       options.selectedModel.value?.name ?? "",
       options.selectedModel.value?.icon_url ?? "",
-      options.selectedModel.value?.engine_hints.recommended_mode ?? "",
       options.parameterActionPreview.value,
       options.selectedSemanticAxisProfile.value,
       options.adapter.state.motionTuningSamplesStatus.effectiveExamples,
