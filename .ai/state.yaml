@@ -9,6 +9,22 @@ model_sync_projection_cleanup:
   evidence_gap:
     - "The standalone inbound-protocol and inbound-events scripts cannot compile the vendored Cubism Framework under their existing strict test tsconfig; full frontend typecheck remains green."
 
+motion_composition_sampling:
+  recorded_at: "2026-09-28"
+  scope:
+    - "Add read-only compiler diagnostics for the composed pose: primary axis and direction, group involvement, declared-relation alignment, and warnings."
+    - "Correlate seeded axis-level sampling within skeleton and face groups while retaining a shared turn factor and per-axis perturbation."
+    - "Reduce few-shot pressure toward sequence examples; ordinary requests select pose-oriented references unless the request explicitly signals a sequence."
+    - "Use one compiler-local semantic-group taxonomy for sampling and diagnostics, so torso and shoulder contribute to the same structural body role."
+    - "Render composition diagnostics per semantic sequence step instead of treating the first step as the whole performance."
+  non_actions:
+    - "Do not add a second compiler, player, clock, mixer, Timeline, protocol version, or rigid action-family template."
+    - "Do not remove axis perturbation or override explicit semantic-axis targets through the composition diagnostic."
+  validation:
+    - "Focused performance-composition compiler test, full frontend typecheck, focused motion-selector examples (4), and diff whitespace check pass."
+  evidence_gap:
+    - "Live Motion Lab and model playback must still compare fixed semantic cases for coordinated skeleton motion, retained micro-variation, and natural sequence selection."
+
 plugin_prompt_migration:
   date: '2026-09-18'
   status: implemented_pending_live_acceptance

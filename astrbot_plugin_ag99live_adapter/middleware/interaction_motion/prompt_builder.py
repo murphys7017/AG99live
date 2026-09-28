@@ -76,7 +76,7 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
     ) + (
         "回复本身存在清晰的姿态转折、重心切换、追问句尾或短时夸张后的回收时，可以使用 motion_steps，"
         "按播放顺序输出 2 到 4 个姿态事件；只有一个稳定姿态时使用 axis_levels。"
-        "不要按词语、停顿或语音节奏拆分 motion_steps。"
+        "普通短回复、确认和单一情绪优先 axis_levels；不要因为示例出现 sequence 而生成 motion_steps，也不要按词语、停顿或语音节奏拆分 motion_steps。"
     )
     if persona_effect_available:
         output_contract_text = (
@@ -126,7 +126,7 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
         "在可用轴中优先用 head_yaw、head_roll、body_yaw、body_roll、gaze_x、gaze_y 表达左右朝向、侧倾和重心变化；"
         "head_pitch 只用于确有低头、抬头或点头语义的动作，不能作为通用强调动作。"
         "普通回复的主要姿态轴从 3 级开始；2 级用于克制表达，1 级仅用于细节，4 级用于短暂夸张表演。"
-        "示例只展示结构和数值，不要照抄示例内容。"
+        "示例只展示结构和数值，不要照抄示例内容或把示例的动作形状当作本轮必须复用的模板。"
         f"{output_shape_text}"
     )
 

@@ -91,7 +91,7 @@ class RuntimeState:
             self.interaction_contributors_available
         )
         self.motion_tuning_fewshot_enabled = True
-        self.motion_tuning_fewshot_count = 7
+        self.motion_tuning_fewshot_count = 4
         self.motion_tuning_user_fewshot_count = 3
         self.runtime_cache_root_error = ""
         self.runtime_cache_segment_errors: dict[str, str] = {}

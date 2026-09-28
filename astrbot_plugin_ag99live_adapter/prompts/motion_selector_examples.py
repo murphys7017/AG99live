@@ -220,18 +220,18 @@ def create_default_motion_reference_examples(axis_names: list[str]) -> list[dict
 
 CORE_EXAMPLE_CATEGORY_GROUPS: list[tuple[str, ...]] = [
     ("neutral",),
-    ("explain",),
     ("soothe",),
     ("confused",),
     ("happy",),
+    ("explain",),
     ("surprised",),
     ("sequence",),
 ]
 
-REQUIRED_STRUCTURE_EXAMPLE_CATEGORIES = (
-    "explain",
-    "surprised",
-    "sequence",
+MAX_DEFAULT_REFERENCE_EXAMPLES = 2
+SEQUENCE_REFERENCE_PATTERN = re.compile(
+    r"(?:先.{0,24}(?:再|然后|随后)|(?:再|然后|随后).{0,24}(?:追问|确认)|"
+    r"转折|但是|不过|然而|突然|惊讶|后缩|回收|连续动作)",
 )
 
 
@@ -250,25 +250,14 @@ def resolve_motion_reference_examples(
     count = max(0, count)
     if count == 0:
         return {"examples": [], "diagnostics": []}
-    if count < len(REQUIRED_STRUCTURE_EXAMPLE_CATEGORIES):
-        raise ValueError(
-            "motion_reference_example_budget_below_required:"
-            f"count={count}:required={len(REQUIRED_STRUCTURE_EXAMPLE_CATEGORIES)}"
-        )
 
     raw_user_examples = [
         item
         for item in runtime_state.list_motion_tuning_reference_examples()
         if isinstance(item, dict)
     ]
-    required_examples = select_required_structure_examples(
-        candidates=default_examples,
-        count=count,
-        normalize_emotion_key=normalize_emotion_key,
-    )
-    user_capacity = max(0, count - len(required_examples))
     user_example_count = int(runtime_state.motion_tuning_user_fewshot_count)
-    user_example_count = max(0, min(3, user_capacity, user_example_count))
+    user_example_count = max(0, min(count, user_example_count))
     selected_user_examples = select_relevant_user_examples(
         candidates=raw_user_examples,
         request_text=request_text,
@@ -282,21 +271,13 @@ def resolve_motion_reference_examples(
         if normalize_example_category_key(item, normalize_emotion_key=normalize_emotion_key)
     }
 
-    for item in required_examples:
-        category = normalize_example_category_key(
-            item,
-            normalize_emotion_key=normalize_emotion_key,
-        )
-        resolved_examples.append(item)
-        if category:
-            seen_categories.add(category)
-
     remaining = max(0, count - len(resolved_examples))
-    default_backfill = select_category_backfill_examples(
+    default_backfill = select_relevant_default_examples(
         candidates=default_examples,
-        count=remaining,
+        count=min(remaining, MAX_DEFAULT_REFERENCE_EXAMPLES),
         seen_categories=seen_categories,
         normalize_emotion_key=normalize_emotion_key,
+        request_text=request_text,
     )
     resolved_examples.extend(default_backfill)
 
@@ -307,16 +288,10 @@ def resolve_motion_reference_examples(
             f"requested={user_example_count}:user_available={len(raw_user_examples)}:"
             f"user_selected={len(selected_user_examples)}"
         )
-    default_example_count = len(required_examples) + len(default_backfill)
-    if default_example_count:
+    if default_backfill:
         diagnostics.append(
-            "motion_tuning_default_backfill_applied:"
-            f"count={default_example_count}"
-        )
-    if len(resolved_examples) < count:
-        diagnostics.append(
-            "motion_tuning_fewshot_final_shortage:"
-            f"requested={count}:final_count={len(resolved_examples)}"
+            "motion_tuning_default_references_selected:"
+            f"count={len(default_backfill)}"
         )
     return {
         "examples": resolved_examples,
@@ -335,8 +310,11 @@ def select_relevant_user_examples(
 
     normalized_request = _normalize_relevance_text(request_text)
     request_terms = _extract_relevance_terms(normalized_request)
+    sequence_allowed = bool(SEQUENCE_REFERENCE_PATTERN.search(normalized_request))
     ranked: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
     for candidate in candidates:
+        if _is_sequence_reference(candidate) and not sequence_allowed:
+            continue
         raw_tags = candidate.get("tags")
         tags = (
             [
@@ -392,91 +370,83 @@ def _extract_relevance_terms(value: str) -> set[str]:
     return terms
 
 
-def select_required_structure_examples(
-    *,
-    candidates: list[dict[str, Any]],
-    count: int,
-    normalize_emotion_key: Callable[[str], str],
-) -> list[dict[str, Any]]:
-    selected: list[dict[str, Any]] = []
-    for required_category in REQUIRED_STRUCTURE_EXAMPLE_CATEGORIES:
-        if len(selected) >= count:
-            break
-        match = next(
-            (
-                item
-                for item in candidates
-                if isinstance(item, dict)
-                and normalize_example_category_key(
-                    item,
-                    normalize_emotion_key=normalize_emotion_key,
-                )
-                == required_category
-            ),
-            None,
-        )
-        if match is None:
-            raise ValueError(
-                "motion_reference_required_example_missing:"
-                f"{required_category}"
-            )
-        selected.append(match)
-    return selected
-
-
-def select_category_backfill_examples(
+def select_relevant_default_examples(
     *,
     candidates: list[dict[str, Any]],
     count: int,
     seen_categories: set[str],
     normalize_emotion_key: Callable[[str], str],
+    request_text: str,
 ) -> list[dict[str, Any]]:
     if count <= 0:
         return []
 
+    normalized_request = _normalize_relevance_text(request_text)
+    request_terms = _extract_relevance_terms(normalized_request)
+    sequence_allowed = bool(SEQUENCE_REFERENCE_PATTERN.search(normalized_request))
     normalized_candidates = [item for item in candidates if isinstance(item, dict)]
     selected: list[dict[str, Any]] = []
     local_seen = set(seen_categories)
-    used_indexes: set[int] = set()
-
-    for group in CORE_EXAMPLE_CATEGORY_GROUPS:
-        if len(selected) >= count:
-            break
-        if any(category in local_seen for category in group):
-            continue
-        for index, item in enumerate(normalized_candidates):
-            if index in used_indexes:
-                continue
-            category = normalize_example_category_key(
-                item,
-                normalize_emotion_key=normalize_emotion_key,
-            )
-            if category in group:
-                selected.append(item)
-                used_indexes.add(index)
-                if category:
-                    local_seen.add(category)
-                break
-
-    if len(selected) >= count:
-        return selected[:count]
-
+    ranked: list[tuple[tuple[Any, ...], int, dict[str, Any]]] = []
     for index, item in enumerate(normalized_candidates):
-        if index in used_indexes:
-            continue
         category = normalize_example_category_key(
             item,
             normalize_emotion_key=normalize_emotion_key,
         )
-        if category and category in local_seen:
+        if category in local_seen:
+            continue
+        is_sequence = _is_sequence_reference(item)
+        if is_sequence and not sequence_allowed:
+            continue
+        candidate_text = "\n".join(
+            (
+                str(item.get("category") or ""),
+                str(item.get("input") or ""),
+                " ".join(
+                    str(tag)
+                    for tag in (item.get("output") or {}).get("intent_tags", [])
+                ) if isinstance(item.get("output"), dict) else "",
+            )
+        )
+        term_overlap = len(
+            request_terms
+            & _extract_relevance_terms(_normalize_relevance_text(candidate_text))
+        )
+        category_priority = _resolve_default_category_priority(category)
+        rank = (
+            term_overlap,
+            1 if not is_sequence else 0,
+            category_priority,
+            -index,
+        )
+        ranked.append((rank, index, item))
+
+    ranked.sort(key=lambda entry: entry[0], reverse=True)
+    for _rank, _index, item in ranked:
+        category = normalize_example_category_key(
+            item,
+            normalize_emotion_key=normalize_emotion_key,
+        )
+        if category in local_seen:
             continue
         selected.append(item)
-        used_indexes.add(index)
         if category:
             local_seen.add(category)
         if len(selected) >= count:
             break
     return selected[:count]
+
+
+def _is_sequence_reference(example: dict[str, Any]) -> bool:
+    output = example.get("output")
+    return isinstance(output, dict) and isinstance(output.get("motion_steps"), list)
+
+
+def _resolve_default_category_priority(category: str) -> int:
+    for index, group in enumerate(CORE_EXAMPLE_CATEGORY_GROUPS):
+        if category in group:
+            return len(CORE_EXAMPLE_CATEGORY_GROUPS) - index
+    return 0
 
 
 def normalize_example_category_key(

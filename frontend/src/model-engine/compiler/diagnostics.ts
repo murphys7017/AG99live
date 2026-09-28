@@ -7,6 +7,12 @@ import {
 } from "../../types/compiledSemanticMotion.js";
 import type { MotionCompileContext } from "./compileContext.js";
 import type { ModelEngineSettings } from "../settings.js";
+import { buildPerformanceCompositionSignature } from "./performanceComposition.js";
+import {
+  normalizeSemanticGroup,
+  resolveStructuralSemanticGroup,
+  SKELETON_COMPOSITION_GROUPS,
+} from "./semanticGroupTaxonomy.js";
 
 export function buildBaseCompileDiagnostics(
   options: CompileOptions,
@@ -57,6 +63,7 @@ function buildVisibilityDiagnostics(
   context: MotionCompileContext,
 ): Partial<CompileDiagnostics> {
   const activeGroups = new Set<string>();
+  const activeStructuralGroups = new Set<string>();
   let maxDeltaFromNeutral = 0;
   let neutralishAxisCount = 0;
   let expressiveAxisCount = 0;
@@ -66,9 +73,13 @@ function buildVisibilityDiagnostics(
     if (!axis) {
       continue;
     }
-    const group = normalizeText(axis.semantic_group);
+    const group = normalizeSemanticGroup(axis.semantic_group);
     if (group) {
       activeGroups.add(group);
+    }
+    const structuralGroup = resolveStructuralSemanticGroup(axis.semantic_group);
+    if (structuralGroup) {
+      activeStructuralGroups.add(structuralGroup);
     }
     const delta = Math.abs(value - axis.neutral);
     maxDeltaFromNeutral = Math.max(maxDeltaFromNeutral, delta);
@@ -80,9 +91,10 @@ function buildVisibilityDiagnostics(
   }
 
   const activeGroupList = [...activeGroups].sort();
-  const skeletonGroupIds = ["head", "body", "gaze"];
-  const skeletonGroups = skeletonGroupIds.filter((group) => activeGroups.has(group));
-  const missingSkeletonGroups = skeletonGroupIds.filter((group) => !activeGroups.has(group));
+  const skeletonGroups = SKELETON_COMPOSITION_GROUPS.filter((group) =>
+    activeStructuralGroups.has(group));
+  const missingSkeletonGroups = SKELETON_COMPOSITION_GROUPS.filter((group) =>
+    !activeStructuralGroups.has(group));
 
   return {
     activeGroups: activeGroupList,
@@ -95,6 +107,20 @@ function buildVisibilityDiagnostics(
     relationSkippedExplicitTargets: collectRelationSkippedExplicitTargets(context.state.warnings),
     relationAdjustments: [...context.state.relationAdjustments],
     relationEvaluations: context.state.relationEvaluations.map((item) => ({ ...item })),
+    performanceComposition: context.state.profile
+      ? buildPerformanceCompositionSignature(
+          context.state.profile,
+          Object.entries(context.state.allAxisValues)
+            .map(([axisId, value]) => ({
+              axisId,
+              value,
+              neutralValue: context.state.axisById.get(axisId)?.neutral ?? 0,
+              source: context.state.axisValueSources[axisId] === "relation_graph"
+                ? "relation_graph"
+                : "semantic_axis",
+            })),
+        )
+      : undefined,
     transformTrace: buildTransformTrace(context),
   };
 }
@@ -112,6 +138,7 @@ function buildTransformTrace(context: MotionCompileContext): MotionTransformTrac
     axisSampling: context.state.axisSampling
       ? {
           ...context.state.axisSampling,
+          groupRandom: { ...context.state.axisSampling.groupRandom },
           perAxisRandom: { ...context.state.axisSampling.perAxisRandom },
           sampledValues: { ...context.state.axisSampling.sampledValues },
           sampleBounds: Object.fromEntries(
@@ -154,8 +181,4 @@ function collectRelationSkippedExplicitTargets(warnings: readonly string[]): str
 
 function roundDiagnosticNumber(value: number): number {
   return Math.round(value * 10000) / 10000;
-}
-
-function normalizeText(value: unknown): string {
-  return typeof value === "string" ? value.trim().toLowerCase() : "";
 }

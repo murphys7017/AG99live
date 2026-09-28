@@ -20,6 +20,8 @@ import {
 } from "../types/protocol";
 import type {
   CompiledSemanticMotion,
+  MotionAxisSamplingTrace,
+  PerformanceCompositionSignature,
   PerformanceScheduleTrace,
   PerformanceTimingEventTrace,
 } from "../types/compiledSemanticMotion";
@@ -196,11 +198,11 @@ const llmReferenceEntries = computed<LlmReferenceEntry[]>(() => {
     entries.push({
       id: `effective:default:${emotionKey}:${entries.length}`,
       title: example.category || "默认参考",
-      subtitle: "默认兜底",
+      subtitle: "默认预览",
       description: example.input || "默认关键词参考",
       axes: extractEffectiveExampleAxes(example),
       tags: example.tags,
-      sourceLabel: "默认参考",
+      sourceLabel: "默认预览",
       enabled: true,
     });
     knownEntryKeys.add(emotionKey);
@@ -722,12 +724,95 @@ function buildMotionDiagnosticLines(source: MotionDraftSource | null): string[] 
   appendList(lines, "越过soft轴", pickStringList(summary.outside_soft_range_axes));
   appendList(lines, "姿态描述", pickStringList(summary.pose_descriptors));
   appendList(lines, "关系图跳过", diagnostics?.relationSkippedExplicitTargets);
+  appendPerformanceCompositionDiagnostics(lines, record);
+  appendAxisSamplingDiagnostics(lines, record);
   appendPerformanceScheduleDiagnostics(
     lines,
     diagnostics?.transformTrace?.performanceSchedule,
   );
   appendList(lines, "编译/计划警告", warningLines.slice(0, 8));
   return lines;
+}
+
+function appendPerformanceCompositionDiagnostics(
+  lines: string[],
+  record: DesktopMotionPlaybackRecord,
+): void {
+  if (
+    "semanticMotion" in record
+    && record.semanticMotion.kind === "sequence"
+  ) {
+    const stepCompositions = record.semanticMotion.steps
+      .map((step) => step.diagnostics.performanceComposition)
+      .filter((composition): composition is PerformanceCompositionSignature =>
+        composition !== undefined);
+    if (!stepCompositions.length) {
+      return;
+    }
+    stepCompositions.forEach((composition, index) => {
+      appendPerformanceComposition(lines, composition, `步骤 ${index + 1}`);
+    });
+    return;
+  }
+  const composition = record.diagnostics?.performanceComposition;
+  if (!composition) {
+    return;
+  }
+  appendPerformanceComposition(lines, composition);
+}
+
+function appendPerformanceComposition(
+  lines: string[],
+  composition: PerformanceCompositionSignature,
+  prefix = "",
+): void {
+  const label = prefix ? `${prefix} ` : "";
+  const primary = composition.primaryAxis
+    ? `${composition.primaryAxis} ${composition.primaryDirection}`
+    : "无主轴";
+  lines.push(
+    `${label}组成: ${primary} / 强度 ${roundTo(composition.intensity, 3)} / 骨架 ${composition.skeletonAlignment}`,
+  );
+  lines.push(
+    `${label}参与: 头 ${roundTo(composition.headInvolvement, 3)}, 身 ${roundTo(composition.bodyInvolvement, 3)}, 眼神 ${roundTo(composition.gazeInvolvement, 3)}`,
+  );
+  appendList(lines, `${label}组成警告`, composition.warnings);
+}
+
+function appendAxisSamplingDiagnostics(
+  lines: string[],
+  record: DesktopMotionPlaybackRecord,
+): void {
+  const trace = record.diagnostics?.transformTrace;
+  if (
+    "semanticMotion" in record
+    && record.semanticMotion.kind === "sequence"
+  ) {
+    trace?.sequenceSteps?.forEach((step, index) => {
+      appendAxisSampling(lines, step.axisSampling, `步骤 ${index + 1}`);
+    });
+    return;
+  }
+  appendAxisSampling(lines, trace?.axisSampling);
+}
+
+function appendAxisSampling(
+  lines: string[],
+  sampling: Pick<MotionAxisSamplingTrace, "sharedRandom"> & {
+    groupRandom?: Record<string, number>;
+  } | undefined,
+  prefix = "",
+): void {
+  if (!sampling) {
+    return;
+  }
+  const label = prefix ? `${prefix} ` : "";
+  const groupValues = Object.entries(sampling.groupRandom ?? {})
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([group, value]) => `${group} ${roundTo(value, 3)}`);
+  lines.push(
+    `${label}采样: shared ${roundTo(sampling.sharedRandom, 3)}${groupValues.length ? ` / ${groupValues.join(", ")}` : ""}`,
+  );
 }
 
 function appendPerformanceScheduleDiagnostics(
@@ -904,10 +989,11 @@ function normalizeEmotionKey(value: string): string {
     <p class="settings-card__copy">
       选择最近一次真实播放过的动作，手动微调 primary / hint 轴及其绑定参数，点击播放观察 Live2D 效果。
       保存后的样本可以作为 few-shot 参考同步给后端大模型，用来约束后续动作生成风格。
+      下方覆盖状态基于空输入的静态预览；每一轮实际注入的样例会按用户输入动态选择。
     </p>
 
     <details v-if="llmReferenceEntries.length" class="motion-tuning__details">
-      <summary>LLM 参考覆盖</summary>
+      <summary>Few-shot 静态预览</summary>
       <div class="motion-tuning__coverage-grid">
         <div
           v-for="item in effectiveExampleCoverage"
@@ -936,7 +1022,7 @@ function normalizeEmotionKey(value: string): string {
         class="motion-tuning__sample-item"
       >
         <div>
-          <strong>few-shot 诊断</strong>
+          <strong>few-shot 预览诊断</strong>
           <p>{{ diagnostic }}</p>
         </div>
       </li>

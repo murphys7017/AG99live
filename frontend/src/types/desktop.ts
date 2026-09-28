@@ -6,6 +6,7 @@ import { SCHEMA_MOTION_TUNING_SAMPLE_V2 } from "./protocol";
 import type { SemanticAxisProfile } from "./semantic-axis-profile";
 import type {
   CompiledSemanticMotion,
+  PerformanceCompositionSignature,
   PerformanceScheduleTrace,
 } from "./compiledSemanticMotion";
 import type {
@@ -176,6 +177,7 @@ export interface DesktopMotionCompileDiagnostics {
   semanticAxisCount?: number;
   failureStage?: string;
   relationSkippedExplicitTargets?: string[];
+  performanceComposition?: PerformanceCompositionSignature;
   transformTrace?: {
     transformVersion: string;
     profileRevision: number;
@@ -189,6 +191,7 @@ export interface DesktopMotionCompileDiagnostics {
     axisSampling?: {
       seed: string;
       sharedRandom: number;
+      groupRandom?: Record<string, number>;
       perAxisRandom: Record<string, number>;
       sampledValues: Record<string, number>;
       sampleBounds: Record<string, { min: number; max: number }>;
@@ -205,6 +208,7 @@ export interface DesktopMotionCompileDiagnostics {
       axisSampling?: {
         seed: string;
         sharedRandom: number;
+        groupRandom?: Record<string, number>;
         perAxisRandom: Record<string, number>;
         sampledValues: Record<string, number>;
         sampleBounds: Record<string, { min: number; max: number }>;

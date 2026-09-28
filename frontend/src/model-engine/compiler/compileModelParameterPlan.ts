@@ -188,6 +188,9 @@ function compileMotionSequenceIntent(
             axisSampling: result.diagnostics.transformTrace?.axisSampling
               ? {
                   ...result.diagnostics.transformTrace.axisSampling,
+                  groupRandom: {
+                    ...result.diagnostics.transformTrace.axisSampling.groupRandom,
+                  },
                   perAxisRandom: {
                     ...result.diagnostics.transformTrace.axisSampling.perAxisRandom,
                   },

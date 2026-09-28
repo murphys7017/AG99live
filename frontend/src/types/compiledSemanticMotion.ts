@@ -5,10 +5,37 @@ import type {
   PerformanceCurveHint,
 } from "./protocol.js";
 
-export const SEMANTIC_MOTION_TRANSFORM_VERSION = "semantic_motion_transform.v5";
+export const SEMANTIC_MOTION_TRANSFORM_VERSION = "semantic_motion_transform.v6";
 export const PERFORMANCE_SCHEDULE_TRACE_VERSION = "performance_schedule_trace.v7";
 
 export type CompiledSemanticAxisSource = "semantic_axis" | "relation_graph";
+export type PerformanceCompositionDirection =
+  | "negative"
+  | "positive"
+  | "neutral"
+  | "mixed";
+export type PerformanceCompositionAlignment =
+  | "aligned"
+  | "partial"
+  | "opposed"
+  | "missing";
+
+export interface PerformanceCompositionSignature {
+  version: "performance_composition.v1";
+  primaryAxis: string | null;
+  primaryDirection: PerformanceCompositionDirection;
+  primaryStrength: number;
+  activeAxisIds: string[];
+  activeGroups: string[];
+  axisDirections: Record<string, PerformanceCompositionDirection>;
+  groupDirections: Record<string, PerformanceCompositionDirection>;
+  skeletonAlignment: PerformanceCompositionAlignment;
+  bodyInvolvement: number;
+  headInvolvement: number;
+  gazeInvolvement: number;
+  intensity: number;
+  warnings: string[];
+}
 
 export interface MotionTimingResolution {
   timing: DirectParameterPlanTiming;
@@ -48,6 +75,7 @@ export interface CompileDiagnostics {
   relationSkippedExplicitTargets?: string[];
   relationAdjustments?: MotionAxisRelationAdjustment[];
   relationEvaluations?: MotionAxisRelationEvaluation[];
+  performanceComposition?: PerformanceCompositionSignature;
   transformTrace?: MotionTransformTrace;
 }
 
@@ -220,6 +248,7 @@ export interface PerformanceParameterNodeTrace {
 export interface MotionAxisSamplingTrace {
   seed: string;
   sharedRandom: number;
+  groupRandom: Record<string, number>;
   perAxisRandom: Record<string, number>;
   sampledValues: Record<string, number>;
   sampleBounds: Record<string, { min: number; max: number }>;

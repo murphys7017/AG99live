@@ -16,6 +16,7 @@ import {
   SEMANTIC_MOTION_TRANSFORM_VERSION,
   type MotionAxisSamplingTrace,
 } from "../../../types/compiledSemanticMotion.js";
+import { resolveAxisSamplingGroup } from "../semanticGroupTaxonomy.js";
 
 const ALLOWED_LLM_ROLES = new Set(["primary", "hint"]);
 
@@ -229,10 +230,19 @@ function resolveAxisLevelValue(
       reason: `semantic_axis_level_anchor_order_invalid:${axis.id}:${level}`,
     };
   }
+  const samplingGroup = resolveAxisSamplingGroup(axis.semantic_group);
+  const groupRandom = sampling.groupRandom[samplingGroup]
+    ?? roundAxisSample(seededSignedUnit(`${sampling.seed}|group:${samplingGroup}`));
+  sampling.groupRandom[samplingGroup] = groupRandom;
   const axisRandom = seededSignedUnit(`${sampling.seed}|axis:${axis.id}`);
   const combinedRandom = Math.max(
     -1,
-    Math.min(1, sampling.sharedRandom * 0.65 + axisRandom * 0.35),
+    Math.min(
+      1,
+      sampling.sharedRandom * 0.55
+        + groupRandom * 0.30
+        + axisRandom * 0.15,
+    ),
   );
   const sampledValue = combinedRandom < 0
     ? anchoredValue + combinedRandom * (anchoredValue - bounds.min)
@@ -261,6 +271,7 @@ function createAxisLevelSamplingTrace(
   return {
     seed,
     sharedRandom: roundAxisSample(seededSignedUnit(`${seed}|shared`)),
+    groupRandom: {},
     perAxisRandom: {},
     sampledValues: {},
     sampleBounds: {},

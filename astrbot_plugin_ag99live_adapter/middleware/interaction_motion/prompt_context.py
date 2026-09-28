@@ -250,7 +250,7 @@ def _build_motion_variation_payload(
             "repeated_directions": repeated_direction_summary,
             "guidance": (
                 "优先根据本轮语义选择动作；语义允许时避免连续复用 repeated_directions 中的方向，"
-                "并在 pose 与 sequence、头部轴与身体轴之间做自然变化。不要为了多样性强行反转语义方向。"
+                "可在幅度、节奏、身体参与度和细节轴之间做自然变化。不要为了多样性强行切换 pose/sequence 或反转语义方向。"
             ),
         },
     }
