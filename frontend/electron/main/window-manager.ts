@@ -74,6 +74,7 @@ export class WindowManager {
   private overlayFollowsPet = true;
   private overlayDragOrigin: OverlayDragOrigin | null = null;
   private activeDragState: WindowDragState | null = null;
+  private dragTimer: ReturnType<typeof setInterval> | null = null;
   private pendingTransparentWindowRecoveryReason: string | null = null;
   private petWindowIgnoreMouseEvents = true;
   private readonly rendererReadyWindows = new WeakSet<BrowserWindow>();
@@ -257,18 +258,18 @@ export class WindowManager {
     }
   }
 
-  startWindowDrag(
-    targetWindow: BrowserWindow | null,
-    screenX: number,
-    screenY: number,
-  ): void {
+  startWindowDrag(targetWindow: BrowserWindow | null): void {
     if (!targetWindow || targetWindow.isDestroyed()) {
       return;
+    }
+    if (this.activeDragState) {
+      this.endWindowDrag(this.activeDragState.targetWindow);
     }
 
     const role = this.findRole(targetWindow);
     this.normalizeTransparentWindowSize(targetWindow, role);
     const bounds = targetWindow.getBounds();
+    const { x: screenX, y: screenY } = screen.getCursorScreenPoint();
     const lockedWidth = role === "pet"
       ? PET_WINDOW_WIDTH
       : role === "overlay"
@@ -309,21 +310,17 @@ export class WindowManager {
     }
 
     targetWindow.moveTop();
+    this.dragTimer = setInterval(() => this.updateWindowDrag(), 16);
   }
 
-  updateWindowDrag(
-    targetWindow: BrowserWindow | null,
-    screenX: number,
-    screenY: number,
-  ): void {
+  private updateWindowDrag(): void {
+    const activeDragState = this.activeDragState;
+    const targetWindow = activeDragState?.targetWindow;
     if (!targetWindow || targetWindow.isDestroyed()) {
       return;
     }
 
-    const activeDragState = this.activeDragState;
-    if (!activeDragState || activeDragState.targetWindow !== targetWindow) {
-      return;
-    }
+    const { x: screenX, y: screenY } = screen.getCursorScreenPoint();
 
     const nextX = Math.round(screenX - activeDragState.offsetX);
     const nextY = Math.round(screenY - activeDragState.offsetY);
@@ -361,6 +358,13 @@ export class WindowManager {
     }
 
     if (this.activeDragState?.targetWindow === targetWindow) {
+      if (this.dragTimer !== null) {
+        clearInterval(this.dragTimer);
+        this.dragTimer = null;
+      }
+      if (targetWindow.isVisible()) {
+        this.updateWindowDrag();
+      }
       const activeDragState = this.activeDragState;
       const bounds = targetWindow.isDestroyed() ? null : targetWindow.getBounds();
       if (
@@ -466,6 +470,7 @@ export class WindowManager {
       this.broadcastWindowState();
     });
     petWindow.on("hide", () => {
+      this.endWindowDrag(petWindow);
       this.windows.overlay?.hide();
       this.broadcastWindowState();
     });
@@ -538,6 +543,7 @@ export class WindowManager {
       this.broadcastWindowState();
     });
     overlayWindow.on("hide", () => {
+      this.endWindowDrag(overlayWindow);
       this.broadcastWindowState();
     });
     overlayWindow.on("close", (event: ElectronEvent) => {

@@ -123,23 +123,16 @@ function handlePointerDown(event: PointerEvent): void {
       ? target.closest("[data-overlay-drag]")
       : null;
 
-  if (event.button !== 0 || isInteractiveTarget(target) || !dragHandle) {
+  if (event.button !== 0 || !event.isPrimary || activePointerId.value !== null
+    || isInteractiveTarget(target) || !dragHandle) {
     return;
   }
 
   activePointerId.value = event.pointerId;
   isDragging.value = true;
-  window.ag99desktop?.startWindowDrag(event.screenX, event.screenY);
+  window.ag99desktop?.startWindowDrag();
   (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
   event.preventDefault();
-}
-
-function handlePointerMove(event: PointerEvent): void {
-  if (activePointerId.value !== event.pointerId) {
-    return;
-  }
-
-  window.ag99desktop?.updateWindowDrag(event.screenX, event.screenY);
 }
 
 function handlePointerUp(event: PointerEvent): void {
@@ -172,7 +165,6 @@ onBeforeUnmount(() => {
       class="overlay-card"
       :class="{ 'overlay-card--dragging': isDragging }"
       @pointerdown="handlePointerDown"
-      @pointermove="handlePointerMove"
       @pointerup="handlePointerUp"
       @pointercancel="handlePointerCancel"
       @lostpointercapture="finishWindowDrag"

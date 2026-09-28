@@ -467,20 +467,8 @@ function setupIpc(): void {
     );
   });
 
-  ipcMain.on("desktop:start-window-drag", (event, screenX, screenY) => {
-    windowManager.startWindowDrag(
-      BrowserWindow.fromWebContents(event.sender),
-      screenX,
-      screenY,
-    );
-  });
-
-  ipcMain.on("desktop:update-window-drag", (event, screenX, screenY) => {
-    windowManager.updateWindowDrag(
-      BrowserWindow.fromWebContents(event.sender),
-      screenX,
-      screenY,
-    );
+  ipcMain.on("desktop:start-window-drag", (event) => {
+    windowManager.startWindowDrag(BrowserWindow.fromWebContents(event.sender));
   });
 
   ipcMain.on("desktop:end-window-drag", (event) => {

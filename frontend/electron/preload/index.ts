@@ -51,11 +51,8 @@ const api = {
   setIgnoreMouseEvents: (ignore: boolean) => {
     ipcRenderer.send("desktop:set-ignore-mouse-events", ignore);
   },
-  startWindowDrag: (screenX: number, screenY: number) => {
-    ipcRenderer.send("desktop:start-window-drag", screenX, screenY);
-  },
-  updateWindowDrag: (screenX: number, screenY: number) => {
-    ipcRenderer.send("desktop:update-window-drag", screenX, screenY);
+  startWindowDrag: () => {
+    ipcRenderer.send("desktop:start-window-drag");
   },
   endWindowDrag: () => {
     ipcRenderer.send("desktop:end-window-drag");

@@ -19,7 +19,6 @@ const {
   isDragging,
   finishWindowDrag,
   handlePointerDown,
-  handlePointerMove,
   handlePointerUp,
   handlePointerCancel,
 } = usePetWindowDrag();
@@ -34,7 +33,6 @@ const {
         class="desktop-pet__canvas-mount"
         :class="{ 'desktop-pet__canvas-mount--dragging': isDragging }"
         @pointerdown="handlePointerDown"
-        @pointermove="handlePointerMove"
         @pointerup="handlePointerUp"
         @pointercancel="handlePointerCancel"
         @lostpointercapture="finishWindowDrag"

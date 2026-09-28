@@ -25,8 +25,7 @@ export interface Ag99DesktopApi {
     screenY?: number;
   }) => void;
   setIgnoreMouseEvents: (ignore: boolean) => void;
-  startWindowDrag: (screenX: number, screenY: number) => void;
-  updateWindowDrag: (screenX: number, screenY: number) => void;
+  startWindowDrag: () => void;
   endWindowDrag: () => void;
   getLocalAdapterHosts: () => string[];
   getBilibiliDanmakuInfo: (
