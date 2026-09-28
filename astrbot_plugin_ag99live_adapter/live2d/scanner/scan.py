@@ -1219,12 +1219,6 @@ def _build_calibration_profile(
             if skip_reason:
                 calibration_axis["skip_reason"] = skip_reason
 
-        direction_preference = str(key_axis.get("direction_preference") or "").strip().lower()
-        if direction_preference == "negative":
-            calibration_axis["direction"] = -1
-        elif direction_preference == "positive":
-            calibration_axis["direction"] = 1
-
         axes[axis_name] = calibration_axis
 
     return {
@@ -1745,7 +1739,7 @@ def _score_channel_candidate(spec: dict[str, Any], entry: dict[str, Any]) -> int
     normalized_name = _normalize_lookup_key(parameter_name)
 
     if parameter_id in spec["exact_ids"]:
-        return 100
+        return 1000 - spec["exact_ids"].index(parameter_id)
 
     score = 10
     for token in spec["tokens"]:

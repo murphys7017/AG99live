@@ -45,11 +45,6 @@ def format_profile_axis_prompt_line(
         range_text = f"[{float(value_range[0]):g},{float(value_range[1]):g}]"
     negative = format_axis_semantics(axis.get("negative_semantics"), truncate_text=truncate_text) or "负方向"
     positive = format_axis_semantics(axis.get("positive_semantics"), truncate_text=truncate_text) or "正方向"
-    negative_action, positive_action = format_axis_action_directions(
-        axis_id,
-        negative=negative,
-        positive=positive,
-    )
     notes = truncate_text(str(axis.get("usage_notes") or "").strip(), 160)
     description = truncate_text(str(axis.get("description") or "").strip(), 160)
     suffix = f" 使用说明={notes}" if notes else ""
@@ -57,14 +52,14 @@ def format_profile_axis_prompt_line(
         level_range = _format_available_level_range(axis)
         return (
             f"- {axis_id}（{label}，{role_label}）："
-            f"负方向会让角色{negative_action}；正方向会让角色{positive_action}。"
+            f"负方向会让角色{negative}；正方向会让角色{positive}。"
             f"可用等级={level_range}；超出该范围的方向对这个轴没有效果。"
             f"本轮没有对应方向的表达需要时省略此轴。{description}{suffix}"
         ).strip()
     return (
         f"- {axis_id}（{label}，{role_label}，范围 {range_text}）："
-        f"向较小值调整会让角色{negative_action}；"
-        f"向较大值调整会让角色{positive_action}。"
+        f"向较小值调整会让角色{negative}；"
+        f"向较大值调整会让角色{positive}。"
         f"本轮没有对应方向的表达需要时省略此轴。{description}{suffix}"
     ).strip()
 
@@ -107,27 +102,3 @@ def format_control_role_label(role: str) -> str:
     if role == "hint":
         return "辅助细节参数"
     return "可控制参数"
-
-
-def format_axis_action_directions(
-    axis_id: str,
-    *,
-    negative: str,
-    positive: str,
-) -> tuple[str, str]:
-    action_directions = {
-        "head_yaw": ("向左扭头", "向右扭头"),
-        "head_pitch": ("向下低头", "向上抬头"),
-        "head_roll": ("向左歪头", "向右歪头"),
-        "body_yaw": ("向左转身", "向右转身"),
-        "body_pitch": ("身体向前倾", "身体向后仰"),
-        "body_roll": ("身体向左侧倾", "身体向右侧倾"),
-        "gaze_yaw": ("视线看向左侧", "视线看向右侧"),
-        "eye_gaze_x": ("视线看向左侧", "视线看向右侧"),
-        "gaze_pitch": ("视线向下看", "视线向上看"),
-        "eye_gaze_y": ("视线向下看", "视线向上看"),
-        "mouth_smile": ("嘴角下压", "嘴角上扬微笑"),
-        "brow_bias": ("眉毛压低", "眉毛抬高"),
-        "mouth_open": ("嘴巴收拢闭合", "嘴巴张开"),
-    }
-    return action_directions.get(axis_id.strip().lower(), (negative, positive))

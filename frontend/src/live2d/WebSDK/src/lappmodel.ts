@@ -679,22 +679,22 @@ export class LAppModel extends CubismUserModel {
 
     // ドラッグによる変化
     // ドラッグによる顔の向きの調整
-    this._model.addParameterValueById(this._idParamAngleX, this._dragX * 30); // -30から30の値を加える
-    this._model.addParameterValueById(this._idParamAngleY, this._dragY * 30);
-    this._model.addParameterValueById(
+    this.addNormalizedParameterValue(this._idParamAngleX, this._dragX);
+    this.addNormalizedParameterValue(this._idParamAngleY, this._dragY);
+    this.addNormalizedParameterValue(
       this._idParamAngleZ,
-      this._dragX * this._dragY * -30
+      this._dragX * this._dragY * -1,
     );
 
     // ドラッグによる体の向きの調整
-    this._model.addParameterValueById(
+    this.addNormalizedParameterValue(
       this._idParamBodyAngleX,
-      this._dragX * 10
-    ); // -10から10の値を加える
+      this._dragX,
+    );
 
     // ドラッグによる目の向きの調整
-    this._model.addParameterValueById(this._idParamEyeBallX, this._dragX); // -1から1の値を加える
-    this._model.addParameterValueById(this._idParamEyeBallY, this._dragY);
+    this.addNormalizedParameterValue(this._idParamEyeBallX, this._dragX);
+    this.addNormalizedParameterValue(this._idParamEyeBallY, this._dragY);
 
     // 呼吸など
     if (ambientMotionEnabled && this._breath != null) {
@@ -2118,6 +2118,27 @@ export class LAppModel extends CubismUserModel {
       return false;
     }
     return parameterIndex >= 0 && parameterIndex < this._model.getParameterCount();
+  }
+
+  private addNormalizedParameterValue(
+    parameterId: CubismIdHandle,
+    normalizedValue: number,
+  ): void {
+    if (!this._model || !Number.isFinite(normalizedValue)) {
+      return;
+    }
+    const parameterIndex = this._model.getParameterIndex(parameterId);
+    if (!this.isParameterIndexWritable(parameterIndex)) {
+      return;
+    }
+    const clamped = Math.max(-1, Math.min(1, normalizedValue));
+    const minimum = this._model.getParameterMinimumValue(parameterIndex);
+    const defaultValue = this._model.getParameterDefaultValue(parameterIndex);
+    const maximum = this._model.getParameterMaximumValue(parameterIndex);
+    const delta = clamped >= 0
+      ? (maximum - defaultValue) * clamped
+      : (defaultValue - minimum) * clamped;
+    this._model.addParameterValueById(parameterId, delta);
   }
 
   private resolveWritableParameterIndex(parameterName: string): number | null {

@@ -379,6 +379,63 @@ _AXIS_DEFAULTS: dict[str, dict[str, Any]] = {
     },
 }
 
+# Mk6.moc3 supplies the native limits/defaults. VTube Studio tracking inputs
+# are separate from semantic parameter directions; keep these model-specific.
+_MODEL_AXIS_DEFAULTS: dict[str, dict[str, dict[str, Any]]] = {
+    "Mk6_1.0": {
+        "head_yaw": {"output_range": [-35.0, 35.0]},
+        "head_pitch": {"output_range": [-20.0, 20.0]},
+        "brow_bias": {
+            "description": "Controls smiling-versus-tense brow form, not brow height.",
+            "positive_semantics": ["soften brow form", "smiling brow shape"],
+            "negative_semantics": ["tense brow form", "frowning brow shape"],
+            "usage_notes": "Mk6 VTube Studio maps MouthSmile to ParamBrowForm; use this as a brow-shape hint, not a brow-height control.",
+        },
+        "eye_open_left": {
+            "neutral": 50.0, "output_range": [0.0, 2.0],
+            "soft_range": [35.0, 65.0], "strong_range": [12.0, 88.0],
+        },
+        "eye_open_right": {
+            "neutral": 50.0, "output_range": [0.0, 2.0],
+            "soft_range": [35.0, 65.0], "strong_range": [12.0, 88.0],
+        },
+        "eye_smile_left": {
+            "neutral": 50.0, "output_range": [-1.0, 1.0],
+            "soft_range": [35.0, 65.0], "strong_range": [12.0, 88.0],
+        },
+        "eye_smile_right": {
+            "neutral": 50.0, "output_range": [-1.0, 1.0],
+            "soft_range": [35.0, 65.0], "strong_range": [12.0, 88.0],
+        },
+        "brow_left_detail": {
+            "description": "Controls the one-sided left brow down shape.",
+            "positive_semantics": ["relax left brow down control"],
+            "negative_semantics": ["lower left brow", "tense left brow down"],
+            "usage_notes": "BrowL Down is one-sided: neutral is no down effect; negative levels lower the brow.",
+            "neutral": 100.0, "invert": True, "output_range": [0.0, 1.0],
+            "soft_range": [70.0, 100.0], "strong_range": [20.0, 100.0],
+            "extreme_range": [0.0, 100.0],
+        },
+        "brow_right_detail": {
+            "description": "Controls the one-sided right brow down shape.",
+            "positive_semantics": ["relax right brow down control"],
+            "negative_semantics": ["lower right brow", "tense right brow down"],
+            "usage_notes": "BrowR Down is one-sided: neutral is no down effect; negative levels lower the brow.",
+            "neutral": 100.0, "invert": True, "output_range": [0.0, 1.0],
+            "soft_range": [70.0, 100.0], "strong_range": [20.0, 100.0],
+            "extreme_range": [0.0, 100.0],
+        },
+        "mouth_open": {
+            "neutral": 0.0, "soft_range": [0.0, 25.0],
+            "strong_range": [0.0, 75.0], "extreme_range": [0.0, 100.0],
+        },
+        "breath": {
+            "neutral": 0.0, "soft_range": [0.0, 20.0],
+            "strong_range": [0.0, 60.0], "extreme_range": [0.0, 100.0],
+        },
+    },
+}
+
 _RELATION_DEFAULTS = (
     {
         "id": "head_yaw_to_body_yaw",
@@ -539,7 +596,10 @@ def build_default_semantic_axis_profile(
     axes: list[SemanticAxisDefinition] = []
     bound_parameter_ids: set[str] = set()
     for axis_id in _AXIS_ORDER:
-        axis_defaults = _AXIS_DEFAULTS[axis_id]
+        axis_defaults = {
+            **_AXIS_DEFAULTS[axis_id],
+            **_MODEL_AXIS_DEFAULTS.get(model_name, {}).get(axis_id, {}),
+        }
         channel_entry = _as_mapping(standard_channels.get(axis_id))
         calibration_entry = _as_mapping(calibration_axes.get(axis_id))
         candidate_parameter_ids = _collect_candidate_parameter_ids(
@@ -1266,7 +1326,9 @@ def _collect_candidate_parameter_ids(
     calibration_entry: Mapping[str, Any],
 ) -> list[str]:
     candidates: list[str] = []
-    parameter_id = str(calibration_entry.get("parameter_id") or "").strip()
+    # The CDI standard channel identifies the control. Motion statistics describe
+    # usage and can favor a related parameter (e.g. jaw over the lip-sync mouth).
+    parameter_id = str(channel_entry.get("primary_parameter_id") or "").strip()
     if parameter_id:
         candidates.append(parameter_id)
 
@@ -1275,7 +1337,7 @@ def _collect_candidate_parameter_ids(
         if parameter_id:
             candidates.append(parameter_id)
 
-    parameter_id = str(channel_entry.get("primary_parameter_id") or "").strip()
+    parameter_id = str(calibration_entry.get("parameter_id") or "").strip()
     if parameter_id:
         candidates.append(parameter_id)
 
@@ -1309,14 +1371,7 @@ def _build_parameter_binding(
     if output_min is None or output_max is None:
         output_min, output_max = axis_defaults["output_range"]
 
-    direction = calibration_entry.get("direction")
-    invert = False
-    if "invert" in axis_defaults:
-        invert = bool(axis_defaults["invert"])
-    elif isinstance(direction, (int, float)):
-        invert = float(direction) < 0
-    elif isinstance(direction, str):
-        invert = direction.strip().lower() in {"-1", "negative", "invert", "reversed"}
+    invert = bool(axis_defaults.get("invert", False))
 
     binding: SemanticAxisParameterBinding = {
         "parameter_id": parameter_id,
