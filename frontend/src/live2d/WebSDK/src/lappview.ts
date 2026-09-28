@@ -15,6 +15,7 @@ import { canvas, gl } from "./lappglmanager";
 import { LAppLive2DManager } from "./lapplive2dmanager";
 import { LAppPal } from "./lapppal";
 import { TouchManager } from "./touchmanager";
+import { loadModelViewScale } from "../../../app/petPreferences";
 
 /**
  * 描画クラス。
@@ -65,7 +66,9 @@ export class LAppView {
     }
 
     this._viewMatrix.setScreenRect(left, right, bottom, top); // デバイスに対応する画面の範囲。 Xの左端、Xの右端、Yの下端、Yの上端
-    this._viewMatrix.scale(LAppDefine.ViewScale, LAppDefine.ViewScale);
+    const viewScale = loadModelViewScale();
+    this._viewMatrix.loadIdentity();
+    this._viewMatrix.scale(viewScale, viewScale);
 
     this._deviceToScreen.loadIdentity();
     if (width > height) {
@@ -117,6 +120,17 @@ export class LAppView {
     live2DManager.setViewMatrix(this._viewMatrix);
 
     live2DManager.onUpdate();
+  }
+
+  public getViewScale(): number {
+    return this._viewMatrix.getScaleX();
+  }
+
+  public setViewScale(scale: number): void {
+    if (!Number.isFinite(scale)) return;
+    const current = this.getViewScale();
+    if (current <= 0) return;
+    this._viewMatrix.adjustScale(0, 0, scale / current);
   }
 
   /**
@@ -175,10 +189,10 @@ export class LAppView {
 
     {
       // シングルタップ
-      const x: number = this._deviceToScreen.transformX(
+      const x: number = this.transformViewX(
         this._touchManager.getX()
       ); // 論理座標変換した座標を取得。
-      const y: number = this._deviceToScreen.transformY(
+      const y: number = this.transformViewY(
         this._touchManager.getY()
       ); // 論理座標変化した座標を取得。
 
@@ -187,6 +201,10 @@ export class LAppView {
       }
       live2DManager.onTap(x, y);
     }
+  }
+
+  public onTouchesCancelled(): void {
+    LAppLive2DManager.getInstance().onDrag(0.0, 0.0);
   }
 
   /**

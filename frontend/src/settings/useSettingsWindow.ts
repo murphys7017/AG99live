@@ -1,4 +1,9 @@
-import { computed, onBeforeUnmount, reactive, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import {
+  loadModelViewScale, loadSpeechVolume, MAX_MODEL_VIEW_SCALE,
+  MIN_MODEL_VIEW_SCALE, MODEL_VIEW_SCALE_KEY, saveModelViewScale,
+  saveSpeechVolume, SPEECH_VOLUME_KEY,
+} from "../app/petPreferences";
 import { listMicrophoneInputDevices } from "../adapter-connection/runtime/microphoneDevices";
 import { useDesktopBridge } from "../desktop-bridge/useDesktopBridge";
 import { DEFAULT_ADAPTER_ADDRESS } from "../adapter-connection/core/address";
@@ -36,6 +41,8 @@ export function useSettingsWindow() {
   );
   const microphoneDeviceId = ref(bridge.state.snapshot.microphoneDeviceId);
   const microphoneDeviceStatus = ref("");
+  const speechVolumePercent = ref(Math.round(loadSpeechVolume() * 100));
+  const modelViewScale = ref(loadModelViewScale());
   const pttModeEnabled = ref(bridge.state.snapshot.pttModeEnabled);
   const pttKeyBinding = ref(
     normalizePttKeyBinding(bridge.state.snapshot.pttKeyBinding),
@@ -172,6 +179,24 @@ export function useSettingsWindow() {
     });
   }
 
+  function applySpeechVolume(): void {
+    saveSpeechVolume(speechVolumePercent.value / 100);
+  }
+
+  function applyModelViewScale(): void {
+    saveModelViewScale(modelViewScale.value);
+  }
+
+  function onPetPreferenceChanged(event: StorageEvent): void {
+    if (event.key === SPEECH_VOLUME_KEY) {
+      speechVolumePercent.value = Math.round(loadSpeechVolume() * 100);
+    } else if (event.key === MODEL_VIEW_SCALE_KEY) {
+      modelViewScale.value = loadModelViewScale();
+    }
+  }
+
+  onMounted(() => window.addEventListener("storage", onPetPreferenceChanged));
+
   async function refreshMicrophoneDevices(): Promise<void> {
     microphoneDeviceStatus.value = "正在刷新麦克风设备...";
     try {
@@ -236,6 +261,7 @@ export function useSettingsWindow() {
   }
 
   onBeforeUnmount(() => {
+    window.removeEventListener("storage", onPetPreferenceChanged);
     removePttCaptureListener?.();
   });
 
@@ -271,6 +297,8 @@ export function useSettingsWindow() {
   function resetLive2dPresentationSettings(): void {
     applyLive2dPresentationSettingsSnapshot(live2dPresentationSettings, undefined);
     applyLive2dPresentationSettings();
+    modelViewScale.value = 1;
+    applyModelViewScale();
   }
 
   return {
@@ -279,6 +307,10 @@ export function useSettingsWindow() {
     desktopScreenshotOnSendEnabled,
     microphoneDeviceId,
     microphoneDeviceStatus,
+    speechVolumePercent,
+    modelViewScale,
+    modelViewScaleMin: MIN_MODEL_VIEW_SCALE,
+    modelViewScaleMax: MAX_MODEL_VIEW_SCALE,
     pttModeEnabled,
     pttKeyBinding,
     pttKeyCaptureActive,
@@ -306,6 +338,8 @@ export function useSettingsWindow() {
     toggleProfileEditorWindow,
     applyDesktopScreenshotOnSend,
     applyMicrophoneDevice,
+    applySpeechVolume,
+    applyModelViewScale,
     refreshMicrophoneDevices,
     applyLive2dPresentationSettings,
     applyPttModeEnabled,

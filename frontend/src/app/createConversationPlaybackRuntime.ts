@@ -58,11 +58,12 @@ export function createConversationPlaybackRuntime(options: {
     normalizeMotionPayload: options.normalizeMotionPayload,
   });
   const speechOutputRuntime = createSpeechOutputRuntime();
+  const audioSink = createBrowserAudioTimelineSink({ speechOutputRuntime });
   const playbackComposition = createAppPlaybackTimelineRuntime({
     sessionStore: options.sessionStore,
     adapterPlayback: adapter.playback,
     motionSink: requiredMotionTimelineSink,
-    audioSink: createBrowserAudioTimelineSink({ speechOutputRuntime }),
+    audioSink,
     onAudioTimelineStarted: (turnId, messageId, timeline) => {
       requireMotionRuntime().handleAudioTimelineStarted(turnId, messageId, timeline);
     },
@@ -84,6 +85,7 @@ export function createConversationPlaybackRuntime(options: {
     } catch (error) {
       errors.push(error);
     }
+    audioSink.dispose();
     try {
       await speechOutputRuntime.dispose();
     } catch (error) {

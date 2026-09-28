@@ -6,6 +6,9 @@
  */
 
 import { LogLevel } from '@framework/live2dcubismframework';
+import {
+  DEFAULT_MODEL_VIEW_SCALE, MAX_MODEL_VIEW_SCALE, MIN_MODEL_VIEW_SCALE,
+} from '../../../app/petPreferences';
 
 /**
  * Sample Appで使用する定数
@@ -15,10 +18,10 @@ import { LogLevel } from '@framework/live2dcubismframework';
 export const CanvasSize: { width: number; height: number } | 'auto' = 'auto';
 
 // 画面
-export const ViewScale = 1.0;
+export const ViewScale = DEFAULT_MODEL_VIEW_SCALE;
 export let CurrentKScale = ViewScale;
-export const ViewMaxScale = 2.0;
-export const ViewMinScale = 0.8;
+export const ViewMaxScale = MAX_MODEL_VIEW_SCALE;
+export const ViewMinScale = MIN_MODEL_VIEW_SCALE;
 
 export const ViewLogicalLeft = -1.0;
 export const ViewLogicalRight = 1.0;

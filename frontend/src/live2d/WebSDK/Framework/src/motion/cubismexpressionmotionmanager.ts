@@ -161,6 +161,16 @@ export class CubismExpressionMotionManager extends CubismMotionQueueManager {
         ite = motions.erase(ite); //削除
         continue;
       }
+      if (motionQueueEntry.isFinished() || (
+        motionQueueEntry.isStarted() &&
+        motionQueueEntry.getEndTime() >= 0.0 &&
+        this._userTimeSeconds >= motionQueueEntry.getEndTime()
+      )) {
+        csmDelete(motionQueueEntry);
+        ite = motions.erase(ite);
+        this._fadeWeights.remove(expressionIndex);
+        continue;
+      }
 
       const expressionParameters = expressionMotion.getExpressionParameters();
 
@@ -204,29 +214,21 @@ export class CubismExpressionMotionManager extends CubismMotionQueueManager {
         motionQueueEntry,
         this._userTimeSeconds
       );
-      this._fadeWeights.set(
-        expressionIndex,
-        expressionMotion.updateFadeWeight(
-          motionQueueEntry,
-          this._userTimeSeconds
-        )
+      const fadeWeight = expressionMotion.updateFadeWeight(
+        motionQueueEntry,
+        this._userTimeSeconds
       );
+      this._fadeWeights.set(expressionIndex, fadeWeight);
       expressionMotion.calculateExpressionParameters(
         model,
         this._userTimeSeconds,
         motionQueueEntry,
         this._expressionParameterValues,
         expressionIndex,
-        this._fadeWeights.at(expressionIndex)
+        fadeWeight
       );
 
-      expressionWeight +=
-        expressionMotion.getFadeInTime() == 0.0
-          ? 1.0
-          : CubismMath.getEasingSine(
-              (this._userTimeSeconds - motionQueueEntry.getFadeInStartTime()) /
-                expressionMotion.getFadeInTime()
-            );
+      expressionWeight += fadeWeight;
 
       updated = true;
 
@@ -294,7 +296,6 @@ export class CubismExpressionMotionManager extends CubismMotionQueueManager {
 
 // Namespace definition for compatibility.
 import * as $ from './cubismexpressionmotionmanager';
-import { CubismMath } from '../math/cubismmath';
 import { CubismDebug, CubismLogError } from '../utils/cubismdebug';
 // eslint-disable-next-line @typescript-eslint/no-namespace
 export namespace Live2DCubismFramework {

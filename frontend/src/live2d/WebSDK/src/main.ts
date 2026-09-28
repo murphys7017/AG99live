@@ -13,6 +13,9 @@ import { LAppAdapter } from "./lappadapter";
 import { LAppGlManager } from "./lappglmanager";
 import { LAppLive2DManager } from "./lapplive2dmanager";
 import {
+  loadModelViewScale, MODEL_VIEW_SCALE_KEY, saveModelViewScale,
+} from "../../../app/petPreferences";
+import {
   beginLive2DModelLoad,
   cancelCurrentLive2DModelLoad,
   markLive2DModelFailed,
@@ -24,12 +27,14 @@ let currentInitializationPromise: Promise<void> | null = null;
 let boundPointerTarget: HTMLElement | null = null;
 let boundPointerMoveHandler: ((event: PointerEvent) => void) | null = null;
 let boundPointerDownHandler: ((event: PointerEvent) => void) | null = null;
+let boundWheelHandler: ((event: WheelEvent) => void) | null = null;
+let boundScaleStorageHandler: ((event: StorageEvent) => void) | null = null;
 let setIgnoreMouseEventsBridge: ((ignore: boolean) => void) | null = null;
 let lastIgnoreMouseEventsValue: boolean | null = null;
 let lastPointerHitTestAt = 0;
 const POINTER_HIT_TEST_INTERVAL_MS = 33;
 
-function getPointerModelCoordinates(event: PointerEvent): { x: number; y: number } | null {
+function getPointerModelCoordinates(event: MouseEvent): { x: number; y: number } | null {
   const view = LAppDelegate.getInstance().getView();
   const canvas = document.getElementById("canvas") as HTMLCanvasElement | null;
 
@@ -55,8 +60,8 @@ function getPointerModelCoordinates(event: PointerEvent): { x: number; y: number
   const scaledY = relativeY * scale;
 
   return {
-    x: view._deviceToScreen.transformX(scaledX),
-    y: view._deviceToScreen.transformY(scaledY),
+    x: view.transformViewX(scaledX),
+    y: view.transformViewY(scaledY),
   };
 }
 
@@ -92,10 +97,18 @@ function cleanupHitTestPointerHandlers(): void {
   if (boundPointerTarget && boundPointerDownHandler) {
     boundPointerTarget.removeEventListener("pointerdown", boundPointerDownHandler);
   }
+  if (boundPointerTarget && boundWheelHandler) {
+    boundPointerTarget.removeEventListener("wheel", boundWheelHandler);
+  }
+  if (boundScaleStorageHandler) {
+    window.removeEventListener("storage", boundScaleStorageHandler);
+  }
 
   boundPointerTarget = null;
   boundPointerMoveHandler = null;
   boundPointerDownHandler = null;
+  boundWheelHandler = null;
+  boundScaleStorageHandler = null;
   delete (window as any).__ag99SetPetMouseIgnoreState;
   setIgnoreMouseEventsBridge = null;
   lastIgnoreMouseEventsValue = null;
@@ -237,12 +250,35 @@ async function initializeLive2DOnce(): Promise<void> {
       console.log("Model clicked:", isHit, hitAreaName ? `in area: ${hitAreaName}` : '');
     };
 
+    boundWheelHandler = (e: WheelEvent) => {
+      const view = LAppDelegate.getInstance().getView();
+      const model = LAppLive2DManager.getInstance().getModel(0);
+      const coordinates = getPointerModelCoordinates(e);
+      if (!view || !coordinates || !model?.anyHitTestWithFallback(coordinates.x, coordinates.y)) {
+        return;
+      }
+      e.preventDefault();
+      const pixelDelta = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 120 : 1);
+      const factor = Math.exp(-Math.max(-240, Math.min(240, pixelDelta)) * 0.001);
+      view.setViewScale(view.getViewScale() * factor);
+      saveModelViewScale(view.getViewScale());
+    };
+    boundScaleStorageHandler = (e: StorageEvent) => {
+      if (e.key === MODEL_VIEW_SCALE_KEY) {
+        LAppDelegate.getInstance().getView()?.setViewScale(loadModelViewScale());
+      }
+    };
+
     if (boundPointerTarget && boundPointerMoveHandler) {
       boundPointerTarget.addEventListener("pointermove", boundPointerMoveHandler);
     }
     if (boundPointerTarget && boundPointerDownHandler) {
       boundPointerTarget.addEventListener("pointerdown", boundPointerDownHandler);
     }
+    if (boundPointerTarget && boundWheelHandler) {
+      boundPointerTarget.addEventListener("wheel", boundWheelHandler, { passive: false });
+    }
+    window.addEventListener("storage", boundScaleStorageHandler);
   }
 
   try {

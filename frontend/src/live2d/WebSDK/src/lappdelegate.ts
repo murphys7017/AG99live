@@ -470,9 +470,10 @@ function onMouseMoved(e: MouseEvent): void {
  * クリックが終了したら呼ばれる。
  */
 function onClickEnded(e: MouseEvent): void {
-  if ((window as Window & { __ag99PetWindowDragging?: boolean }).__ag99PetWindowDragging) {
+  if ((window as Window & { __ag99PetWindowDragging?: boolean }).__ag99PetWindowDragging
+    || !LAppDelegate.getInstance()._captured) {
     LAppDelegate.getInstance()._captured = false;
-    LAppDelegate.getInstance()._view?.onTouchesEnded(0, 0);
+    LAppDelegate.getInstance()._view?.onTouchesCancelled();
     return;
   }
   LAppDelegate.getInstance()._captured = false;
@@ -536,9 +537,10 @@ function onTouchMoved(e: TouchEvent): void {
  * タッチが終了したら呼ばれる。
  */
 function onTouchEnded(e: TouchEvent): void {
-  if ((window as Window & { __ag99PetWindowDragging?: boolean }).__ag99PetWindowDragging) {
+  if ((window as Window & { __ag99PetWindowDragging?: boolean }).__ag99PetWindowDragging
+    || !LAppDelegate.getInstance()._captured) {
     LAppDelegate.getInstance()._captured = false;
-    LAppDelegate.getInstance()._view?.onTouchesEnded(0, 0);
+    LAppDelegate.getInstance()._view?.onTouchesCancelled();
     return;
   }
   LAppDelegate.getInstance()._captured = false;
@@ -559,7 +561,7 @@ function onTouchEnded(e: TouchEvent): void {
 /**
  * タッチがキャンセルされると呼ばれる。
  */
-function onTouchCancel(e: TouchEvent): void {
+function onTouchCancel(): void {
   LAppDelegate.getInstance()._captured = false;
 
   if (!LAppDelegate.getInstance()._view) {
@@ -567,10 +569,5 @@ function onTouchCancel(e: TouchEvent): void {
     return;
   }
 
-  const rect = (e.target as Element).getBoundingClientRect();
-
-  const posX = e.changedTouches[0].clientX - rect.left;
-  const posY = e.changedTouches[0].clientY - rect.top;
-
-  LAppDelegate.getInstance()._view!.onTouchesEnded(posX, posY);
+  LAppDelegate.getInstance()._view!.onTouchesCancelled();
 }

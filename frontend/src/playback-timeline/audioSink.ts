@@ -1,4 +1,5 @@
 import type { AudioPlaybackClock } from "./contracts.js";
+import { loadSpeechVolume, SPEECH_VOLUME_KEY } from "../app/petPreferences.js";
 import type {
   SpeechOutputRuntime,
   SpeechOutputSession,
@@ -78,10 +79,16 @@ function adaptClock(clock: RuntimeAudioPlaybackClock): AudioPlaybackClock {
 
 export function createBrowserAudioTimelineSink(options: {
   speechOutputRuntime?: SpeechOutputRuntime;
-} = {}): PlaybackTimelineAudioSink {
+} = {}): PlaybackTimelineAudioSink & { dispose(): void } {
   let activeAudioElement: HTMLAudioElement | null = null;
   let activeAudioStartCancel: (() => void) | null = null;
   let activeSpeechOutput: SpeechOutputSession | null = null;
+  const onVolumeChanged = (event: StorageEvent) => {
+    if (event.key === SPEECH_VOLUME_KEY && activeAudioElement) {
+      activeAudioElement.volume = loadSpeechVolume();
+    }
+  };
+  window.addEventListener("storage", onVolumeChanged);
 
   function stopBrowserAudioPlayback(): void {
     const audio = activeAudioElement;
@@ -105,6 +112,7 @@ export function createBrowserAudioTimelineSink(options: {
     stopBrowserAudioPlayback();
 
     const audio = new Audio();
+    audio.volume = loadSpeechVolume();
     audio.crossOrigin = "anonymous";
     audio.src = audioUrl;
     let speechOutput: SpeechOutputSession | null = null;
@@ -279,6 +287,10 @@ export function createBrowserAudioTimelineSink(options: {
       await startBrowserAudioPlayback(audioUrl, callbacks);
     },
     stop() {
+      stopBrowserAudioPlayback();
+    },
+    dispose() {
+      window.removeEventListener("storage", onVolumeChanged);
       stopBrowserAudioPlayback();
     },
   };

@@ -10,6 +10,10 @@ const {
   desktopScreenshotOnSendEnabled,
   microphoneDeviceId,
   microphoneDeviceStatus,
+  speechVolumePercent,
+  modelViewScale,
+  modelViewScaleMin,
+  modelViewScaleMax,
   pttModeEnabled,
   pttKeyBinding,
   pttKeyCaptureActive,
@@ -37,6 +41,8 @@ const {
   toggleProfileEditorWindow,
   applyDesktopScreenshotOnSend,
   applyMicrophoneDevice,
+  applySpeechVolume,
+  applyModelViewScale,
   refreshMicrophoneDevices,
   applyLive2dPresentationSettings,
   applyPttModeEnabled,
@@ -62,8 +68,8 @@ onMounted(() => {
         <header class="settings-section__header">
           <p>01 / CONNECTION</p>
           <div>
-            <h2>连接与语音输入</h2>
-            <span>管理 AstrBot 连接和当前使用的麦克风。</span>
+            <h2>连接与语音</h2>
+            <span>管理 AstrBot 连接、麦克风与播放音量。</span>
           </div>
         </header>
         <div class="settings-grid">
@@ -144,6 +150,26 @@ onMounted(() => {
         </p>
       </article>
 
+      <article class="settings-card">
+        <div class="settings-card__header">
+          <div>
+            <p class="settings-card__eyebrow">语音输出</p>
+            <h2>播放音量</h2>
+          </div>
+          <span class="settings-card__badge">{{ speechVolumePercent }}%</span>
+        </div>
+        <label class="settings-slider">
+          <span class="settings-card__hint">仅调整桌宠语音，不影响麦克风收音。</span>
+          <input
+            v-model.number="speechVolumePercent"
+            class="settings-slider__input"
+            type="range" min="0" max="100" step="1"
+            aria-label="播放音量"
+            @input="applySpeechVolume"
+          />
+        </label>
+      </article>
+
         </div>
       </section>
 
@@ -206,6 +232,26 @@ onMounted(() => {
             :max="physicsResponseMax"
             :step="physicsResponseStep"
             @input="applyLive2dPresentationSettings"
+          />
+        </div>
+
+        <div class="settings-slider">
+          <div class="settings-slider__header">
+            <div>
+              <strong>模型缩放</strong>
+              <p>也可在模型上滚动鼠标滚轮调整；缩放只作用于模型画面。</p>
+            </div>
+            <span class="settings-slider__value">x{{ formatScale(modelViewScale) }}</span>
+          </div>
+          <input
+            v-model.number="modelViewScale"
+            class="settings-slider__input"
+            type="range"
+            :min="modelViewScaleMin"
+            :max="modelViewScaleMax"
+            step="0.05"
+            aria-label="模型缩放"
+            @input="applyModelViewScale"
           />
         </div>
 

@@ -624,6 +624,11 @@ export class LAppModel extends CubismUserModel {
 
     const deltaTimeSeconds: number = LAppPal.getDeltaTime();
     this._userTimeSeconds += deltaTimeSeconds;
+    if (this._tapExpressionExpiresAtSeconds !== null
+      && this._userTimeSeconds >= this._tapExpressionExpiresAtSeconds) {
+      this._tapExpressionExpiresAtSeconds = null;
+      this.stopExpression();
+    }
     const ambientMotionEnabled = LAppDefine.AMBIENT_MOTION_ENABLED;
 
     this._dragManager.update(deltaTimeSeconds);
@@ -1189,7 +1194,7 @@ export class LAppModel extends CubismUserModel {
    * ランダムに選ばれた表情モーションをセットする
    */
   public setRandomExpression(): void {
-    if (this._expressions.getSize() == 0) {
+    if (this._directParameterPlanState || this._expressions.getSize() == 0) {
       return;
     }
 
@@ -1198,7 +1203,9 @@ export class LAppModel extends CubismUserModel {
     for (let i = 0; i < this._expressions.getSize(); i++) {
       if (i == no) {
         const name: string = this._expressions._keyValues[i].first;
-        this.setExpression(name);
+        if (this.setExpression(name)) {
+          this._tapExpressionExpiresAtSeconds = this._userTimeSeconds + 3;
+        }
         return;
       }
     }
@@ -1666,6 +1673,10 @@ export class LAppModel extends CubismUserModel {
       this._directParameterPlanError = this.getExpressionStartError()
         || `expression_start_failed:${expressionId}`;
       return false;
+    }
+    if (this._tapExpressionExpiresAtSeconds !== null) {
+      this._tapExpressionExpiresAtSeconds = null;
+      if (!expressionId) this.stopExpression();
     }
 
     const previousState = this._directParameterPlanState;
@@ -2148,6 +2159,7 @@ export class LAppModel extends CubismUserModel {
     this._modelSetting = null;
     this._modelHomeDir = null;
     this._userTimeSeconds = 0.0;
+    this._tapExpressionExpiresAtSeconds = null;
 
     this._eyeBlinkIds = new csmVector<CubismIdHandle>();
     this._lipSyncIds = new csmVector<CubismIdHandle>();
@@ -2221,6 +2233,7 @@ export class LAppModel extends CubismUserModel {
   _motions: csmMap<string, ACubismMotion>; // 読み込まれているモーションのリスト
   _expressions: csmMap<string, ACubismMotion>; // 読み込まれている表情のリスト
   private _expressionStartError = '';
+  private _tapExpressionExpiresAtSeconds: number | null;
 
   _hitArea: csmVector<csmRect>;
   _userArea: csmVector<csmRect>;
