@@ -258,8 +258,17 @@ export class WindowManager {
     }
   }
 
-  startWindowDrag(targetWindow: BrowserWindow | null): void {
-    if (!targetWindow || targetWindow.isDestroyed()) {
+  startWindowDrag(
+    targetWindow: BrowserWindow | null,
+    screenX: number,
+    screenY: number,
+  ): void {
+    if (
+      !targetWindow
+      || targetWindow.isDestroyed()
+      || !Number.isFinite(screenX)
+      || !Number.isFinite(screenY)
+    ) {
       return;
     }
     if (this.activeDragState) {
@@ -269,7 +278,6 @@ export class WindowManager {
     const role = this.findRole(targetWindow);
     this.normalizeTransparentWindowSize(targetWindow, role);
     const bounds = targetWindow.getBounds();
-    const { x: screenX, y: screenY } = screen.getCursorScreenPoint();
     const lockedWidth = role === "pet"
       ? PET_WINDOW_WIDTH
       : role === "overlay"
@@ -317,6 +325,9 @@ export class WindowManager {
     const activeDragState = this.activeDragState;
     const targetWindow = activeDragState?.targetWindow;
     if (!targetWindow || targetWindow.isDestroyed()) {
+      if (targetWindow) {
+        this.cancelWindowDrag(targetWindow);
+      }
       return;
     }
 
@@ -387,6 +398,25 @@ export class WindowManager {
       this.overlayDragOrigin = null;
       this.flushDeferredTransparentWindowRecovery();
     }
+  }
+
+  cancelWindowDrag(targetWindow: BrowserWindow | null): void {
+    if (!targetWindow || this.activeDragState?.targetWindow !== targetWindow) {
+      return;
+    }
+
+    if (this.dragTimer !== null) {
+      clearInterval(this.dragTimer);
+      this.dragTimer = null;
+    }
+    this.activeDragState = null;
+    this.overlayDragOrigin = null;
+    if (this.findRole(targetWindow) === "pet" && !targetWindow.isDestroyed()) {
+      this.petWindowIgnoreMouseEvents = true;
+      targetWindow.setIgnoreMouseEvents(true, { forward: true });
+      this.keepPetWindowPassive(targetWindow);
+    }
+    this.flushDeferredTransparentWindowRecovery();
   }
 
   buildWindowState(): DesktopWindowVisibilityState {

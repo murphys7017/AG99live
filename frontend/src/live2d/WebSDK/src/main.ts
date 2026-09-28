@@ -33,6 +33,32 @@ let setIgnoreMouseEventsBridge: ((ignore: boolean) => void) | null = null;
 let lastIgnoreMouseEventsValue: boolean | null = null;
 let lastPointerHitTestAt = 0;
 const POINTER_HIT_TEST_INTERVAL_MS = 33;
+const MODEL_SCALE_SAVE_DEBOUNCE_MS = 120;
+let pendingModelViewScale: number | null = null;
+let modelViewScaleSaveTimer: number | null = null;
+
+function flushModelViewScaleSave(): void {
+  if (modelViewScaleSaveTimer !== null) {
+    window.clearTimeout(modelViewScaleSaveTimer);
+    modelViewScaleSaveTimer = null;
+  }
+  if (pendingModelViewScale === null) {
+    return;
+  }
+  saveModelViewScale(pendingModelViewScale);
+  pendingModelViewScale = null;
+}
+
+function scheduleModelViewScaleSave(scale: number): void {
+  pendingModelViewScale = scale;
+  if (modelViewScaleSaveTimer !== null) {
+    window.clearTimeout(modelViewScaleSaveTimer);
+  }
+  modelViewScaleSaveTimer = window.setTimeout(() => {
+    modelViewScaleSaveTimer = null;
+    flushModelViewScaleSave();
+  }, MODEL_SCALE_SAVE_DEBOUNCE_MS);
+}
 
 function getPointerModelCoordinates(event: MouseEvent): { x: number; y: number } | null {
   const view = LAppDelegate.getInstance().getView();
@@ -91,6 +117,7 @@ function updateMouseIgnoreState(ignore: boolean): void {
 }
 
 function cleanupHitTestPointerHandlers(): void {
+  flushModelViewScaleSave();
   if (boundPointerTarget && boundPointerMoveHandler) {
     boundPointerTarget.removeEventListener("pointermove", boundPointerMoveHandler);
   }
@@ -261,7 +288,7 @@ async function initializeLive2DOnce(): Promise<void> {
       const pixelDelta = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 120 : 1);
       const factor = Math.exp(-Math.max(-240, Math.min(240, pixelDelta)) * 0.001);
       view.setViewScale(view.getViewScale() * factor);
-      saveModelViewScale(view.getViewScale());
+      scheduleModelViewScaleSave(view.getViewScale());
     };
     boundScaleStorageHandler = (e: StorageEvent) => {
       if (e.key === MODEL_VIEW_SCALE_KEY) {

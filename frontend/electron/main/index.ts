@@ -376,15 +376,15 @@ if (process.platform === "win32") {
 }
 
 function watchWindowShortcuts(window: BrowserWindow): void {
-  if (!app.isPackaged) {
-    window.webContents.on(
-      "render-process-gone",
-      (_event, details) => {
+  window.webContents.on(
+    "render-process-gone",
+    (_event, details) => {
+      windowManager?.cancelWindowDrag(window);
+      if (!app.isPackaged) {
         console.error(`[renderer] process gone: ${details.reason}`);
-      },
-    );
-
-  }
+      }
+    },
+  );
 
   window.webContents.on("before-input-event", (event, input) => {
     if (input.type !== "keyDown") {
@@ -467,8 +467,12 @@ function setupIpc(): void {
     );
   });
 
-  ipcMain.on("desktop:start-window-drag", (event) => {
-    windowManager.startWindowDrag(BrowserWindow.fromWebContents(event.sender));
+  ipcMain.on("desktop:start-window-drag", (event, screenX, screenY) => {
+    windowManager.startWindowDrag(
+      BrowserWindow.fromWebContents(event.sender),
+      screenX,
+      screenY,
+    );
   });
 
   ipcMain.on("desktop:end-window-drag", (event) => {

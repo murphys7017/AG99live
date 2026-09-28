@@ -57,7 +57,7 @@ export function usePetWindowDrag(): {
     window.ag99desktop?.setIgnoreMouseEvents(false);
     activePointerId.value = event.pointerId;
     isDragging.value = true;
-    window.ag99desktop?.startWindowDrag();
+    window.ag99desktop?.startWindowDrag(event.screenX, event.screenY);
     (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
     event.preventDefault();
   }
