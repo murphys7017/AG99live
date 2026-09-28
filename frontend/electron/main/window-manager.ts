@@ -454,7 +454,9 @@ export class WindowManager {
       frame: false,
       transparent: true,
       show: false,
-      skipTaskbar: true,
+      // OBS excludes tool windows from its Window Capture picker. Keep the
+      // render source as a normal top-level window so it can be selected.
+      skipTaskbar: false,
       hasShadow: false,
       backgroundColor: "#00000000",
       resizable: false,

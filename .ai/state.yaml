@@ -25,6 +25,19 @@ motion_composition_sampling:
   evidence_gap:
     - "Live Motion Lab and model playback must still compare fixed semantic cases for coordinated skeleton motion, retained micro-variation, and natural sequence selection."
 
+obs_window_capture_enumeration:
+  recorded_at: "2026-09-28"
+  class: bugfix
+  risk: medium
+  scope:
+    - "Keep the Live2D pet window as a normal top-level Windows window so OBS Window Capture can enumerate it."
+    - "Keep the input overlay and auxiliary windows excluded from the taskbar and OBS source picker."
+  assumption:
+    - "OBS excludes WS_EX_TOOLWINDOW windows; the existing pet-window skipTaskbar option causes the source to be filtered."
+  validation: "Electron main-process typecheck and diff whitespace check pass."
+  evidence_gap:
+    - "Live OBS must confirm that AG99live Live2D is listed, captures a transparent frame at the required frame rate, and remains usable after transparent-window recovery."
+
 plugin_prompt_migration:
   date: '2026-09-18'
   status: implemented_pending_live_acceptance
