@@ -1,81 +1,20 @@
-# AG99live 流程图与分析图
+# AG99live 架构图集
 
-本目录保存系统的 Mermaid 架构图权威源。除明确标为“目标”的依赖规则图外，
-其余图只描述当前代码真实成立的边界；图集不维护迁移历史，也不生成 PNG/SVG 副本。
+本目录保留当前源码的 Mermaid 图源，作为架构、播放和数据流的可视化补充。协议版本、运行边界和实现结论仍以[文档中心](../README.md)列出的源码与正文为准；图中不记录阶段计划或尚未实施的路线。
 
-## 阅读顺序
+## 阅读入口
 
-### 认识系统
-
-1. `01-系统上下文图.mmd`：系统与外部参与者。
-2. `02-部署与进程边界图.mmd`：代码运行在哪里。
-3. `03-后端模块结构图.mmd`：AstrBot Adapter 内部结构。
-4. `04-前端模块结构图.mmd`：Electron Renderer 内部结构。
-
-### 审查架构
-
-5. `05-当前静态依赖图.mmd`：当前主要 import/call 依赖。
-6. `06-目标依赖规则图.mmd`：允许和禁止的依赖方向，以及二期 Director 的目标边界。
-7. `07-运行时组合与实例所有权图.mmd`：对象如何装配、由谁持有。
-8. `08-事实来源与写入权图.mmd`：每类状态的唯一写入者。
-
-### 理解主链路
-
-9. `09-端到端消息播放流程图.mmd`：从输入到播放收口的完整分支。
-10. `10-端到端消息播放时序图.mmd`：同一链路的时间顺序。
-11. `11-动作数据转换链路图.mmd`：Prompt 到 Live2D 参数的转换。
-12. `12-统一时钟与播放同步图.mmd`：音频、字幕、动作和口型同步。
-
-### 排障与数据治理
-
-13. `13-Turn与Segment状态机图.mmd`：会话和原子段状态变化。
-14. `14-Timeline与Sink状态机图.mmd`：播放执行状态变化。
-15. `15-错误传播与禁止Fallback图.mmd`：错误在哪里终止。
-16. `16-MotionLab数据闭环图.mmd`：观察事件、缓存、SQLite 与样本。
-17. `17-Live2D模型生命周期图.mmd`：模型加载、替换和释放。
-
-## 图的职责
-
-| 图种类 | 回答的问题 | 不应包含 |
-| --- | --- | --- |
-| 上下文图 | 系统和谁交互 | 文件、函数和状态机细节 |
-| 部署图 | 代码运行在哪个进程 | 领域处理步骤 |
-| 结构图 | 模块负责什么 | 完整运行时序 |
-| 静态依赖图 | 谁 import/call 谁 | 状态写入合法性结论 |
-| 所有权图 | 谁创建、持有、销毁实例 | 业务数据的全部字段 |
-| 事实写入图 | 谁能修改哪类状态 | 媒体播放的逐帧细节 |
-| 流程图 | 一次请求有哪些分支 | 精确调用先后 |
-| 时序图 | 调用和事件何时发生 | 全部静态模块 |
-| 状态机图 | 合法状态及转移 | 跨系统数据转换 |
-
-## 统一约定
-
-- 实线箭头表示同步调用、直接依赖或确定数据流。
-- 虚线箭头表示事件、回调、异步通知或观察关系。
-- 红色节点表示失败终点或禁止路径，不表示可用 fallback。
-- `turn_id + message_id` 是正式播放段的统一身份。
-- `output.segment.v5` 是前后端正式回复的唯一原子消息，speech slot 携带可选 provider-neutral 语音 cue。
-- `engine.motion_intent.v4` 是 Persona Effect 主动作协议。
-- 正式动作输入与官方 `<@anim>` 兼容入口统一使用 v4；手动预览从本地 `CompiledSemanticMotion` 直接进入第二阶段编译。
-- SessionStore 是协议槽位和稳定生命周期投影事实源，PlaybackTimeline 是 required sink
-  实时执行与完成门禁事实源；Orchestrator 和 CompletionCoordinator 必须联合读取两者。
-- ModelEngine / Performance Director 编译动作，AG99 Live2D Runtime 逐帧执行参数计划；官方 Cubism `Framework` / `Core` 只负责模型、Physics 和绘制。
-- ModelEngine 分为 semantic 与 model_parameter 两个编译阶段；每个完整 pose/sequence 由
-  `PerformanceSchedule` 统一生成 phrase、step、部位事件和来源诊断，SpeechPoseStage 只选择说话表现，
-  Parameter Track Graph 再把 Schedule 投影为 V3 keyframes/modulation。
-- `PerformanceSchedule` 已属于当前运行链路的 ModelEngine 编译事实；目标依赖图可以描述完整
-  Performance Director 的目标边界，但图集不维护阶段进度或下一批清单。当前状态与剩余规划分别以
-  `06-一期完成边界与二期入口.md` 和 `18-二期角色表演系统总体规划.md` 为准。
-- AG99 Live2D Runtime 先形成 Cubism Motion / EyeBlink / Expression / drag / breath 的 base snapshot，再由 Parameter Mixer 组合 direct plan 与 lip-sync；Physics 只消费最终主动参数帧，不是 Mixer 输入。
-- 每条 WebSocket 连接必须先通过 `system.server_info.schema_manifest`；ModelSync 不接受 window/devtools 旁路写入。
-- 当前桌宠 WebSocket 与 HTTP 资源只支持同机 `127.0.0.1` / `localhost`。
+| 想查看的内容 | 图源 |
+| --- | --- |
+| 系统参与者与本机进程边界 | [系统上下文图](01-系统上下文图.mmd)、[部署与进程边界图](02-部署与进程边界图.mmd) |
+| Adapter 与前端模块职责 | [后端模块结构图](03-后端模块结构图.mmd)、[前端模块结构图](04-前端模块结构图.mmd) |
+| 依赖方向、运行时组合和状态写入权 | [当前静态依赖图](05-当前静态依赖图.mmd)、[依赖规则图](06-依赖规则图.mmd)、[运行时组合与实例所有权图](07-运行时组合与实例所有权图.mmd)、[事实来源与写入权图](08-事实来源与写入权图.mmd) |
+| 输入、原子段和播放完成 | [端到端消息播放流程图](09-端到端消息播放流程图.mmd)、[端到端消息播放时序图](10-端到端消息播放时序图.mmd)、[统一时钟与播放同步图](12-统一时钟与播放同步图.mmd) |
+| 动作编译、状态机和失败路径 | [动作数据转换链路图](11-动作数据转换链路图.mmd)、[Turn 与 Segment 状态机图](13-Turn与Segment状态机图.mmd)、[Timeline 与 Sink 状态机图](14-Timeline与Sink状态机图.mmd)、[错误传播与禁止 Fallback 图](15-错误传播与禁止Fallback图.mmd) |
+| Motion Lab 与模型生命周期 | [Motion Lab 数据闭环图](16-MotionLab数据闭环图.mmd)、[Live2D 模型生命周期图](17-Live2D模型生命周期图.mmd) |
 
 ## 维护规则
 
-1. 修改公开协议、manifest 或 model sync 投影时同步检查图 01、03、04、05、07、08、09、10、13、15。
-2. 修改播放所有权时同步检查图 04、06、07、08、12、14。
-3. 修改动作生成或编译时同步检查图 03、11、15、16。
-4. 修改模型加载或 WebSDK 时同步检查图 02、04、12、17。
-5. 图中不得加入已删除链路或“为了说明历史”的兼容分支。
-6. 官方 AstrBot `<@anim>` 只保留运输兼容说明，内部动作契约必须是 v4。
-7. 新增模块前先确认它是否创造了第二个事实源、第二个时钟或第二个状态机。
+1. 修改协议、播放所有权、动作编译或模型生命周期时，同步检查对应图源和正文。
+2. 图源只描述当前实现与明确的运行边界；未实施能力写入专项设计或验收记录，不写入图集。
+3. 不提交从 Mermaid 导出的 PNG、SVG 或 PDF 副本。

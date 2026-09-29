@@ -4,7 +4,7 @@ flowchart TB
     classDef core fill:#e8f1f2,stroke:#2f5d62,color:#163438
     classDef forbidden fill:#fde7e3,stroke:#b33a2b,color:#681d14
 
-    subgraph BACK[后端目标依赖]
+    subgraph BACK[后端依赖]
         BHOST[AstrBot Host / Plugin Entry]:::boundary
         BUSE[Use Cases<br/>middleware contributors / services / TurnCoordinator]:::core
         BDOMAIN[Domain<br/>motion intent / resource / performance curve contracts]:::allowed
@@ -18,14 +18,13 @@ flowchart TB
         BADAPTER --> BDOMAIN
     end
 
-    subgraph FRONT[前端目标依赖]
+    subgraph FRONT[前端依赖]
         FROOT[App Composition Root]:::boundary
         FINBOUND[Protocol Adapter<br/>adapter-connection]:::boundary
         FFACT[Turn Facts<br/>SessionStore]:::core
         FORCH[Release Policy<br/>TurnPlaybackOrchestrator]:::core
         FTL[Execution Lifecycle<br/>PlaybackTimeline]:::core
         FME[Motion Compiler<br/>ModelEngine]:::allowed
-        FDIR[Performance Director<br/>current Schedule + face/hesitation]:::allowed
         FSCHEDULE[PerformanceSchedule<br/>current internal DTO]:::allowed
         FTRACK[Parameter Track Compiler<br/>schedule projection]:::allowed
         FLIVE[Presentation Adapter<br/>Live2D boundary]:::boundary
@@ -47,14 +46,13 @@ flowchart TB
         FTL --> FME
         FTL --> FLIVE
         FME --> FPORT
-        FME --> FDIR
-        FDIR --> FSCHEDULE
+        FME --> FSCHEDULE
         FSCHEDULE --> FTRACK
         FTRACK --> FPORT
         FLIVE --> FSDK
     end
 
-    BPORT <-->|output.segment.v5 / control / input| FPORT
+    BPORT <-->|output.segment (schema v5) / control / input| FPORT
 
     subgraph NO[禁止的反向依赖]
         N1[ModelEngine -> SessionStore<br/>禁止直接写播放事实]:::forbidden
@@ -65,7 +63,7 @@ flowchart TB
         N6[Domain -> AstrBot/WebSocket/Electron<br/>领域规则不依赖框架]:::forbidden
         N7[CompletionCoordinator -> media player<br/>只负责 ACK]:::forbidden
         N8[多个模块 -> 同一 Session fact<br/>禁止第二写入者]:::forbidden
-        N9[Performance Director -> Timeline/WebSDK<br/>禁止创建第二时钟或播放器]:::forbidden
+        N9[ModelEngine -> Timeline/WebSDK<br/>禁止创建第二时钟或播放器]:::forbidden
     end
 
     FME -.禁止.-> N1
@@ -76,6 +74,6 @@ flowchart TB
     BDOMAIN -.禁止.-> N6
     FORCH -.禁止.-> N7
     FFACT -.禁止.-> N8
-    FDIR -.禁止.-> N9
+    FME -.禁止.-> N9
 
     RULE[判定方法<br/>跨层调用必须通过窄 port<br/>状态变化必须能指出唯一 owner<br/>适配器可以依赖 core port，core 不依赖适配器实现]:::allowed

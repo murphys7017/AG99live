@@ -4,7 +4,6 @@ flowchart LR
     classDef queue fill:#fff3d6,stroke:#9a6b14,color:#513807
     classDef storage fill:#e8edf7,stroke:#3e5f93,color:#1d3154
     classDef current fill:#e9f3df,stroke:#557a35,color:#2e431d
-    classDef future fill:#f3e6ec,stroke:#8b4865,color:#4b2637
     classDef failure fill:#fde7e3,stroke:#b33a2b,color:#681d14
 
     subgraph SOURCES[当前观察事件来源]
@@ -86,14 +85,6 @@ flowchart LR
         PANEL -->|source_record_id + turn_id + message_id| SAMPLE
         CONTEXT --> SAMPLE
         SAMPLE --> PROJECT --> SELECT --> PROMPT --> AUDIT --> OBS
-    end
-
-    subgraph REMAINING[明确后续工作]
-        STEPEDIT[sequence step editor<br/>axis_levels + duration_weight]:::future
-        EXPORT[训练数据导出<br/>小模型阶段]:::future
-
-        PANEL -.后续.-> STEPEDIT
-        SAMPLE -.后续.-> EXPORT
     end
 
     RULE[非干扰规则<br/>记录异步执行<br/>前端先落 IndexedDB<br/>SQLite 失败重试并暴露日志<br/>观察失败不改变当前回复或动作]:::port
