@@ -295,6 +295,17 @@ HTTP       127.0.0.1:12397
 
 连接并完成模型同步后，即可通过输入窗口或麦克风开始对话。
 
+### 3. 在 OBS 中使用透明 Live2D 源
+
+Windows 桌面端启动后会自动发布一个 Spout2 Sender：`AG99live.Live2D`。在 OBS 添加 **Spout2 捕获**，选择该来源，并把合成模式设为 **预乘 Alpha**。该来源只包含 Live2D canvas，透明区域不会带入桌面、终端或输入窗口。
+
+项目在 `frontend/resources/spout/` 随附 Spout2 运行库和独立 Sender；开发环境如需重建 Sender，可运行：
+
+```powershell
+cd frontend
+npm run build:spout-sender
+```
+
 ## 一期状态
 
 **项目一期代码范围已经完成。** 当前实现已经形成从用户输入、主模型文本与动作生成、TTS、原子输出段、统一 Timeline、参数计划到 Live2D 逐帧表演的完整链路：

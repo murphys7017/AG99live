@@ -30,13 +30,35 @@ obs_window_capture_enumeration:
   class: bugfix
   risk: medium
   scope:
-    - "Keep the Live2D pet window as a normal top-level Windows window so OBS Window Capture can enumerate it."
-    - "Keep the input overlay and auxiliary windows excluded from the taskbar and OBS source picker."
+    - "Temporarily exposed the Live2D pet window to verify OBS Window Capture enumeration."
   assumption:
     - "OBS excludes WS_EX_TOOLWINDOW windows; the existing pet-window skipTaskbar option causes the source to be filtered."
-  validation: "Electron main-process typecheck and diff whitespace check pass."
+  validation: >-
+    Electron main-process typecheck and diff whitespace check pass. Live OBS
+    confirms that the pet window is enumerated, but Window Capture receives the
+    desktop-composited pixels behind transparent areas rather than an alpha channel.
+  conclusion: >-
+    Window Capture is usable only as an opaque fallback. A transparent OBS source
+    requires a direct frame-output path such as Spout2.
   evidence_gap:
-    - "Live OBS must confirm that AG99live Live2D is listed, captures a transparent frame at the required frame rate, and remains usable after transparent-window recovery."
+    - "Superseded by the Spout2 output path below."
+
+spout2_live2d_output:
+  recorded_at: "2026-09-28"
+  class: feature
+  risk: high
+  scope:
+    - "Publish only the transparent Live2D canvas to the Windows-only Spout Sender named AG99live.Live2D."
+    - "Use one isolated native helper process; Electron retains child-process ownership and the renderer cannot invoke the Spout DLL directly."
+    - "Restore the pet window's taskbar exclusion because OBS receives the direct Spout source instead of a desktop-composited window capture."
+  non_actions:
+    - "Do not alter the Adapter, Timeline, ModelEngine, audio, or input-overlay paths."
+    - "Do not capture the desktop, terminal, settings, or input overlay."
+  validation:
+    - "The MSVC-built helper accepts a framed RGBA input and publishes AG99live.Live2D, verified through the installed Spout receiver's sender enumeration."
+    - "The Spout Sender build and full frontend production build, including renderer, WebSDK, and Electron main-process typechecks, pass."
+  evidence_gap:
+    - "Live OBS must add Spout2 Capture, select AG99live.Live2D, and confirm transparency, alpha edge quality, 30 FPS behavior, and recovery after the desktop app restarts."
 
 plugin_prompt_migration:
   date: '2026-09-18'

@@ -16,6 +16,7 @@ frontend/.test-out*/
 __pycache__/
 *.pyc
 *.tsbuildinfo
+*.obj
 astrbot_plugin_ag99live_adapter/debug_exports/
 *.ipynb
 analysis/

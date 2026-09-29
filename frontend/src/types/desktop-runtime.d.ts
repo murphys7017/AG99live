@@ -37,6 +37,7 @@ export interface Ag99DesktopApi {
     source: "screen";
     captured_at: string;
   } | null>;
+  publishSpoutFrame: (width: number, height: number, rgba: Uint8Array) => void;
   listNativeMicrophones: () => Promise<DesktopMicrophoneDevice[]>;
   startNativeMicrophoneCapture: (
     deviceId: string | null,

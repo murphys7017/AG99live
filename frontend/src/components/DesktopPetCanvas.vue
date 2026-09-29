@@ -4,6 +4,7 @@ import type { ModelSummary } from "../types/protocol";
 import type { Live2dPresentationSettings } from "../live2d-renderer/settings";
 import { useLive2dRenderer } from "../live2d-renderer/useLive2dRenderer";
 import { usePetWindowDrag } from "../app/usePetWindowDrag";
+import { useSpoutFramePublisher } from "../spout/useSpoutFramePublisher";
 
 const props = defineProps<{
   selectedModel: ModelSummary | null;
@@ -15,6 +16,7 @@ const selectedModelRef = toRef(props, "selectedModel");
 const live2dPresentationSettingsRef = toRef(props, "live2dPresentationSettings");
 const { containerRef, canvasRef, renderError } =
   useLive2dRenderer(selectedModelRef, live2dPresentationSettingsRef);
+useSpoutFramePublisher(canvasRef);
 const {
   isDragging,
   finishWindowDrag,

@@ -6,6 +6,7 @@
   "main": "./out/main/index.cjs",
   "scripts": {
     "dev": "node scripts/electron-vite-runner.cjs dev",
+    "build:spout-sender": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-spout-sender.ps1",
     "start": "node scripts/electron-vite-runner.cjs preview",
     "dev:web": "vite",
     "typecheck": "npm run typecheck:renderer && npm run typecheck:websdk && npm run typecheck:node",

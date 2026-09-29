@@ -4,6 +4,7 @@ import { WindowManager } from "./window-manager";
 import { setupNativeMicrophoneIpc } from "./native-microphone";
 import { registerEsp32DisplayIpc, shutdownEsp32DisplayBridge } from "./esp32-display-bridge";
 import { registerBilibiliLiveIpc } from "./bilibili-live-bridge";
+import { SpoutSender } from "./spout-sender";
 import type {
   DesktopPttEventAck,
   DesktopPttEventKind,
@@ -14,6 +15,7 @@ import type {
 
 let windowManager: WindowManager;
 let menuManager: MenuManager;
+let spoutSender: SpoutSender | null = null;
 const WM_DWMCOMPOSITIONCHANGED = 0x031e;
 const WINDOW_RECOVERY_DEBOUNCE_MS = 5000;
 
@@ -416,6 +418,14 @@ function watchWindowShortcuts(window: BrowserWindow): void {
 }
 
 function setupIpc(): void {
+  ipcMain.on("desktop:publish-spout-frame", (event, width: unknown, height: unknown, rgba: unknown) => {
+    const petWindow = windowManager.getWindow("pet");
+    if (!petWindow || petWindow.isDestroyed() || petWindow.webContents !== event.sender) {
+      return;
+    }
+    spoutSender?.publishFrame(width, height, rgba);
+  });
+
   ipcMain.handle("desktop:get-pet-cursor-target", async () => {
     const petWindow = windowManager.getWindow("pet");
     if (!petWindow || petWindow.isDestroyed() || !petWindow.isVisible()) {
@@ -667,6 +677,8 @@ app.whenReady().then(() => {
   windowManager = new WindowManager();
   menuManager = new MenuManager(windowManager);
   void menuManager;
+  spoutSender = new SpoutSender();
+  spoutSender.start();
   windowManager.createWindows();
   setupIpc();
   setupNativeMicrophoneIpc();
@@ -700,6 +712,7 @@ app.whenReady().then(() => {
 
 app.on("before-quit", () => {
   windowManager?.markAppQuitting();
+  spoutSender?.stop();
   void shutdownEsp32DisplayBridge();
 });
 

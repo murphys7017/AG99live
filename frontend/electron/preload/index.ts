@@ -74,6 +74,9 @@ const api = {
       captured_at: string;
     } | null>;
   },
+  publishSpoutFrame: (width: number, height: number, rgba: Uint8Array) => {
+    ipcRenderer.send("desktop:publish-spout-frame", width, height, rgba);
+  },
   listNativeMicrophones: () => {
     return ipcRenderer.invoke("desktop:list-native-microphones") as Promise<DesktopMicrophoneDevice[]>;
   },
