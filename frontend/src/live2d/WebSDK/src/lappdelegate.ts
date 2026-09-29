@@ -265,6 +265,7 @@ export class LAppDelegate {
 
       // 描画更新
       this._view!.render();
+      window.dispatchEvent(new Event("ag99live:live2d-frame-rendered"));
 
       // ループのために再帰呼び出し
       // 递归调用以进行循环

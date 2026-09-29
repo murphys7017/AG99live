@@ -2,6 +2,7 @@ import { onBeforeUnmount, onMounted, type Ref } from "vue";
 
 const TARGET_FPS = 30;
 const FRAME_INTERVAL_MS = 1000 / TARGET_FPS;
+const LIVE2D_FRAME_RENDERED_EVENT = "ag99live:live2d-frame-rendered";
 
 function flipRows(
   pixels: Uint8Array,
@@ -21,8 +22,6 @@ function flipRows(
 }
 
 export function useSpoutFramePublisher(canvasRef: Ref<HTMLCanvasElement | null>): void {
-  let frameHandle = 0;
-  let running = false;
   let lastPublishedAt = 0;
   let lastError = "";
 
@@ -72,11 +71,8 @@ export function useSpoutFramePublisher(canvasRef: Ref<HTMLCanvasElement | null>)
     }
   }
 
-  function loop(now: number): void {
-    if (!running) {
-      return;
-    }
-    frameHandle = requestAnimationFrame(loop);
+  function handleLive2DFrameRendered(): void {
+    const now = performance.now();
     if (lastPublishedAt !== 0 && now - lastPublishedAt < FRAME_INTERVAL_MS) {
       return;
     }
@@ -85,15 +81,10 @@ export function useSpoutFramePublisher(canvasRef: Ref<HTMLCanvasElement | null>)
   }
 
   onMounted(() => {
-    running = true;
-    frameHandle = requestAnimationFrame(loop);
+    window.addEventListener(LIVE2D_FRAME_RENDERED_EVENT, handleLive2DFrameRendered);
   });
 
   onBeforeUnmount(() => {
-    running = false;
-    if (frameHandle !== 0) {
-      cancelAnimationFrame(frameHandle);
-      frameHandle = 0;
-    }
+    window.removeEventListener(LIVE2D_FRAME_RENDERED_EVENT, handleLive2DFrameRendered);
   });
 }

@@ -55,7 +55,8 @@ spout2_live2d_output:
     - "Do not alter the Adapter, Timeline, ModelEngine, audio, or input-overlay paths."
     - "Do not capture the desktop, terminal, settings, or input overlay."
   validation:
-    - "The MSVC-built helper accepts a framed RGBA input and publishes AG99live.Live2D, verified through the installed Spout receiver's sender enumeration."
+    - "The MSVC-built helper relays a framed RGBA input to a Spout receiver; the receiver read back the sent 17,34,51,255 pixel."
+    - "The renderer publishes only after the concrete Live2D this._view.render() call completes, rather than from a separate requestAnimationFrame loop."
     - "The Spout Sender build and full frontend production build, including renderer, WebSDK, and Electron main-process typechecks, pass."
   evidence_gap:
     - "Live OBS must add Spout2 Capture, select AG99live.Live2D, and confirm transparency, alpha edge quality, 30 FPS behavior, and recovery after the desktop app restarts."
