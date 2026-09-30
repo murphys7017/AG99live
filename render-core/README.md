@@ -18,7 +18,16 @@ The current executable, `ag99-render-host`, verifies:
 - a D3D11 hardware device and swap chain can be created;
 - the Cubism Native Framework can start and initialize;
 - the D3D11 renderer backend can receive the device;
-- the frame loop can clear and present without a browser renderer.
+- a `model3.json` can be loaded from the command line;
+- the referenced `.moc3` and PNG textures can be loaded;
+- the model can be updated and rendered in the native frame loop.
 
-Model loading, texture binding, parameter updates, motions, audio/lip-sync,
+Run the host with the repository's Mk6 model:
+
+```powershell
+render-core\build\Release\ag99-render-host.exe `
+  (Resolve-Path "astrbot_plugin_ag99live_adapter\live2ds\Mk6_1.0\Mk6.model3.json")
+```
+
+Motion playback, physics, audio/lip-sync, window controls, Spout output,
 and the runtime protocol are intentionally not wired into this first slice.

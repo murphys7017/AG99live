@@ -28,14 +28,14 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CONFIGURATION_TYPES Debug Release CACHE STRING "" FORCE)
-set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
 
 add_library(ag99_cubism_core STATIC IMPORTED GLOBAL)
 set_target_properties(ag99_cubism_core PROPERTIES
   IMPORTED_LOCATION_DEBUG
-    "${CUBISM_CORE_PATH}/lib/windows/x86_64/143/Live2DCubismCore_MTd.lib"
+    "${CUBISM_CORE_PATH}/lib/windows/x86_64/143/Live2DCubismCore_MDd.lib"
   IMPORTED_LOCATION_RELEASE
-    "${CUBISM_CORE_PATH}/lib/windows/x86_64/143/Live2DCubismCore_MT.lib"
+    "${CUBISM_CORE_PATH}/lib/windows/x86_64/143/Live2DCubismCore_MD.lib"
   INTERFACE_INCLUDE_DIRECTORIES "${CUBISM_CORE_PATH}/include"
 )
 
@@ -82,4 +82,5 @@ target_link_libraries(ag99-render-host PRIVATE
   d3d11
   d3dcompiler
   dwmapi
+  shell32
 )
