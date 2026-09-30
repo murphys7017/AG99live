@@ -5,6 +5,8 @@ import {
   type Esp32DisplayConfig,
 } from "./types";
 
+const LIVE2D_FRAME_RENDERED_EVENT = "ag99live:live2d-frame-rendered";
+
 interface PipelineOptions {
   config: () => Esp32DisplayConfig;
   connected: Ref<boolean>;
@@ -245,7 +247,6 @@ export function useEsp32DisplayPipeline(options: PipelineOptions): PipelineStatu
   const lastError = ref("");
   const active = ref(false);
 
-  let rafHandle = 0;
   let running = false;
   let composite: CompositeTarget | null = null;
   let lastSentAt = 0;
@@ -255,6 +256,7 @@ export function useEsp32DisplayPipeline(options: PipelineOptions): PipelineStatu
   let captureInFlight = false;
   let live2dCanvas: HTMLCanvasElement | null = null;
   let live2dGl: WebGL2RenderingContext | null = null;
+  let listening = false;
   const readback = {
     width: 0,
     height: 0,
@@ -262,12 +264,21 @@ export function useEsp32DisplayPipeline(options: PipelineOptions): PipelineStatu
     row: new Uint8Array(0),
   };
 
-  function stop(): void {
-    if (rafHandle !== 0) {
-      cancelAnimationFrame(rafHandle);
-      rafHandle = 0;
+  function setListening(next: boolean): void {
+    if (listening === next) {
+      return;
     }
+    listening = next;
+    if (next) {
+      window.addEventListener(LIVE2D_FRAME_RENDERED_EVENT, handleLive2DFrameRendered);
+    } else {
+      window.removeEventListener(LIVE2D_FRAME_RENDERED_EVENT, handleLive2DFrameRendered);
+    }
+  }
+
+  function stop(): void {
     running = false;
+    setListening(false);
     active.value = false;
   }
 
@@ -358,11 +369,11 @@ export function useEsp32DisplayPipeline(options: PipelineOptions): PipelineStatu
     }
   }
 
-  function loop(now: number): void {
+  function handleLive2DFrameRendered(): void {
     if (!running) {
       return;
     }
-    rafHandle = requestAnimationFrame(loop);
+    const now = performance.now();
     const config = options.config();
     if (!options.connected.value || !config.enabled) {
       lastSentAt = 0;
@@ -393,7 +404,7 @@ export function useEsp32DisplayPipeline(options: PipelineOptions): PipelineStatu
     }
     running = true;
     active.value = true;
-    rafHandle = requestAnimationFrame(loop);
+    setListening(true);
   }
 
   watch(

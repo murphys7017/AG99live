@@ -1,3 +1,26 @@
+frontend_rendering_performance_followup:
+  recorded_at: "2026-09-30"
+  class: perf_refactor
+  risk: medium
+  scope:
+    - "Short-circuit idle ActiveParameterMixer frames before contribution graph and base snapshot allocation."
+    - "Reuse the ActiveParameterRuntime speech-gain callback instead of creating it per frame."
+    - "Drive ESP32 frame capture from the existing Live2D rendered-frame event instead of an independent RAF polling loop."
+    - "Initialize WebGL clear depth once instead of resetting it every render frame."
+  non_actions:
+    - "Keep SPOUT and ESP32 manual enable/disable settings unchanged."
+    - "Do not change external frame formats, crop behavior, JPEG settings, or device IPC."
+    - "Do not alter Cubism renderer state restoration or preserveDrawingBuffer behavior."
+  validation:
+    - "`npm run typecheck:renderer` passed."
+    - "`npm run typecheck:websdk` passed."
+    - "`npm run typecheck:node` passed."
+    - "`npm run build:web` passed."
+    - "`git diff --check` passed."
+  evidence_gap:
+    - "Live Electron/Live2D/ESP32 hardware acceptance is still required to confirm event-driven capture cadence and output delivery."
+    - "The existing frontend test compile remains blocked by strict errors in the vendored Cubism Framework and missing Live2DCubismCore test globals."
+
 model_sync_projection_cleanup:
   recorded_at: "2026-09-25"
   scope:

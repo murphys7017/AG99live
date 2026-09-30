@@ -33,6 +33,8 @@ export interface ActiveParameterFrameResult {
 export class ActiveParameterRuntime {
   private readonly mixer = new ActiveParameterMixer();
   private readonly speechSignals = new SpeechSignalRuntime();
+  private readonly getSpeechAudioGain = (axisId: string): number =>
+    this.speechSignals.getSpeechAudioGain(axisId);
   private interactionSway: ActiveInteractionSwayState | null = null;
   private interactionGaze: ActiveInteractionGazeState | null = null;
 
@@ -117,7 +119,7 @@ export class ActiveParameterRuntime {
       ...input,
       interactionSway: this.interactionSway,
       interactionGaze: this.interactionGaze,
-      getSpeechAudioGain: (axisId) => this.speechSignals.getSpeechAudioGain(axisId),
+      getSpeechAudioGain: this.getSpeechAudioGain,
     });
     if (execution.ok === false) {
       return {

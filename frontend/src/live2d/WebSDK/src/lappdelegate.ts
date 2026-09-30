@@ -83,6 +83,7 @@ export class LAppDelegate {
     // 透明设置
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.clearDepth(1.0);
 
     const supportTouch: boolean = 'ontouchend' in canvas;
     this._boundCanvas = canvas;
@@ -258,8 +259,6 @@ export class LAppDelegate {
       // カラーバッファや深度バッファをクリアする
       // 清除颜色缓冲区和深度缓冲区
       gl!.clear(gl!.COLOR_BUFFER_BIT | gl!.DEPTH_BUFFER_BIT);
-
-      gl!.clearDepth(1.0);
 
       // 透過設定
       gl!.enable(gl!.BLEND);

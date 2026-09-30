@@ -160,6 +160,20 @@ export interface DirectPlanContributionCollection {
   released: boolean;
 }
 
+const EMPTY_DIRECT_PLAN_COLLECTION: DirectPlanContributionCollection = {
+  contributions: [],
+  failure: null,
+  shouldLogFrame: false,
+  elapsedMs: null,
+  allBindingsActivated: false,
+  nominalReleaseReached: false,
+  releaseEligible: false,
+  released: false,
+};
+
+const EMPTY_PARAMETER_BASE_SNAPSHOTS: ReadonlyMap<number, ParameterBaseSnapshot> =
+  new Map();
+
 export interface ActiveParameterFrameInput {
   model: CubismModel | null;
   directPlan: ActiveDirectParameterFrameState | null;
@@ -197,6 +211,25 @@ export class ActiveParameterMixer {
     const model = input.model;
     if (!model) {
       return { ok: false, owner: "mixed", reason: "parameter_mixer_model_unavailable" };
+    }
+
+    const hasLipSyncSource = input.lipSyncEnabled
+      && input.lipSyncActive
+      && input.lipSyncParameterIds.getSize() > 0;
+    if (
+      input.directPlan === null
+      && input.interactionSway === null
+      && input.interactionGaze === null
+      && !hasLipSyncSource
+    ) {
+      // Most idle frames have no active parameter source. Avoid rebuilding the
+      // contribution graph and base snapshots when there is nothing to write.
+      return {
+        ok: true,
+        parameters: [],
+        directPlan: EMPTY_DIRECT_PLAN_COLLECTION,
+        lipSyncContributionCount: 0,
+      };
     }
 
     const directPlan = this.collectDirectPlanContributions(
@@ -271,6 +304,10 @@ export class ActiveParameterMixer {
     contributions: readonly ParameterContribution[],
     baseSnapshots: ReadonlyMap<number, ParameterBaseSnapshot>,
   ): ActiveParameterMixerResolution {
+    if (contributions.length === 0) {
+      return { ok: true, parameters: [], directPresentationSettled: true };
+    }
+
     const grouped = new Map<number, {
       parameterIdRaw: string;
       contributions: Array<ParameterContribution & { sequence: number }>;
@@ -623,6 +660,10 @@ export class ActiveParameterMixer {
     model: CubismModel,
     contributions: readonly ParameterContribution[],
   ): ReadonlyMap<number, ParameterBaseSnapshot> {
+    if (contributions.length === 0) {
+      return EMPTY_PARAMETER_BASE_SNAPSHOTS;
+    }
+
     const snapshots = new Map<number, ParameterBaseSnapshot>();
     for (const { parameterIndex } of contributions) {
       if (snapshots.has(parameterIndex)) {
