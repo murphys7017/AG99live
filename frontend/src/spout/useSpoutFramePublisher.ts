@@ -1,4 +1,4 @@
-import { onBeforeUnmount, onMounted, type Ref } from "vue";
+import { onBeforeUnmount, onMounted, watch, type Ref } from "vue";
 
 const TARGET_FPS = 30;
 const FRAME_INTERVAL_MS = 1000 / TARGET_FPS;
@@ -8,31 +8,63 @@ function flipRows(
   pixels: Uint8Array,
   width: number,
   height: number,
+  scratchRow: Uint8Array,
 ): void {
   const rowBytes = width * 4;
-  const row = new Uint8Array(rowBytes);
   for (let top = 0; top < Math.floor(height / 2); top += 1) {
     const bottom = height - top - 1;
     const topOffset = top * rowBytes;
     const bottomOffset = bottom * rowBytes;
-    row.set(pixels.subarray(topOffset, topOffset + rowBytes));
+    scratchRow.set(pixels.subarray(topOffset, topOffset + rowBytes));
     pixels.copyWithin(topOffset, bottomOffset, bottomOffset + rowBytes);
-    pixels.set(row, bottomOffset);
+    pixels.set(scratchRow, bottomOffset);
   }
 }
 
-export function useSpoutFramePublisher(canvasRef: Ref<HTMLCanvasElement | null>): void {
+export function useSpoutFramePublisher(
+  canvasRef: Ref<HTMLCanvasElement | null>,
+  enabled: Ref<boolean>,
+): void {
   let lastPublishedAt = 0;
   let lastError = "";
+  let cachedCanvas: HTMLCanvasElement | null = null;
+  let cachedGl: WebGL2RenderingContext | null = null;
+  let pixelBuffer: Uint8Array | null = null;
+  let rowBuffer: Uint8Array | null = null;
+  let pixelWidth = 0;
+  let pixelHeight = 0;
+  let mounted = false;
+  let listening = false;
+
+  function setListening(next: boolean): void {
+    if (!mounted || listening === next) {
+      return;
+    }
+    listening = next;
+    if (next) {
+      window.addEventListener(LIVE2D_FRAME_RENDERED_EVENT, handleLive2DFrameRendered);
+    } else {
+      window.removeEventListener(LIVE2D_FRAME_RENDERED_EVENT, handleLive2DFrameRendered);
+    }
+  }
 
   function publishFrame(): void {
     const publish = window.ag99desktop?.publishSpoutFrame;
     const canvas = canvasRef.value;
-    if (!publish || !canvas) {
+    if (!enabled.value || !publish || !canvas) {
       return;
     }
 
-    const gl = canvas.getContext("webgl2");
+    if (cachedCanvas !== canvas) {
+      cachedCanvas = canvas;
+      cachedGl = canvas.getContext("webgl2");
+      pixelBuffer = null;
+      rowBuffer = null;
+      pixelWidth = 0;
+      pixelHeight = 0;
+    }
+
+    const gl = cachedGl;
     if (!gl) {
       return;
     }
@@ -43,7 +75,14 @@ export function useSpoutFramePublisher(canvasRef: Ref<HTMLCanvasElement | null>)
       return;
     }
 
-    const pixels = new Uint8Array(width * height * 4);
+    if (width !== pixelWidth || height !== pixelHeight || !pixelBuffer || !rowBuffer) {
+      pixelWidth = width;
+      pixelHeight = height;
+      pixelBuffer = new Uint8Array(width * height * 4);
+      rowBuffer = new Uint8Array(width * 4);
+    }
+
+    const pixels = pixelBuffer;
     const previousFramebuffer = gl.getParameter(gl.FRAMEBUFFER_BINDING) as WebGLFramebuffer | null;
     const previousPackAlignment = gl.getParameter(gl.PACK_ALIGNMENT) as number;
     try {
@@ -54,7 +93,7 @@ export function useSpoutFramePublisher(canvasRef: Ref<HTMLCanvasElement | null>)
       gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
       // The Live2D WebGL drawing buffer is premultiplied-alpha. Preserve that
       // representation so OBS can blend it with the Spout2 premultiplied mode.
-      flipRows(pixels, width, height);
+      flipRows(pixels, width, height, rowBuffer);
       publish(width, height, pixels);
       lastError = "";
     } catch (error) {
@@ -81,10 +120,15 @@ export function useSpoutFramePublisher(canvasRef: Ref<HTMLCanvasElement | null>)
   }
 
   onMounted(() => {
-    window.addEventListener(LIVE2D_FRAME_RENDERED_EVENT, handleLive2DFrameRendered);
+    mounted = true;
+    setListening(enabled.value);
   });
 
+  const stopEnabledWatch = watch(enabled, setListening);
+
   onBeforeUnmount(() => {
-    window.removeEventListener(LIVE2D_FRAME_RENDERED_EVENT, handleLive2DFrameRendered);
+    stopEnabledWatch();
+    setListening(false);
+    mounted = false;
   });
 }

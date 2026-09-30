@@ -113,8 +113,6 @@ export class LAppView {
   public render(): void {
     gl.useProgram(this._programId);
 
-    gl.flush();
-
     const live2DManager: LAppLive2DManager = LAppLive2DManager.getInstance();
 
     live2DManager.setViewMatrix(this._viewMatrix);

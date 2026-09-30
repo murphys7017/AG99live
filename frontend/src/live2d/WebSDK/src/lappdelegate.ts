@@ -14,6 +14,8 @@ import { LAppTextureManager } from './lapptexturemanager';
 import { LAppView } from './lappview';
 import { canvas, gl } from './lappglmanager';
 
+const LIVE2D_FRAME_RENDERED_EVENT = new Event('ag99live:live2d-frame-rendered');
+
 export let s_instance: LAppDelegate | null = null;
 export let frameBuffer: WebGLFramebuffer | null = null;
 
@@ -265,7 +267,7 @@ export class LAppDelegate {
 
       // 描画更新
       this._view!.render();
-      window.dispatchEvent(new Event("ag99live:live2d-frame-rendered"));
+      window.dispatchEvent(LIVE2D_FRAME_RENDERED_EVENT);
 
       // ループのために再帰呼び出し
       // 递归调用以进行循环

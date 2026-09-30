@@ -167,7 +167,8 @@ export class LAppLive2DManager {
     const modelCount: number = this._models.getSize();
 
     for (let i = 0; i < modelCount; ++i) {
-      const projection: CubismMatrix44 = new CubismMatrix44();
+      const projection = this._projection;
+      projection.getArray().set(IDENTITY_MATRIX);
       const model: LAppModel = this.getModel(i);
 
       if (model.getModel()) {
@@ -232,12 +233,14 @@ export class LAppLive2DManager {
    */
   constructor() {
     this._viewMatrix = new CubismMatrix44();
+    this._projection = new CubismMatrix44();
     this._models = new csmVector<LAppModel>();
     this._sceneIndex = 0;
     this.changeScene(this._sceneIndex);
   }
 
   _viewMatrix: CubismMatrix44; // モデル描画に用いるview行列
+  _projection: CubismMatrix44; // reused per-frame projection matrix
   _models: csmVector<LAppModel>; // モデルインスタンスのコンテナ
   _sceneIndex: number; // 表示するシーンのインデックス値
   // モーション再生終了のコールバック関数
@@ -246,3 +249,10 @@ export class LAppLive2DManager {
     console.log(self);
   };
 }
+
+const IDENTITY_MATRIX = new Float32Array([
+  1.0, 0.0, 0.0, 0.0,
+  0.0, 1.0, 0.0, 0.0,
+  0.0, 0.0, 1.0, 0.0,
+  0.0, 0.0, 0.0, 1.0,
+]);

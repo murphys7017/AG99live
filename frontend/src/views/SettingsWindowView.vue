@@ -3,6 +3,7 @@ import { onMounted } from "vue";
 import DesktopWindowPanel from "../components/DesktopWindowPanel.vue";
 import { useSettingsWindow } from "../settings/useSettingsWindow";
 import Esp32DisplaySettingsCard from "../esp32-display/Esp32DisplaySettingsCard.vue";
+import SpoutSettingsCard from "../spout/SpoutSettingsCard.vue";
 
 const {
   bridgeState,
@@ -621,6 +622,7 @@ onMounted(() => {
           </div>
         </header>
         <div class="settings-grid">
+          <SpoutSettingsCard />
           <Esp32DisplaySettingsCard />
         </div>
       </section>

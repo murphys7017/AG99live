@@ -50,6 +50,11 @@ interface CompositeTarget {
   context: CanvasRenderingContext2D;
   width: number;
   height: number;
+  sourceCanvas: HTMLCanvasElement;
+  sourceContext: CanvasRenderingContext2D;
+  sourceImageData: ImageData | null;
+  sourceWidth: number;
+  sourceHeight: number;
 }
 
 function createCompositeCanvas(size: number): CompositeTarget | null {
@@ -63,7 +68,24 @@ function createCompositeCanvas(size: number): CompositeTarget | null {
   if (!context) {
     return null;
   }
-  return { canvas, context, width: size, height: size };
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = "high";
+  const sourceCanvas = document.createElement("canvas");
+  const sourceContext = sourceCanvas.getContext("2d");
+  if (!sourceContext) {
+    return null;
+  }
+  return {
+    canvas,
+    context,
+    width: size,
+    height: size,
+    sourceCanvas,
+    sourceContext,
+    sourceImageData: null,
+    sourceWidth: 0,
+    sourceHeight: 0,
+  };
 }
 
 function readCropRegion(
@@ -71,6 +93,7 @@ function readCropRegion(
   sourceWidth: number,
   sourceHeight: number,
   crop: Esp32DisplayConfig["crop"],
+  readback: { width: number; height: number; pixels: Uint8Array; row: Uint8Array },
 ): { width: number; height: number; pixels: Uint8Array } | null {
   if (sourceWidth <= 0 || sourceHeight <= 0) {
     return null;
@@ -85,7 +108,13 @@ function readCropRegion(
   if (cropW <= 0 || cropH <= 0) {
     return null;
   }
-  const pixels = new Uint8Array(cropW * cropH * 4);
+  if (readback.width !== cropW || readback.height !== cropH) {
+    readback.width = cropW;
+    readback.height = cropH;
+    readback.pixels = new Uint8Array(cropW * cropH * 4);
+    readback.row = new Uint8Array(cropW * 4);
+  }
+  const pixels = readback.pixels;
   const webglY = sourceHeight - cropTopY - cropH;
   const prevFbo = gl.getParameter(gl.FRAMEBUFFER_BINDING) as WebGLFramebuffer | null;
   const prevPack = gl.getParameter(gl.PACK_ALIGNMENT) as number;
@@ -101,14 +130,18 @@ function readCropRegion(
       gl.bindFramebuffer(gl.FRAMEBUFFER, prevFbo);
     }
   }
-  flipRowsInPlace(pixels, cropW, cropH);
+  flipRowsInPlace(pixels, cropW, cropH, readback.row);
   unpremultiplyAlphaInPlace(pixels);
   return { width: cropW, height: cropH, pixels };
 }
 
-function flipRowsInPlace(pixels: Uint8Array, width: number, height: number): void {
+function flipRowsInPlace(
+  pixels: Uint8Array,
+  width: number,
+  height: number,
+  temp: Uint8Array,
+): void {
   const rowSize = width * 4;
-  const temp = new Uint8Array(rowSize);
   for (let y = 0; y < Math.floor(height / 2); y += 1) {
     const top = y * rowSize;
     const bottom = (height - y - 1) * rowSize;
@@ -153,15 +186,19 @@ function drawImageDataOnCanvas(
   source: { pixels: Uint8Array; width: number; height: number },
   scaleMode: Esp32DisplayConfig["scaleMode"],
 ): void {
-  const imageData = new ImageData(new Uint8ClampedArray(source.pixels), source.width, source.height);
-  const tempCanvas = document.createElement("canvas");
-  tempCanvas.width = source.width;
-  tempCanvas.height = source.height;
-  const tempContext = tempCanvas.getContext("2d");
-  if (!tempContext) {
+  if (target.sourceWidth !== source.width || target.sourceHeight !== source.height) {
+    target.sourceCanvas.width = source.width;
+    target.sourceCanvas.height = source.height;
+    target.sourceImageData = new ImageData(source.width, source.height);
+    target.sourceWidth = source.width;
+    target.sourceHeight = source.height;
+  }
+  const imageData = target.sourceImageData;
+  if (!imageData) {
     return;
   }
-  tempContext.putImageData(imageData, 0, 0);
+  imageData.data.set(source.pixels);
+  target.sourceContext.putImageData(imageData, 0, 0);
   const scale = scaleMode === "stretch"
     ? null
     : scaleMode === "cover"
@@ -171,10 +208,8 @@ function drawImageDataOnCanvas(
   const destH = scale === null ? target.height : Math.max(1, Math.round(source.height * scale));
   const destX = scale === null ? 0 : Math.round((target.width - destW) * 0.5);
   const destY = scale === null ? 0 : Math.round((target.height - destH) * 0.5);
-  context.imageSmoothingEnabled = true;
-  context.imageSmoothingQuality = "high";
   context.drawImage(
-    tempCanvas,
+    target.sourceCanvas,
     0,
     0,
     source.width,
@@ -218,6 +253,14 @@ export function useEsp32DisplayPipeline(options: PipelineOptions): PipelineStatu
   let windowStart = 0;
   let canvasMissingLoggedAt = 0;
   let captureInFlight = false;
+  let live2dCanvas: HTMLCanvasElement | null = null;
+  let live2dGl: WebGL2RenderingContext | null = null;
+  const readback = {
+    width: 0,
+    height: 0,
+    pixels: new Uint8Array(0),
+    row: new Uint8Array(0),
+  };
 
   function stop(): void {
     if (rafHandle !== 0) {
@@ -253,7 +296,11 @@ export function useEsp32DisplayPipeline(options: PipelineOptions): PipelineStatu
         return;
       }
       canvasMissingLoggedAt = 0;
-      const gl = getWebGL2Context(canvas);
+      if (live2dCanvas !== canvas) {
+        live2dCanvas = canvas;
+        live2dGl = getWebGL2Context(canvas);
+      }
+      const gl = live2dGl;
       if (!gl) {
         lastError.value = "webgl2_unavailable";
         return;
@@ -263,6 +310,7 @@ export function useEsp32DisplayPipeline(options: PipelineOptions): PipelineStatu
         gl.drawingBufferWidth || canvas.width,
         gl.drawingBufferHeight || canvas.height,
         config.crop,
+        readback,
       );
       if (!region) {
         lastError.value = "crop_invalid";
@@ -315,13 +363,14 @@ export function useEsp32DisplayPipeline(options: PipelineOptions): PipelineStatu
       return;
     }
     rafHandle = requestAnimationFrame(loop);
-    if (!options.connected.value) {
+    const config = options.config();
+    if (!options.connected.value || !config.enabled) {
       lastSentAt = 0;
       windowStart = 0;
       frameCountInWindow = 0;
       return;
     }
-    const targetInterval = 1000 / Math.max(1, options.config().fps);
+    const targetInterval = 1000 / Math.max(1, config.fps);
     if (lastSentAt !== 0 && now - lastSentAt < targetInterval) {
       return;
     }
@@ -348,9 +397,9 @@ export function useEsp32DisplayPipeline(options: PipelineOptions): PipelineStatu
   }
 
   watch(
-    () => options.connected.value,
-    (next) => {
-      if (next) {
+    () => [options.connected.value, options.config().enabled] as const,
+    ([connected, enabled]) => {
+      if (connected && enabled) {
         start();
       } else {
         stop();
@@ -361,6 +410,8 @@ export function useEsp32DisplayPipeline(options: PipelineOptions): PipelineStatu
 
   onBeforeUnmount(() => {
     stop();
+    live2dCanvas = null;
+    live2dGl = null;
   });
 
   return {
