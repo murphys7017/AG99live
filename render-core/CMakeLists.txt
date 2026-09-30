@@ -16,12 +16,19 @@ endif()
 set(CUBISM_CORE_PATH "${CUBISM_SDK_ROOT}/Core")
 set(CUBISM_FRAMEWORK_PATH "${CUBISM_SDK_ROOT}/Framework")
 set(DIRECTXTK_PATH "${CUBISM_SDK_ROOT}/Samples/D3D11/thirdParty/DirectXTK")
+set(CUBISM_SHADER_PATH
+  "${CUBISM_FRAMEWORK_PATH}/src/Rendering/D3D11/Shaders")
+set(AG99_RUNTIME_ROOT
+  "${CMAKE_CURRENT_SOURCE_DIR}/../runtime-core")
 
 if(NOT EXISTS "${CUBISM_CORE_PATH}/include/Live2DCubismCore.h")
   message(FATAL_ERROR "Cubism Core was not found under ${CUBISM_CORE_PATH}")
 endif()
 if(NOT EXISTS "${DIRECTXTK_PATH}/Inc")
   message(FATAL_ERROR "DirectXTK was not found under ${DIRECTXTK_PATH}")
+endif()
+if(NOT EXISTS "${CUBISM_SHADER_PATH}/CubismEffect.fx")
+  message(FATAL_ERROR "Cubism D3D11 shaders were not found under ${CUBISM_SHADER_PATH}")
 endif()
 
 set(CMAKE_CXX_STANDARD 20)
@@ -52,6 +59,10 @@ add_executable(ag99-render-host WIN32
   src/main.cpp
 )
 
+add_subdirectory("${AG99_RUNTIME_ROOT}"
+  "${CMAKE_CURRENT_BINARY_DIR}/runtime-core"
+  EXCLUDE_FROM_ALL)
+
 set(FRAMEWORK_SOURCE D3D11)
 add_subdirectory("${CUBISM_FRAMEWORK_PATH}"
   "${CMAKE_CURRENT_BINARY_DIR}/cubism-framework")
@@ -69,6 +80,7 @@ target_compile_definitions(ag99-render-host PRIVATE
   _UNICODE
   NOMINMAX
   WIN32_LEAN_AND_MEAN
+  AG99_CUBISM_SHADER_DIR="${CUBISM_SHADER_PATH}"
 )
 target_include_directories(ag99-render-host PRIVATE
   "${CUBISM_CORE_PATH}/include"
@@ -79,8 +91,10 @@ target_link_libraries(ag99-render-host PRIVATE
   Framework
   ag99_cubism_core
   ag99_directxtk
+  ag99_runtime_core
   d3d11
   d3dcompiler
   dwmapi
   shell32
+  winmm
 )

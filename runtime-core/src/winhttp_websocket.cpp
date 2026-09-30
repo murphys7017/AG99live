@@ -89,6 +89,7 @@ bool WinHttpWebSocketClient::connect(
   if (!impl_->session) {
     return false;
   }
+  WinHttpSetTimeouts(impl_->session, 3000, 3000, 3000, 3000);
   impl_->connection = WinHttpConnect(
       impl_->session,
       components.lpszHostName,

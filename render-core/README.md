@@ -21,6 +21,11 @@ The current executable, `ag99-render-host`, verifies:
 - a `model3.json` can be loaded from the command line;
 - the referenced `.moc3` and PNG textures can be loaded;
 - the model can be updated and rendered in the native frame loop.
+- a tray icon can show, hide, or exit the runtime;
+- the model window can be moved by dragging the canvas;
+- the native host can connect to the Adapter at `ws://127.0.0.1:12396`;
+- cached WAV audio from `output.segment` can be downloaded and played;
+- playback drives the model's `ParamMouthOpenY` parameter.
 
 Run the host with the repository's Mk6 model:
 
@@ -29,5 +34,9 @@ render-core\build\Release\ag99-render-host.exe `
   (Resolve-Path "astrbot_plugin_ag99live_adapter\live2ds\Mk6_1.0\Mk6.model3.json")
 ```
 
-Motion playback, physics, audio/lip-sync, window controls, Spout output,
-and the runtime protocol are intentionally not wired into this first slice.
+The current demo still uses the existing D3D11 HWND swap chain, so the
+background is opaque. True per-pixel transparent composition, Spout output,
+full motion-plan playback, microphone capture, and production audio amplitude
+analysis remain the next integration slices. The native runtime is not a
+second settings application: the existing frontend remains the source of
+configuration, while this host consumes the resulting runtime inputs.
