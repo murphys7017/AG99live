@@ -8,19 +8,22 @@ from ...motion.payload_validation import (
     describe_axis_descriptors,
     build_prompt_axis_lookup,
 )
+from ...motion.resource_catalog import validate_motion_resource_id
 from ...protocol.schema_versions import MOTION_INTENT_V4_SCHEMA_VERSION
+
 
 def _project_reference_examples_for_prompt(
     examples: list[Any],
     *,
     allowed_axis_ids: set[str],
     available_levels_by_axis: dict[str, set[int]],
+    resource_candidates: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     for item in examples:
         if not isinstance(item, dict):
             raise ValueError("motion_reference_example_shape_invalid")
-        input_text = str(item.get("input") or "").strip()
+        input_text = str(item.get("input") or item.get("user_text") or "").strip()
         output = item.get("output")
         if not input_text or not isinstance(output, dict):
             raise ValueError("motion_reference_example_shape_invalid")
@@ -69,9 +72,31 @@ def _project_reference_examples_for_prompt(
             raise ValueError("motion_reference_example_motion_resource_invalid")
         if expression_resource_id and motion_resource_id:
             raise ValueError("motion_reference_example_resource_conflict")
+        expression_conflicting_axis_ids: set[str] = set()
         if expression_resource_id:
+            if resource_candidates is not None and not validate_motion_resource_id(
+                expression_resource_id,
+                candidates=resource_candidates,
+                resource_type="expression",
+            ):
+                continue
+            expression_conflicting_axis_ids = (
+                _resolve_resource_conflicting_axis_ids(
+                    expression_resource_id,
+                    resource_candidates,
+                    resource_type="expression",
+                )
+                if resource_candidates is not None
+                else set()
+            )
             projected_output["expression_resource_id"] = expression_resource_id.strip()
         if motion_resource_id:
+            if resource_candidates is not None and not validate_motion_resource_id(
+                motion_resource_id,
+                candidates=resource_candidates,
+                resource_type="motion",
+            ):
+                continue
             projected_output["motion_resource_id"] = motion_resource_id.strip()
         if motion_resource_id:
             if expression_resource_id:
@@ -83,6 +108,7 @@ def _project_reference_examples_for_prompt(
                 output.get("axis_levels"),
                 allowed_axis_ids=allowed_axis_ids,
                 available_levels_by_axis=available_levels_by_axis,
+                excluded_axis_ids=expression_conflicting_axis_ids,
             )
             if has_axis_levels
             else {}
@@ -100,6 +126,7 @@ def _project_reference_examples_for_prompt(
                         step.get("axis_levels"),
                         allowed_axis_ids=allowed_axis_ids,
                         available_levels_by_axis=available_levels_by_axis,
+                        excluded_axis_ids=expression_conflicting_axis_ids,
                     )
                     if not step_levels:
                         projected_steps = []
@@ -131,29 +158,80 @@ def _project_example_axis_levels(
     *,
     allowed_axis_ids: set[str],
     available_levels_by_axis: dict[str, set[int]],
+    excluded_axis_ids: set[str] | None = None,
 ) -> dict[str, int]:
     if not isinstance(value, dict):
         raise ValueError("motion_reference_example_axis_levels_invalid")
     result: dict[str, int] = {}
+    excluded_axis_ids = excluded_axis_ids or set()
     for axis_id, level in value.items():
         normalized_axis_id = str(axis_id).strip()
-        if normalized_axis_id not in allowed_axis_ids:
+        if (
+            normalized_axis_id not in allowed_axis_ids
+            or normalized_axis_id in excluded_axis_ids
+        ):
             continue
         if (
             not isinstance(level, int)
             or isinstance(level, bool)
             or not -4 <= level <= 4
         ):
-            raise ValueError(
-                f"motion_reference_example_axis_level_invalid:{normalized_axis_id}"
-            )
-        if level not in available_levels_by_axis.get(normalized_axis_id, set()):
-            raise ValueError(
-                "motion_reference_example_axis_level_unavailable:"
-                f"{normalized_axis_id}:{level}"
-            )
-        result[normalized_axis_id] = level
+            continue
+        available_levels = available_levels_by_axis.get(normalized_axis_id, set())
+        projected_level = _nearest_available_example_level(
+            level,
+            available_levels,
+        )
+        if projected_level is None:
+            continue
+        result[normalized_axis_id] = projected_level
     return result
+
+
+def _resolve_resource_conflicting_axis_ids(
+    resource_id: str,
+    resource_candidates: list[dict[str, Any]],
+    *,
+    resource_type: str,
+) -> set[str]:
+    normalized_resource_id = str(resource_id or "").strip().lower()
+    for candidate in resource_candidates:
+        if not isinstance(candidate, dict):
+            continue
+        if str(candidate.get("resource_type") or "").strip() != resource_type:
+            continue
+        if (
+            str(candidate.get("resource_id") or "").strip().lower()
+            != normalized_resource_id
+        ):
+            continue
+        return {
+            str(axis_id).strip()
+            for key in ("conflicting_axis_ids", "conflicting_prompt_axis_ids")
+            for axis_id in candidate.get(key) or []
+            if str(axis_id).strip()
+        }
+    return set()
+
+
+def _nearest_available_example_level(
+    requested_level: int,
+    available_levels: set[int],
+) -> int | None:
+    if not available_levels:
+        return None
+    if requested_level in available_levels:
+        return requested_level
+    return min(
+        available_levels,
+        key=lambda level: (
+            abs(level - requested_level),
+            0 if level and (level > 0) == (requested_level > 0) else 1,
+            abs(level),
+            level,
+        ),
+    )
+
 
 def _select_prompt_resource_candidates(
     resources: list[Any],

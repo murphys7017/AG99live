@@ -20,22 +20,12 @@ from ...motion.payload_validation import (
     describe_axis_descriptor,
     resolve_axis_neutral_value,
 )
+from ...motion.resource_catalog import build_motion_resource_candidates
 from ...prompts.motion_selector import resolve_motion_reference_examples
 from ...prompts.semantic_axis_prompt import (
     format_profile_axis_prompt_line,
     profile_prompt_axes,
     resolve_available_axis_levels,
-)
-
-PROMPT_VARIATION_AXIS_IDS = (
-    "head_yaw",
-    "head_roll",
-    "head_pitch",
-    "body_yaw",
-    "body_roll",
-    "body_pitch",
-    "gaze_x",
-    "gaze_y",
 )
 
 def _record_motion_prompt_reference_observation(
@@ -102,11 +92,15 @@ def _build_motion_runtime_reference_examples(
         runtime_state=runtime_state,
         request_text=_extract_motion_prompt_input_text(event),
     )
+    resource_candidates = build_motion_resource_candidates(
+        runtime_state=runtime_state,
+    )
     return {
         "examples": _project_reference_examples_for_prompt(
             resolution["examples"],
             allowed_axis_ids=allowed_axis_ids,
             available_levels_by_axis=available_levels_by_axis,
+            resource_candidates=resource_candidates,
         ),
         "diagnostics": list(resolution["diagnostics"]),
     }
@@ -132,6 +126,11 @@ def _build_motion_variation_payload(
     if not history:
         return {}
     snapshot = history[-1]
+    variation_axis_ids = _resolve_prompt_variation_axis_ids(
+        runtime_state,
+        history,
+    )
+    variation_axis_id_set = set(variation_axis_ids)
 
     axis_levels = _resolve_snapshot_axis_levels(snapshot)
     motion_steps = snapshot.get("motion_steps")
@@ -155,7 +154,7 @@ def _build_motion_variation_payload(
 
     key_axes: list[dict[str, Any]] = []
     key_axis_levels: dict[str, int] = {}
-    for axis_id in PROMPT_VARIATION_AXIS_IDS:
+    for axis_id in variation_axis_ids:
         axis_level = axis_levels.get(axis_id) if isinstance(axis_levels, dict) else None
         if isinstance(axis_level, int) and not isinstance(axis_level, bool) and -4 <= axis_level <= 4:
             key_axes.append({"axis_id": axis_id, "level": axis_level})
@@ -190,7 +189,7 @@ def _build_motion_variation_payload(
         key_levels = {
             axis_id: level
             for axis_id, level in history_levels.items()
-            if axis_id in PROMPT_VARIATION_AXIS_IDS
+            if axis_id in variation_axis_id_set
         }
         directions = {
             axis_id: 1 if level > 0 else -1
@@ -261,6 +260,62 @@ def _build_motion_variation_payload(
             if value not in (None, "", [], {}) or key in {"was_sequence", "guidance"}
         }
     return payload
+
+
+def _resolve_prompt_variation_axis_ids(
+    runtime_state: Any,
+    history: list[dict[str, Any]],
+    *,
+    limit: int = 8,
+) -> list[str]:
+    """Choose variation axes from the active profile, retaining recent custom axes."""
+    latest_axis_ids: list[str] = []
+    latest = history[-1] if history else {}
+    for source in (
+        latest.get("axis_levels"),
+        latest.get("axes"),
+    ):
+        if not isinstance(source, dict):
+            continue
+        for raw_axis_id in source:
+            axis_id = str(raw_axis_id or "").strip()
+            if axis_id and axis_id not in latest_axis_ids:
+                latest_axis_ids.append(axis_id)
+
+    profile_axis_ids: list[str] = []
+    try:
+        semantic_profile = resolve_selected_semantic_axis_profile(
+            runtime_state=runtime_state,
+        )
+        prompt_axes = profile_prompt_axes(semantic_profile)
+    except Exception:  # noqa: BLE001
+        prompt_axes = []
+    ranked_axes = sorted(
+        (
+            axis
+            for axis in prompt_axes
+            if isinstance(axis, dict) and str(axis.get("id") or "").strip()
+        ),
+        key=lambda axis: (
+            0
+            if str(axis.get("semantic_group") or "").strip().lower()
+            in {"head", "body", "gaze"}
+            else 1,
+            0 if str(axis.get("control_role") or "").strip() == "primary" else 1,
+        ),
+    )
+    profile_axis_ids = [
+        str(axis.get("id") or "").strip()
+        for axis in ranked_axes
+    ]
+
+    result: list[str] = []
+    for axis_id in (*latest_axis_ids, *profile_axis_ids):
+        if axis_id and axis_id not in result:
+            result.append(axis_id)
+        if len(result) >= max(0, limit):
+            break
+    return result
 
 def _resolve_prompt_motion_history(turn_coordinator: Any) -> list[dict[str, Any]]:
     observations = getattr(turn_coordinator, "motion_observations", None)

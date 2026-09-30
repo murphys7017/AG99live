@@ -53,7 +53,7 @@ def format_profile_axis_prompt_line(
         return (
             f"- {axis_id}（{label}，{role_label}）："
             f"负方向会让角色{negative}；正方向会让角色{positive}。"
-            f"可用等级={level_range}；超出该范围的方向对这个轴没有效果。"
+            f"可用等级={level_range}；只能使用列表中的整数等级。"
             f"本轮没有对应方向的表达需要时省略此轴。{description}{suffix}"
         ).strip()
     return (
@@ -76,7 +76,7 @@ def format_axis_semantics(values: Any, *, truncate_text: Any) -> str:
 
 def _format_available_level_range(axis: dict[str, Any]) -> str:
     effective_levels = resolve_available_axis_levels(axis)
-    return f"{min(effective_levels)}..{max(effective_levels)}"
+    return "[" + ", ".join(str(level) for level in effective_levels) + "]"
 
 
 def resolve_available_axis_levels(axis: dict[str, Any]) -> list[int]:

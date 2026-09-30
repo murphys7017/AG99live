@@ -28,6 +28,7 @@ def build_motion_resource_candidates(
             seen_ids,
             item,
             resource_type="motion",
+            model=model,
             parameter_axis_lookup=parameter_axis_lookup,
         )
     for item in constraints.get("expressions") or []:
@@ -36,6 +37,7 @@ def build_motion_resource_candidates(
             seen_ids,
             item,
             resource_type="expression",
+            model=model,
             parameter_axis_lookup=parameter_axis_lookup,
         )
 
@@ -76,6 +78,7 @@ def _append_catalog_resource_candidate(
     item: Any,
     *,
     resource_type: str,
+    model: dict[str, Any],
     parameter_axis_lookup: dict[str, list[str]],
 ) -> None:
     if not isinstance(item, dict):
@@ -132,7 +135,58 @@ def _append_catalog_resource_candidate(
         )
         if conflicting_axis_ids:
             candidate["conflicting_axis_ids"] = conflicting_axis_ids
+            conflicting_prompt_axis_ids = _resolve_conflicting_prompt_axis_ids(
+                conflicting_axis_ids,
+                model,
+            )
+            if conflicting_prompt_axis_ids:
+                candidate["conflicting_prompt_axis_ids"] = conflicting_prompt_axis_ids
     candidates.append(candidate)
+
+
+def _resolve_conflicting_prompt_axis_ids(
+    conflicting_axis_ids: list[str],
+    model: dict[str, Any],
+) -> list[str]:
+    profile = model.get("semantic_axis_profile")
+    if not isinstance(profile, dict):
+        return []
+    axes = profile.get("axes")
+    if not isinstance(axes, list):
+        return []
+    prompt_axis_ids = {
+        str(axis.get("id") or "").strip()
+        for axis in axes
+        if isinstance(axis, dict)
+        and str(axis.get("id") or "").strip()
+        and str(axis.get("control_role") or "").strip() in {"primary", "hint"}
+    }
+    if not prompt_axis_ids:
+        return []
+
+    affected_axis_ids = {axis_id for axis_id in conflicting_axis_ids if axis_id}
+    edges = (
+        profile.get("relation_graph", {}).get("edges")
+        if isinstance(profile.get("relation_graph"), dict)
+        else None
+    )
+    if isinstance(edges, list):
+        changed = True
+        while changed:
+            changed = False
+            for edge in edges:
+                if not isinstance(edge, dict):
+                    continue
+                source_axis_id = str(edge.get("source_axis_id") or "").strip()
+                target_axis_id = str(edge.get("target_axis_id") or "").strip()
+                if (
+                    source_axis_id
+                    and target_axis_id in affected_axis_ids
+                    and source_axis_id not in affected_axis_ids
+                ):
+                    affected_axis_ids.add(source_axis_id)
+                    changed = True
+    return sorted(affected_axis_ids & prompt_axis_ids)
 
 
 def _build_parameter_axis_lookup(model: dict[str, Any]) -> dict[str, list[str]]:

@@ -182,6 +182,39 @@ def validate_normalized_motion_intent_payload(
             return None, reason
 
     if expression_resource_id:
+        expression_candidate = next(
+            (
+                candidate
+                for candidate in resource_candidates
+                if isinstance(candidate, dict)
+                and str(candidate.get("resource_type") or "").strip() == "expression"
+                and str(candidate.get("resource_id") or "").strip().lower()
+                == expression_resource_id.lower()
+            ),
+            None,
+        )
+        conflicting_axis_ids = set(
+            expression_candidate.get("conflicting_axis_ids") or []
+            if isinstance(expression_candidate, dict)
+            else []
+        )
+        conflicting_axis_ids.update(
+            expression_candidate.get("conflicting_prompt_axis_ids") or []
+            if isinstance(expression_candidate, dict)
+            else []
+        )
+        used_axis_ids = set(validated_levels or {})
+        for step in motion_steps or []:
+            used_axis_ids.update(step["axis_levels"])
+        direct_conflicts = sorted(used_axis_ids & conflicting_axis_ids)
+        if direct_conflicts:
+            return None, append_resolution_reason(
+                reason,
+                "expression_resource_axis_conflict:"
+                f"{expression_resource_id}:{','.join(direct_conflicts)}",
+            )
+
+    if expression_resource_id:
         payload["expression_resource_id"] = expression_resource_id
     else:
         payload.pop("expression_resource_id", None)

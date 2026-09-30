@@ -62,7 +62,8 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
     resource_field_text = (
         "expression_resource_id 表示可与不冲突姿态叠加的表情资源；"
         "motion_resource_id 表示替代普通参数姿态播放的完整动作资源；"
-        "两者不能同时填写；选择 expression 时必须省略该候选 conflicting_axis_ids 中的轴；"
+        "两者不能同时填写；选择 expression 时必须省略该候选 conflicting_prompt_axis_ids 和 "
+        "conflicting_axis_ids 中的轴；"
         "不确定时两个资源字段都省略。"
         if has_expression_resources or has_motion_resources
         else ""
@@ -110,7 +111,9 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
         "没有明确方向或表演贡献的轴直接省略。"
     )
     axis_shape_text = (
-        "单姿态使用 axis_levels；动作序列使用 motion_steps；完整动作资源只使用 motion_resource_id。三者必须且只能选择一个。"
+        "执行形状三选一：单姿态使用 axis_levels，动作序列使用 motion_steps，完整动作资源只使用 motion_resource_id。"
+        "expression_resource_id 是可选的表情叠加层，可以和 axis_levels 或 motion_steps 同时出现，"
+        "但不能和 motion_resource_id 同时出现。"
         "motion_steps 的每一步只写新开始控制或需要改变的轴；轴在首次声明前不受本序列控制，首次声明后省略表示保持该轴的上一目标，"
         "只有显式 0 才表示该轴回到语义中性。最后一步可以保持有意义的非中性姿态。"
         "axis_levels 只能使用下方列出的轴 id。"
@@ -123,9 +126,9 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
         f"{axis_instruction}"
         "只输出本轮直接需要控制的轴；关系图可派生的跟随轴不要为了凑完整而重复输出。"
         "优先选择能表达姿态方向、视线焦点和身体重心的关键轴，再用少量表情轴补充情绪细节。"
-        "在可用轴中优先用 head_yaw、head_roll、body_yaw、body_roll、gaze_x、gaze_y 表达左右朝向、侧倾和重心变化；"
-        "head_pitch 只用于确有低头、抬头或点头语义的动作，不能作为通用强调动作。"
-        "普通回复的主要姿态轴从 3 级开始；2 级用于克制表达，1 级仅用于细节，4 级用于短暂夸张表演。"
+        "优先使用当前 Profile 中 control_role=primary 且 semantic_group 属于 head、body、gaze 的轴表达姿态骨架；"
+        "视线和表情细节使用对应的辅助轴。等级必须从每个轴自己的 available_levels 中选择：优先较强的可用等级，"
+        "克制表达选择较小的可用等级，短时夸张才选择最大可用等级。"
         "示例只展示结构和数值，不要照抄示例内容或把示例的动作形状当作本轮必须复用的模板。"
         f"{output_shape_text}"
     )
@@ -157,6 +160,7 @@ def _build_motion_capability_prompt_payload(
                 "id",
                 "label",
                 "description",
+                "semantic_group",
                 "control_role",
                 "negative_semantics",
                 "positive_semantics",
@@ -204,6 +208,12 @@ def _build_motion_capability_prompt_payload(
             for item in result.get("axes") or []
             if isinstance(item, dict) and str(item.get("id") or "").strip()
         }
+        if not allowed_axis_ids and isinstance(semantic_profile, dict):
+            allowed_axis_ids = {
+                str(axis.get("id") or "").strip()
+                for axis in semantic_profile.get("prompt_axes") or []
+                if isinstance(axis, dict) and str(axis.get("id") or "").strip()
+            }
         result["resources"] = [
             {
                 key: (
@@ -225,6 +235,7 @@ def _build_motion_capability_prompt_payload(
                     "recommended_scenarios",
                     "intensity",
                     "conflicting_axis_ids",
+                    "conflicting_prompt_axis_ids",
                 )
                 if (
                     key != "conflicting_axis_ids"
@@ -234,6 +245,12 @@ def _build_motion_capability_prompt_payload(
                     and any(
                         axis_id in allowed_axis_ids
                         for axis_id in item.get("conflicting_axis_ids") or []
+                    )
+                ) or (
+                    key == "conflicting_prompt_axis_ids"
+                    and any(
+                        axis_id in allowed_axis_ids
+                        for axis_id in item.get("conflicting_prompt_axis_ids") or []
                     )
                 )
             }
