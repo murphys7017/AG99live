@@ -1,3 +1,22 @@
+desktop_release_v0_1_0:
+  recorded_at: "2026-09-30"
+  class: release
+  risk: high
+  status: published
+  scope:
+    - "Publish the Windows x64 Electron installer with production dependencies, uiohook-napi, Spout Sender, and Spout DLLs."
+    - "Publish the AG99live Adapter 1.1.0 source package alongside desktop version 0.1.0."
+    - "Document prebuilt desktop installation, separate Adapter installation, and one-click local packaging."
+  non_actions:
+    - "Do not include runtime-core/ in the desktop installer or release package."
+    - "Do not package unrelated untracked work."
+  validation:
+    - "`npm run package:win` passed."
+    - "`python scripts/check_protocol_schema_manifest.py` passed."
+    - "`git diff --check` passed."
+  evidence_gap:
+    - "Live user-machine acceptance of the installed desktop client with AstrBot, TTS, Live2D, and OBS remains required."
+
 spout_readback_first_batch:
   recorded_at: "2026-09-30"
   class: perf_refactor

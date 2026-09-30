@@ -6,7 +6,7 @@
 
 Windows 桌面端 · AstrBot · Electron · Live2D Cubism · Spout2
 
-[开始运行](#快速开始) · [看看它能做什么](#为创作和直播而生) · [接入 OBS](#在-obs-中使用透明-live2d-源) · [浏览文档](docs/README.md)
+[开始运行](#快速开始) · [下载预构建版本](#下载预构建版本) · [看看它能做什么](#为创作和直播而生) · [接入 OBS](#在-obs-中使用透明-live2d-源) · [浏览文档](docs/README.md)
 
 ![AG99live 桌面运行界面](docs/assets/readme/QQ20260722-021900.png)
 
@@ -67,11 +67,23 @@ Windows 桌面端将已经绘制的透明 Live2D canvas 发布为 Spout2 Sender�
 ### 环境
 
 - Windows 10 或 11。
-- Node.js 20 或更高版本。
+- Node.js 20 或更高版本（仅从源码构建桌面端时需要）。
 - 可运行的 AstrBot 环境、对话模型和 TTS Provider。
 - 与 AstrBot 和插件依赖兼容的 Python 环境。
 
 增强链路以维护者的 [AstrBot 配套分支](https://github.com/murphys7017/AstrBot) 为集成目标。官方 AstrBot 可以通过 `<@anim>` 使用兼容传输入口；该入口不承担增强 Persona Effect 的失败降级。
+
+### 下载预构建版本
+
+从 [GitHub Releases](https://github.com/murphys7017/AG99live/releases) 下载 `AG99live-Setup-0.1.0-x64.exe`，按安装向导完成桌面端安装。安装包已经包含 Electron runtime、前端生产依赖、`uiohook-napi` 原生模块，以及 Spout Sender 和 DLL；运行已安装的桌面端不需要另外安装 Node.js。
+
+Adapter 不嵌入桌面安装包，需要单独安装到 AstrBot：
+
+1. 从本仓库或对应 Release 的源码中取得 `astrbot_plugin_ag99live_adapter/`。
+2. 将目录复制到 AstrBot 的插件目录。
+3. 使用 AstrBot 当前的 Python 环境安装 `astrbot_plugin_ag99live_adapter/requirements.txt`。
+
+本次 Release 的桌面端版本为 `0.1.0`，配套 Adapter 版本为 `1.1.0`。`runtime-core/` 是独立的原生运行时，不属于本次桌面安装包。
 
 ### 1. 安装并启用 Adapter
 

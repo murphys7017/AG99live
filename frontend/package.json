@@ -2,6 +2,8 @@
   "name": "ag99live-frontend",
   "private": true,
   "version": "0.1.0",
+  "description": "AG99live Live2D desktop client",
+  "author": "AG99live",
   "type": "module",
   "main": "./out/main/index.cjs",
   "scripts": {
@@ -23,6 +25,8 @@
     "test": "npm run test:compile && node scripts/run-compiled-tests.cjs",
     "build": "npm run typecheck && electron-vite build",
     "build:web": "vue-tsc --noEmit -p tsconfig.json && vite build",
+    "package:win": "npm run build:spout-sender && npm run build && electron-builder --win --x64",
+    "package:win:dir": "npm run build:spout-sender && npm run build && electron-builder --win --x64 --dir",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -35,6 +39,7 @@
     "@types/node": "^22.15.3",
     "@vitejs/plugin-vue": "^5.2.1",
     "electron": "^37.2.6",
+    "electron-builder": "^26.15.3",
     "electron-vite": "^3.1.0",
     "typescript": "^5.6.3",
     "vite": "^5.4.10",

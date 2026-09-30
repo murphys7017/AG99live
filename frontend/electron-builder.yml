@@ -1,0 +1,39 @@
+appId: com.ag99live.desktop
+productName: AG99live
+artifactName: ${productName}-Setup-${version}-${arch}.${ext}
+
+directories:
+  output: release
+  buildResources: resources
+
+files:
+  - out/**/*
+  - package.json
+  - resources/app-icon.png
+
+extraResources:
+  - from: resources/spout
+    to: spout
+    filter:
+      - "**/*"
+
+asarUnpack:
+  - node_modules/uiohook-napi/build/Release/uiohook_napi.node
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: resources/app-icon.png
+  requestedExecutionLevel: asInvoker
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  perMachine: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: AG99live
+  runAfterFinish: true
+  deleteAppDataOnUninstall: false

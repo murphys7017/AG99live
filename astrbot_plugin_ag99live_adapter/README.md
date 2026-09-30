@@ -1,6 +1,6 @@
 # AG99live Adapter
 
-AstrBot 插件 `astrbot_plugin_ag99live_adapter` 将 AstrBot 的对话、TTS 和 Persona Effect 接入 AG99live 桌面端。当前版本为 **1.1.0**，协议版本以 `protocol/schema_manifest.json` 为准。
+AstrBot 插件 `astrbot_plugin_ag99live_adapter` 将 AstrBot 的对话、TTS 和 Persona Effect 接入 AG99live 桌面端。当前版本为 **1.1.0**，协议版本以 `protocol/schema_manifest.json` 为准。本版本与 AG99live 桌面端 `0.1.0` 安装包配套。
 
 ## 职责
 
@@ -62,3 +62,11 @@ python -m pip install -r requirements.txt
 协议检查只比较 schema manifest 与生成的 TypeScript 文件。完整验证仍需在真实 AstrBot、TTS、Electron 和 Live2D 环境中检查段顺序、音频、口型、动作和完成回执。
 
 完整源码仓库中的深入说明见[文档中心](https://github.com/murphys7017/AG99live/blob/main/docs/README.md)。
+
+## 发布版安装
+
+桌面端安装包从 [AG99live GitHub Releases](https://github.com/murphys7017/AG99live/releases) 获取。Adapter 不随桌面安装包嵌入，需要将本目录复制到 AstrBot 插件目录，并在 AstrBot 使用的 Python 环境中执行：
+
+```powershell
+python -m pip install -r astrbot_plugin_ag99live_adapter/requirements.txt
+```

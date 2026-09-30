@@ -38,8 +38,22 @@ npm run dev
 | `npm run build` | 类型检查后构建桌面端。 |
 | `npm run build:web` | 检查并构建 Web renderer。 |
 | `npm run build:spout-sender` | 使用 MSVC x64 重建 Windows Spout2 Sender。 |
+| `npm run package:win` | 重建 Spout、构建 Electron 并生成 Windows x64 安装包。 |
+| `npm run package:win:dir` | 重建并生成未压缩的 Windows x64 可运行目录，用于安装包前验收。 |
 
 Spout Sender 需要 Visual Studio Build Tools，并将输出放入 `resources/spout/`。渲染进程只在 Live2D 画布完成真实绘制后读取帧，保留预乘 Alpha；OBS 应使用预乘 Alpha 合成模式。
+
+Windows 安装包构建：
+
+```powershell
+cd frontend
+npm ci
+npm run package:win
+```
+
+安装包输出到 `frontend/release/`。该流程会将 Electron runtime、生产依赖、`uiohook-napi` 原生模块、Live2D Core 公共资源以及 Spout Sender 和 DLL 一起纳入安装包。构建 Spout Sender 需要安装带 MSVC x64 工具链的 Visual Studio Build Tools。
+
+也可以直接双击仓库根目录的 `build-installer.cmd`，自动完成依赖安装、Spout 编译和 Windows 安装包构建。`runtime-core/` 是独立的原生运行时，不会被纳入本安装包。
 
 ## 验证范围
 
