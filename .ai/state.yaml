@@ -6,7 +6,9 @@ native_runtime_motion_plan:
   scope:
     - "Extend RuntimeProtocolSession to consume the adapter's system.model_sync snapshot."
     - "Compile engine.motion_intent.v4 axis levels into native Cubism parameter tracks."
+    - "Compile motion_steps into one weighted multi-keyframe native plan."
     - "Apply blend-in, hold, blend-out motion plans after the native idle/talk motion update."
+    - "Drive mouth motion from a decoded PCM16 WAV RMS envelope."
   non_actions:
     - "Do not add VAD, microphone device selection, settings pages, Spout, or transparent composition in this slice."
     - "Do not add a second adapter connection or a second motion clock."

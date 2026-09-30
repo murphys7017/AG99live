@@ -31,8 +31,12 @@ The current executable, `ag99-render-host`, verifies:
 - `system.model_sync` is consumed to cache the selected semantic axis profile;
 - `engine.motion_intent.v4` axis levels are compiled into timed parameter
   tracks with relation-graph propagation, blend-in, hold, and blend-out;
+- `motion_steps` are compiled into one multi-keyframe plan using each step's
+  `duration_weight`, with omitted axes holding their previous target;
 - completed parameter tracks release control and return to the model's idle
   motion.
+- supported PCM16 WAV output now drives mouth motion from a 50 Hz RMS envelope
+  instead of a synthetic oscillator.
 - text can be sent through the tray's `发送演示文本` command or `--text=...`;
 - the tray can start and stop a manual 16 kHz mono microphone stream using
   the existing binary PCM protocol;

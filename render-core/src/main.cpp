@@ -60,11 +60,14 @@ bool g_dragging = false;
 POINT g_drag_cursor{};
 POINT g_drag_origin{};
 std::atomic<double> g_audio_end_seconds{0.0};
+std::atomic<double> g_audio_start_seconds{0.0};
 std::atomic<float> g_audio_level{0.0f};
 std::atomic<bool> g_talk_motion_requested{false};
 std::atomic<std::uint64_t> g_audio_serial{0};
 std::mutex g_audio_file_mutex;
+std::mutex g_audio_signal_mutex;
 std::wstring g_audio_file;
+std::vector<float> g_audio_rms;
 std::function<void(std::string)> g_send_text;
 std::function<void()> g_toggle_microphone;
 std::function<bool()> g_microphone_running;
@@ -75,13 +78,21 @@ double NowSeconds() {
 }
 
 void UpdateAudioLevel() {
-  const double remaining = g_audio_end_seconds.load() - NowSeconds();
+  const double now = NowSeconds();
+  const double remaining = g_audio_end_seconds.load() - now;
   if (remaining <= 0.0) {
     g_audio_level.store(0.0f);
     return;
   }
-  const float level = 0.15f + 0.85f *
-      static_cast<float>(0.5 + 0.5 * std::sin(NowSeconds() * 18.0));
+  const double elapsed = std::max(0.0, now - g_audio_start_seconds.load());
+  float level = 0.0f;
+  {
+    std::scoped_lock lock(g_audio_signal_mutex);
+    const auto index = static_cast<std::size_t>(elapsed * 50.0);
+    if (index < g_audio_rms.size()) {
+      level = std::clamp(g_audio_rms[index] * 4.0f, 0.0f, 1.0f);
+    }
+  }
   g_audio_level.store(level);
 }
 
@@ -195,6 +206,77 @@ std::optional<double> ReadWavDuration(const std::vector<std::uint8_t>& bytes) {
   return static_cast<double>(data_size) / byte_rate;
 }
 
+std::vector<float> ReadWavRms(const std::vector<std::uint8_t>& bytes) {
+  if (bytes.size() < 44 || std::memcmp(bytes.data(), "RIFF", 4) != 0
+      || std::memcmp(bytes.data() + 8, "WAVE", 4) != 0) {
+    return {};
+  }
+  std::uint16_t format = 0;
+  std::uint16_t channels = 0;
+  std::uint32_t sample_rate = 0;
+  std::uint16_t bits_per_sample = 0;
+  std::size_t data_offset = 0;
+  std::size_t data_size = 0;
+  auto read_u16 = [&bytes](std::size_t offset) {
+    std::uint16_t value = 0;
+    std::memcpy(&value, bytes.data() + offset, sizeof(value));
+    return value;
+  };
+  auto read_u32 = [&bytes](std::size_t offset) {
+    std::uint32_t value = 0;
+    std::memcpy(&value, bytes.data() + offset, sizeof(value));
+    return value;
+  };
+  for (std::size_t offset = 12; offset + 8 <= bytes.size();) {
+    const auto chunk_size = static_cast<std::size_t>(read_u32(offset + 4));
+    const auto chunk_start = offset + 8;
+    if (chunk_start > bytes.size()
+        || chunk_size > bytes.size() - chunk_start) {
+      break;
+    }
+    if (std::memcmp(bytes.data() + offset, "fmt ", 4) == 0
+        && chunk_size >= 16) {
+      format = read_u16(chunk_start);
+      channels = read_u16(chunk_start + 2);
+      sample_rate = read_u32(chunk_start + 4);
+      bits_per_sample = read_u16(chunk_start + 14);
+    } else if (std::memcmp(bytes.data() + offset, "data", 4) == 0) {
+      data_offset = chunk_start;
+      data_size = chunk_size;
+      break;
+    }
+    offset = chunk_start + chunk_size + (chunk_size & 1u);
+  }
+  if (format != 1 || channels == 0 || sample_rate == 0
+      || bits_per_sample != 16 || data_offset == 0 || data_size == 0) {
+    return {};
+  }
+  const std::size_t bytes_per_frame = static_cast<std::size_t>(channels) * 2;
+  const std::size_t frame_count = data_size / bytes_per_frame;
+  const std::size_t frames_per_bucket =
+      std::max<std::size_t>(1, sample_rate / 50);
+  std::vector<float> result;
+  result.reserve((frame_count + frames_per_bucket - 1) / frames_per_bucket);
+  for (std::size_t first = 0; first < frame_count; first += frames_per_bucket) {
+    const std::size_t count = std::min(frames_per_bucket, frame_count - first);
+    double square_sum = 0.0;
+    for (std::size_t frame = 0; frame < count; ++frame) {
+      for (std::size_t channel = 0; channel < channels; ++channel) {
+        const auto offset = data_offset
+            + (first + frame) * bytes_per_frame + channel * 2;
+        std::int16_t sample = 0;
+        std::memcpy(&sample, bytes.data() + offset, sizeof(sample));
+        const double normalized = static_cast<double>(sample) / 32768.0;
+        square_sum += normalized * normalized;
+      }
+    }
+    const double sample_count = static_cast<double>(count) * channels;
+    result.push_back(static_cast<float>(
+        std::sqrt(square_sum / std::max(1.0, sample_count))));
+  }
+  return result;
+}
+
 std::optional<std::wstring> WriteTempAudio(
     const std::vector<std::uint8_t>& bytes) {
   wchar_t temp_directory[MAX_PATH]{};
@@ -226,7 +308,12 @@ void StopCurrentAudio() {
     g_audio_file.clear();
   }
   g_audio_end_seconds.store(0.0);
+  g_audio_start_seconds.store(0.0);
   g_audio_level.store(0.0f);
+  {
+    std::scoped_lock signal_lock(g_audio_signal_mutex);
+    g_audio_rms.clear();
+  }
 }
 
 struct AudioPlayback {
@@ -245,6 +332,7 @@ std::optional<AudioPlayback> PlayAudioUrl(const std::string& url) {
     return std::nullopt;
   }
   const double duration = ReadWavDuration(bytes).value_or(1.0);
+  const auto rms = ReadWavRms(bytes);
   const auto serial = g_audio_serial.fetch_add(1) + 1;
   {
     std::scoped_lock lock(g_audio_file_mutex);
@@ -255,7 +343,12 @@ std::optional<AudioPlayback> PlayAudioUrl(const std::string& url) {
     g_audio_file = *path;
     PlaySoundW(g_audio_file.c_str(), nullptr, SND_FILENAME | SND_ASYNC | SND_NODEFAULT);
   }
-  g_audio_end_seconds.store(NowSeconds() + duration);
+  {
+    std::scoped_lock signal_lock(g_audio_signal_mutex);
+    g_audio_rms = rms;
+  }
+  g_audio_start_seconds.store(NowSeconds());
+  g_audio_end_seconds.store(g_audio_start_seconds.load() + duration);
   g_talk_motion_requested.store(true);
   return AudioPlayback{duration, serial};
 }
@@ -922,9 +1015,14 @@ public:
 
 private:
   struct MotionTrack {
+    struct Keyframe {
+      int at_ms = 0;
+      float target_value = 0.0f;
+    };
+
     csmInt32 parameter_index = -1;
     float neutral_value = 0.0f;
-    float target_value = 0.0f;
+    std::vector<Keyframe> keyframes;
   };
 
   struct MotionPlan {
@@ -1003,9 +1101,7 @@ private:
     }
 
     const auto axes = profile->find("axes");
-    const auto axis_levels = intent.find("axis_levels");
-    if (axes == profile->end() || !axes->is_array()
-        || axis_levels == intent.end() || !axis_levels->is_object()) {
+    if (axes == profile->end() || !axes->is_array()) {
       return std::nullopt;
     }
 
@@ -1014,84 +1110,133 @@ private:
       double neutral = 0.0;
       std::string group;
     };
-    std::unordered_map<std::string, AxisValue> resolved;
-    std::unordered_set<std::string> explicit_axes;
-    for (const auto& axis : *axes) {
-      if (!axis.is_object()) {
-        continue;
-      }
-      const auto id = ReadString(axis, "id");
-      const auto level_it = axis_levels->find(id);
-      if (id.empty() || level_it == axis_levels->end()
-          || !level_it->is_number_integer()) {
-        continue;
-      }
-      const auto role = ReadString(axis, "control_role");
-      if (role != "primary" && role != "hint") {
-        continue;
-      }
-      const double neutral = ReadNumber(axis, "neutral", 50.0);
-      double value = neutral;
-      const auto anchors = axis.find("level_anchors");
-      if (anchors != axis.end() && anchors->is_object()) {
-        const auto key = std::to_string(level_it->get<int>());
-        const auto anchor = anchors->find(key);
-        if (anchor != anchors->end() && anchor->is_number()) {
-          value = anchor->get<double>();
-        }
-      }
-      const auto range = axis.find("value_range");
-      if (range != axis.end() && range->is_array() && range->size() == 2) {
-        value = Clamp(value, (*range)[0].get<double>(), (*range)[1].get<double>());
-      }
-      resolved.emplace(id, AxisValue{value, neutral, ReadString(axis, "semantic_group")});
-      explicit_axes.insert(id);
-    }
 
-    const auto relation_graph = profile->find("relation_graph");
-    const auto edges = relation_graph != profile->end()
-        ? relation_graph->find("edges") : profile->end();
-    if (edges != profile->end() && edges->is_array()) {
-      for (int pass = 0; pass < 3; ++pass) {
-        for (const auto& edge : *edges) {
-          if (!edge.is_object()) {
-            continue;
+    using AxisMap = std::unordered_map<std::string, AxisValue>;
+    const auto resolve_axis_levels = [&](const ag99::runtime::Json& levels) {
+      AxisMap resolved;
+      std::unordered_set<std::string> explicit_axes;
+      if (!levels.is_object()) {
+        return resolved;
+      }
+      for (const auto& axis : *axes) {
+        if (!axis.is_object()) {
+          continue;
+        }
+        const auto id = ReadString(axis, "id");
+        const auto level_it = levels.find(id);
+        if (id.empty() || level_it == levels.end()
+            || !level_it->is_number_integer()) {
+          continue;
+        }
+        const auto role = ReadString(axis, "control_role");
+        if (role != "primary" && role != "hint") {
+          continue;
+        }
+        const double neutral = ReadNumber(axis, "neutral", 50.0);
+        double value = neutral;
+        const auto anchors = axis.find("level_anchors");
+        if (anchors != axis.end() && anchors->is_object()) {
+          const auto key = std::to_string(level_it->get<int>());
+          const auto anchor = anchors->find(key);
+          if (anchor != anchors->end() && anchor->is_number()) {
+            value = anchor->get<double>();
           }
-          const auto source_id = ReadString(edge, "source_axis_id");
-          const auto target_id = ReadString(edge, "target_axis_id");
-          const auto source = resolved.find(source_id);
-          if (source == resolved.end() || target_id.empty()) {
-            continue;
+        }
+        const auto range = axis.find("value_range");
+        if (range != axis.end() && range->is_array() && range->size() == 2) {
+          value = Clamp(
+              value, (*range)[0].get<double>(), (*range)[1].get<double>());
+        }
+        resolved.emplace(
+            id, AxisValue{value, neutral, ReadString(axis, "semantic_group")});
+        explicit_axes.insert(id);
+      }
+
+      const auto relation_graph = profile->find("relation_graph");
+      const auto edges = relation_graph != profile->end()
+          ? relation_graph->find("edges") : profile->end();
+      if (edges != profile->end() && edges->is_array()) {
+        for (int pass = 0; pass < 3; ++pass) {
+          for (const auto& edge : *edges) {
+            if (!edge.is_object()) {
+              continue;
+            }
+            const auto source_id = ReadString(edge, "source_axis_id");
+            const auto target_id = ReadString(edge, "target_axis_id");
+            const auto source = resolved.find(source_id);
+            if (source == resolved.end() || target_id.empty()) {
+              continue;
+            }
+            const auto target_axis = std::ranges::find_if(
+                *axes, [&target_id](const auto& axis) {
+                  return axis.is_object()
+                      && ReadString(axis, "id") == target_id;
+                });
+            if (target_axis == axes->end()) {
+              continue;
+            }
+            const double target_neutral =
+                ReadNumber(*target_axis, "neutral", 50.0);
+            const auto target_range = target_axis->find("value_range");
+            const double target_min = target_range != target_axis->end()
+                && target_range->is_array() && target_range->size() == 2
+                ? (*target_range)[0].get<double>() : 0.0;
+            const double target_max = target_range != target_axis->end()
+                && target_range->is_array() && target_range->size() == 2
+                ? (*target_range)[1].get<double>() : 100.0;
+            const double source_delta =
+                source->second.value - source->second.neutral;
+            const double scale = ReadNumber(edge, "scale", 0.0);
+            const double direction =
+                ReadString(edge, "mode") == "opposite_direction" ? -1.0 : 1.0;
+            const double candidate = Clamp(
+                target_neutral + source_delta * scale * direction,
+                target_min,
+                target_max);
+            if (explicit_axes.contains(target_id)) {
+              continue;
+            }
+            resolved[target_id] = AxisValue{
+                candidate,
+                target_neutral,
+                ReadString(*target_axis, "semantic_group")};
           }
-          const auto target_axis = std::ranges::find_if(
-              *axes, [&target_id](const auto& axis) {
-                return axis.is_object() && ReadString(axis, "id") == target_id;
-              });
-          if (target_axis == axes->end()) {
-            continue;
-          }
-          const double target_neutral = ReadNumber(*target_axis, "neutral", 50.0);
-          const auto target_range = target_axis->find("value_range");
-          const double target_min = target_range != target_axis->end()
-              && target_range->is_array() && target_range->size() == 2
-              ? (*target_range)[0].get<double>() : 0.0;
-          const double target_max = target_range != target_axis->end()
-              && target_range->is_array() && target_range->size() == 2
-              ? (*target_range)[1].get<double>() : 100.0;
-          const double source_delta = source->second.value - source->second.neutral;
-          const double scale = ReadNumber(edge, "scale", 0.0);
-          const double direction = ReadString(edge, "mode") == "opposite_direction"
-              ? -1.0 : 1.0;
-          const double candidate = Clamp(
-              target_neutral + source_delta * scale * direction,
-              target_min, target_max);
-          if (explicit_axes.contains(target_id)) {
-            continue;
-          }
-          resolved[target_id] = AxisValue{
-              candidate, target_neutral, ReadString(*target_axis, "semantic_group")};
         }
       }
+      return resolved;
+    };
+
+    std::vector<std::pair<ag99::runtime::Json, int>> input_steps;
+    const auto steps = intent.find("motion_steps");
+    if (steps != intent.end()) {
+      if (!steps->is_array() || steps->empty()) {
+        return std::nullopt;
+      }
+      for (const auto& step : *steps) {
+        if (!step.is_object()) {
+          return std::nullopt;
+        }
+        const auto levels = step.find("axis_levels");
+        const auto weight = step.find("duration_weight");
+        if (levels == step.end() || !levels->is_object()
+            || weight == step.end() || !weight->is_number_integer()) {
+          return std::nullopt;
+        }
+        const int duration_weight = weight->get<int>();
+        if (duration_weight < 1 || duration_weight > 3) {
+          return std::nullopt;
+        }
+        input_steps.emplace_back(*levels, duration_weight);
+      }
+    } else {
+      const auto axis_levels = intent.find("axis_levels");
+      if (axis_levels == intent.end() || !axis_levels->is_object()) {
+        return std::nullopt;
+      }
+      input_steps.emplace_back(*axis_levels, 1);
+    }
+    if (input_steps.empty()) {
+      return std::nullopt;
     }
 
     MotionPlan plan;
@@ -1103,14 +1248,30 @@ private:
     if (!cubism_model) {
       return std::nullopt;
     }
+    std::vector<AxisMap> resolved_steps;
+    resolved_steps.reserve(input_steps.size());
+    int total_weight = 0;
+    for (const auto& [levels, weight] : input_steps) {
+      resolved_steps.push_back(resolve_axis_levels(levels));
+      total_weight += weight;
+    }
+    if (total_weight <= 0) {
+      return std::nullopt;
+    }
+
+    std::unordered_set<std::string> used_axis_ids;
+    for (const auto& resolved : resolved_steps) {
+      for (const auto& [axis_id, _] : resolved) {
+        used_axis_ids.insert(axis_id);
+      }
+    }
     std::unordered_set<csmInt32> bound_parameters;
     for (const auto& axis : *axes) {
       if (!axis.is_object()) {
         continue;
       }
       const auto axis_id = ReadString(axis, "id");
-      const auto value_it = resolved.find(axis_id);
-      if (value_it == resolved.end()) {
+      if (!used_axis_ids.contains(axis_id)) {
         continue;
       }
       const auto bindings = axis.find("parameter_bindings");
@@ -1141,24 +1302,55 @@ private:
         if (std::abs(input_max - input_min) < 0.0001) {
           continue;
         }
-        const double ratio = Clamp(
-            (value_it->second.value - input_min) / (input_max - input_min),
-            0.0, 1.0);
         const bool invert = binding.value("invert", false);
-        const double effective_ratio = invert ? 1.0 - ratio : ratio;
         const double neutral_ratio = Clamp(
-            (value_it->second.neutral - input_min) / (input_max - input_min),
+            (ReadNumber(axis, "neutral", 50.0) - input_min)
+                / (input_max - input_min),
             0.0, 1.0);
         const double neutral_effective_ratio = invert
             ? 1.0 - neutral_ratio : neutral_ratio;
-        const float target = static_cast<float>(
-            output_min + (output_max - output_min) * effective_ratio);
         const float neutral_target = static_cast<float>(
             output_min + (output_max - output_min) * neutral_effective_ratio);
+        std::vector<MotionTrack::Keyframe> keyframes;
+        bool axis_started = false;
+        AxisValue previous_value{};
+        int accumulated_weight = 0;
+        for (std::size_t step_index = 0;
+             step_index < resolved_steps.size();
+             ++step_index) {
+          const auto value_it = resolved_steps[step_index].find(axis_id);
+          if (value_it != resolved_steps[step_index].end()) {
+            previous_value = value_it->second;
+            axis_started = true;
+          }
+          if (!axis_started) {
+            accumulated_weight += input_steps[step_index].second;
+            continue;
+          }
+          const double ratio = Clamp(
+              (previous_value.value - input_min)
+                  / (input_max - input_min),
+              0.0,
+              1.0);
+          const double effective_ratio = invert ? 1.0 - ratio : ratio;
+          const float target = static_cast<float>(
+              output_min + (output_max - output_min) * effective_ratio);
+          const int at_ms = static_cast<int>(std::lround(
+              static_cast<double>(plan.duration_ms)
+              * static_cast<double>(accumulated_weight)
+              / static_cast<double>(total_weight)));
+          if (keyframes.empty() || keyframes.back().target_value != target) {
+            keyframes.push_back(MotionTrack::Keyframe{at_ms, target});
+          }
+          accumulated_weight += input_steps[step_index].second;
+        }
+        if (keyframes.empty()) {
+          continue;
+        }
         plan.tracks.push_back(MotionTrack{
             parameter,
             neutral_target,
-            target});
+            std::move(keyframes)});
         bound_parameters.insert(parameter);
       }
     }
@@ -1190,23 +1382,44 @@ private:
     const double elapsed_ms =
         (NowSeconds() - _active_motion->started_at) * 1000.0;
     for (const auto& track : _active_motion->tracks) {
-      double value = track.target_value;
+      if (track.keyframes.empty()) {
+        continue;
+      }
+      double value = track.keyframes.back().target_value;
       if (elapsed_ms < _active_motion->blend_in_ms) {
         const double t = Clamp(
             elapsed_ms / std::max(1, _active_motion->blend_in_ms), 0.0, 1.0);
         const double smooth = t * t * (3.0 - 2.0 * t);
         value = track.neutral_value
-            + (track.target_value - track.neutral_value) * smooth;
-      } else if (elapsed_ms >=
-                 _active_motion->duration_ms - _active_motion->blend_out_ms) {
-        const double t = Clamp(
-            (elapsed_ms - (_active_motion->duration_ms
-                - _active_motion->blend_out_ms))
-                / std::max(1, _active_motion->blend_out_ms),
-            0.0, 1.0);
-        const double smooth = t * t * (3.0 - 2.0 * t);
-        value = track.target_value
-            + (track.neutral_value - track.target_value) * smooth;
+            + (track.keyframes.front().target_value - track.neutral_value)
+                * smooth;
+      } else {
+        for (std::size_t index = 1; index < track.keyframes.size(); ++index) {
+          const auto& previous = track.keyframes[index - 1];
+          const auto& next = track.keyframes[index];
+          if (elapsed_ms < next.at_ms) {
+            const double window = std::max(
+                1, next.at_ms - previous.at_ms);
+            const double t = Clamp(
+                (elapsed_ms - previous.at_ms) / window, 0.0, 1.0);
+            const double smooth = t * t * (3.0 - 2.0 * t);
+            value = previous.target_value
+                + (next.target_value - previous.target_value) * smooth;
+            break;
+          }
+        }
+        if (elapsed_ms >= _active_motion->duration_ms
+            - _active_motion->blend_out_ms) {
+          const double t = Clamp(
+              (elapsed_ms - (_active_motion->duration_ms
+                  - _active_motion->blend_out_ms))
+                  / std::max(1, _active_motion->blend_out_ms),
+              0.0, 1.0);
+          const double smooth = t * t * (3.0 - 2.0 * t);
+          value = track.keyframes.back().target_value
+              + (track.neutral_value - track.keyframes.back().target_value)
+                  * smooth;
+        }
       }
       const double minimum = _model->GetModel()->GetParameterMinimumValue(
           track.parameter_index);
