@@ -1,3 +1,25 @@
+frontend_runtime_occupancy_followup:
+  recorded_at: "2026-09-30"
+  class: perf_refactor
+  risk: medium
+  scope:
+    - "Defer desktop runtime snapshot projection and cloning until the debounced publish actually runs; keep the watcher on source state references."
+    - "Run live audio analyser sampling at 30 Hz while retaining the existing 60 FPS Live2D render loop and external audio signal contract."
+    - "Lower hidden-tab Live2D rendering to 30 FPS, preserving foreground rendering and the existing SPOUT/ESP32 enable switches."
+  non_actions:
+    - "Do not change runtime snapshot fields, IPC payload shape, or localStorage keys."
+    - "Do not change external frame formats, crop behavior, device connection logic, or output enable semantics."
+    - "Do not change foreground Live2D frame rate."
+  validation:
+    - "`npm run typecheck:renderer` passed."
+    - "`npm run typecheck:websdk` passed."
+    - "`npm run typecheck:node` passed."
+    - "`npm run build:web` passed."
+    - "`npm run build` passed."
+    - "`git diff --check` passed."
+  evidence_gap:
+    - "Live Electron acceptance is still required to measure CPU/GPU reduction, verify hidden-window behavior, and confirm lip-sync visual quality at 30 Hz."
+
 frontend_rendering_performance_followup:
   recorded_at: "2026-09-30"
   class: perf_refactor

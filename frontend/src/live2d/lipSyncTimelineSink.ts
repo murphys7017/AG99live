@@ -8,6 +8,7 @@ const SPEECH_ANALYSIS_BAND_MAX_HZ = 4200;
 const SPEECH_EMPHASIS_BAND_MIN_HZ = 900;
 const SPEECH_EMPHASIS_RATIO_FLOOR = 0.24;
 const SPEECH_EMPHASIS_RATIO_SPAN = 0.24;
+const SPEECH_ANALYSIS_FRAME_INTERVAL_MS = 1000 / 30;
 interface LiveLipSyncRuntime {
   stop: () => void;
 }
@@ -165,11 +166,18 @@ function startLiveLipSync(
     let animationFrameId: number | null = null;
     let stopped = false;
     let firstFrameLogged = false;
+    let lastAnalysisAt = 0;
 
     const tick = () => {
       if (stopped || !isCurrentAudio()) {
         return;
       }
+      const now = performance.now();
+      if (lastAnalysisAt !== 0 && now - lastAnalysisAt < SPEECH_ANALYSIS_FRAME_INTERVAL_MS) {
+        animationFrameId = window.requestAnimationFrame(tick);
+        return;
+      }
+      lastAnalysisAt = now;
       analyser.getByteTimeDomainData(samples);
       analyser.getByteFrequencyData(frequencyBins);
       let squareSum = 0;

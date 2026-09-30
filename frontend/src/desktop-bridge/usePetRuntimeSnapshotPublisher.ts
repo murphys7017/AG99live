@@ -153,51 +153,51 @@ export function createPetRuntimeSnapshotPublisher(
   const profileDebounce = createDebounce();
   let lastPublishedMotionRecordId: string | null = null;
   function buildRuntimeSnapshotInput() {
-      const a = options.adapter.state;
-      const adapterProjection = buildAdapterRuntimeProjection({
-        address: a.address,
-        desktopScreenshotOnSendEnabled: a.desktopScreenshotOnSendEnabled,
-        microphoneDeviceId: a.microphoneDeviceId,
-        microphoneDevices: a.microphoneDevices.map((device) => ({ ...device })),
-        statusMessage: a.statusMessage,
-        serverWsUrl: a.serverInfo?.ws_url ?? "",
-        httpBaseUrl: a.serverInfo?.http_base_url ?? "",
-        lastAssistantText: a.lastAssistantText,
-        lastTranscription: a.lastTranscription,
-        lastImageCount: a.lastImageCount,
-        currentTurnId: a.currentTurnId,
-        micCapturing: a.micCapturing,
-        microphoneStandby: a.microphoneStandby,
-        isPlayingAudio: a.isPlayingAudio,
-        pttModeEnabled: a.pttModeEnabled,
-        pttKeyBinding: a.pttKeyBinding,
-        pttHookStatus: a.pttHookStatus,
-        historyEntries: [...a.historyEntries],
-        backendHistorySummaries: [...a.backendHistorySummaries],
-        backendHistoryEntries: [...a.backendHistoryEntries],
-        activeBackendHistoryUid: a.activeBackendHistoryUid,
-        backendHistoryLoading: a.backendHistoryLoading,
-        backendHistoryStatusMessage: a.backendHistoryStatusMessage,
-        bilibiliLiveStatus: options.bilibiliLiveStatus(),
-      });
+    const a = options.adapter.state;
+    const adapterProjection = buildAdapterRuntimeProjection({
+      address: a.address,
+      desktopScreenshotOnSendEnabled: a.desktopScreenshotOnSendEnabled,
+      microphoneDeviceId: a.microphoneDeviceId,
+      microphoneDevices: a.microphoneDevices.map((device) => ({ ...device })),
+      statusMessage: a.statusMessage,
+      serverWsUrl: a.serverInfo?.ws_url ?? "",
+      httpBaseUrl: a.serverInfo?.http_base_url ?? "",
+      lastAssistantText: a.lastAssistantText,
+      lastTranscription: a.lastTranscription,
+      lastImageCount: a.lastImageCount,
+      currentTurnId: a.currentTurnId,
+      micCapturing: a.micCapturing,
+      microphoneStandby: a.microphoneStandby,
+      isPlayingAudio: a.isPlayingAudio,
+      pttModeEnabled: a.pttModeEnabled,
+      pttKeyBinding: a.pttKeyBinding,
+      pttHookStatus: a.pttHookStatus,
+      historyEntries: [...a.historyEntries],
+      backendHistorySummaries: [...a.backendHistorySummaries],
+      backendHistoryEntries: [...a.backendHistoryEntries],
+      activeBackendHistoryUid: a.activeBackendHistoryUid,
+      backendHistoryLoading: a.backendHistoryLoading,
+      backendHistoryStatusMessage: a.backendHistoryStatusMessage,
+      bilibiliLiveStatus: options.bilibiliLiveStatus(),
+    });
 
-      return {
-        adapter: adapterProjection,
-        motionEngineSettings: cloneModelEngineSettings(options.motionEngineSettings),
-        live2dPresentationSettings: cloneLive2dPresentationSettings(
-          options.live2dPresentationSettings,
-        ),
-        motionPlaybackRecords: options.motionPlaybackRecords.value.map((record) =>
-          cloneJson(record),
-        ) as DesktopMotionPlaybackRecord[],
-        connectionState: options.connectionState.value,
-        connectionLabel: options.connectionLabel.value,
-        stageMessage: options.stageMessage.value,
-        aiState: options.aiState.value,
-        lastUpdated: options.modelSyncState.lastUpdated,
-        manualPreviewText: options.manualPreviewText.value,
-        latestAssistantFeedback: { ...options.latestAssistantFeedback.value },
-      };
+    return {
+      adapter: adapterProjection,
+      motionEngineSettings: cloneModelEngineSettings(options.motionEngineSettings),
+      live2dPresentationSettings: cloneLive2dPresentationSettings(
+        options.live2dPresentationSettings,
+      ),
+      motionPlaybackRecords: options.motionPlaybackRecords.value.map((record) =>
+        cloneJson(record),
+      ) as DesktopMotionPlaybackRecord[],
+      connectionState: options.connectionState.value,
+      connectionLabel: options.connectionLabel.value,
+      stageMessage: options.stageMessage.value,
+      aiState: options.aiState.value,
+      lastUpdated: options.modelSyncState.lastUpdated,
+      manualPreviewText: options.manualPreviewText.value,
+      latestAssistantFeedback: { ...options.latestAssistantFeedback.value },
+    };
   }
 
   function publishSnapshotWithRevision(input: ReturnType<typeof buildRuntimeSnapshotInput>): void {
@@ -219,13 +219,56 @@ export function createPetRuntimeSnapshotPublisher(
     });
   }
 
+  function scheduleRuntimeSnapshotPublish(): void {
+    snapshotDebounce.schedule(() => {
+      publishSnapshotWithRevision(buildRuntimeSnapshotInput());
+    });
+  }
+
+  const runtimeSnapshotWatchSource = () => {
+    const a = options.adapter.state;
+    return {
+      adapter: {
+        address: a.address,
+        desktopScreenshotOnSendEnabled: a.desktopScreenshotOnSendEnabled,
+        microphoneDeviceId: a.microphoneDeviceId,
+        microphoneDevices: a.microphoneDevices,
+        statusMessage: a.statusMessage,
+        serverInfo: a.serverInfo,
+        lastAssistantText: a.lastAssistantText,
+        lastTranscription: a.lastTranscription,
+        lastImageCount: a.lastImageCount,
+        currentTurnId: a.currentTurnId,
+        micCapturing: a.micCapturing,
+        microphoneStandby: a.microphoneStandby,
+        isPlayingAudio: a.isPlayingAudio,
+        pttModeEnabled: a.pttModeEnabled,
+        pttKeyBinding: a.pttKeyBinding,
+        pttHookStatus: a.pttHookStatus,
+        historyEntries: a.historyEntries,
+        backendHistorySummaries: a.backendHistorySummaries,
+        backendHistoryEntries: a.backendHistoryEntries,
+        activeBackendHistoryUid: a.activeBackendHistoryUid,
+        backendHistoryLoading: a.backendHistoryLoading,
+        backendHistoryStatusMessage: a.backendHistoryStatusMessage,
+        bilibiliLiveStatus: options.bilibiliLiveStatus(),
+      },
+      motionEngineSettings: options.motionEngineSettings,
+      live2dPresentationSettings: options.live2dPresentationSettings,
+      motionPlaybackRecords: options.motionPlaybackRecords.value,
+      connectionState: options.connectionState.value,
+      connectionLabel: options.connectionLabel.value,
+      stageMessage: options.stageMessage.value,
+      aiState: options.aiState.value,
+      lastUpdated: options.modelSyncState.lastUpdated,
+      manualPreviewText: options.manualPreviewText.value,
+      latestAssistantFeedback: options.latestAssistantFeedback.value,
+    };
+  };
+
   const stopRuntimeSnapshotWatch = watch(
-    buildRuntimeSnapshotInput,
-    (input) => {
-      snapshotDebounce.schedule(() => {
-        publishSnapshotWithRevision(input);
-      });
-    },
+    runtimeSnapshotWatchSource,
+    scheduleRuntimeSnapshotPublish,
     { deep: true, immediate: true },
   );
 

@@ -92,7 +92,7 @@ export const RenderTargetHeight = 1000;
 
 export const ENABLE_LIMITED_FRAME_RATE = true;
 export let LIMITED_FRAME_RATE = 60;
-export let BACKGROUND_FRAME_RATE = 60;
+export let BACKGROUND_FRAME_RATE = 30;
 export let MAX_RENDER_DEVICE_PIXEL_RATIO = 1.25;
 export let AMBIENT_MOTION_ENABLED = true;
 export let PHYSICS_RESPONSE_SCALE = 1.0;
