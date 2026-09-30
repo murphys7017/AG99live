@@ -8,6 +8,7 @@
 #include <windowsx.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -15,6 +16,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <functional>
 #include <iostream>
 #include <malloc.h>
 #include <mutex>
@@ -22,6 +24,8 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "ag99/runtime/protocol.hpp"
@@ -31,6 +35,7 @@
 #include <CubismModelSettingJson.hpp>
 #include <Id/CubismIdManager.hpp>
 #include <Model/CubismUserModel.hpp>
+#include <Motion/ACubismMotion.hpp>
 #include <Rendering/D3D11/CubismDeviceInfo_D3D11.hpp>
 #include <Rendering/D3D11/CubismRenderer_D3D11.hpp>
 #include <WICTextureLoader.h>
@@ -45,6 +50,8 @@ constexpr UINT kTrayMessage = WM_APP + 1;
 constexpr UINT kTrayShow = 1001;
 constexpr UINT kTrayHide = 1002;
 constexpr UINT kTrayExit = 1003;
+constexpr UINT kTrayDemoText = 1004;
+constexpr UINT kTrayMicToggle = 1005;
 
 HWND g_window = nullptr;
 NOTIFYICONDATAW g_tray_icon{};
@@ -54,8 +61,13 @@ POINT g_drag_cursor{};
 POINT g_drag_origin{};
 std::atomic<double> g_audio_end_seconds{0.0};
 std::atomic<float> g_audio_level{0.0f};
+std::atomic<bool> g_talk_motion_requested{false};
+std::atomic<std::uint64_t> g_audio_serial{0};
 std::mutex g_audio_file_mutex;
 std::wstring g_audio_file;
+std::function<void(std::string)> g_send_text;
+std::function<void()> g_toggle_microphone;
+std::function<bool()> g_microphone_running;
 
 double NowSeconds() {
   return std::chrono::duration<double>(
@@ -207,6 +219,7 @@ std::optional<std::wstring> WriteTempAudio(
 
 void StopCurrentAudio() {
   std::scoped_lock lock(g_audio_file_mutex);
+  g_audio_serial.fetch_add(1);
   PlaySoundW(nullptr, nullptr, 0);
   if (!g_audio_file.empty()) {
     DeleteFileW(g_audio_file.c_str());
@@ -216,17 +229,23 @@ void StopCurrentAudio() {
   g_audio_level.store(0.0f);
 }
 
-void PlayAudioUrl(const std::string& url) {
+struct AudioPlayback {
+  double duration_seconds = 0.0;
+  std::uint64_t serial = 0;
+};
+
+std::optional<AudioPlayback> PlayAudioUrl(const std::string& url) {
   std::vector<std::uint8_t> bytes;
   if (!DownloadHttp(url, bytes)) {
     std::cerr << "Failed to download audio: " << url << '\n';
-    return;
+    return std::nullopt;
   }
   const auto path = WriteTempAudio(bytes);
   if (!path) {
-    return;
+    return std::nullopt;
   }
   const double duration = ReadWavDuration(bytes).value_or(1.0);
+  const auto serial = g_audio_serial.fetch_add(1) + 1;
   {
     std::scoped_lock lock(g_audio_file_mutex);
     PlaySoundW(nullptr, nullptr, 0);
@@ -237,6 +256,8 @@ void PlayAudioUrl(const std::string& url) {
     PlaySoundW(g_audio_file.c_str(), nullptr, SND_FILENAME | SND_ASYNC | SND_NODEFAULT);
   }
   g_audio_end_seconds.store(NowSeconds() + duration);
+  g_talk_motion_requested.store(true);
+  return AudioPlayback{duration, serial};
 }
 
 class Allocator final : public ICubismAllocator {
@@ -281,10 +302,284 @@ void LogMessage(const csmChar* message) {
   }
 }
 
+bool ReadFile(const std::filesystem::path& path, std::vector<csmByte>& output);
+
+class NativeCubismModel final : public CubismUserModel {
+public:
+  ~NativeCubismModel() override {
+    if (_idle_motion) {
+      ACubismMotion::Delete(_idle_motion);
+    }
+    if (_talk_motion) {
+      ACubismMotion::Delete(_talk_motion);
+    }
+  }
+
+  bool LoadDemoMotions(
+      const std::filesystem::path& model_directory,
+      CubismModelSettingJson* setting) {
+    _idle_motion = LoadDemoMotion(
+        model_directory, setting, "Idle", 0, "idle");
+    _talk_motion = LoadDemoMotion(
+        model_directory, setting, "Talk", 0, "talk");
+    if (!_idle_motion) {
+      std::cerr << "[cubism] no Idle/0 motion was available\n";
+    }
+    if (!_talk_motion) {
+      std::cerr << "[cubism] no Talk/0 motion was available\n";
+    }
+    return _idle_motion != nullptr || _talk_motion != nullptr;
+  }
+
+  void StartTalkMotion() {
+    if (_motionManager && _talk_motion) {
+      _motionManager->StartMotionPriority(_talk_motion, false, 2);
+    }
+  }
+
+  void UpdateMotion(csmFloat32 delta_seconds) {
+    if (!_motionManager || !_model) {
+      return;
+    }
+
+    _model->LoadParameters();
+    if (_motionManager->IsFinished()) {
+      if (g_audio_end_seconds.load() > NowSeconds() && _talk_motion) {
+        _motionManager->StartMotionPriority(_talk_motion, false, 2);
+      } else if (_idle_motion) {
+        _motionManager->StartMotionPriority(_idle_motion, false, 1);
+      }
+    } else {
+      _motionManager->UpdateMotion(_model, delta_seconds);
+    }
+    _model->SaveParameters();
+  }
+
+private:
+  ACubismMotion* LoadDemoMotion(
+      const std::filesystem::path& model_directory,
+      CubismModelSettingJson* setting,
+      const csmChar* group,
+      csmInt32 index,
+      const char* label) {
+    if (!setting || setting->GetMotionCount(group) <= index) {
+      return nullptr;
+    }
+
+    const char* file_name = setting->GetMotionFileName(group, index);
+    if (!file_name || file_name[0] == '\0') {
+      return nullptr;
+    }
+    const auto motion_path = model_directory / file_name;
+    std::vector<csmByte> motion_bytes;
+    if (!ReadFile(motion_path, motion_bytes)) {
+      std::cerr << "[cubism] failed to read " << label
+                << " motion: " << motion_path.string() << '\n';
+      return nullptr;
+    }
+    return LoadMotion(
+        motion_bytes.data(),
+        static_cast<csmSizeInt>(motion_bytes.size()),
+        nullptr,
+        nullptr,
+        nullptr,
+        setting,
+        group,
+        index);
+  }
+
+  ACubismMotion* _idle_motion = nullptr;
+  ACubismMotion* _talk_motion = nullptr;
+};
+
+class MicrophoneCapture final {
+public:
+  explicit MicrophoneCapture(
+      ag99::runtime::WinHttpWebSocketClient& websocket)
+      : websocket_(websocket) {}
+
+  ~MicrophoneCapture() {
+    Stop("runtime_shutdown");
+  }
+
+  bool Start() {
+    if (running_.load() || !websocket_.connected()) {
+      return false;
+    }
+
+    const auto serial = next_stream_serial_.fetch_add(1);
+    stream_id_ = "native-mic-" + std::to_string(serial);
+    turn_id_ = stream_id_;
+    sequence_ = 0;
+
+    WAVEFORMATEX format{};
+    format.wFormatTag = WAVE_FORMAT_PCM;
+    format.nChannels = 1;
+    format.nSamplesPerSec = 16000;
+    format.wBitsPerSample = 16;
+    format.nBlockAlign = format.nChannels * format.wBitsPerSample / 8;
+    format.nAvgBytesPerSec = format.nSamplesPerSec * format.nBlockAlign;
+    format.cbSize = 0;
+
+    const auto open_result = waveInOpen(
+        &device_,
+        WAVE_MAPPER,
+        &format,
+        reinterpret_cast<DWORD_PTR>(&WaveInCallback),
+        reinterpret_cast<DWORD_PTR>(this),
+        CALLBACK_FUNCTION);
+    if (open_result != MMSYSERR_NOERROR) {
+      device_ = nullptr;
+      return false;
+    }
+
+    for (auto& buffer : buffers_) {
+      buffer.assign(kBufferBytes, 0);
+    }
+    for (auto& header : headers_) {
+      header = {};
+    }
+    for (std::size_t index = 0; index < buffers_.size(); ++index) {
+      auto& header = headers_[index];
+      header.lpData = reinterpret_cast<LPSTR>(buffers_[index].data());
+      header.dwBufferLength = static_cast<DWORD>(buffers_[index].size());
+      if (waveInPrepareHeader(device_, &header, sizeof(header))
+          != MMSYSERR_NOERROR) {
+        Stop("capture_setup_failed");
+        return false;
+      }
+      prepared_[index] = true;
+      if (waveInAddBuffer(device_, &header, sizeof(header))
+          != MMSYSERR_NOERROR) {
+        Stop("capture_setup_failed");
+        return false;
+      }
+    }
+
+    const auto start_message = ag99::runtime::build_input_audio_stream_start(
+        stream_id_,
+        "microphone",
+        16000,
+        1,
+        "manual",
+        std::nullopt,
+        turn_id_);
+    if (!websocket_.send_text(start_message.dump())) {
+      Stop("capture_start_send_failed");
+      return false;
+    }
+
+    running_.store(true);
+    if (waveInStart(device_) != MMSYSERR_NOERROR) {
+      Stop("capture_device_start_failed");
+      return false;
+    }
+    return true;
+  }
+
+  void Stop(std::string_view reason) {
+    const bool was_running = running_.exchange(false);
+    if (device_) {
+      waveInStop(device_);
+      waveInReset(device_);
+      for (std::size_t index = 0; index < headers_.size(); ++index) {
+        if (prepared_[index]) {
+          waveInUnprepareHeader(device_, &headers_[index], sizeof(WAVEHDR));
+          prepared_[index] = false;
+        }
+      }
+      waveInClose(device_);
+      device_ = nullptr;
+    }
+
+    if (was_running && !stream_id_.empty() && websocket_.connected()) {
+      const auto last_sequence = sequence_ == 0
+          ? std::optional<std::uint64_t>{}
+          : std::optional<std::uint64_t>{sequence_ - 1};
+      const auto end_message = ag99::runtime::build_input_audio_stream_end(
+          stream_id_,
+          reason,
+          false,
+          last_sequence,
+          "manual");
+      websocket_.send_text(end_message.dump());
+    }
+    stream_id_.clear();
+    turn_id_.clear();
+  }
+
+  bool running() const noexcept {
+    return running_.load();
+  }
+
+private:
+  static constexpr std::size_t kBufferCount = 4;
+  static constexpr std::size_t kBufferBytes = 3200;
+
+  static void CALLBACK WaveInCallback(
+      HWAVEIN,
+      UINT message,
+      DWORD_PTR instance,
+      DWORD_PTR parameter1,
+      DWORD_PTR) {
+    if (message != WIM_DATA || instance == 0 || parameter1 == 0) {
+      return;
+    }
+    auto* capture = reinterpret_cast<MicrophoneCapture*>(instance);
+    capture->OnBuffer(reinterpret_cast<WAVEHDR*>(parameter1));
+  }
+
+  void OnBuffer(WAVEHDR* header) {
+    if (!running_.load() || !header || header->dwBytesRecorded == 0) {
+      return;
+    }
+
+    const auto payload = std::span<const std::uint8_t>(
+        reinterpret_cast<const std::uint8_t*>(header->lpData),
+        header->dwBytesRecorded);
+    const ag99::runtime::AudioChunkMetadata metadata{
+        stream_id_,
+        turn_id_,
+        sequence_++,
+        "pcm16le",
+        16000,
+        1,
+        "manual"};
+    try {
+      const auto frame = ag99::runtime::build_binary_audio_frame(
+          metadata, payload);
+      websocket_.send_binary(frame);
+    } catch (const std::exception& error) {
+      std::cerr << "[microphone] failed to build audio frame: "
+                << error.what() << '\n';
+      Stop("capture_frame_failed");
+      return;
+    }
+    header->dwBytesRecorded = 0;
+    waveInAddBuffer(device_, header, sizeof(WAVEHDR));
+  }
+
+  ag99::runtime::WinHttpWebSocketClient& websocket_;
+  HWAVEIN device_ = nullptr;
+  std::array<std::vector<std::uint8_t>, kBufferCount> buffers_{};
+  std::array<WAVEHDR, kBufferCount> headers_{};
+  std::array<bool, kBufferCount> prepared_{};
+  std::atomic<bool> running_{false};
+  std::string stream_id_;
+  std::string turn_id_;
+  std::uint64_t sequence_ = 0;
+  std::atomic<std::uint64_t> next_stream_serial_{1};
+};
+
 class RuntimeBridge final {
 public:
-  RuntimeBridge()
-      : session_({
+  RuntimeBridge(
+      std::function<void(ag99::runtime::ModelSync)> on_model_sync,
+      std::function<void(const ag99::runtime::Json&)> on_motion_intent)
+      : microphone_(websocket_),
+        on_model_sync_(std::move(on_model_sync)),
+        on_motion_intent_(std::move(on_motion_intent)),
+        session_({
             [this](ag99::runtime::OutputSegment segment) {
               OnSegment(std::move(segment));
             },
@@ -298,9 +593,15 @@ public:
             [](std::string error) {
               std::cerr << "[runtime] protocol error: " << error << '\n';
             },
+            [this](ag99::runtime::ModelSync sync) {
+              if (on_model_sync_) {
+                on_model_sync_(std::move(sync));
+              }
+            },
         }) {}
 
   bool Connect(const std::string& url) {
+    closing_.store(false);
     return websocket_.connect(
         url,
         {
@@ -317,7 +618,35 @@ public:
         });
   }
 
+  bool SendText(std::string_view text) {
+    if (text.empty()) {
+      return false;
+    }
+    const auto turn_id = "native-demo-" +
+        std::to_string(next_turn_id_.fetch_add(1));
+    const auto envelope = ag99::runtime::build_input_text(text, {}, turn_id);
+    return websocket_.send_text(envelope.dump());
+  }
+
+  bool ToggleMicrophone() {
+    if (microphone_.running()) {
+      microphone_.Stop("manual_stop");
+      return false;
+    }
+    if (!microphone_.Start()) {
+      std::cerr << "[microphone] failed to start capture\n";
+      return false;
+    }
+    return true;
+  }
+
+  bool MicrophoneRunning() const noexcept {
+    return microphone_.running();
+  }
+
   void Close() {
+    closing_.store(true);
+    microphone_.Stop("runtime_shutdown");
     websocket_.close();
     std::vector<std::thread> workers;
     {
@@ -334,21 +663,61 @@ public:
 
 private:
   void OnSegment(ag99::runtime::OutputSegment segment) {
+    if (segment.motion.state == ag99::runtime::MotionSlot::State::Present
+        && on_motion_intent_) {
+      on_motion_intent_(segment.motion.payload);
+    }
     if (segment.text.state == ag99::runtime::TextSlot::State::Present) {
       std::cout << "[assistant] " << segment.text.content << '\n';
     }
+    const auto turn_id = segment.envelope.turn_id.value_or("");
     if (segment.audio.state == ag99::runtime::AudioSlot::State::Present) {
       std::scoped_lock lock(worker_mutex_);
-      audio_workers_.emplace_back([url = std::move(segment.audio.url)] {
-        PlayAudioUrl(url);
+      audio_workers_.emplace_back([this, url = std::move(segment.audio.url), turn_id] {
+        const auto playback = PlayAudioUrl(url);
+        if (!playback) {
+          if (!closing_.load() && !turn_id.empty()) {
+            const auto failed =
+                ag99::runtime::build_control_playback_finished(
+                    turn_id,
+                    false,
+                    "audio_download_failed");
+            websocket_.send_text(failed.dump());
+          }
+          return;
+        }
+        const auto deadline = NowSeconds() + playback->duration_seconds;
+        while (!closing_.load() && NowSeconds() < deadline) {
+          std::this_thread::sleep_for(std::chrono::milliseconds(25));
+        }
+        if (closing_.load()
+            || g_audio_serial.load() != playback->serial
+            || turn_id.empty()) {
+          return;
+        }
+        const auto finished =
+            ag99::runtime::build_control_playback_finished(turn_id);
+        websocket_.send_text(finished.dump());
       });
+      return;
+    }
+
+    if (!turn_id.empty() && websocket_.connected()) {
+      const auto finished =
+          ag99::runtime::build_control_playback_finished(turn_id);
+      websocket_.send_text(finished.dump());
     }
   }
 
   ag99::runtime::WinHttpWebSocketClient websocket_;
+  MicrophoneCapture microphone_;
+  std::function<void(ag99::runtime::ModelSync)> on_model_sync_;
+  std::function<void(const ag99::runtime::Json&)> on_motion_intent_;
   ag99::runtime::RuntimeProtocolSession session_;
   std::mutex worker_mutex_;
   std::vector<std::thread> audio_workers_;
+  std::atomic<bool> closing_{false};
+  std::atomic<std::uint64_t> next_turn_id_{1};
 };
 
 csmByte* LoadFile(const std::string path, csmSizeInt* size) {
@@ -448,7 +817,7 @@ public:
       return false;
     }
 
-    _model = new CubismUserModel();
+    _model = new NativeCubismModel();
     _model->LoadModel(
         moc_bytes.data(), static_cast<csmSizeInt>(moc_bytes.size()));
     if (!_model->GetModel()) {
@@ -493,6 +862,11 @@ public:
       _textures.push_back(texture);
     }
 
+    if (!_model->LoadDemoMotions(model_dir, _setting)) {
+      std::cerr << "[cubism] demo motion groups are unavailable; "
+                   "rendering will continue without motion playback\n";
+    }
+
     renderer->IsPremultipliedAlpha(false);
     std::cout << "Loaded Live2D model: " << model_json.string() << '\n';
     return true;
@@ -504,14 +878,23 @@ public:
     }
 
     CubismModel* cubism_model = _model->GetModel();
-    cubism_model->LoadParameters();
+    const auto now = NowSeconds();
+    const auto delta_seconds = _last_update_seconds > 0.0
+        ? static_cast<csmFloat32>(std::clamp(
+              now - _last_update_seconds, 0.0, 0.1))
+        : 1.0f / 60.0f;
+    _last_update_seconds = now;
+    if (g_talk_motion_requested.exchange(false)) {
+      _model->StartTalkMotion();
+    }
+    _model->UpdateMotion(delta_seconds);
+    ApplyQueuedMotion();
     UpdateAudioLevel();
     if (_mouth_parameter_index >= 0) {
       const float mouth = 0.08f + g_audio_level.load() * 0.92f;
       cubism_model->SetParameterValue(_mouth_parameter_index, mouth);
     }
     cubism_model->Update();
-    cubism_model->SaveParameters();
 
     auto* renderer =
         _model->GetRenderer<Rendering::CubismRenderer_D3D11>();
@@ -525,11 +908,328 @@ public:
     renderer->EndFrame();
   }
 
+  void SetModelSync(const ag99::runtime::Json& payload) {
+    std::scoped_lock lock(_motion_mutex);
+    _model_sync_payload = payload;
+    std::cerr << "[motion] model sync received\n";
+  }
+
+  void QueueMotionIntent(const ag99::runtime::Json& intent) {
+    std::scoped_lock lock(_motion_mutex);
+    _pending_motion_intent = intent;
+    std::cerr << "[motion] intent queued\n";
+  }
+
 private:
-  CubismUserModel* _model = nullptr;
+  struct MotionTrack {
+    csmInt32 parameter_index = -1;
+    float neutral_value = 0.0f;
+    float target_value = 0.0f;
+  };
+
+  struct MotionPlan {
+    double started_at = 0.0;
+    int duration_ms = 900;
+    int blend_in_ms = 120;
+    int blend_out_ms = 180;
+    std::vector<MotionTrack> tracks;
+  };
+
+  static double Clamp(double value, double minimum, double maximum) {
+    return std::max(minimum, std::min(maximum, value));
+  }
+
+  static double ReadNumber(
+      const ag99::runtime::Json& object,
+      const char* key,
+      double fallback) {
+    const auto it = object.find(key);
+    return it != object.end() && it->is_number()
+        ? it->get<double>() : fallback;
+  }
+
+  static std::string ReadString(
+      const ag99::runtime::Json& object,
+      const char* key) {
+    const auto it = object.find(key);
+    return it != object.end() && it->is_string()
+        ? it->get<std::string>() : std::string{};
+  }
+
+  const ag99::runtime::Json* SelectedModelProfile() const {
+    const auto model_info = _model_sync_payload.find("model_info");
+    if (model_info == _model_sync_payload.end()
+        || !model_info->is_object()) {
+      return nullptr;
+    }
+    const auto models = model_info->find("models");
+    if (models == model_info->end() || !models->is_array()) {
+      return nullptr;
+    }
+    const auto selected = ReadString(*model_info, "selected_model");
+    for (const auto& model : *models) {
+      if (!model.is_object()) {
+        continue;
+      }
+      if (!selected.empty() && ReadString(model, "name") != selected) {
+        continue;
+      }
+      const auto profile = model.find("semantic_axis_profile");
+      if (profile != model.end() && profile->is_object()) {
+        return &*profile;
+      }
+    }
+    return nullptr;
+  }
+
+  std::optional<MotionPlan> CompileMotionPlan(
+      const ag99::runtime::Json& intent) const {
+    if (!intent.is_object()
+        || ReadString(intent, "schema_version") !=
+            std::string(ag99::runtime::kMotionIntentSchema)) {
+      std::cerr << "[motion] unsupported motion intent schema\n";
+      return std::nullopt;
+    }
+    const auto profile = SelectedModelProfile();
+    if (!profile) {
+      std::cerr << "[motion] no semantic axis profile is available\n";
+      return std::nullopt;
+    }
+    const auto profile_id = ReadString(*profile, "profile_id");
+    if (!profile_id.empty()
+        && ReadString(intent, "profile_id") != profile_id) {
+      std::cerr << "[motion] profile id mismatch\n";
+      return std::nullopt;
+    }
+
+    const auto axes = profile->find("axes");
+    const auto axis_levels = intent.find("axis_levels");
+    if (axes == profile->end() || !axes->is_array()
+        || axis_levels == intent.end() || !axis_levels->is_object()) {
+      return std::nullopt;
+    }
+
+    struct AxisValue {
+      double value = 0.0;
+      double neutral = 0.0;
+      std::string group;
+    };
+    std::unordered_map<std::string, AxisValue> resolved;
+    std::unordered_set<std::string> explicit_axes;
+    for (const auto& axis : *axes) {
+      if (!axis.is_object()) {
+        continue;
+      }
+      const auto id = ReadString(axis, "id");
+      const auto level_it = axis_levels->find(id);
+      if (id.empty() || level_it == axis_levels->end()
+          || !level_it->is_number_integer()) {
+        continue;
+      }
+      const auto role = ReadString(axis, "control_role");
+      if (role != "primary" && role != "hint") {
+        continue;
+      }
+      const double neutral = ReadNumber(axis, "neutral", 50.0);
+      double value = neutral;
+      const auto anchors = axis.find("level_anchors");
+      if (anchors != axis.end() && anchors->is_object()) {
+        const auto key = std::to_string(level_it->get<int>());
+        const auto anchor = anchors->find(key);
+        if (anchor != anchors->end() && anchor->is_number()) {
+          value = anchor->get<double>();
+        }
+      }
+      const auto range = axis.find("value_range");
+      if (range != axis.end() && range->is_array() && range->size() == 2) {
+        value = Clamp(value, (*range)[0].get<double>(), (*range)[1].get<double>());
+      }
+      resolved.emplace(id, AxisValue{value, neutral, ReadString(axis, "semantic_group")});
+      explicit_axes.insert(id);
+    }
+
+    const auto relation_graph = profile->find("relation_graph");
+    const auto edges = relation_graph != profile->end()
+        ? relation_graph->find("edges") : profile->end();
+    if (edges != profile->end() && edges->is_array()) {
+      for (int pass = 0; pass < 3; ++pass) {
+        for (const auto& edge : *edges) {
+          if (!edge.is_object()) {
+            continue;
+          }
+          const auto source_id = ReadString(edge, "source_axis_id");
+          const auto target_id = ReadString(edge, "target_axis_id");
+          const auto source = resolved.find(source_id);
+          if (source == resolved.end() || target_id.empty()) {
+            continue;
+          }
+          const auto target_axis = std::ranges::find_if(
+              *axes, [&target_id](const auto& axis) {
+                return axis.is_object() && ReadString(axis, "id") == target_id;
+              });
+          if (target_axis == axes->end()) {
+            continue;
+          }
+          const double target_neutral = ReadNumber(*target_axis, "neutral", 50.0);
+          const auto target_range = target_axis->find("value_range");
+          const double target_min = target_range != target_axis->end()
+              && target_range->is_array() && target_range->size() == 2
+              ? (*target_range)[0].get<double>() : 0.0;
+          const double target_max = target_range != target_axis->end()
+              && target_range->is_array() && target_range->size() == 2
+              ? (*target_range)[1].get<double>() : 100.0;
+          const double source_delta = source->second.value - source->second.neutral;
+          const double scale = ReadNumber(edge, "scale", 0.0);
+          const double direction = ReadString(edge, "mode") == "opposite_direction"
+              ? -1.0 : 1.0;
+          const double candidate = Clamp(
+              target_neutral + source_delta * scale * direction,
+              target_min, target_max);
+          if (explicit_axes.contains(target_id)) {
+            continue;
+          }
+          resolved[target_id] = AxisValue{
+              candidate, target_neutral, ReadString(*target_axis, "semantic_group")};
+        }
+      }
+    }
+
+    MotionPlan plan;
+    plan.duration_ms = static_cast<int>(Clamp(
+        ReadNumber(intent, "duration_hint_ms", 900.0), 250.0, 5000.0));
+    plan.blend_in_ms = std::min(140, std::max(40, plan.duration_ms / 5));
+    plan.blend_out_ms = std::min(220, std::max(80, plan.duration_ms / 5));
+    const auto* cubism_model = _model ? _model->GetModel() : nullptr;
+    if (!cubism_model) {
+      return std::nullopt;
+    }
+    std::unordered_set<csmInt32> bound_parameters;
+    for (const auto& axis : *axes) {
+      if (!axis.is_object()) {
+        continue;
+      }
+      const auto axis_id = ReadString(axis, "id");
+      const auto value_it = resolved.find(axis_id);
+      if (value_it == resolved.end()) {
+        continue;
+      }
+      const auto bindings = axis.find("parameter_bindings");
+      if (bindings == axis.end() || !bindings->is_array()) {
+        continue;
+      }
+      for (const auto& binding : *bindings) {
+        if (!binding.is_object()) {
+          continue;
+        }
+        const auto parameter_id = ReadString(binding, "parameter_id");
+        const auto parameter = _model->GetModel()->GetParameterIndex(
+            CubismFramework::GetIdManager()->GetId(parameter_id.c_str()));
+        if (parameter < 0 || bound_parameters.contains(parameter)) {
+          continue;
+        }
+        const auto input_range = binding.find("input_range");
+        const auto output_range = binding.find("output_range");
+        if (input_range == binding.end() || output_range == binding.end()
+            || !input_range->is_array() || !output_range->is_array()
+            || input_range->size() != 2 || output_range->size() != 2) {
+          continue;
+        }
+        const double input_min = (*input_range)[0].get<double>();
+        const double input_max = (*input_range)[1].get<double>();
+        const double output_min = (*output_range)[0].get<double>();
+        const double output_max = (*output_range)[1].get<double>();
+        if (std::abs(input_max - input_min) < 0.0001) {
+          continue;
+        }
+        const double ratio = Clamp(
+            (value_it->second.value - input_min) / (input_max - input_min),
+            0.0, 1.0);
+        const bool invert = binding.value("invert", false);
+        const double effective_ratio = invert ? 1.0 - ratio : ratio;
+        const double neutral_ratio = Clamp(
+            (value_it->second.neutral - input_min) / (input_max - input_min),
+            0.0, 1.0);
+        const double neutral_effective_ratio = invert
+            ? 1.0 - neutral_ratio : neutral_ratio;
+        const float target = static_cast<float>(
+            output_min + (output_max - output_min) * effective_ratio);
+        const float neutral_target = static_cast<float>(
+            output_min + (output_max - output_min) * neutral_effective_ratio);
+        plan.tracks.push_back(MotionTrack{
+            parameter,
+            neutral_target,
+            target});
+        bound_parameters.insert(parameter);
+      }
+    }
+    if (plan.tracks.empty()) {
+      return std::nullopt;
+    }
+    plan.started_at = NowSeconds();
+    return plan;
+  }
+
+  void ApplyQueuedMotion() {
+    std::scoped_lock lock(_motion_mutex);
+    if (!_model || !_model->GetModel()) {
+      return;
+    }
+    if (_pending_motion_intent) {
+      const auto plan = CompileMotionPlan(*_pending_motion_intent);
+      _pending_motion_intent.reset();
+      if (plan) {
+        _active_motion = *plan;
+        std::cerr << "[motion] compiled " << _active_motion->tracks.size()
+                  << " parameter tracks for "
+                  << _active_motion->duration_ms << " ms\n";
+      }
+    }
+    if (!_active_motion) {
+      return;
+    }
+    const double elapsed_ms =
+        (NowSeconds() - _active_motion->started_at) * 1000.0;
+    for (const auto& track : _active_motion->tracks) {
+      double value = track.target_value;
+      if (elapsed_ms < _active_motion->blend_in_ms) {
+        const double t = Clamp(
+            elapsed_ms / std::max(1, _active_motion->blend_in_ms), 0.0, 1.0);
+        const double smooth = t * t * (3.0 - 2.0 * t);
+        value = track.neutral_value
+            + (track.target_value - track.neutral_value) * smooth;
+      } else if (elapsed_ms >=
+                 _active_motion->duration_ms - _active_motion->blend_out_ms) {
+        const double t = Clamp(
+            (elapsed_ms - (_active_motion->duration_ms
+                - _active_motion->blend_out_ms))
+                / std::max(1, _active_motion->blend_out_ms),
+            0.0, 1.0);
+        const double smooth = t * t * (3.0 - 2.0 * t);
+        value = track.target_value
+            + (track.neutral_value - track.target_value) * smooth;
+      }
+      const double minimum = _model->GetModel()->GetParameterMinimumValue(
+          track.parameter_index);
+      const double maximum = _model->GetModel()->GetParameterMaximumValue(
+          track.parameter_index);
+      _model->GetModel()->SetParameterValue(
+          track.parameter_index,
+          static_cast<csmFloat32>(Clamp(value, minimum, maximum)));
+    }
+    if (elapsed_ms >= _active_motion->duration_ms) {
+      _active_motion.reset();
+    }
+  }
+
+  NativeCubismModel* _model = nullptr;
   CubismModelSettingJson* _setting = nullptr;
   std::vector<TextureResource> _textures;
   csmInt32 _mouth_parameter_index = -1;
+  double _last_update_seconds = 0.0;
+  ag99::runtime::Json _model_sync_payload = ag99::runtime::Json::object();
+  std::optional<MotionPlan> _active_motion;
+  std::optional<ag99::runtime::Json> _pending_motion_intent;
+  mutable std::mutex _motion_mutex;
 };
 
 void AddTrayIcon(HWND window) {
@@ -561,6 +1261,14 @@ void ShowTrayMenu(HWND window) {
   const bool visible = IsWindowVisible(window) != FALSE;
   AppendMenuW(menu, MF_STRING, kTrayShow, L"显示模型");
   AppendMenuW(menu, MF_STRING, kTrayHide, L"隐藏模型");
+  AppendMenuW(menu, MF_STRING, kTrayDemoText, L"发送演示文本");
+  AppendMenuW(
+      menu,
+      MF_STRING,
+      kTrayMicToggle,
+      g_microphone_running && g_microphone_running()
+          ? L"停止麦克风"
+          : L"开始麦克风");
   AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
   AppendMenuW(menu, MF_STRING, kTrayExit, L"退出 AG99live");
   EnableMenuItem(menu, kTrayShow, visible ? MF_GRAYED : MF_ENABLED);
@@ -619,6 +1327,16 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lpa
           return 0;
         case kTrayHide:
           ShowWindow(window, SW_HIDE);
+          return 0;
+        case kTrayDemoText:
+          if (g_send_text) {
+            g_send_text("你好，这是原生 Live2D 核心演示。");
+          }
+          return 0;
+        case kTrayMicToggle:
+          if (g_toggle_microphone) {
+            g_toggle_microphone();
+          }
           return 0;
         case kTrayExit:
           RemoveTrayIcon();
@@ -775,7 +1493,10 @@ void StopCubism() {
   CubismFramework::CleanUp();
 }
 
-int Run(HINSTANCE instance, const std::filesystem::path& model_json) {
+int Run(
+    HINSTANCE instance,
+    const std::filesystem::path& model_json,
+    const std::string& startup_text) {
   constexpr UINT width = 640;
   constexpr UINT height = 820;
   HWND window = CreateWindowHandle(instance, width, height);
@@ -797,12 +1518,31 @@ int Run(HINSTANCE instance, const std::filesystem::path& model_json) {
   int result_code = 0;
   {
     NativeModel model;
-    RuntimeBridge runtime;
+    RuntimeBridge runtime(
+        [&model](ag99::runtime::ModelSync sync) {
+          model.SetModelSync(sync.payload);
+        },
+        [&model](const ag99::runtime::Json& motion_intent) {
+          model.QueueMotionIntent(motion_intent);
+        });
+    g_send_text = [&runtime](std::string text) {
+      if (!runtime.SendText(text)) {
+        std::cerr << "[runtime] failed to send demo text\n";
+      }
+    };
+    g_toggle_microphone = [&runtime] {
+      runtime.ToggleMicrophone();
+    };
+    g_microphone_running = [&runtime] {
+      return runtime.MicrophoneRunning();
+    };
     if (!model_json.empty() && !model.Load(model_json, width, height)) {
       result_code = 1;
     } else {
       if (!runtime.Connect("ws://127.0.0.1:12396")) {
         std::cerr << "[runtime] adapter connection unavailable; tray/render demo continues\n";
+      } else if (!startup_text.empty()) {
+        g_send_text(startup_text);
       }
       ShowWindow(window, SW_SHOWNOACTIVATE);
       UpdateWindow(window);
@@ -827,6 +1567,9 @@ int Run(HINSTANCE instance, const std::filesystem::path& model_json) {
       }
     }
     runtime.Close();
+    g_send_text = {};
+    g_toggle_microphone = {};
+    g_microphone_running = {};
   }
 
   StopCurrentAudio();
@@ -849,13 +1592,42 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
   LPWSTR* arguments =
       CommandLineToArgvW(GetCommandLineW(), &argument_count);
   std::filesystem::path model_json;
+  std::string startup_text;
   if (arguments && argument_count > 1) {
     model_json = arguments[1];
+  }
+  for (int index = 2; index < argument_count; ++index) {
+    const std::wstring argument = arguments[index];
+    constexpr std::wstring_view prefix = L"--text=";
+    if (argument.starts_with(prefix)) {
+      const auto value = argument.substr(prefix.size());
+      const int length = WideCharToMultiByte(
+          CP_UTF8,
+          0,
+          value.data(),
+          static_cast<int>(value.size()),
+          nullptr,
+          0,
+          nullptr,
+          nullptr);
+      if (length > 0) {
+        startup_text.resize(static_cast<std::size_t>(length));
+        WideCharToMultiByte(
+            CP_UTF8,
+            0,
+            value.data(),
+            static_cast<int>(value.size()),
+            startup_text.data(),
+            length,
+            nullptr,
+            nullptr);
+      }
+    }
   }
   if (arguments) {
     LocalFree(arguments);
   }
-  const int result = Run(instance, model_json);
+  const int result = Run(instance, model_json, startup_text);
   if (SUCCEEDED(com_result)) {
     CoUninitialize();
   }

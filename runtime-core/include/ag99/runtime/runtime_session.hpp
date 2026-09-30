@@ -17,6 +17,7 @@ struct RuntimeSessionCallbacks {
   std::function<void(BinaryAudioChunkFrame)> on_audio_chunk;
   std::function<void(std::string)> on_ignored_type;
   std::function<void(std::string)> on_protocol_error;
+  std::function<void(ModelSync)> on_model_sync;
 };
 
 class RuntimeProtocolSession final {

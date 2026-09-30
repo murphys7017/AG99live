@@ -18,6 +18,7 @@ using Json = nlohmann::json;
 inline constexpr std::string_view kProtocolVersion = "v2";
 inline constexpr std::string_view kOutputSegmentSchema = "output.segment.v5";
 inline constexpr std::string_view kMotionIntentSchema = "engine.motion_intent.v4";
+inline constexpr std::string_view kModelInfoSchema = "live2d_scan.v4";
 
 class ProtocolError final : public std::runtime_error {
  public:
@@ -83,6 +84,11 @@ struct OutputSegment {
   std::string avatar;
 };
 
+struct ModelSync {
+  ProtocolEnvelope envelope;
+  Json payload;
+};
+
 struct AudioChunkMetadata {
   std::string stream_id;
   std::optional<std::string> turn_id;
@@ -101,6 +107,7 @@ struct BinaryAudioChunkFrame {
 ProtocolEnvelope parse_envelope(const Json& raw);
 ProtocolEnvelope parse_envelope_json(std::string_view raw);
 OutputSegment parse_output_segment(const ProtocolEnvelope& envelope);
+ModelSync parse_model_sync(const ProtocolEnvelope& envelope);
 
 BinaryAudioChunkFrame parse_binary_audio_frame(std::span<const std::uint8_t> frame);
 std::vector<std::uint8_t> build_binary_audio_frame(

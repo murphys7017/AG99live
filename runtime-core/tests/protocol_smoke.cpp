@@ -35,6 +35,33 @@ ag99::runtime::Json make_segment(
   };
 }
 
+ag99::runtime::Json make_model_sync() {
+  const ag99::runtime::Json models = nlohmann::json::array({
+      {
+          {"name", "Demo"},
+          {"semantic_axis_profile", nullptr},
+      },
+  });
+  return {
+      {"type", "system.model_sync"},
+      {"version", "v2"},
+      {"message_id", "sync-1"},
+      {"timestamp", "2026-10-01T00:00:00.000Z"},
+      {"turn_id", nullptr},
+      {"source", "adapter"},
+      {"payload",
+       {
+           {"model_info",
+            {
+                {"schema_version", "live2d_scan.v4"},
+                {"selected_model", "Demo"},
+                {"models", models},
+            }},
+           {"runtime_cache_errors", nlohmann::json::object()},
+       }},
+  };
+}
+
 void test_envelope_and_segment() {
   const auto envelope = ag99::runtime::parse_envelope(make_segment("m-1", 0));
   const auto segment = ag99::runtime::parse_output_segment(envelope);
@@ -148,6 +175,7 @@ void test_input_text_builder() {
 
 void test_runtime_session_dispatch() {
   std::vector<std::string> ready_messages;
+  std::vector<std::string> synced_models;
   std::vector<std::string> errors;
   ag99::runtime::RuntimeProtocolSession session({
       [&](ag99::runtime::OutputSegment segment) {
@@ -156,8 +184,14 @@ void test_runtime_session_dispatch() {
       {},
       {},
       [&](std::string message) { errors.push_back(std::move(message)); },
+      [&](ag99::runtime::ModelSync sync) {
+        synced_models.push_back(
+            sync.payload.at("model_info").at("selected_model").get<std::string>());
+      },
   });
 
+  session.ingest_text(make_model_sync().dump());
+  assert((synced_models == std::vector<std::string>{"Demo"}));
   session.ingest_text(make_segment("m-2", 1).dump());
   session.ingest_text(make_segment("m-1", 0).dump());
   assert((ready_messages == std::vector<std::string>{"m-1", "m-2"}));

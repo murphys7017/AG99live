@@ -1,3 +1,23 @@
+native_runtime_motion_plan:
+  recorded_at: "2026-09-30"
+  class: feature
+  risk: high
+  status: source_complete_pending_live_acceptance
+  scope:
+    - "Extend RuntimeProtocolSession to consume the adapter's system.model_sync snapshot."
+    - "Compile engine.motion_intent.v4 axis levels into native Cubism parameter tracks."
+    - "Apply blend-in, hold, blend-out motion plans after the native idle/talk motion update."
+  non_actions:
+    - "Do not add VAD, microphone device selection, settings pages, Spout, or transparent composition in this slice."
+    - "Do not add a second adapter connection or a second motion clock."
+  validation:
+    - "`cmake --build render-core/build --config Release --parallel 4` passed."
+    - "`cmake --build runtime-core/build --config Release --parallel 4` passed."
+    - "`ctest --test-dir runtime-core/build -C Release --output-on-failure` passed."
+    - "Native host stayed alive for 8 seconds against the listening local Adapter."
+  evidence_gap:
+    - "Live visual confirmation is still required for motion quality, audio amplitude lip-sync, and transparent-window composition."
+
 desktop_release_v0_1_0:
   recorded_at: "2026-09-30"
   class: release

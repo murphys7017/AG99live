@@ -12,6 +12,13 @@ RuntimeProtocolSession::RuntimeProtocolSession(
 void RuntimeProtocolSession::ingest_text(std::string_view text_frame) {
   try {
     const auto envelope = parse_envelope_json(text_frame);
+    if (envelope.type == "system.model_sync") {
+      auto sync = parse_model_sync(envelope);
+      if (callbacks_.on_model_sync) {
+        callbacks_.on_model_sync(std::move(sync));
+      }
+      return;
+    }
     if (envelope.type != "output.segment") {
       if (callbacks_.on_ignored_type) {
         callbacks_.on_ignored_type(envelope.type);

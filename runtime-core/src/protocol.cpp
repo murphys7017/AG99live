@@ -415,6 +415,53 @@ OutputSegment parse_output_segment(const ProtocolEnvelope& envelope) {
       avatar};
 }
 
+ModelSync parse_model_sync(const ProtocolEnvelope& envelope) {
+  if (envelope.type != "system.model_sync") {
+    throw ProtocolError("expected system.model_sync envelope");
+  }
+  if (envelope.source != "adapter") {
+    throw ProtocolError("system.model_sync.source must be adapter");
+  }
+  require_exact_keys(
+      envelope.payload,
+      "payload",
+      {"model_info", "runtime_cache_errors"});
+  const auto& model_info = require_member(
+      envelope.payload, "model_info", "payload");
+  require_object(model_info, "payload.model_info");
+  const auto schema_version = require_string(
+      model_info, "schema_version", "payload.model_info");
+  if (schema_version != kModelInfoSchema) {
+    throw ProtocolError("payload.model_info.schema_version must be live2d_scan.v4");
+  }
+  const auto selected_model = require_string(
+      model_info, "selected_model", "payload.model_info");
+  const auto& models = require_member(
+      model_info, "models", "payload.model_info");
+  if (!models.is_array() || models.empty()) {
+    throw ProtocolError("payload.model_info.models must be a non-empty array");
+  }
+  for (const auto& model : models) {
+    require_object(model, "payload.model_info.models[]");
+    require_string(model, "name", "payload.model_info.models[]");
+    if (model.contains("semantic_axis_profile")
+        && !model.at("semantic_axis_profile").is_null()
+        && !model.at("semantic_axis_profile").is_object()) {
+      throw ProtocolError(
+          "payload.model_info.models[].semantic_axis_profile must be an object or null");
+    }
+  }
+  if (selected_model.empty()) {
+    throw ProtocolError("payload.model_info.selected_model must be non-empty");
+  }
+  const auto& cache_errors = require_member(
+      envelope.payload, "runtime_cache_errors", "payload");
+  if (!cache_errors.is_object()) {
+    throw ProtocolError("payload.runtime_cache_errors must be an object");
+  }
+  return ModelSync{envelope, envelope.payload};
+}
+
 BinaryAudioChunkFrame parse_binary_audio_frame(
     std::span<const std::uint8_t> frame) {
   if (frame.size() < kAudioHeaderBytes) {
