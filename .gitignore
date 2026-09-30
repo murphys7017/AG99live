@@ -27,3 +27,4 @@ ai_governance_runtime_overview_manifest.md
 deploy_adapter.ps1
 /promo-video/
 runtime-core/build/
+render-core/build/
