@@ -11,6 +11,7 @@ import type {
   DesktopPttEventAck,
   DesktopPttHookStatus,
   DesktopPttKeyBinding,
+  DesktopSpoutSenderStatus,
   DesktopWindowVisibilityState,
 } from "../../src/types/desktop";
 
@@ -76,6 +77,20 @@ const api = {
   },
   publishSpoutFrame: (width: number, height: number, rgba: Uint8Array) => {
     ipcRenderer.send("desktop:publish-spout-frame", width, height, rgba);
+  },
+  getSpoutSenderStatus: () => {
+    return ipcRenderer.invoke(
+      "desktop:get-spout-sender-status",
+    ) as Promise<DesktopSpoutSenderStatus>;
+  },
+  onSpoutSenderStatus: (callback: (status: DesktopSpoutSenderStatus) => void) => {
+    const handler = (_event: unknown, status: DesktopSpoutSenderStatus) => {
+      callback(status);
+    };
+    ipcRenderer.on("desktop:spout-sender-status", handler);
+    return () => {
+      ipcRenderer.removeListener("desktop:spout-sender-status", handler);
+    };
   },
   listNativeMicrophones: () => {
     return ipcRenderer.invoke("desktop:list-native-microphones") as Promise<DesktopMicrophoneDevice[]>;

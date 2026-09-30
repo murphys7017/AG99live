@@ -1,3 +1,24 @@
+spout_readback_first_batch:
+  recorded_at: "2026-09-30"
+  class: perf_refactor
+  risk: high
+  status: source_complete_pending_live_acceptance
+  scope:
+    - "Add low-frequency Renderer, Electron pipe, and Native Sender statistics for readback cost, bytes, frame rate, backpressure, and SendImage duration."
+    - "Expose Sender ready/writeBlocked state through a query plus revisioned status notifications so Renderer skips readPixels before an unavailable or backpressured pipe."
+    - "Remove Renderer row flipping and use Spout SendImage bInvert=true so the Native Sender owns vertical orientation."
+  non_actions:
+    - "Keep SPOUT and ESP32 manual enable/disable semantics and the existing RGBA frame protocol."
+    - "Do not change preserveDrawingBuffer, GPU texture direct handoff, or shared SPOUT/ESP32 capture coordination in this batch."
+  validation:
+    - "`npm run typecheck` passed."
+    - "`npm run build:web` passed."
+    - "`npm run build` passed."
+    - "`npm run build:spout-sender` passed with MSVC x64 and refreshed the packaged helper."
+    - "`git diff --check` passed."
+  evidence_gap:
+    - "Live OBS/Spout2 acceptance must confirm vertical orientation, transparency, premultiplied-alpha edge quality, actual FPS, and recovery after Sender backpressure or restart."
+
 frontend_runtime_occupancy_followup:
   recorded_at: "2026-09-30"
   class: perf_refactor

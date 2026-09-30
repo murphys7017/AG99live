@@ -32,6 +32,14 @@ export interface DesktopWindowVisibilityState {
   profileEditorVisible?: boolean;
 }
 
+export interface DesktopSpoutSenderStatus {
+  ready: boolean;
+  writeBlocked: boolean;
+  unavailable: boolean;
+  canPublish: boolean;
+  revision: number;
+}
+
 export interface DesktopHistoryEntry {
   id: string;
   role: "user" | "assistant" | "system" | "error" | "transcription";

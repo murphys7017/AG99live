@@ -1,5 +1,6 @@
 #include <windows.h>
 
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <string>
@@ -12,6 +13,7 @@ namespace {
 constexpr std::uint32_t kFrameMagic = 0x41473939;
 constexpr std::uint32_t kMaxFrameDimension = 8192;
 constexpr std::size_t kMaxFrameBytes = 256U * 1024U * 1024U;
+constexpr auto kStatsInterval = std::chrono::seconds(10);
 constexpr char kDefaultSenderName[] = "AG99live.Live2D";
 
 struct FrameHeader {
@@ -101,6 +103,44 @@ int main(int argc, char** argv) {
   const HANDLE input = GetStdHandle(STD_INPUT_HANDLE);
   std::vector<std::uint8_t> pixels;
   FrameHeader header{};
+  auto stats_started_at = std::chrono::steady_clock::now();
+  std::uint64_t send_calls = 0;
+  std::uint64_t sent_frames = 0;
+  std::uint64_t failed_frames = 0;
+  double total_send_ms = 0;
+  double max_send_ms = 0;
+  const auto report_stats = [&](bool force) {
+    const auto now = std::chrono::steady_clock::now();
+    const auto elapsed = now - stats_started_at;
+    if (!force && elapsed < kStatsInterval) {
+      return;
+    }
+    if (send_calls == 0) {
+      stats_started_at = now;
+      return;
+    }
+
+    const double elapsed_seconds = std::chrono::duration<double>(elapsed).count();
+    const double average_send_ms = total_send_ms / static_cast<double>(send_calls);
+    char stats_line[256]{};
+    std::snprintf(
+      stats_line,
+      sizeof(stats_line),
+      "stats frames=%llu failed=%llu send_fps=%.1f send_avg_ms=%.2f send_max_ms=%.2f",
+      static_cast<unsigned long long>(sent_frames),
+      static_cast<unsigned long long>(failed_frames),
+      elapsed_seconds > 0 ? sent_frames / elapsed_seconds : 0,
+      average_send_ms,
+      max_send_ms
+    );
+    WriteStatus(stats_line);
+    stats_started_at = now;
+    send_calls = 0;
+    sent_frames = 0;
+    failed_frames = 0;
+    total_send_ms = 0;
+    max_send_ms = 0;
+  };
   while (ReadExact(input, &header, sizeof(header))) {
     if (!IsValidHeader(header)) {
       WriteStatus("spout_frame_header_invalid", stderr);
@@ -113,11 +153,26 @@ int main(int argc, char** argv) {
       break;
     }
 
-    if (!spout->SendImage(pixels.data(), header.width, header.height, GL_RGBA, false)) {
-      WriteStatus("spout_frame_send_failed", stderr);
+    const auto send_started_at = std::chrono::steady_clock::now();
+    const bool sent = spout->SendImage(pixels.data(), header.width, header.height, GL_RGBA, true);
+    const double send_ms = std::chrono::duration<double, std::milli>(
+      std::chrono::steady_clock::now() - send_started_at
+    ).count();
+    ++send_calls;
+    total_send_ms += send_ms;
+    if (send_ms > max_send_ms) {
+      max_send_ms = send_ms;
     }
+    if (!sent) {
+      ++failed_frames;
+    } else {
+      ++sent_frames;
+    }
+
+    report_stats(false);
   }
 
+  report_stats(true);
   spout->ReleaseSender();
   spout->CloseOpenGL();
   spout->Release();

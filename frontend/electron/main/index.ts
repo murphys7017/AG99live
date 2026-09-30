@@ -11,6 +11,7 @@ import type {
   DesktopPttEventPayload,
   DesktopPttHookStatus,
   DesktopPttKeyBinding,
+  DesktopSpoutSenderStatus,
 } from "../../src/types/desktop";
 
 let windowManager: WindowManager;
@@ -259,6 +260,14 @@ function broadcastToOtherWindows(
   }
 }
 
+function sendSpoutSenderStatus(status: DesktopSpoutSenderStatus): void {
+  const pet = windowManager?.getWindow("pet");
+  if (!pet || pet.isDestroyed() || pet.webContents.isDestroyed()) {
+    return;
+  }
+  pet.webContents.send("desktop:spout-sender-status", status);
+}
+
 function normalizePttKeycode(binding: unknown): number | null {
   if (!binding || typeof binding !== "object") {
     return 29;
@@ -418,6 +427,26 @@ function watchWindowShortcuts(window: BrowserWindow): void {
 }
 
 function setupIpc(): void {
+  ipcMain.handle("desktop:get-spout-sender-status", (event) => {
+    const petWindow = windowManager.getWindow("pet");
+    if (!petWindow || petWindow.isDestroyed() || petWindow.webContents !== event.sender) {
+      return {
+        ready: false,
+        writeBlocked: false,
+        unavailable: true,
+        canPublish: false,
+        revision: 0,
+      } satisfies DesktopSpoutSenderStatus;
+    }
+    return spoutSender?.getStatus() ?? {
+      ready: false,
+      writeBlocked: false,
+      unavailable: true,
+      canPublish: false,
+      revision: 0,
+    };
+  });
+
   ipcMain.on("desktop:publish-spout-frame", (event, width: unknown, height: unknown, rgba: unknown) => {
     const petWindow = windowManager.getWindow("pet");
     if (!petWindow || petWindow.isDestroyed() || petWindow.webContents !== event.sender) {
@@ -677,7 +706,7 @@ app.whenReady().then(() => {
   windowManager = new WindowManager();
   menuManager = new MenuManager(windowManager);
   void menuManager;
-  spoutSender = new SpoutSender();
+  spoutSender = new SpoutSender(sendSpoutSenderStatus);
   spoutSender.start();
   windowManager.createWindows();
   setupIpc();

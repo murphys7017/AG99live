@@ -9,6 +9,7 @@ import type {
   DesktopPttEventAck,
   DesktopPttHookStatus,
   DesktopPttKeyBinding,
+  DesktopSpoutSenderStatus,
   DesktopWindowVisibilityState,
 } from "./desktop";
 
@@ -38,6 +39,10 @@ export interface Ag99DesktopApi {
     captured_at: string;
   } | null>;
   publishSpoutFrame: (width: number, height: number, rgba: Uint8Array) => void;
+  getSpoutSenderStatus: () => Promise<DesktopSpoutSenderStatus>;
+  onSpoutSenderStatus: (
+    callback: (status: DesktopSpoutSenderStatus) => void,
+  ) => () => void;
   listNativeMicrophones: () => Promise<DesktopMicrophoneDevice[]>;
   startNativeMicrophoneCapture: (
     deviceId: string | null,
