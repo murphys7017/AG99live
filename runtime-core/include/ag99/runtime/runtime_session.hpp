@@ -18,6 +18,8 @@ struct RuntimeSessionCallbacks {
   std::function<void(std::string)> on_ignored_type;
   std::function<void(std::string)> on_protocol_error;
   std::function<void(ModelSync)> on_model_sync;
+  std::function<void(std::string)> on_turn_started;
+  std::function<void(std::string)> on_turn_finished;
 };
 
 class RuntimeProtocolSession final {

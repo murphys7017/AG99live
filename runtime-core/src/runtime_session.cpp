@@ -12,6 +12,65 @@ RuntimeProtocolSession::RuntimeProtocolSession(
 void RuntimeProtocolSession::ingest_text(std::string_view text_frame) {
   try {
     const auto envelope = parse_envelope_json(text_frame);
+    if (envelope.type == "control.turn_started") {
+      if (envelope.source != "adapter") {
+        throw ProtocolError("control.turn_started.source must be adapter");
+      }
+      if (!envelope.turn_id.has_value()) {
+        throw ProtocolError("control.turn_started requires turn_id");
+      }
+      if (!envelope.payload.empty()) {
+        throw ProtocolError("control.turn_started payload must be empty");
+      }
+      if (callbacks_.on_turn_started) {
+        callbacks_.on_turn_started(*envelope.turn_id);
+      }
+      return;
+    }
+    if (envelope.type == "control.turn_finished") {
+      if (envelope.source != "adapter") {
+        throw ProtocolError("control.turn_finished.source must be adapter");
+      }
+      if (!envelope.turn_id.has_value()) {
+        throw ProtocolError("control.turn_finished requires turn_id");
+      }
+      if (!envelope.payload.is_object()) {
+        throw ProtocolError("control.turn_finished payload must be an object");
+      }
+      const auto success = envelope.payload.find("success");
+      if (success == envelope.payload.end() || !success->is_boolean()) {
+        throw ProtocolError("control.turn_finished payload.success must be boolean");
+      }
+      const auto reason = envelope.payload.find("reason");
+      if (reason != envelope.payload.end() && !reason->is_string()) {
+        throw ProtocolError("control.turn_finished payload.reason must be string");
+      }
+      for (const auto& [key, _] : envelope.payload.items()) {
+        if (key != "success" && key != "reason") {
+          throw ProtocolError(
+              "control.turn_finished payload." + key + " is not allowed");
+        }
+      }
+      if (callbacks_.on_turn_finished) {
+        callbacks_.on_turn_finished(*envelope.turn_id);
+      }
+      return;
+    }
+    if (envelope.type == "control.interrupt") {
+      if (envelope.source != "adapter") {
+        throw ProtocolError("control.interrupt.source must be adapter");
+      }
+      if (!envelope.turn_id.has_value()) {
+        throw ProtocolError("control.interrupt requires turn_id");
+      }
+      if (!envelope.payload.empty()) {
+        throw ProtocolError("control.interrupt payload must be empty");
+      }
+      if (callbacks_.on_turn_finished) {
+        callbacks_.on_turn_finished(*envelope.turn_id);
+      }
+      return;
+    }
     if (envelope.type == "system.model_sync") {
       auto sync = parse_model_sync(envelope);
       if (callbacks_.on_model_sync) {

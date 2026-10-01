@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -1084,10 +1085,14 @@ class RuntimeBridge final {
 public:
   RuntimeBridge(
       std::function<void(ag99::runtime::ModelSync)> on_model_sync,
-      std::function<void(const ag99::runtime::Json&)> on_motion_intent)
+      std::function<void(const ag99::runtime::Json&, const std::string&)> on_motion_intent,
+      std::function<void(const std::string&)> on_turn_started,
+      std::function<void(const std::string&)> on_turn_finished)
       : microphone_(websocket_),
         on_model_sync_(std::move(on_model_sync)),
         on_motion_intent_(std::move(on_motion_intent)),
+        on_turn_started_(std::move(on_turn_started)),
+        on_turn_finished_(std::move(on_turn_finished)),
         session_({
             [this](ag99::runtime::OutputSegment segment) {
               OnSegment(std::move(segment));
@@ -1105,6 +1110,16 @@ public:
             [this](ag99::runtime::ModelSync sync) {
               if (on_model_sync_) {
                 on_model_sync_(std::move(sync));
+              }
+            },
+            [this](std::string turn_id) {
+              if (on_turn_started_) {
+                on_turn_started_(turn_id);
+              }
+            },
+            [this](std::string turn_id) {
+              if (on_turn_finished_) {
+                on_turn_finished_(turn_id);
               }
             },
         }) {
@@ -1215,7 +1230,7 @@ private:
 
     if (segment.motion.state == ag99::runtime::MotionSlot::State::Present
         && on_motion_intent_) {
-      on_motion_intent_(segment.motion.payload);
+      on_motion_intent_(segment.motion.payload, turn_id);
     }
     if (!turn_id.empty() && websocket_.connected()) {
       const auto finished =
@@ -1252,7 +1267,7 @@ private:
         continue;
       }
       if (item.has_motion && on_motion_intent_) {
-        on_motion_intent_(item.motion_payload);
+        on_motion_intent_(item.motion_payload, item.turn_id);
       }
       const auto deadline = NowSeconds() + playback->duration_seconds;
       while (!closing_.load()
@@ -1285,7 +1300,9 @@ private:
   ag99::runtime::WinHttpWebSocketClient websocket_;
   MicrophoneCapture microphone_;
   std::function<void(ag99::runtime::ModelSync)> on_model_sync_;
-  std::function<void(const ag99::runtime::Json&)> on_motion_intent_;
+  std::function<void(const ag99::runtime::Json&, const std::string&)> on_motion_intent_;
+  std::function<void(const std::string&)> on_turn_started_;
+  std::function<void(const std::string&)> on_turn_finished_;
   ag99::runtime::RuntimeProtocolSession session_;
   std::mutex audio_queue_mutex_;
   std::condition_variable audio_queue_condition_;
@@ -1441,7 +1458,8 @@ public:
     UpdateAudioLevel(delta_seconds);
     ApplyParameterFrame(
         g_lip_sync_intensity.load(),
-        g_audio_end_seconds.load() > NowSeconds());
+        g_audio_end_seconds.load() > NowSeconds(),
+        delta_seconds);
     _model->UpdatePhysicsAndPose(delta_seconds);
     cubism_model->Update();
 
@@ -1450,7 +1468,21 @@ public:
 
   void SetModelSync(const ag99::runtime::Json& payload) {
     std::scoped_lock lock(_motion_mutex);
+    const auto* previous_profile = SelectedModelProfile(_model_sync_payload);
+    const auto* next_profile = SelectedModelProfile(payload);
+    const bool selected_runtime_changed =
+        SelectedModelName(_model_sync_payload) != SelectedModelName(payload)
+        || (previous_profile == nullptr) != (next_profile == nullptr)
+        || (previous_profile && next_profile
+            && *previous_profile != *next_profile);
     _model_sync_payload = payload;
+    if (selected_runtime_changed) {
+      _interaction_sway.reset();
+      _interaction_gaze.reset();
+      _pending_thinking_turn_id.reset();
+      _gaze_candidate_valid = false;
+      _gaze_candidate_since_ms = 0.0;
+    }
     std::unordered_set<std::string> protected_parameter_ids;
     const auto model_info = payload.find("model_info");
     if (model_info != payload.end() && model_info->is_object()) {
@@ -1501,20 +1533,100 @@ public:
     std::cerr << "[motion] model sync received\n";
   }
 
-  void QueueMotionPayload(const ag99::runtime::Json& payload) {
+  void QueueMotionPayload(
+      const ag99::runtime::Json& payload,
+      const std::string& turn_id) {
     std::scoped_lock lock(_motion_mutex);
     const auto schema = ReadString(payload, "schema_version");
     if (schema == std::string(ag99::runtime::kParameterPlanSchema)) {
       _pending_parameter_plan = payload;
+      _pending_parameter_plan_turn_id = turn_id;
       _pending_motion_intent.reset();
+      _pending_motion_intent_turn_id.reset();
       _active_motion.reset();
       std::cerr << "[motion] parameter plan queued\n";
       return;
     }
     _pending_motion_intent = payload;
+    _pending_motion_intent_turn_id = turn_id;
     _pending_parameter_plan.reset();
+    _pending_parameter_plan_turn_id.reset();
     _active_parameter_plan.reset();
     std::cerr << "[motion] intent queued\n";
+  }
+
+  void StartThinkingSway(const std::string& turn_id) {
+    if (turn_id.empty()) {
+      return;
+    }
+    std::scoped_lock lock(_motion_mutex);
+    _pending_thinking_turn_id = turn_id;
+  }
+
+  void ReleaseThinkingSway(const std::string& turn_id) {
+    std::scoped_lock lock(_motion_mutex);
+    if (_interaction_sway
+        && (turn_id.empty() || _interaction_sway->turn_id == turn_id)) {
+      ReleaseThinkingSwayLocked(turn_id);
+    }
+    if (_pending_thinking_turn_id
+        && (turn_id.empty() || *_pending_thinking_turn_id == turn_id)) {
+      _pending_thinking_turn_id.reset();
+    }
+  }
+
+  void UpdateCursorGaze(
+      HWND window) {
+    if (!window || !IsWindowVisible(window)) {
+      return;
+    }
+    const double now_ms = NowSeconds() * 1000.0;
+    if (now_ms < _next_cursor_poll_ms) {
+      return;
+    }
+    _next_cursor_poll_ms = now_ms + 100.0;
+
+    POINT cursor{};
+    RECT bounds{};
+    if (!GetCursorPos(&cursor) || !GetWindowRect(window, &bounds)) {
+      return;
+    }
+    const double window_width = std::max<LONG>(1, bounds.right - bounds.left);
+    const double window_center_x = bounds.left + window_width * 0.5;
+
+    const double target_ratio = Clamp(
+        (cursor.x - window_center_x) / std::max(1.0, window_width * 1.5),
+        -1.0,
+        1.0);
+    std::scoped_lock lock(_motion_mutex);
+    const bool moved = !_gaze_candidate_valid
+        || std::hypot(cursor.x - _gaze_candidate_x,
+                      cursor.y - _gaze_candidate_y) > 14.0;
+    if (moved) {
+      _gaze_candidate_valid = true;
+      _gaze_candidate_x = cursor.x;
+      _gaze_candidate_y = cursor.y;
+      _gaze_candidate_since_ms = now_ms;
+      if (_interaction_gaze) {
+        _interaction_gaze->target_ratio = 0.0;
+      }
+      return;
+    }
+
+    _gaze_candidate_x = cursor.x;
+    _gaze_candidate_y = cursor.y;
+    if (now_ms - _gaze_candidate_since_ms < 450.0) {
+      return;
+    }
+    if (!_interaction_gaze) {
+      auto state = CreateInteractionGaze(target_ratio);
+      if (state) {
+        _interaction_gaze = std::move(*state);
+        std::cerr << "[interaction] cursor gaze started\n";
+      }
+      return;
+    }
+    _interaction_gaze->target_ratio = target_ratio;
   }
 
 private:
@@ -1544,6 +1656,19 @@ private:
     float value = 0.0f;
   };
 
+  struct ParameterPresentationState {
+    float initial_value = 0.0f;
+    float neutral_value = 0.0f;
+    float max_velocity = 1.0f;
+    float max_acceleration = 1.0f;
+    std::string response_kind = "bounded";
+    float response_frequency_hz = 0.0f;
+    float response_damping_ratio = 0.0f;
+    float driven_offset = 0.0f;
+    float velocity = 0.0f;
+    double last_elapsed_ms = -1.0;
+  };
+
   struct ParameterPlanBinding {
     std::string axis_id;
     std::string parameter_id;
@@ -1551,22 +1676,41 @@ private:
     int activation_at_ms = 0;
     float target_value = 0.0f;
     float neutral_target_value = 0.0f;
-    float initial_value = 0.0f;
     float weight = 1.0f;
     std::vector<ParameterPlanTrackPoint> keyframes;
     std::vector<ParameterPlanTrackPoint> modulation_points;
     float modulation_amplitude = 0.0f;
     int modulation_direction = 1;
     int modulation_delay_ms = 0;
-    float max_velocity = 1.0f;
-    float max_acceleration = 1.0f;
     float max_speech_offset = 0.0f;
-    std::string response_kind = "bounded";
-    float response_frequency_hz = 0.0f;
-    float response_damping_ratio = 0.0f;
-    float driven_offset = 0.0f;
-    float velocity = 0.0f;
-    double last_elapsed_ms = -1.0;
+    ParameterPresentationState presentation;
+  };
+
+  struct InteractionBinding {
+    std::string axis_id;
+    std::string parameter_id;
+    csmInt32 parameter_index = -1;
+    float neutral_value = 0.0f;
+    float negative_value = 0.0f;
+    float positive_value = 0.0f;
+    float weight = 1.0f;
+    ParameterPresentationState presentation;
+  };
+
+  struct InteractionSwayState {
+    std::string turn_id;
+    double cycle_ms = 4000.0;
+    double attack_ms = 500.0;
+    double release_ms = 650.0;
+    double elapsed_ms = 0.0;
+    std::optional<double> release_started_at_ms;
+    std::vector<InteractionBinding> bindings;
+  };
+
+  struct InteractionGazeState {
+    double target_ratio = 0.0;
+    double elapsed_ms = 0.0;
+    std::vector<InteractionBinding> bindings;
   };
 
   struct ParameterPlan {
@@ -1596,7 +1740,8 @@ private:
     float value = 0.0f;
     float weight = 1.0f;
     int priority = 0;
-    ParameterPlanBinding* presentation_binding = nullptr;
+    ParameterPresentationState* presentation = nullptr;
+    bool presentation_is_direct_plan = false;
     double elapsed_ms = 0.0;
   };
 
@@ -1887,9 +2032,11 @@ private:
           .target_value = static_cast<float>(target->get<double>()),
           .neutral_target_value = static_cast<float>(neutral->get<double>()),
           .weight = static_cast<float>(weight->get<double>()),
-          .max_velocity = static_cast<float>(max_velocity->get<double>()),
-          .max_acceleration = static_cast<float>(max_acceleration->get<double>()),
           .max_speech_offset = static_cast<float>(max_speech_offset->get<double>()),
+          .presentation = ParameterPresentationState{
+              .max_velocity = static_cast<float>(max_velocity->get<double>()),
+              .max_acceleration = static_cast<float>(max_acceleration->get<double>()),
+          },
       };
       const auto response_kind = ReadString(*response, "kind");
       if (response_kind == "bounded") {
@@ -1908,14 +2055,14 @@ private:
             || response->at("damping_ratio").get<double>() >= 1) {
           return std::nullopt;
         }
-        binding.response_frequency_hz =
+        binding.presentation.response_frequency_hz =
             static_cast<float>(response->at("frequency_hz").get<double>());
-        binding.response_damping_ratio =
+        binding.presentation.response_damping_ratio =
             static_cast<float>(response->at("damping_ratio").get<double>());
       } else {
         return std::nullopt;
       }
-      binding.response_kind = response_kind;
+      binding.presentation.response_kind = response_kind;
 
       if (const auto keyframes = item.find("keyframes");
           keyframes != item.end()) {
@@ -2011,8 +2158,9 @@ private:
           || binding.neutral_target_value > maximum) {
         return std::nullopt;
       }
-      binding.initial_value = _model->GetModel()->GetParameterValue(
+      binding.presentation.initial_value = _model->GetModel()->GetParameterValue(
           binding.parameter_index);
+      binding.presentation.neutral_value = binding.neutral_target_value;
       for (const auto& point : binding.keyframes) {
         if (point.value < minimum || point.value > maximum) {
           return std::nullopt;
@@ -2186,39 +2334,143 @@ private:
   }
 
   static float ResolveEnvelopeTarget(
-      const ParameterPlanBinding& binding,
+      const ParameterPresentationState& presentation,
       float frame_target,
       double elapsed_ms,
-      const ParameterPlan& plan) {
+      const ParameterPlan* plan) {
+    if (!plan) {
+      return frame_target;
+    }
     const auto elapsed = std::max(0.0, elapsed_ms);
-    if (plan.blend_in_ms > 0 && elapsed < plan.blend_in_ms) {
-      const auto progress = static_cast<float>(elapsed / plan.blend_in_ms);
-      if (plan.curve_preset == "slow_build_quick_release") {
-        return binding.initial_value
-            + (frame_target - binding.initial_value) * progress * progress;
+    if (plan->blend_in_ms > 0 && elapsed < plan->blend_in_ms) {
+      const auto progress = static_cast<float>(elapsed / plan->blend_in_ms);
+      if (plan->curve_preset == "slow_build_quick_release") {
+        return presentation.initial_value
+            + (frame_target - presentation.initial_value) * progress * progress;
       }
-      if (plan.curve_preset == "pulse_settle") {
+      if (plan->curve_preset == "pulse_settle") {
         const auto x = progress - 1.0f;
         const auto eased = 1.0f + 2.70158f * x * x * x + 1.70158f * x * x;
-        return binding.initial_value
-            + (frame_target - binding.initial_value)
+        return presentation.initial_value
+            + (frame_target - presentation.initial_value)
                 * std::min(1.08f, eased);
       }
     }
-    if (elapsed < plan.blend_in_ms + plan.hold_ms
-        && (plan.curve_preset == "breathing_swell"
-            || plan.curve_preset == "pulse_settle")) {
-      const auto progress = plan.hold_ms > 0
-          ? static_cast<float>((elapsed - plan.blend_in_ms) / plan.hold_ms)
+    if (elapsed < plan->blend_in_ms + plan->hold_ms
+        && (plan->curve_preset == "breathing_swell"
+            || plan->curve_preset == "pulse_settle")) {
+      const auto progress = plan->hold_ms > 0
+          ? static_cast<float>((elapsed - plan->blend_in_ms) / plan->hold_ms)
           : 1.0f;
-      return binding.neutral_target_value
-          + (frame_target - binding.neutral_target_value)
+      return presentation.neutral_value
+          + (frame_target - presentation.neutral_value)
               * (1.0f - 0.06f * std::sin(3.14159265358979323846f * progress));
     }
     return frame_target;
   }
 
-  bool ApplyParameterFrame(float lip_sync_intensity, bool lip_sync_active) {
+  void ReleaseThinkingSwayLocked(const std::string& turn_id) {
+    if (_interaction_sway
+        && (turn_id.empty() || _interaction_sway->turn_id == turn_id)
+        && !_interaction_sway->release_started_at_ms) {
+      _interaction_sway->release_started_at_ms = _interaction_sway->elapsed_ms;
+    }
+    if (_pending_thinking_turn_id
+        && (turn_id.empty() || *_pending_thinking_turn_id == turn_id)) {
+      _pending_thinking_turn_id.reset();
+    }
+  }
+
+  void CollectInteractionContributions(
+      float delta_seconds,
+      std::vector<ParameterFrameContribution>& contributions) {
+    const auto delta_ms = std::max(0.0f, delta_seconds) * 1000.0;
+    if (_pending_thinking_turn_id) {
+      const auto turn_id = *_pending_thinking_turn_id;
+      _pending_thinking_turn_id.reset();
+      auto state = CreateInteractionSway(turn_id);
+      if (state) {
+        _interaction_sway = std::move(*state);
+        std::cerr << "[interaction] thinking sway started for turn "
+                  << turn_id << '\n';
+      } else {
+        _interaction_sway.reset();
+        std::cerr << "[interaction] no usable lateral semantic axis\n";
+      }
+    }
+
+    if (_interaction_sway) {
+      auto& sway = *_interaction_sway;
+      sway.elapsed_ms += delta_ms;
+      const auto release_elapsed_ms = sway.release_started_at_ms
+          ? sway.elapsed_ms - *sway.release_started_at_ms
+          : -1.0;
+      if (release_elapsed_ms >= 0.0
+          && (sway.release_ms <= 0.0 || release_elapsed_ms >= sway.release_ms)) {
+        _interaction_sway.reset();
+      } else {
+        const auto attack_weight = sway.attack_ms <= 0.0
+            ? 1.0f
+            : Smoothstep(static_cast<float>(sway.elapsed_ms / sway.attack_ms));
+        const auto release_weight = release_elapsed_ms < 0.0 || sway.release_ms <= 0.0
+            ? 1.0f
+            : Smoothstep(static_cast<float>(
+                  1.0 - std::max(0.0, release_elapsed_ms) / sway.release_ms));
+        const double phase = std::fmod(sway.elapsed_ms, sway.cycle_ms)
+            / sway.cycle_ms;
+        const float lateral_offset = static_cast<float>(
+            std::sin(phase * 2.0 * 3.14159265358979323846));
+        for (auto& binding : sway.bindings) {
+          const float target = lateral_offset >= 0.0f
+              ? binding.neutral_value
+                  + (binding.positive_value - binding.neutral_value) * lateral_offset
+              : binding.neutral_value
+                  + (binding.negative_value - binding.neutral_value) * -lateral_offset;
+          contributions.push_back(ParameterFrameContribution{
+              binding.parameter_id,
+              binding.parameter_index,
+              ParameterContributionOwner::InteractionSway,
+              "interaction_sway:" + binding.axis_id,
+              target,
+              binding.weight * attack_weight * release_weight,
+              50,
+              &binding.presentation,
+              false,
+              sway.elapsed_ms});
+        }
+      }
+    }
+
+    if (_interaction_gaze) {
+      auto& gaze = *_interaction_gaze;
+      gaze.elapsed_ms += delta_ms;
+      const auto ratio = static_cast<float>(
+          std::clamp(gaze.target_ratio, -1.0, 1.0));
+      for (auto& binding : gaze.bindings) {
+        const float target = ratio >= 0.0f
+            ? binding.neutral_value
+                + (binding.positive_value - binding.neutral_value) * ratio
+            : binding.neutral_value
+                + (binding.negative_value - binding.neutral_value) * -ratio;
+        contributions.push_back(ParameterFrameContribution{
+            binding.parameter_id,
+            binding.parameter_index,
+            ParameterContributionOwner::InteractionGaze,
+            "interaction_gaze:" + binding.axis_id,
+            target,
+            binding.weight,
+            60,
+            &binding.presentation,
+            false,
+            gaze.elapsed_ms});
+      }
+    }
+  }
+
+  bool ApplyParameterFrame(
+      float lip_sync_intensity,
+      bool lip_sync_active,
+      float delta_seconds) {
     std::scoped_lock lock(_motion_mutex);
     if (!_model || !_model->GetModel()) {
       return false;
@@ -2226,6 +2478,8 @@ private:
     if (_pending_parameter_plan) {
       const auto parsed = ParseParameterPlan(*_pending_parameter_plan);
       _pending_parameter_plan.reset();
+      const auto turn_id = _pending_parameter_plan_turn_id.value_or("");
+      _pending_parameter_plan_turn_id.reset();
       if (parsed) {
         if (!parsed->expression_id.empty()
             && !_model->StartExpressionById(parsed->expression_id)) {
@@ -2234,6 +2488,7 @@ private:
           _active_parameter_plan.reset();
         } else {
           _active_parameter_plan = *parsed;
+          ReleaseThinkingSwayLocked(turn_id);
           std::cerr << "[motion] activated parameter plan with "
                     << _active_parameter_plan->bindings.size()
                     << " bindings for "
@@ -2245,6 +2500,7 @@ private:
     }
     auto* cubism_model = _model->GetModel();
     std::vector<ParameterFrameContribution> contributions;
+    CollectInteractionContributions(delta_seconds, contributions);
     double elapsed_ms = 0.0;
     bool clear_active_plan = false;
 
@@ -2297,7 +2553,8 @@ private:
             frame_target,
             binding.weight * ownership,
             100,
-            &binding,
+            &binding.presentation,
+            true,
             elapsed_ms});
       }
       clear_active_plan = plan.release_started_at_ms >= 0.0
@@ -2338,21 +2595,25 @@ private:
             1.0f,
             200,
             nullptr,
+            false,
             elapsed_ms});
       }
     }
 
-    if (!ResolveAndWriteParameterFrame(contributions)) {
+    bool direct_presentation_settled = true;
+    if (!ResolveAndWriteParameterFrame(
+            contributions, direct_presentation_settled)) {
       return false;
     }
-    if (clear_active_plan) {
+    if (clear_active_plan && direct_presentation_settled) {
       _active_parameter_plan.reset();
     }
     return true;
   }
 
   bool ResolveAndWriteParameterFrame(
-      std::vector<ParameterFrameContribution>& contributions) {
+      std::vector<ParameterFrameContribution>& contributions,
+      bool& direct_presentation_settled) {
     auto* model = _model ? _model->GetModel() : nullptr;
     if (!model) {
       return false;
@@ -2439,7 +2700,8 @@ private:
       auto mixed_target = base_value;
       auto direct_only_target = base_value;
       bool has_lip_sync = false;
-      ParameterPlanBinding* presentation_binding = nullptr;
+      ParameterPresentationState* presentation_state = nullptr;
+      bool presentation_is_direct_plan = false;
       double presentation_elapsed_ms = 0.0;
       for (const auto* contribution : group.contributions) {
         mixed_target = mixed_target * (1.0f - contribution->weight)
@@ -2449,50 +2711,57 @@ private:
         } else {
           direct_only_target = direct_only_target * (1.0f - contribution->weight)
               + contribution->value * contribution->weight;
-          if (contribution->presentation_binding) {
-            presentation_binding = contribution->presentation_binding;
+          if (contribution->presentation) {
+            presentation_state = contribution->presentation;
+            presentation_is_direct_plan = contribution->presentation_is_direct_plan;
             presentation_elapsed_ms = contribution->elapsed_ms;
           }
         }
       }
 
       auto final_value = has_lip_sync ? mixed_target : direct_only_target;
-      if (presentation_binding && _active_parameter_plan) {
-        auto& binding = *presentation_binding;
+      if (presentation_state) {
+        auto& presentation = *presentation_state;
         const auto target = ResolveEnvelopeTarget(
-            binding,
+            presentation,
             direct_only_target,
             presentation_elapsed_ms,
-            *_active_parameter_plan);
+            presentation_is_direct_plan && _active_parameter_plan
+                ? &*_active_parameter_plan : nullptr);
         const auto target_offset = target - base_value;
-        if (binding.last_elapsed_ms < 0.0) {
-          binding.last_elapsed_ms = presentation_elapsed_ms;
-        } else if (presentation_elapsed_ms > binding.last_elapsed_ms) {
+        if (presentation.last_elapsed_ms < 0.0) {
+          presentation.last_elapsed_ms = presentation_elapsed_ms;
+        } else if (presentation_elapsed_ms > presentation.last_elapsed_ms) {
           const auto delta_seconds = static_cast<float>(
-              (presentation_elapsed_ms - binding.last_elapsed_ms) / 1000.0);
-          const auto next_state = binding.response_kind == "spring"
+              (presentation_elapsed_ms - presentation.last_elapsed_ms) / 1000.0);
+          const auto next_state = presentation.response_kind == "spring"
               ? AdvanceSpring(
-                  binding.driven_offset,
+                  presentation.driven_offset,
                   target_offset,
-                  binding.velocity,
+                  presentation.velocity,
                   delta_seconds,
-                  binding.max_velocity,
-                  binding.max_acceleration,
-                  binding.response_frequency_hz,
-                  binding.response_damping_ratio)
+                  presentation.max_velocity,
+                  presentation.max_acceleration,
+                  presentation.response_frequency_hz,
+                  presentation.response_damping_ratio)
               : AdvanceBounded(
-                  binding.driven_offset,
+                  presentation.driven_offset,
                   target_offset,
-                  binding.velocity,
+                  presentation.velocity,
                   delta_seconds,
-                  binding.max_velocity,
-                  binding.max_acceleration);
-          binding.velocity = next_state.velocity;
-          binding.driven_offset = next_state.value;
-          binding.last_elapsed_ms = presentation_elapsed_ms;
+                  presentation.max_velocity,
+                  presentation.max_acceleration);
+          presentation.velocity = next_state.velocity;
+          presentation.driven_offset = next_state.value;
+          presentation.last_elapsed_ms = presentation_elapsed_ms;
         }
         if (!has_lip_sync) {
-          final_value = base_value + binding.driven_offset;
+          final_value = base_value + presentation.driven_offset;
+        }
+        const bool settled = std::abs(presentation.driven_offset - target_offset) <= 0.001f
+            && std::abs(presentation.velocity) <= 0.001f;
+        if (presentation_is_direct_plan) {
+          direct_presentation_settled &= settled;
         }
       }
 
@@ -2517,10 +2786,18 @@ private:
     return true;
   }
 
-  const ag99::runtime::Json* SelectedModelProfile() const {
-    const auto model_info = _model_sync_payload.find("model_info");
-    if (model_info == _model_sync_payload.end()
-        || !model_info->is_object()) {
+  static std::string SelectedModelName(
+      const ag99::runtime::Json& model_sync_payload) {
+    const auto model_info = model_sync_payload.find("model_info");
+    return model_info != model_sync_payload.end() && model_info->is_object()
+        ? ReadString(*model_info, "selected_model")
+        : std::string{};
+  }
+
+  static const ag99::runtime::Json* SelectedModelProfile(
+      const ag99::runtime::Json& model_sync_payload) {
+    const auto model_info = model_sync_payload.find("model_info");
+    if (model_info == model_sync_payload.end() || !model_info->is_object()) {
       return nullptr;
     }
     const auto models = model_info->find("models");
@@ -2541,6 +2818,328 @@ private:
       }
     }
     return nullptr;
+  }
+
+  const ag99::runtime::Json* SelectedModelProfile() const {
+    return SelectedModelProfile(_model_sync_payload);
+  }
+
+  static std::optional<std::array<double, 2>> ReadNumberPair(
+      const ag99::runtime::Json& object,
+      const char* key) {
+    const auto it = object.find(key);
+    if (it == object.end() || !it->is_array() || it->size() != 2
+        || !(*it)[0].is_number() || !(*it)[1].is_number()) {
+      return std::nullopt;
+    }
+    const std::array<double, 2> result{
+        (*it)[0].get<double>(), (*it)[1].get<double>()};
+    if (!std::isfinite(result[0]) || !std::isfinite(result[1])) {
+      return std::nullopt;
+    }
+    return result;
+  }
+
+  static std::string LowerAscii(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+      return static_cast<char>(std::tolower(ch));
+    });
+    return value;
+  }
+
+  static std::string TrimAscii(std::string value) {
+    const auto not_space = [](unsigned char ch) {
+      return std::isspace(ch) == 0;
+    };
+    const auto first = std::find_if(value.begin(), value.end(), not_space);
+    const auto last = std::find_if(value.rbegin(), value.rend(), not_space).base();
+    return first < last ? std::string(first, last) : std::string{};
+  }
+
+  static int InteractionAxisPriority(
+      const ag99::runtime::Json& axis,
+      bool gaze) {
+    const auto id = LowerAscii(ReadString(axis, "id"));
+    const auto text = id + " " + LowerAscii(ReadString(axis, "label")) + " "
+        + LowerAscii(ReadString(axis, "description")) + " "
+        + LowerAscii(ReadString(axis, "usage_notes"));
+    if (gaze) {
+      if (id == "gaze_x") return 0;
+      if (id == "head_yaw") return 1;
+      for (const auto* token : {"gaze", "视线", "眼神", "扭头", "yaw"}) {
+        if (text.find(token) != std::string::npos) return 2;
+      }
+      return -1;
+    }
+    if (id == "gaze_x" || id == "head_yaw") return 0;
+    if (id == "head_roll") return 1;
+    if (id == "body_yaw" || id == "body_roll") return 2;
+    for (const auto* token : {
+             "gaze", "yaw", "roll", "左右", "扭头", "摇摆"}) {
+      if (text.find(token) != std::string::npos) return 3;
+    }
+    return -1;
+  }
+
+  const ag99::runtime::Json* SelectInteractionAxis(bool gaze) const {
+    const auto* profile = SelectedModelProfile();
+    if (!profile) {
+      return nullptr;
+    }
+    const auto axes = profile->find("axes");
+    if (axes == profile->end() || !axes->is_array()) {
+      return nullptr;
+    }
+    const ag99::runtime::Json* selected = nullptr;
+    int selected_priority = std::numeric_limits<int>::max();
+    for (const auto& axis : *axes) {
+      if (!axis.is_object()) {
+        continue;
+      }
+      const auto role = ReadString(axis, "control_role");
+      const auto anchors = axis.find("level_anchors");
+      const auto bindings = axis.find("parameter_bindings");
+      if ((role != "primary" && role != "hint")
+          || anchors == axis.end() || !anchors->is_object()
+          || !anchors->contains("-1") || !anchors->contains("1")
+          || !anchors->at("-1").is_number()
+          || !anchors->at("1").is_number()
+          || bindings == axis.end() || !bindings->is_array()
+          || bindings->empty()) {
+        continue;
+      }
+      const int priority = InteractionAxisPriority(axis, gaze);
+      if (priority >= 0 && priority < selected_priority) {
+        selected = &axis;
+        selected_priority = priority;
+      }
+    }
+    return selected;
+  }
+
+  std::optional<std::vector<InteractionBinding>> CreateInteractionBindings(
+      const ag99::runtime::Json& axis,
+      double negative_axis_value,
+      double positive_axis_value) const {
+    auto* model = _model ? _model->GetModel() : nullptr;
+    if (!model) {
+      return std::nullopt;
+    }
+    const auto axis_id = ReadString(axis, "id");
+    const auto neutral = axis.find("neutral");
+    const auto dynamics = axis.find("dynamics");
+    const auto bindings = axis.find("parameter_bindings");
+    if (axis_id.empty() || neutral == axis.end() || !neutral->is_number()
+        || !std::isfinite(neutral->get<double>())
+        || dynamics == axis.end() || !dynamics->is_object()
+        || bindings == axis.end() || !bindings->is_array()
+        || bindings->empty()) {
+      return std::nullopt;
+    }
+    const auto neutral_value = neutral->get<double>();
+    const auto axis_max_velocity = dynamics->find("max_velocity");
+    const auto axis_max_acceleration = dynamics->find("max_acceleration");
+    if (axis_max_velocity == dynamics->end() || !axis_max_velocity->is_number()
+        || axis_max_acceleration == dynamics->end()
+        || !axis_max_acceleration->is_number()) {
+      return std::nullopt;
+    }
+
+    const auto semantic_group = TrimAscii(
+        LowerAscii(ReadString(axis, "semantic_group")));
+    float response_frequency_hz = 0.0f;
+    float response_damping_ratio = 0.0f;
+    bool use_spring = true;
+    if (semantic_group == "head") {
+      response_frequency_hz = 2.9f;
+      response_damping_ratio = 0.72f;
+    } else if (semantic_group == "body") {
+      response_frequency_hz = 1.05f;
+      response_damping_ratio = 0.84f;
+    } else if (semantic_group == "torso") {
+      response_frequency_hz = 1.0f;
+      response_damping_ratio = 0.86f;
+    } else if (semantic_group == "shoulder") {
+      response_frequency_hz = 1.08f;
+      response_damping_ratio = 0.84f;
+    } else if (semantic_group == "gaze") {
+      response_frequency_hz = 4.2f;
+      response_damping_ratio = 0.74f;
+    } else if (semantic_group == "eye") {
+      response_frequency_hz = 4.4f;
+      response_damping_ratio = 0.86f;
+    } else if (semantic_group == "brow") {
+      response_frequency_hz = 3.9f;
+      response_damping_ratio = 0.78f;
+    } else if (semantic_group == "face") {
+      response_frequency_hz = 3.6f;
+      response_damping_ratio = 0.78f;
+    } else {
+      use_spring = false;
+    }
+
+    const auto map_binding_value = [&](const ag99::runtime::Json& binding,
+                                       double value,
+                                       double& target,
+                                       double& neutral_target) {
+      const auto input_range = ReadNumberPair(binding, "input_range");
+      const auto output_range = ReadNumberPair(binding, "output_range");
+      const auto invert = binding.find("invert");
+      if (!input_range || !output_range
+          || (*input_range)[0] == (*input_range)[1]
+          || value < (*input_range)[0] || value > (*input_range)[1]
+          || !std::isfinite(neutral_value)
+          || (invert != binding.end() && !invert->is_boolean())) {
+        return false;
+      }
+      const auto ratio = (value - (*input_range)[0])
+          / ((*input_range)[1] - (*input_range)[0]);
+      const bool inverted = invert != binding.end() && invert->get<bool>();
+      const auto effective_ratio = inverted ? 1.0 - ratio : ratio;
+      target = (*output_range)[0]
+          + ((*output_range)[1] - (*output_range)[0]) * effective_ratio;
+      const auto neutral_ratio = (neutral_value - (*input_range)[0])
+          / ((*input_range)[1] - (*input_range)[0]);
+      const auto effective_neutral_ratio = inverted
+          ? 1.0 - neutral_ratio : neutral_ratio;
+      neutral_target = (*output_range)[0]
+          + ((*output_range)[1] - (*output_range)[0])
+              * effective_neutral_ratio;
+      return std::isfinite(target) && std::isfinite(neutral_target);
+    };
+
+    std::vector<InteractionBinding> result;
+    result.reserve(bindings->size());
+    std::unordered_set<csmInt32> seen_parameter_indices;
+    for (const auto& binding : *bindings) {
+      if (!binding.is_object()) {
+        return std::nullopt;
+      }
+      const auto parameter_id = TrimAscii(ReadString(binding, "parameter_id"));
+      const auto weight_it = binding.find("default_weight");
+      if (parameter_id.empty() || weight_it == binding.end()
+          || !weight_it->is_number()) {
+        return std::nullopt;
+      }
+      const auto weight = weight_it->get<double>();
+      if (!std::isfinite(weight) || weight < 0.0 || weight > 1.0) {
+        return std::nullopt;
+      }
+      double mapped_neutral = 0.0;
+      double neutral_again = 0.0;
+      double mapped_negative = 0.0;
+      double negative_neutral = 0.0;
+      double mapped_positive = 0.0;
+      double positive_neutral = 0.0;
+      if (!map_binding_value(binding, neutral_value, mapped_neutral, neutral_again)
+          || !map_binding_value(
+              binding, negative_axis_value, mapped_negative, negative_neutral)
+          || !map_binding_value(
+              binding, positive_axis_value, mapped_positive, positive_neutral)
+          || std::abs(mapped_neutral - neutral_again) > 1e-6
+          || std::abs(mapped_neutral - negative_neutral) > 1e-6
+          || std::abs(mapped_neutral - positive_neutral) > 1e-6) {
+        return std::nullopt;
+      }
+      const auto parameter_id_handle =
+          CubismFramework::GetIdManager()->GetId(parameter_id.c_str());
+      const auto parameter_index = model->GetParameterIndex(parameter_id_handle);
+      if (parameter_index < 0
+          || !seen_parameter_indices.insert(parameter_index).second) {
+        return std::nullopt;
+      }
+      const auto index = static_cast<csmUint32>(parameter_index);
+      const auto minimum = model->GetParameterMinimumValue(index);
+      const auto maximum = model->GetParameterMaximumValue(index);
+      const auto input_range = ReadNumberPair(binding, "input_range");
+      const auto output_range = ReadNumberPair(binding, "output_range");
+      if (!input_range || !output_range
+          || !std::isfinite(minimum) || !std::isfinite(maximum)
+          || minimum > maximum
+          || mapped_neutral < minimum || mapped_neutral > maximum
+          || mapped_negative < minimum || mapped_negative > maximum
+          || mapped_positive < minimum || mapped_positive > maximum) {
+        return std::nullopt;
+      }
+      const double input_span = std::abs((*input_range)[1] - (*input_range)[0]);
+      if (input_span <= 0.0) {
+        return std::nullopt;
+      }
+      const double output_per_input = std::abs(
+          (*output_range)[1] - (*output_range)[0]) / input_span;
+      const double max_velocity = axis_max_velocity->get<double>() * output_per_input;
+      const double max_acceleration =
+          axis_max_acceleration->get<double>() * output_per_input;
+      if (!std::isfinite(max_velocity) || !std::isfinite(max_acceleration)
+          || max_velocity <= 0.0 || max_acceleration <= 0.0) {
+        return std::nullopt;
+      }
+
+      ParameterPresentationState presentation;
+      presentation.initial_value = model->GetParameterValue(parameter_index);
+      presentation.neutral_value = static_cast<float>(mapped_neutral);
+      presentation.max_velocity = static_cast<float>(max_velocity);
+      presentation.max_acceleration = static_cast<float>(max_acceleration);
+      presentation.response_kind = use_spring ? "spring" : "bounded";
+      presentation.response_frequency_hz = response_frequency_hz;
+      presentation.response_damping_ratio = response_damping_ratio;
+      result.push_back(InteractionBinding{
+          axis_id,
+          parameter_id,
+          parameter_index,
+          static_cast<float>(mapped_neutral),
+          static_cast<float>(mapped_negative),
+          static_cast<float>(mapped_positive),
+          static_cast<float>(weight),
+          std::move(presentation)});
+    }
+    return result.empty()
+        ? std::nullopt
+        : std::optional<std::vector<InteractionBinding>>(std::move(result));
+  }
+
+  std::optional<InteractionSwayState> CreateInteractionSway(
+      const std::string& turn_id) const {
+    const auto* axis = SelectInteractionAxis(false);
+    if (!axis) {
+      return std::nullopt;
+    }
+    const auto anchors = axis->find("level_anchors");
+    auto bindings = CreateInteractionBindings(
+        *axis,
+        anchors->at("-1").get<double>(),
+        anchors->at("1").get<double>());
+    if (!bindings) {
+      return std::nullopt;
+    }
+    return InteractionSwayState{
+        turn_id,
+        4000.0,
+        500.0,
+        650.0,
+        0.0,
+        std::nullopt,
+        std::move(*bindings)};
+  }
+
+  std::optional<InteractionGazeState> CreateInteractionGaze(
+      double target_ratio) const {
+    const auto* axis = SelectInteractionAxis(true);
+    if (!axis) {
+      return std::nullopt;
+    }
+    const auto anchors = axis->find("level_anchors");
+    auto bindings = CreateInteractionBindings(
+        *axis,
+        anchors->at("-1").get<double>(),
+        anchors->at("1").get<double>());
+    if (!bindings) {
+      return std::nullopt;
+    }
+    return InteractionGazeState{
+        std::clamp(target_ratio, -1.0, 1.0),
+        0.0,
+        std::move(*bindings)};
   }
 
   std::optional<MotionPlan> CompileMotionPlan(
@@ -2952,8 +3551,11 @@ private:
     if (_pending_motion_intent) {
       const auto plan = CompileMotionPlan(*_pending_motion_intent);
       _pending_motion_intent.reset();
+      const auto turn_id = _pending_motion_intent_turn_id.value_or("");
+      _pending_motion_intent_turn_id.reset();
       if (plan) {
         _active_motion = *plan;
+        ReleaseThinkingSwayLocked(turn_id);
         std::cerr << "[motion] compiled " << _active_motion->tracks.size()
                   << " parameter tracks for "
                   << _active_motion->duration_ms << " ms\n";
@@ -3054,6 +3656,16 @@ private:
   std::optional<ag99::runtime::Json> _pending_motion_intent;
   std::optional<ParameterPlan> _active_parameter_plan;
   std::optional<ag99::runtime::Json> _pending_parameter_plan;
+  std::optional<std::string> _pending_motion_intent_turn_id;
+  std::optional<std::string> _pending_parameter_plan_turn_id;
+  std::optional<std::string> _pending_thinking_turn_id;
+  std::optional<InteractionSwayState> _interaction_sway;
+  std::optional<InteractionGazeState> _interaction_gaze;
+  double _next_cursor_poll_ms = 0.0;
+  double _gaze_candidate_x = 0.0;
+  double _gaze_candidate_y = 0.0;
+  double _gaze_candidate_since_ms = 0.0;
+  bool _gaze_candidate_valid = false;
   mutable std::mutex _motion_mutex;
 };
 
@@ -3297,8 +3909,16 @@ int Run(
         [&model](ag99::runtime::ModelSync sync) {
           model.SetModelSync(sync.payload);
         },
-        [&model](const ag99::runtime::Json& motion_intent) {
-          model.QueueMotionPayload(motion_intent);
+        [&model](
+            const ag99::runtime::Json& motion_intent,
+            const std::string& turn_id) {
+          model.QueueMotionPayload(motion_intent, turn_id);
+        },
+        [&model](const std::string& turn_id) {
+          model.StartThinkingSway(turn_id);
+        },
+        [&model](const std::string& turn_id) {
+          model.ReleaseThinkingSway(turn_id);
         });
     g_send_text = [&runtime](std::string text) {
       if (!runtime.SendText(text)) {
@@ -3333,6 +3953,8 @@ int Run(
           TranslateMessage(&message);
           DispatchMessageW(&message);
         }
+
+        model.UpdateCursorGaze(window);
 
         const HRESULT begin_result = surface.BeginFrame();
         if (FAILED(begin_result)) {

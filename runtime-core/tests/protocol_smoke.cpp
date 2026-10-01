@@ -194,6 +194,8 @@ void test_input_text_builder() {
 void test_runtime_session_dispatch() {
   std::vector<std::string> ready_messages;
   std::vector<std::string> synced_models;
+  std::vector<std::string> started_turns;
+  std::vector<std::string> finished_turns;
   std::vector<std::string> errors;
   ag99::runtime::RuntimeProtocolSession session({
       [&](ag99::runtime::OutputSegment segment) {
@@ -206,17 +208,60 @@ void test_runtime_session_dispatch() {
         synced_models.push_back(
             sync.payload.at("model_info").at("selected_model").get<std::string>());
       },
+      [&](std::string turn_id) { started_turns.push_back(std::move(turn_id)); },
+      [&](std::string turn_id) { finished_turns.push_back(std::move(turn_id)); },
   });
 
   session.ingest_text(make_model_sync().dump());
   assert((synced_models == std::vector<std::string>{"Demo"}));
+  session.ingest_text(ag99::runtime::Json{
+      {"type", "control.turn_started"},
+      {"version", "v2"},
+      {"message_id", "turn-start-1"},
+      {"timestamp", "2026-10-01T00:00:00.000Z"},
+      {"turn_id", "turn-1"},
+      {"source", "adapter"},
+      {"payload", ag99::runtime::Json::object()},
+  }.dump());
+  assert((started_turns == std::vector<std::string>{"turn-1"}));
+  session.ingest_text(ag99::runtime::Json{
+      {"type", "control.turn_finished"},
+      {"version", "v2"},
+      {"message_id", "turn-finish-1"},
+      {"timestamp", "2026-10-01T00:00:00.000Z"},
+      {"turn_id", "turn-1"},
+      {"source", "adapter"},
+      {"payload", {{"success", true}}},
+  }.dump());
+  assert((finished_turns == std::vector<std::string>{"turn-1"}));
+  session.ingest_text(ag99::runtime::Json{
+      {"type", "control.interrupt"},
+      {"version", "v2"},
+      {"message_id", "turn-interrupt-2"},
+      {"timestamp", "2026-10-01T00:00:01.000Z"},
+      {"turn_id", "turn-2"},
+      {"source", "adapter"},
+      {"payload", ag99::runtime::Json::object()},
+  }.dump());
+  assert((finished_turns == std::vector<std::string>{"turn-1", "turn-2"}));
   session.ingest_text(make_segment("m-2", 1).dump());
   session.ingest_text(make_segment("m-1", 0).dump());
   assert((ready_messages == std::vector<std::string>{"m-1", "m-2"}));
   assert(errors.empty());
 
-  session.ingest_text("{\"type\":\"output.segment\",\"version\":\"v1\"}");
+  session.ingest_text(ag99::runtime::Json{
+      {"type", "control.turn_started"},
+      {"version", "v2"},
+      {"message_id", "turn-start-missing"},
+      {"timestamp", "2026-10-01T00:00:00.000Z"},
+      {"turn_id", nullptr},
+      {"source", "adapter"},
+      {"payload", ag99::runtime::Json::object()},
+  }.dump());
   assert(errors.size() == 1);
+
+  session.ingest_text("{\"type\":\"output.segment\",\"version\":\"v1\"}");
+  assert(errors.size() == 2);
 }
 
 void test_audio_control_builders() {
