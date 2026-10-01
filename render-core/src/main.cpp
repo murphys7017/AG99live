@@ -25,6 +25,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <typeinfo>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -3260,9 +3261,11 @@ private:
       }
 
       const auto relation_graph = profile->find("relation_graph");
-      const auto edges = relation_graph != profile->end()
-          ? relation_graph->find("edges") : profile->end();
-      if (edges == profile->end() || !edges->is_array()) {
+      if (relation_graph == profile->end() || !relation_graph->is_object()) {
+        return resolved;
+      }
+      const auto edges = relation_graph->find("edges");
+      if (edges == relation_graph->end() || !edges->is_array()) {
         return resolved;
       }
 
@@ -3549,7 +3552,15 @@ private:
       return;
     }
     if (_pending_motion_intent) {
-      const auto plan = CompileMotionPlan(*_pending_motion_intent);
+      std::optional<MotionPlan> plan;
+      try {
+        plan = CompileMotionPlan(*_pending_motion_intent);
+      } catch (const std::exception& error) {
+        std::cerr << "[motion] compile threw " << typeid(error).name()
+                  << ": " << error.what() << '\n';
+      } catch (...) {
+        std::cerr << "[motion] compile threw an unknown exception\n";
+      }
       _pending_motion_intent.reset();
       const auto turn_id = _pending_motion_intent_turn_id.value_or("");
       _pending_motion_intent_turn_id.reset();
@@ -3945,6 +3956,20 @@ int Run(
 
       MSG message{};
       bool running = true;
+      int consecutive_frame_failures = 0;
+      constexpr int kMaxConsecutiveFrameFailures = 30;
+      // A frame may fail after BeginFrame already bound the render target, so
+      // the boundary must stay resumable: BeginFrame is idempotent and no
+      // per-frame GPU state survives the throw.
+      const auto record_frame_failure = [&](const std::string& detail) {
+        std::cerr << detail << '\n';
+        if (++consecutive_frame_failures < kMaxConsecutiveFrameFailures) {
+          return;
+        }
+        std::cerr << "[frame] too many consecutive failures; stopping\n";
+        result_code = 1;
+        running = false;
+      };
       while (running) {
         while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
           if (message.message == WM_QUIT) {
@@ -3954,26 +3979,35 @@ int Run(
           DispatchMessageW(&message);
         }
 
-        model.UpdateCursorGaze(window);
+        try {
+          model.UpdateCursorGaze(window);
 
-        const HRESULT begin_result = surface.BeginFrame();
-        if (FAILED(begin_result)) {
-          std::cerr << "D3D11 BeginFrame failed: 0x" << std::hex
-                    << static_cast<unsigned long>(begin_result) << std::dec
-                    << '\n';
-          result_code = 1;
-          running = false;
-          continue;
-        }
-        model.UpdateAndDraw();
-        const HRESULT present_result = surface.Present(1, 0);
-        if (FAILED(present_result)) {
-          std::cerr << "D3D11 Present failed: 0x" << std::hex
-                    << static_cast<unsigned long>(present_result) << std::dec
-                    << '\n';
-          result_code = 1;
-          running = false;
-          continue;
+          const HRESULT begin_result = surface.BeginFrame();
+          if (FAILED(begin_result)) {
+            std::cerr << "D3D11 BeginFrame failed: 0x" << std::hex
+                      << static_cast<unsigned long>(begin_result) << std::dec
+                      << '\n';
+            result_code = 1;
+            running = false;
+            continue;
+          }
+          model.UpdateAndDraw();
+          const HRESULT present_result = surface.Present(1, 0);
+          if (FAILED(present_result)) {
+            std::cerr << "D3D11 Present failed: 0x" << std::hex
+                      << static_cast<unsigned long>(present_result) << std::dec
+                      << '\n';
+            result_code = 1;
+            running = false;
+            continue;
+          }
+          consecutive_frame_failures = 0;
+        } catch (const std::exception& error) {
+          record_frame_failure(
+              std::string("[frame] threw ") + typeid(error).name() + ": "
+              + error.what());
+        } catch (...) {
+          record_frame_failure("[frame] threw an unknown exception");
         }
         Sleep(1);
       }

@@ -1,3 +1,35 @@
+native_motion_compile_crash_fix:
+  recorded_at: "2026-10-02"
+  class: bugfix
+  risk: high
+  status: source_complete_pending_live_acceptance
+  root_cause: >-
+    CompileMotionPlan built the relation-graph edges iterator from a ternary whose
+    two branches belong to different nlohmann json objects. The following
+    `edges == profile->end()` therefore compared iterators across containers, which
+    nlohmann rejects with invalid_iterator.212. With no try/catch in wWinMain the
+    exception escaped to std::terminate, abort, and __fastfail(FAST_FAIL_FATAL_APP_EXIT),
+    which Windows reports as 0xc0000409 in ucrtbase.dll. Symptom: the host died
+    silently whenever a motion intent arrived after playing a text reply.
+  scope:
+    - "Compare nlohmann iterators only within the object that produced them; split the relation_graph and edges lookups into two same-object guards."
+    - "Convert a throwing CompileMotionPlan call into a logged rejection consistent with the existing invalid-plan path."
+    - "Add a per-frame exception boundary in Run that logs the exception type and stops after 30 consecutive failures."
+  non_actions:
+    - "Do not change the Adapter, the frontend, or the motion plan schema."
+    - "Do not change frame order, parameter resolution, or the single pre-Physics write."
+  review: >-
+    Confirmed D3D11CompositionSurface::BeginFrame is idempotent and both BeginFrame
+    and Present are noexcept, so re-entering the frame after a mid-frame throw is
+    safe. Verified the original expression throws and the rewritten form does not
+    using a standalone program linked against the same nlohmann 3.11.3 headers.
+  validation:
+    - "`cmake --build render-core/build --config Release --target ag99-render-host` passed and relinked the executable."
+    - "Live run against the local Adapter with `--text=`: log reached `[motion] compiled N parameter tracks for 800 ms` with no exception and no crash; process stayed alive."
+    - "Verified the executable timestamp is newer than the source timestamp before trusting each run; an earlier stale link had produced a false negative."
+  evidence_gap:
+    - "Motion playback quality, lip-sync appearance, and physics feel still require a human visual acceptance run."
+
 live2d_render_component_design:
   recorded_at: "2026-10-01"
   class: refactor
