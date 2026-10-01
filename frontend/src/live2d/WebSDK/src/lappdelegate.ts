@@ -15,6 +15,7 @@ import { LAppView } from './lappview';
 import { canvas, gl } from './lappglmanager';
 
 const LIVE2D_FRAME_RENDERED_EVENT = new Event('ag99live:live2d-frame-rendered');
+const BACKGROUND_FRAME_RATE_CHANGED_EVENT = 'ag99live:background-frame-rate-changed';
 
 export let s_instance: LAppDelegate | null = null;
 export let frameBuffer: WebGLFramebuffer | null = null;
@@ -154,6 +155,14 @@ export class LAppDelegate {
       this._rafId = null;
     }
 
+    if (this._backgroundFrameRateChangeListener) {
+      window.removeEventListener(
+        BACKGROUND_FRAME_RATE_CHANGED_EVENT,
+        this._backgroundFrameRateChangeListener,
+      );
+      this._backgroundFrameRateChangeListener = null;
+    }
+
     if (this._boundCanvas) {
       if (this._useTouchEvents) {
         this._boundCanvas.removeEventListener('touchstart', onTouchBegan);
@@ -196,6 +205,22 @@ export class LAppDelegate {
       return;
     }
     this._isRunning = true;
+    const configuredBackgroundFrameRate = Number(
+      document.documentElement.dataset.live2dBackgroundFrameRate,
+    );
+    if (Number.isFinite(configuredBackgroundFrameRate) && configuredBackgroundFrameRate > 0) {
+      LAppDefine.setBackgroundFrameRate(configuredBackgroundFrameRate);
+    }
+    this._backgroundFrameRateChangeListener = (event: Event): void => {
+      const nextFrameRate = (event as CustomEvent<unknown>).detail;
+      if (typeof nextFrameRate === 'number') {
+        LAppDefine.setBackgroundFrameRate(nextFrameRate);
+      }
+    };
+    window.addEventListener(
+      BACKGROUND_FRAME_RATE_CHANGED_EVENT,
+      this._backgroundFrameRateChangeListener,
+    );
     let nextFrameDeadlineMs = performance.now();
     let scheduledFrameRate = 0;
 
@@ -367,6 +392,7 @@ export class LAppDelegate {
     this._useTouchEvents = false;
     this._lastResizeWidth = 0;
     this._lastResizeHeight = 0;
+    this._backgroundFrameRateChangeListener = null;
 
     this._cubismOption = new Option();
     this._view = new LAppView();
@@ -422,6 +448,7 @@ export class LAppDelegate {
   _useTouchEvents: boolean; // 当前是否使用 touch 事件绑定
   _lastResizeWidth: number; // last canvas width handled by onResize
   _lastResizeHeight: number; // last canvas height handled by onResize
+  _backgroundFrameRateChangeListener: ((event: Event) => void) | null;
   _textureManager: LAppTextureManager | null; // テクスチャマネージャー // 纹理管理器
 }
 

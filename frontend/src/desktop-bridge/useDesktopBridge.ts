@@ -324,7 +324,6 @@ export function createDesktopBridge(): DesktopBridgeInstance {
           nextSnapshot,
         );
         state.snapshot = stabilizedSnapshot;
-        persistRuntimeSnapshot(stabilizedSnapshot);
         return;
       }
 
@@ -398,7 +397,6 @@ export function createDesktopBridge(): DesktopBridgeInstance {
             return;
           }
           state.profileAuthoringSnapshot = nextSnapshot;
-          persistProfileAuthoringSnapshot(nextSnapshot);
         },
       );
     }
@@ -472,10 +470,9 @@ export function createDesktopBridge(): DesktopBridgeInstance {
     );
     state.snapshot = stabilizedSnapshot;
     persistRuntimeSnapshot(stabilizedSnapshot);
-    const broadcastSnapshot = cloneJson(stabilizedSnapshot);
     sendRuntimeBridgeMessage({
       kind: "snapshot",
-      snapshot: broadcastSnapshot,
+      snapshot: stabilizedSnapshot,
     } satisfies RuntimeBridgeMessage);
   }
 
@@ -487,10 +484,9 @@ export function createDesktopBridge(): DesktopBridgeInstance {
       throw new Error("[DesktopBridge] publish model projection snapshot rejected.");
     }
     state.modelProjectionSnapshot = nextSnapshot;
-    const broadcastSnapshot = cloneJson(nextSnapshot);
     sendRuntimeBridgeMessage({
       kind: "model_projection",
-      snapshot: broadcastSnapshot,
+      snapshot: nextSnapshot,
     } satisfies RuntimeBridgeMessage);
   }
 
@@ -504,8 +500,8 @@ export function createDesktopBridge(): DesktopBridgeInstance {
     state.motionTuningSamplesStatus = nextStatus;
     sendRuntimeBridgeMessage({
       kind: "motion_tuning_samples",
-      samples: cloneJson(nextSamples),
-      status: cloneJson(nextStatus),
+      samples: nextSamples,
+      status: nextStatus,
     } satisfies RuntimeBridgeMessage);
   }
 
@@ -527,17 +523,16 @@ export function createDesktopBridge(): DesktopBridgeInstance {
     }
     state.profileAuthoringSnapshot = nextSnapshot;
     persistProfileAuthoringSnapshot(nextSnapshot);
-    const broadcastSnapshot = cloneJson(nextSnapshot);
     profileAuthoringChannel?.postMessage({
       kind: "profile_authoring_snapshot",
-      snapshot: broadcastSnapshot,
+      snapshot: nextSnapshot,
     } satisfies ProfileAuthoringBridgeMessage);
   }
 
   function sendCommand(command: DesktopRuntimeCommand): void {
     sendRuntimeBridgeMessage({
       kind: "command",
-      command: cloneJson(command),
+      command,
     } satisfies RuntimeBridgeMessage);
   }
 

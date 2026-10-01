@@ -1,4 +1,5 @@
 import { onBeforeUnmount, ref, watch, type Ref } from "vue";
+import { setBackgroundFrameConsumerActive } from "../live2d-renderer/backgroundFrameConsumers";
 import { sendEsp32DisplayFrame } from "./useEsp32DisplayConnection";
 import {
   normalizeCrop,
@@ -34,29 +35,11 @@ function findLive2DCanvas(): HTMLCanvasElement | null {
   return null;
 }
 
-function getWebGL2Context(canvas: HTMLCanvasElement): WebGL2RenderingContext | null {
-  try {
-    return canvas.getContext("webgl2", {
-      alpha: true,
-      antialias: true,
-      premultipliedAlpha: true,
-      preserveDrawingBuffer: true,
-    });
-  } catch {
-    return null;
-  }
-}
-
 interface CompositeTarget {
   canvas: HTMLCanvasElement;
   context: CanvasRenderingContext2D;
   width: number;
   height: number;
-  sourceCanvas: HTMLCanvasElement;
-  sourceContext: CanvasRenderingContext2D;
-  sourceImageData: ImageData | null;
-  sourceWidth: number;
-  sourceHeight: number;
 }
 
 function createCompositeCanvas(size: number): CompositeTarget | null {
@@ -72,101 +55,40 @@ function createCompositeCanvas(size: number): CompositeTarget | null {
   }
   context.imageSmoothingEnabled = true;
   context.imageSmoothingQuality = "high";
-  const sourceCanvas = document.createElement("canvas");
-  const sourceContext = sourceCanvas.getContext("2d");
-  if (!sourceContext) {
-    return null;
-  }
   return {
     canvas,
     context,
     width: size,
     height: size,
-    sourceCanvas,
-    sourceContext,
-    sourceImageData: null,
-    sourceWidth: 0,
-    sourceHeight: 0,
   };
 }
 
-function readCropRegion(
-  gl: WebGL2RenderingContext,
+function getCropRegion(
   sourceWidth: number,
   sourceHeight: number,
   crop: Esp32DisplayConfig["crop"],
-  readback: { width: number; height: number; pixels: Uint8Array; row: Uint8Array },
-): { width: number; height: number; pixels: Uint8Array } | null {
+): { x: number; y: number; width: number; height: number } | null {
   if (sourceWidth <= 0 || sourceHeight <= 0) {
     return null;
   }
   const normalizedCrop = normalizeCrop(crop);
-  const cropX = Math.max(0, Math.floor(normalizedCrop.x * sourceWidth));
-  const cropTopY = Math.max(0, Math.floor(normalizedCrop.y * sourceHeight));
-  let cropW = Math.max(1, Math.floor(normalizedCrop.w * sourceWidth));
-  let cropH = Math.max(1, Math.floor(normalizedCrop.h * sourceHeight));
-  cropW = Math.min(cropW, sourceWidth - cropX);
-  cropH = Math.min(cropH, sourceHeight - cropTopY);
-  if (cropW <= 0 || cropH <= 0) {
+  const x = Math.max(0, Math.floor(normalizedCrop.x * sourceWidth));
+  const y = Math.max(0, Math.floor(normalizedCrop.y * sourceHeight));
+  const width = Math.min(
+    Math.max(1, Math.floor(normalizedCrop.w * sourceWidth)),
+    sourceWidth - x,
+  );
+  const height = Math.min(
+    Math.max(1, Math.floor(normalizedCrop.h * sourceHeight)),
+    sourceHeight - y,
+  );
+  if (width <= 0 || height <= 0) {
     return null;
   }
-  if (readback.width !== cropW || readback.height !== cropH) {
-    readback.width = cropW;
-    readback.height = cropH;
-    readback.pixels = new Uint8Array(cropW * cropH * 4);
-    readback.row = new Uint8Array(cropW * 4);
-  }
-  const pixels = readback.pixels;
-  const webglY = sourceHeight - cropTopY - cropH;
-  const prevFbo = gl.getParameter(gl.FRAMEBUFFER_BINDING) as WebGLFramebuffer | null;
-  const prevPack = gl.getParameter(gl.PACK_ALIGNMENT) as number;
-  try {
-    if (prevFbo !== null) {
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    }
-    gl.pixelStorei(gl.PACK_ALIGNMENT, 1);
-    gl.readPixels(cropX, webglY, cropW, cropH, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
-  } finally {
-    gl.pixelStorei(gl.PACK_ALIGNMENT, prevPack || 4);
-    if (prevFbo !== null) {
-      gl.bindFramebuffer(gl.FRAMEBUFFER, prevFbo);
-    }
-  }
-  flipRowsInPlace(pixels, cropW, cropH, readback.row);
-  unpremultiplyAlphaInPlace(pixels);
-  return { width: cropW, height: cropH, pixels };
+  return { x, y, width, height };
 }
 
-function flipRowsInPlace(
-  pixels: Uint8Array,
-  width: number,
-  height: number,
-  temp: Uint8Array,
-): void {
-  const rowSize = width * 4;
-  for (let y = 0; y < Math.floor(height / 2); y += 1) {
-    const top = y * rowSize;
-    const bottom = (height - y - 1) * rowSize;
-    temp.set(pixels.subarray(top, top + rowSize));
-    pixels.copyWithin(top, bottom, bottom + rowSize);
-    pixels.set(temp, bottom);
-  }
-}
-
-function unpremultiplyAlphaInPlace(pixels: Uint8Array): void {
-  for (let i = 0; i < pixels.length; i += 4) {
-    const a = pixels[i + 3];
-    if (a === 0 || a === 255) {
-      continue;
-    }
-    const scale = 255 / a;
-    pixels[i] = Math.min(255, Math.round(pixels[i] * scale));
-    pixels[i + 1] = Math.min(255, Math.round(pixels[i + 1] * scale));
-    pixels[i + 2] = Math.min(255, Math.round(pixels[i + 2] * scale));
-  }
-}
-
-function isMostlyTransparent(pixels: Uint8Array): boolean {
+function isMostlyTransparent(pixels: Uint8ClampedArray): boolean {
   const step = Math.max(1, Math.floor(pixels.length / 4 / 64));
   let nonZero = 0;
   let sampled = 0;
@@ -182,25 +104,12 @@ function isMostlyTransparent(pixels: Uint8Array): boolean {
   return nonZero / sampled < 0.01;
 }
 
-function drawImageDataOnCanvas(
-  context: CanvasRenderingContext2D,
+function drawCanvasRegionOnCanvas(
   target: CompositeTarget,
-  source: { pixels: Uint8Array; width: number; height: number },
+  sourceCanvas: HTMLCanvasElement,
+  source: { x: number; y: number; width: number; height: number },
   scaleMode: Esp32DisplayConfig["scaleMode"],
 ): void {
-  if (target.sourceWidth !== source.width || target.sourceHeight !== source.height) {
-    target.sourceCanvas.width = source.width;
-    target.sourceCanvas.height = source.height;
-    target.sourceImageData = new ImageData(source.width, source.height);
-    target.sourceWidth = source.width;
-    target.sourceHeight = source.height;
-  }
-  const imageData = target.sourceImageData;
-  if (!imageData) {
-    return;
-  }
-  imageData.data.set(source.pixels);
-  target.sourceContext.putImageData(imageData, 0, 0);
   const scale = scaleMode === "stretch"
     ? null
     : scaleMode === "cover"
@@ -210,10 +119,10 @@ function drawImageDataOnCanvas(
   const destH = scale === null ? target.height : Math.max(1, Math.round(source.height * scale));
   const destX = scale === null ? 0 : Math.round((target.width - destW) * 0.5);
   const destY = scale === null ? 0 : Math.round((target.height - destH) * 0.5);
-  context.drawImage(
-    target.sourceCanvas,
-    0,
-    0,
+  target.context.drawImage(
+    sourceCanvas,
+    source.x,
+    source.y,
     source.width,
     source.height,
     destX,
@@ -223,20 +132,8 @@ function drawImageDataOnCanvas(
   );
 }
 
-function blobToUint8Array(blob: Blob): Promise<Uint8Array> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result;
-      if (result instanceof ArrayBuffer) {
-        resolve(new Uint8Array(result));
-      } else {
-        reject(new Error("blob_read_failed"));
-      }
-    };
-    reader.onerror = () => reject(reader.error ?? new Error("blob_read_failed"));
-    reader.readAsArrayBuffer(blob);
-  });
+async function blobToUint8Array(blob: Blob): Promise<Uint8Array> {
+  return new Uint8Array(await blob.arrayBuffer());
 }
 
 export function useEsp32DisplayPipeline(options: PipelineOptions): PipelineStatus {
@@ -254,15 +151,7 @@ export function useEsp32DisplayPipeline(options: PipelineOptions): PipelineStatu
   let windowStart = 0;
   let canvasMissingLoggedAt = 0;
   let captureInFlight = false;
-  let live2dCanvas: HTMLCanvasElement | null = null;
-  let live2dGl: WebGL2RenderingContext | null = null;
   let listening = false;
-  const readback = {
-    width: 0,
-    height: 0,
-    pixels: new Uint8Array(0),
-    row: new Uint8Array(0),
-  };
 
   function setListening(next: boolean): void {
     if (listening === next) {
@@ -279,6 +168,7 @@ export function useEsp32DisplayPipeline(options: PipelineOptions): PipelineStatu
   function stop(): void {
     running = false;
     setListening(false);
+    setBackgroundFrameConsumerActive("esp32", false);
     active.value = false;
   }
 
@@ -307,33 +197,23 @@ export function useEsp32DisplayPipeline(options: PipelineOptions): PipelineStatu
         return;
       }
       canvasMissingLoggedAt = 0;
-      if (live2dCanvas !== canvas) {
-        live2dCanvas = canvas;
-        live2dGl = getWebGL2Context(canvas);
-      }
-      const gl = live2dGl;
-      if (!gl) {
-        lastError.value = "webgl2_unavailable";
-        return;
-      }
-      const region = readCropRegion(
-        gl,
-        gl.drawingBufferWidth || canvas.width,
-        gl.drawingBufferHeight || canvas.height,
-        config.crop,
-        readback,
-      );
+      const region = getCropRegion(canvas.width, canvas.height, config.crop);
       if (!region) {
         lastError.value = "crop_invalid";
         return;
       }
-      if (isMostlyTransparent(region.pixels)) {
+      const ctx = composite.context;
+      ctx.clearRect(0, 0, composite.width, composite.height);
+      try {
+        drawCanvasRegionOnCanvas(composite, canvas, region, config.scaleMode);
+      } catch (error) {
+        lastError.value = error instanceof Error ? error.message : "canvas_draw_failed";
+        return;
+      }
+      if (isMostlyTransparent(ctx.getImageData(0, 0, composite.width, composite.height).data)) {
         framesDropped.value += 1;
         return;
       }
-      const ctx = composite.context;
-      ctx.clearRect(0, 0, composite.width, composite.height);
-      drawImageDataOnCanvas(ctx, composite, region, config.scaleMode);
 
       let blob: Blob | null = null;
       try {
@@ -404,6 +284,7 @@ export function useEsp32DisplayPipeline(options: PipelineOptions): PipelineStatu
     }
     running = true;
     active.value = true;
+    setBackgroundFrameConsumerActive("esp32", true);
     setListening(true);
   }
 
@@ -421,8 +302,6 @@ export function useEsp32DisplayPipeline(options: PipelineOptions): PipelineStatu
 
   onBeforeUnmount(() => {
     stop();
-    live2dCanvas = null;
-    live2dGl = null;
   });
 
   return {

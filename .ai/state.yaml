@@ -164,6 +164,28 @@ frontend_rendering_performance_followup:
     - "Live Electron/Live2D/ESP32 hardware acceptance is still required to confirm event-driven capture cadence and output delivery."
     - "The existing frontend test compile remains blocked by strict errors in the vendored Cubism Framework and missing Live2DCubismCore test globals."
 
+frontend_performance_occupancy_second_pass:
+  recorded_at: "2026-10-01"
+  class: perf_refactor
+  risk: medium
+  status: source_complete_pending_live_acceptance
+  scope:
+    - "Crop and downscale ESP32 frames directly from the Live2D canvas before JPEG encoding instead of full-size WebGL readback and per-pixel JavaScript transforms."
+    - "Use the existing rendered-frame event for external output capture and disable preserveDrawingBuffer on the Live2D WebGL context."
+    - "Lower hidden-tab rendering to 10 FPS while enabling 30 FPS when Spout or ESP32 output is actively consuming frames."
+    - "Remove redundant DesktopBridge receive-side persistence and deep copies before structured IPC or BroadcastChannel cloning."
+  non_actions:
+    - "Do not change the creation, visibility, or hide behavior of the four auxiliary tool windows."
+    - "Keep manual Spout/ESP32 enable switches, output formats, crop/scale settings, and the foreground frame-rate cap unchanged."
+  validation:
+    - "`npm run typecheck` passed for renderer, WebSDK, and Node projects."
+    - "`npm run build` passed."
+    - "`git diff --check` passed."
+    - "The focused desktop bridge test did not reach execution because its test tsconfig compiles the vendored Cubism Framework with existing strict-null and missing-Core-global errors."
+  evidence_gap:
+    - "Live Electron, Live2D, Spout, and ESP32 acceptance is required for capture cadence, frame stability, alpha/JPEG edges, and actual CPU/GPU reduction."
+    - "Spout still performs full-resolution Renderer readPixels and Electron IPC; this batch does not optimize that bandwidth path."
+
 model_sync_projection_cleanup:
   recorded_at: "2026-09-25"
   scope:

@@ -1,4 +1,5 @@
 import { onBeforeUnmount, onMounted, watch, type Ref } from "vue";
+import { setBackgroundFrameConsumerActive } from "../live2d-renderer/backgroundFrameConsumers";
 
 const TARGET_FPS = 30;
 const FRAME_INTERVAL_MS = 1000 / TARGET_FPS;
@@ -35,6 +36,14 @@ export function useSpoutFramePublisher(
     }
     senderStatusRevision = status.revision;
     senderCanPublish = status.canPublish;
+    updateFrameConsumerActivity();
+  }
+
+  function updateFrameConsumerActivity(): void {
+    setBackgroundFrameConsumerActive(
+      "spout",
+      listening && enabled.value && senderCanPublish,
+    );
   }
 
   function setListening(next: boolean): void {
@@ -50,6 +59,7 @@ export function useSpoutFramePublisher(
       if (getStatus) {
         void getStatus().then(applySenderStatus).catch(() => {
           senderCanPublish = false;
+          updateFrameConsumerActivity();
         });
       }
       window.addEventListener(LIVE2D_FRAME_RENDERED_EVENT, handleLive2DFrameRendered);
@@ -60,6 +70,7 @@ export function useSpoutFramePublisher(
       senderCanPublish = false;
       senderStatusRevision = -1;
     }
+    updateFrameConsumerActivity();
   }
 
   function publishFrame(): void {
