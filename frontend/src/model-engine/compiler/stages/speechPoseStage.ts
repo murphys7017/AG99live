@@ -17,6 +17,7 @@ import {
   hashPerformanceIdentity,
   performanceUnitInterval,
 } from "../performanceDeterminism.js";
+import { mapSemanticBindingValue } from "../semanticParameterBinding.js";
 
 type SpeechGesturePreset = NonNullable<
   SemanticParameterPlan["parameters"][number]["modulation"]
@@ -123,6 +124,7 @@ export function runSpeechPoseStage(
       preset,
       axis.semantic_group,
       context.options.samplingIdentity,
+      resolveSemanticGestureDirection(context, channel),
     );
     if (!gestureTrack.ok) {
       return { ok: false, reason: gestureTrack.reason };
@@ -146,6 +148,7 @@ function buildGestureTrack(
   preset: SpeechGesturePreset,
   semanticGroup: string,
   identity: { turnId: string; messageId: string } | undefined,
+  initialDirection: number,
 ):
   | {
     ok: true;
@@ -195,6 +198,7 @@ function buildGestureTrack(
       phrase,
       phraseSeed,
       previousDirection,
+      initialDirection,
     );
     points.push({
       at_ms: event.localAtMs ?? 0,
@@ -221,6 +225,7 @@ function resolveGestureValue(
   phrase: { emphasis: number },
   phraseSeed: number,
   previousDirection: number,
+  initialDirection: number,
 ): { value: number; direction: number } {
   const [minimumMagnitude, maximumMagnitude] = PRESET_MAGNITUDE_RANGE[preset];
   const magnitudeSeed = hashPerformanceIdentity(
@@ -234,17 +239,57 @@ function resolveGestureValue(
     minimumMagnitude
     + (maximumMagnitude - minimumMagnitude) * performanceUnitInterval(magnitudeSeed)
   ) * phrase.emphasis * pitchScale;
-  let direction = directionSeed % 2 === 0 ? 1 : -1;
+  let direction = previousDirection === 0 && initialDirection !== 0
+    ? initialDirection
+    : directionSeed % 2 === 0 ? 1 : -1;
   if (previousDirection !== 0 && directionSeed % 5 !== 0) {
     direction = -previousDirection;
   }
-  if (preset === "emphatic" && channel.channel.includes("pitch") && previousDirection === 0) {
+  if (
+    preset === "emphatic"
+    && channel.channel.includes("pitch")
+    && previousDirection === 0
+    && initialDirection === 0
+  ) {
     direction = -1;
   }
   return {
     direction,
     value: clampNumber(magnitude * direction, -1, 1),
   };
+}
+
+function resolveSemanticGestureDirection(
+  context: ModelParameterCompileContext,
+  channel: SpeechGestureChannel,
+): number {
+  const semanticAxis = context.semanticMotion.axes.find(
+    (entry) => entry.axisId === channel.semantic_axis_id,
+  );
+  const axis = context.state.axisById.get(channel.semantic_axis_id);
+  if (!semanticAxis || !axis) {
+    return 0;
+  }
+  let direction = 0;
+  for (const binding of axis.parameter_bindings) {
+    if (binding.default_weight <= 0) {
+      continue;
+    }
+    const mapped = mapSemanticBindingValue(axis, binding, semanticAxis.value);
+    if (!mapped.ok) {
+      return 0;
+    }
+    const delta = mapped.targetValue - mapped.neutralTargetValue;
+    if (Math.abs(delta) <= 0.001) {
+      continue;
+    }
+    const bindingDirection = Math.sign(delta);
+    if (direction !== 0 && direction !== bindingDirection) {
+      return 0;
+    }
+    direction = bindingDirection;
+  }
+  return direction;
 }
 
 
@@ -275,10 +320,8 @@ function resolveSpeechGesturePreset(context: ModelParameterCompileContext): Spee
   if (/(?:\b(?:explain|thinking?|serious)\b|说明|解释|思考|认真)/.test(semanticLabels)) {
     return "calm_explain";
   }
-  const identity = context.options.samplingIdentity;
-  return hashPerformanceIdentity(`${identity?.turnId ?? ""}:${identity?.messageId ?? ""}`) % 2 === 0
-    ? "calm_explain"
-    : "lively_chat";
+  // Keep untagged replies at a moderate baseline; phrase-level variation is added downstream.
+  return "calm_explain";
 }
 
 function resolveSpeechGestureLateralFamily(
