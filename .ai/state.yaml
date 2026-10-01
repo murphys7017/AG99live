@@ -701,3 +701,26 @@ astrbot_plugin_web_control:
   evidence_gap:
     - "The active plugin was not reloaded; opening the view and exercising authenticated API requests in the live AstrBot Dashboard remains unverified."
     - "Desktop-local device controls and live motion preview are intentionally not exposed by this first Web control batch."
+
+spout_async_readback:
+  recorded_at: "2026-10-02"
+  class: feature
+  risk: medium
+  status: source_reviewed_pending_live_acceptance
+  scope:
+    - "Replace synchronous WebGL readPixels destination with a pixel-pack buffer and fence-polled readback."
+    - "Preserve the existing RGBA frame payload, sender readiness/backpressure behavior, and 30 FPS sampling cap."
+    - "Report readPixels submission, completed CPU copy, IPC call, and GPU-busy skipped-sample timings separately."
+  non_actions:
+    - "Do not change native Spout protocol or Electron IPC payload format."
+    - "Do not modify tool-window visibility or lifecycle behavior."
+  findings:
+    - "A single PBO and fence reduce direct render-thread waiting on GPU completion, at the cost of delayed frame delivery and skipped samples while the fence is unsignaled."
+    - "Completed readback still copies into a CPU Uint8Array and traverses Electron IPC; total RGBA transfer volume and downstream pipe/Spout bandwidth are unchanged."
+    - "PBO bindings are restored around allocation, readback copy, and new frame submission to avoid leaking WebGL state into the shared Cubism context."
+  validation:
+    - "`npm run typecheck` passed."
+    - "`npm run build` passed."
+    - "`git diff --check` passed."
+  evidence_gap:
+    - "Compare renderer frame time, readback copy duration, GPU-busy skipped samples, IPC duration, native pipe throughput, output FPS, and visible frame latency on the target machine with Spout enabled."
