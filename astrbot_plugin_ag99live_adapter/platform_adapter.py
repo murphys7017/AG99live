@@ -27,6 +27,7 @@ from .services.media_service import MediaService
 from .services.message_factory import MessageFactory
 from .transport.static_routes import build_static_routes, list_background_files
 from .runtime.plugin_runtime import (
+    ADAPTER_PLATFORM_NAME,
     get_config_value,
     register_control_platform,
     get_plugin_config_snapshot,
@@ -57,7 +58,7 @@ LOOPBACK_BIND_HOST = "127.0.0.1"
 
 
 @register_platform_adapter(
-    "olv_pet_adapter",
+    ADAPTER_PLATFORM_NAME,
     "AG99live Adapter",
     default_config_tmpl={
         "port": 12396,
@@ -220,7 +221,7 @@ class OLVPetPlatformAdapter(Platform):
 
     def meta(self) -> PlatformMetadata:
         metadata = PlatformMetadata(
-            name="olv_pet_adapter",
+            name=ADAPTER_PLATFORM_NAME,
             description="AG99live desktop adapter",
             id=self.platform_id,
         )

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from astrbot_plugin_ag99live_adapter.runtime import plugin_runtime
 from astrbot_plugin_ag99live_adapter.runtime.plugin_runtime import get_config_value
 
@@ -38,3 +40,17 @@ def test_plugin_config_snapshot_reports_injected_and_file_sources(
     assert file_snapshot.path == str(config_path)
     assert file_snapshot.mtime_ns == config_path.stat().st_mtime_ns
     assert file_snapshot.config == {"general": {"client_uid": "file"}}
+
+
+def test_reconcile_finds_surviving_adapter_by_metadata_after_reload(monkeypatch) -> None:
+    adapter = SimpleNamespace(
+        platform_id="adapter-1",
+        meta=lambda: SimpleNamespace(name=plugin_runtime.ADAPTER_PLATFORM_NAME),
+    )
+    context = SimpleNamespace(
+        platform_manager=SimpleNamespace(platform_insts=[adapter]),
+    )
+    monkeypatch.setattr(plugin_runtime, "_control_platforms", {})
+
+    assert plugin_runtime.reconcile_control_platforms(context) == [adapter]
+    assert plugin_runtime.get_live_control_platform(context, "adapter-1") is adapter

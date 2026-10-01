@@ -22,9 +22,9 @@ from .protocol.constants import (
 )
 from .runtime.desktop_settings_broker import DesktopSettingsError
 from .runtime.plugin_runtime import (
-    get_control_platform,
+    get_live_control_platform,
     get_plugin_context,
-    list_control_platforms,
+    reconcile_control_platforms,
     set_plugin_config,
 )
 
@@ -444,6 +444,15 @@ def register_web_control_page(context: Any, plugin: Any) -> bool:
     return True
 
 
+def _live_control_platforms() -> list[Any]:
+    """Registered platforms, rebound to the ones AstrBot actually runs."""
+    return reconcile_control_platforms(get_plugin_context())
+
+
+def _live_control_platform(platform_id: str) -> Any | None:
+    return get_live_control_platform(get_plugin_context(), platform_id)
+
+
 class WebControlPageApi:
     def __init__(self, plugin: Any) -> None:
         self._plugin = plugin
@@ -453,7 +462,7 @@ class WebControlPageApi:
         if response := _require_dashboard_user():
             return response
         platforms = []
-        for platform in list_control_platforms():
+        for platform in _live_control_platforms():
             model_info = platform.runtime_state.model_info
             platforms.append({
                 "platform_id": platform.platform_id,
@@ -492,7 +501,7 @@ class WebControlPageApi:
         if response := _require_dashboard_user():
             return response
         platform_id = str(request.args.get("platform_id") or "").strip()
-        return jsonify(_desktop_settings_payload(get_control_platform(platform_id)))
+        return jsonify(_desktop_settings_payload(_live_control_platform(platform_id)))
 
     async def apply_desktop_setting(self):
         """Broker one list/set exchange between this page and the connected desktop."""
@@ -572,7 +581,7 @@ class WebControlPageApi:
                 self._replace_plugin_config(merged)
                 save_config()
                 set_plugin_config(self._plugin.config)
-                for platform in list_control_platforms():
+                for platform in _live_control_platforms():
                     await platform._refresh_runtime_settings_async(reload_providers=True)
                     await platform._send_current_model_and_conf(force=True)
             except Exception as exc:
@@ -581,7 +590,7 @@ class WebControlPageApi:
                     self._replace_plugin_config(previous)
                     save_config()
                     set_plugin_config(self._plugin.config)
-                    for platform in list_control_platforms():
+                    for platform in _live_control_platforms():
                         await platform._refresh_runtime_settings_async(reload_providers=True)
                 except Exception:
                     logger.exception("AG99live web settings rollback failed")
@@ -614,7 +623,7 @@ class WebControlPageApi:
         if isinstance(body, tuple):
             return body[1]
         platform_id = str(body.get("platform_id") or "").strip()
-        platform = get_control_platform(platform_id)
+        platform = _live_control_platform(platform_id)
         if platform is None:
             return _error("platform_not_found", 404)
         model_name = str(body.get("model_name") or "").strip()
@@ -668,7 +677,7 @@ class WebControlPageApi:
         body = await _read_json_body()
         if isinstance(body, tuple):
             return body[1]
-        platform = get_control_platform(str(body.get("platform_id") or "").strip())
+        platform = _live_control_platform(str(body.get("platform_id") or "").strip())
         if platform is None:
             return _error("platform_not_found", 404)
         try:
@@ -684,7 +693,7 @@ class WebControlPageApi:
         body = await _read_json_body()
         if isinstance(body, tuple):
             return body[1]
-        platform = get_control_platform(str(body.get("platform_id") or "").strip())
+        platform = _live_control_platform(str(body.get("platform_id") or "").strip())
         if platform is None:
             return _error("platform_not_found", 404)
         sample_id = body.get("sample_id")
@@ -720,14 +729,14 @@ async def _read_json_body():
 
 def _resolve_platform_from_query():
     platform_id = str(request.args.get("platform_id") or "").strip()
-    platform = get_control_platform(platform_id)
+    platform = _live_control_platform(platform_id)
     if not platform:
         return None, _error("platform_not_found", 404)
     return platform, None
 
 
 def _resolve_platform_from_body(body: dict[str, Any]):
-    platform = get_control_platform(str(body.get("platform_id") or "").strip())
+    platform = _live_control_platform(str(body.get("platform_id") or "").strip())
     if not platform:
         return None, _error("platform_not_found", 404)
     return platform, None

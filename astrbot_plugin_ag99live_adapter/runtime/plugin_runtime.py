@@ -16,6 +16,7 @@ _plugin_context: Any = None
 _plugin_config: dict[str, Any] = {}
 _plugin_config_path: str | None = None
 _control_platforms: dict[str, Any] = {}
+ADAPTER_PLATFORM_NAME = "olv_pet_adapter"
 PLUGIN_CONFIG_BASENAME = "astrbot_plugin_ag99live_adapter_config.json"
 _default_plugin_config_paths = tuple(
     os.path.join(get_astrbot_config_path(), filename)
@@ -73,6 +74,61 @@ def get_control_platform(platform_id: str) -> Any | None:
 def list_control_platforms() -> list[Any]:
     with _state_lock:
         return list(_control_platforms.values())
+
+
+def reconcile_control_platforms(context: Any) -> list[Any]:
+    """Re-bind the control registry to the platform instances AstrBot actually runs.
+
+    A plugin reload drops every registration the plugin made, because the Star is
+    rebuilt from scratch. Platform instances, however, belong to PlatformManager
+    and survive a plugin reload: they keep their WebSocket and keep serving the
+    desktop. That left the registry empty while a live adapter was still running,
+    so the control page reported "no adapter instance" after every deploy.
+
+    Rebinding from the manager makes the registry a cache of reality instead of a
+    record of plugin lifetime. The stable platform metadata name identifies the
+    surviving instance even when AstrBot retains an object from the previous
+    plugin class after reload.
+    """
+    manager = getattr(context, "platform_manager", None)
+    instances = getattr(manager, "platform_insts", None)
+    if instances is None:
+        # Nothing to verify against; leave the registry as it is.
+        return list_control_platforms()
+
+    live: dict[str, Any] = {}
+    for platform in list(instances):
+        metadata_method = getattr(platform, "meta", None)
+        if not callable(metadata_method):
+            continue
+        try:
+            metadata = metadata_method()
+        except Exception as exc:
+            logger.debug(
+                "Skipping platform with unreadable metadata during AG99live "
+                "control registry reconciliation (%s): %s",
+                type(platform).__name__,
+                exc,
+            )
+            continue
+        if getattr(metadata, "name", None) != ADAPTER_PLATFORM_NAME:
+            continue
+        platform_id = str(getattr(platform, "platform_id", "") or "").strip()
+        if platform_id:
+            live[platform_id] = platform
+
+    with _state_lock:
+        for key, platform in live.items():
+            _control_platforms[key] = platform
+        for key in [known for known in _control_platforms if known not in live]:
+            del _control_platforms[key]
+        return list(_control_platforms.values())
+
+
+def get_live_control_platform(context: Any, platform_id: str) -> Any | None:
+    """Resolve a platform by id, refreshing the registry from the manager first."""
+    reconcile_control_platforms(context)
+    return get_control_platform(platform_id)
 
 
 def set_plugin_config(config: Mapping[str, Any] | None) -> None:
