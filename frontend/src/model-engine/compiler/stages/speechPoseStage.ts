@@ -124,7 +124,7 @@ export function runSpeechPoseStage(
       preset,
       axis.semantic_group,
       context.options.samplingIdentity,
-      resolveSemanticGestureDirection(context, channel),
+      (event) => resolveSemanticGestureDirection(context, channel, event),
     );
     if (!gestureTrack.ok) {
       return { ok: false, reason: gestureTrack.reason };
@@ -148,7 +148,9 @@ function buildGestureTrack(
   preset: SpeechGesturePreset,
   semanticGroup: string,
   identity: { turnId: string; messageId: string } | undefined,
-  initialDirection: number,
+  resolveInitialDirection: (
+    event: ModelParameterCompileContext["performanceSchedule"]["events"][number],
+  ) => number,
 ):
   | {
     ok: true;
@@ -198,7 +200,7 @@ function buildGestureTrack(
       phrase,
       phraseSeed,
       previousDirection,
-      initialDirection,
+      resolveInitialDirection(event),
     );
     points.push({
       at_ms: event.localAtMs ?? 0,
@@ -239,12 +241,11 @@ function resolveGestureValue(
     minimumMagnitude
     + (maximumMagnitude - minimumMagnitude) * performanceUnitInterval(magnitudeSeed)
   ) * phrase.emphasis * pitchScale;
-  let direction = previousDirection === 0 && initialDirection !== 0
+  let direction = initialDirection !== 0
     ? initialDirection
-    : directionSeed % 2 === 0 ? 1 : -1;
-  if (previousDirection !== 0 && directionSeed % 5 !== 0) {
-    direction = -previousDirection;
-  }
+    : previousDirection !== 0
+      ? previousDirection
+      : directionSeed % 2 === 0 ? 1 : -1;
   if (
     preset === "emphatic"
     && channel.channel.includes("pitch")
@@ -262,8 +263,34 @@ function resolveGestureValue(
 function resolveSemanticGestureDirection(
   context: ModelParameterCompileContext,
   channel: SpeechGestureChannel,
+  event: ModelParameterCompileContext["performanceSchedule"]["events"][number],
 ): number {
-  const semanticAxis = context.semanticMotion.axes.find(
+  const alignedStepWeights = new Map<number, number>();
+  for (const phraseIndex of event.phraseIndices ?? []) {
+    const alignment = context.performanceSchedule.estimatedAlignments.find(
+      (entry) => entry.phraseIndex === phraseIndex && entry.primaryForPhrase,
+    );
+    if (alignment) {
+      alignedStepWeights.set(
+        alignment.stepIndex,
+        (alignedStepWeights.get(alignment.stepIndex) ?? 0) + alignment.overlapRatio,
+      );
+    }
+  }
+  const alignedStepIndex = [...alignedStepWeights.entries()]
+    .sort(([leftIndex, leftWeight], [rightIndex, rightWeight]) => (
+      rightWeight - leftWeight || leftIndex - rightIndex
+    ))[0]?.[0];
+  const stepIndex = context.semanticSequenceStepAxes
+    ? alignedStepIndex ?? context.performanceSchedule.semanticSteps.findIndex(
+      (step) => (event.localAtMs ?? 0) >= step.startMs
+        && (event.localAtMs ?? 0) < step.endMs,
+    )
+    : -1;
+  const axisValues = stepIndex >= 0
+    ? context.semanticSequenceStepAxes?.[stepIndex] ?? []
+    : context.semanticMotion.axes;
+  const semanticAxis = axisValues.find(
     (entry) => entry.axisId === channel.semantic_axis_id,
   );
   const axis = context.state.axisById.get(channel.semantic_axis_id);

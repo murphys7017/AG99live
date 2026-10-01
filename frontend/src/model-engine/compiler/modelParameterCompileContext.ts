@@ -4,7 +4,10 @@ import type {
   SemanticAxisProfile,
 } from "../../types/semantic-axis-profile.js";
 import type { ModelEngineSettings } from "../settings.js";
-import type { CompiledSemanticMotion } from "../../types/compiledSemanticMotion.js";
+import type {
+  CompiledSemanticAxis,
+  CompiledSemanticMotion,
+} from "../../types/compiledSemanticMotion.js";
 import type {
   CompileOptions,
 } from "./contracts.js";
@@ -36,6 +39,7 @@ export interface ModelParameterCompileState {
 export interface ModelParameterCompileContext {
   semanticMotion: Extract<CompiledSemanticMotion, { kind: "pose" }>;
   performanceSchedule: PerformanceSchedule;
+  semanticSequenceStepAxes?: readonly (readonly CompiledSemanticAxis[])[];
   options: CompileOptions;
   settings: ModelEngineSettings;
   state: ModelParameterCompileState;
@@ -55,6 +59,7 @@ export function createModelParameterCompileContext(
   performanceSchedule: PerformanceSchedule,
   options: CompileOptions,
   settings: ModelEngineSettings,
+  semanticSequenceStepAxes?: readonly (readonly CompiledSemanticAxis[])[],
 ): ModelParameterCompileContext {
   const profile = options.model.semantic_axis_profile;
   if (
@@ -68,6 +73,7 @@ export function createModelParameterCompileContext(
   return {
     semanticMotion,
     performanceSchedule,
+    semanticSequenceStepAxes,
     options,
     settings,
     state: {

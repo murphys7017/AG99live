@@ -4,6 +4,7 @@ import type {
 } from "../../types/protocol.js";
 import { SCHEMA_PARAMETER_PLAN_V3 } from "../../types/protocol.js";
 import type {
+  CompiledSemanticAxis,
   CompiledSemanticMotion,
 } from "../../types/compiledSemanticMotion.js";
 import type {
@@ -63,6 +64,7 @@ function compileModelParameterPose(
   semanticMotion: Extract<CompiledSemanticMotion, { kind: "pose" }>,
   performanceSchedule: PerformanceSchedule,
   options: CompileOptions,
+  semanticSequenceStepAxes?: readonly (readonly CompiledSemanticAxis[])[],
 ): CompileResult {
   let context: ModelParameterCompileContext;
   try {
@@ -71,6 +73,7 @@ function compileModelParameterPose(
       performanceSchedule,
       options,
       normalizeModelEngineSettings(options.settings),
+      semanticSequenceStepAxes,
     );
   } catch (error) {
     return failCompile(
@@ -96,6 +99,7 @@ function compileMotionSequenceIntent(
   performanceSchedule: PerformanceSchedule,
   options: CompileOptions,
 ): CompileResult {
+  const semanticSequenceStepAxes = semanticMotion.steps.map((step) => step.axes);
   const stepResults = semanticMotion.steps.map((step, index) => {
     // A sequence owns one speech modulation track for its shared Schedule;
     // later steps contribute only semantic parameter targets.
@@ -113,6 +117,7 @@ function compileMotionSequenceIntent(
         allowNeutralAxisPose: true,
         speechActive: ownsSpeechPose && options.speechActive,
       },
+      ownsSpeechPose ? semanticSequenceStepAxes : undefined,
     );
   });
   const failedStepIndex = stepResults.findIndex((result) => !result.ok || !result.plan);

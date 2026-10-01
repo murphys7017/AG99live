@@ -153,15 +153,32 @@ const leftGesture = compileGesture({
   ...untaggedIntent,
   axis_levels: { head_yaw: -3 },
 }, { turnId: "turn-4", messageId: "message-3" });
-const firstLeftGestureValue = leftGesture.points.find((point) => point.value !== 0)?.value;
-assert.ok(firstLeftGestureValue !== undefined && firstLeftGestureValue < 0);
+const leftGestureValues = leftGesture.points
+  .map((point) => point.value)
+  .filter((value) => value !== 0);
+assert.ok(leftGestureValues.length > 1);
+assert.ok(leftGestureValues.every((value) => value < 0));
 
 const rightGesture = compileGesture({
   ...untaggedIntent,
   axis_levels: { head_yaw: 3 },
 }, { turnId: "turn-5", messageId: "message-4" });
-const firstRightGestureValue = rightGesture.points.find((point) => point.value !== 0)?.value;
-assert.ok(firstRightGestureValue !== undefined && firstRightGestureValue > 0);
+const rightGestureValues = rightGesture.points
+  .map((point) => point.value)
+  .filter((value) => value !== 0);
+assert.ok(rightGestureValues.length > 1);
+assert.ok(rightGestureValues.every((value) => value > 0));
+
+const untaggedGesture = compileGesture(
+  untaggedIntent,
+  { turnId: "turn-8", messageId: "message-7" },
+);
+const untaggedGestureDirections = new Set(
+  untaggedGesture.points
+    .map((point) => Math.sign(point.value))
+    .filter((direction) => direction !== 0),
+);
+assert.equal(untaggedGestureDirections.size, 1);
 
 const invertedProfile: SemanticAxisProfile = {
   ...profile,
@@ -188,6 +205,30 @@ const invertedGesture = compileGesture({
 const firstInvertedGestureValue = invertedGesture.points
   .find((point) => point.value !== 0)?.value;
 assert.ok(firstInvertedGestureValue !== undefined && firstInvertedGestureValue < 0);
+
+const sequenceOptions = {
+  ...optionsBase,
+  assistantText: "Left! Right!",
+};
+const sequenceGesture = compileGesture({
+  schema_version: SCHEMA_MOTION_INTENT_V4,
+  profile_id: profile.profile_id,
+  profile_revision: profile.revision,
+  model_id: profile.model_id,
+  mode: "idle",
+  intent_tags: [],
+  emotion_label: "neutral",
+  motion_steps: [
+    { axis_levels: { head_yaw: -3 }, duration_weight: 1 },
+    { axis_levels: { head_yaw: 3 }, duration_weight: 1 },
+  ],
+}, { turnId: "turn-9", messageId: "message-8" }, sequenceOptions);
+const sequenceGestureValues = sequenceGesture.points
+  .map((point) => point.value)
+  .filter((value) => value !== 0);
+assert.ok(sequenceGestureValues.length >= 2);
+assert.ok(sequenceGestureValues.some((value) => value < 0));
+assert.ok(sequenceGestureValues.some((value) => value > 0));
 
 const pitchProfile: SemanticAxisProfile = {
   ...profile,
@@ -228,5 +269,8 @@ const emphaticPitchGesture = compileGesture({
 const firstEmphaticPitchValue = emphaticPitchGesture.points
   .find((point) => point.value !== 0)?.value;
 assert.ok(firstEmphaticPitchValue !== undefined && firstEmphaticPitchValue > 0);
+assert.ok(emphaticPitchGesture.points
+  .filter((point) => point.value !== 0)
+  .every((point) => point.value > 0));
 
 console.log("speech pose coherence tests passed");
