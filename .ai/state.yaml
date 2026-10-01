@@ -56,6 +56,32 @@ native_motion_compile_crash_fix:
   evidence_gap:
     - "Motion playback quality, lip-sync appearance, and physics feel still require a human visual acceptance run."
 
+native_audio_download_and_websocket_guards:
+  recorded_at: "2026-10-02"
+  class: bugfix
+  risk: medium
+  status: source_complete_pending_live_acceptance
+  scope:
+    - "Reject any audio download whose HTTP status is not 200, and verify the body is a real PCM WAV before it can reach the decoder or PlaySound."
+    - "Bypass the system proxy for the loopback audio cache, which previously returned a proxy error page that looked like a successful download."
+    - "Cap the download size so a bad response cannot exhaust memory."
+    - "Serialise WinHttpWebSocketClient::close handle teardown against send_text and send_binary."
+  root_cause: >-
+    DownloadHttp treated any non-empty response body as audio, so a 404 page or
+    a proxy error page was written to a temp file and handed to PlaySound.
+    Separately, close() released the WinHTTP handles without taking send_mutex,
+    so a sender that had already passed connected() could call
+    WinHttpWebSocketSend on a handle close() had already closed.
+  non_actions:
+    - "Do not change the cached audio URL, the WAV parsing, or the playback scheduling."
+    - "Do not change the WebSocket frame format or the close handshake."
+  validation:
+    - "`cmake --build render-core/build --config Release --target ag99-render-host` passed with no errors or warnings."
+    - "`cmake --build runtime-core/build --config Release --target ag99-runtime-protocol-smoke` passed and the smoke executable exited 0."
+    - "Live run against the local Adapter downloaded and played a real cached WAV with no rejection, and the motion intent still compiled, confirming the new validation accepts the normal path."
+  evidence_gap:
+    - "The rejection branch was not exercised against a real failing response; it was verified by reading the Adapter's static server rather than by serving an error page."
+
 live2d_render_component_design:
   recorded_at: "2026-10-01"
   class: refactor

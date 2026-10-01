@@ -235,6 +235,37 @@ std::wstring WidenUtf8(std::string_view value) {
   return result;
 }
 
+// Bound the download so a bad response cannot exhaust memory. 64 MB is about
+// half an hour of 16 kHz mono PCM16, far beyond any single spoken reply.
+constexpr std::size_t kMaxAudioBytes = 64u * 1024u * 1024u;
+
+// The Adapter serves cached audio as a finite PCM WAV. Anything else, including
+// an HTML error page from a proxy or a non-200 response, must never reach the
+// audio decoder or PlaySound.
+bool IsPlayableWav(const std::vector<std::uint8_t>& bytes) {
+  if (bytes.size() < 44) {
+    return false;
+  }
+  if (std::memcmp(bytes.data(), "RIFF", 4) != 0
+      || std::memcmp(bytes.data() + 8, "WAVE", 4) != 0) {
+    return false;
+  }
+  for (std::size_t offset = 12; offset + 8 <= bytes.size();) {
+    std::uint32_t chunk_size = 0;
+    std::memcpy(&chunk_size, bytes.data() + offset + 4, sizeof(chunk_size));
+    if (std::memcmp(bytes.data() + offset, "fmt ", 4) == 0
+        && chunk_size >= 16
+        && offset + 8 + chunk_size <= bytes.size()) {
+      return true;
+    }
+    if (std::memcmp(bytes.data() + offset, "data", 4) == 0) {
+      return chunk_size > 0;
+    }
+    offset += 8 + chunk_size + (chunk_size & 1u);
+  }
+  return false;
+}
+
 bool DownloadHttp(const std::string& url, std::vector<std::uint8_t>& output) {
   const std::wstring wide_url = WidenUtf8(url);
   if (wide_url.empty()) {
@@ -258,8 +289,10 @@ bool DownloadHttp(const std::string& url, std::vector<std::uint8_t>& output) {
     return false;
   }
 
+  // The audio cache is always loopback. Going through the system proxy would
+  // hand us a proxy error page instead of the WAV.
   HINTERNET session = WinHttpOpen(
-      L"AG99liveNativeDemo/0.1", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+      L"AG99liveNativeDemo/0.1", WINHTTP_ACCESS_TYPE_NO_PROXY,
       WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
   if (!session) {
     return false;
@@ -279,16 +312,39 @@ bool DownloadHttp(const std::string& url, std::vector<std::uint8_t>& output) {
       WinHttpSendRequest(request, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
                          WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&
       WinHttpReceiveResponse(request, nullptr)) {
-    std::uint8_t buffer[64 * 1024];
-    DWORD read = 0;
-    do {
-      if (!WinHttpReadData(request, buffer, sizeof(buffer), &read)) {
+    DWORD status = 0;
+    DWORD status_size = sizeof(status);
+    const bool have_status = WinHttpQueryHeaders(
+        request,
+        WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+        WINHTTP_HEADER_NAME_BY_INDEX,
+        &status,
+        &status_size,
+        WINHTTP_NO_HEADER_INDEX)
+        && status == 200;
+    if (!have_status) {
+      std::cerr << "audio download rejected, status " << status << ": " << url
+                << '\n';
+    } else {
+      std::uint8_t buffer[64 * 1024];
+      DWORD read = 0;
+      do {
+        if (!WinHttpReadData(request, buffer, sizeof(buffer), &read)) {
+          output.clear();
+          break;
+        }
+        if (output.size() + read > kMaxAudioBytes) {
+          output.clear();
+          break;
+        }
+        output.insert(output.end(), buffer, buffer + read);
+      } while (read != 0);
+      if (!output.empty() && !IsPlayableWav(output)) {
+        std::cerr << "audio download is not a playable WAV: " << url << '\n';
         output.clear();
-        break;
       }
-      output.insert(output.end(), buffer, buffer + read);
-    } while (read != 0);
-    success = !output.empty();
+      success = !output.empty();
+    }
   }
   if (request) {
     WinHttpCloseHandle(request);

@@ -240,6 +240,11 @@ void WinHttpWebSocketClient::close() {
   if (impl_->receive_thread.joinable()) {
     impl_->receive_thread.join();
   }
+  // send_text and send_binary hold send_mutex across their connected() check
+  // and WinHttpWebSocketSend, so take the same lock before releasing the
+  // handle. Without it a sender can pass the check and then send on a handle
+  // this function has already closed.
+  std::scoped_lock lock(impl_->send_mutex);
   if (impl_->websocket) {
     WinHttpCloseHandle(impl_->websocket);
     impl_->websocket = nullptr;
