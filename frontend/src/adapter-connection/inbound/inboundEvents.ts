@@ -25,6 +25,7 @@ import type {
   SystemModelSyncPayload,
   SystemMotionTuningSamplesStatePayload,
   SystemMotionLabRawEventRecordedPayload,
+  SystemDesktopSettingsQueryPayload,
   SystemSemanticAxisProfileSavedPayload,
   SystemSemanticAxisProfileSaveFailedPayload,
   SystemServerInfoPayload,
@@ -40,6 +41,7 @@ import {
   parseHistoryListPayload,
   parseMotionTuningSamplesStatePayload,
   parseSystemMotionLabRawEventRecordedPayload,
+  parseSystemDesktopSettingsQueryPayload,
   parseOutputSegmentPayload,
   parseOutputTranscriptionPayload,
   parseSemanticAxisProfileSaveFailedPayload,
@@ -121,6 +123,10 @@ type InboundPassthroughEvent =
   | {
     kind: "motion_lab_raw_event_recorded";
     envelope: ProtocolEnvelope<SystemMotionLabRawEventRecordedPayload>;
+  }
+  | {
+    kind: "desktop_settings_query";
+    envelope: ProtocolEnvelope<SystemDesktopSettingsQueryPayload>;
   }
   | { kind: "history_list"; envelope: ProtocolEnvelope<SystemHistoryListPayload> }
   | { kind: "history_created"; envelope: ProtocolEnvelope<SystemHistoryCreatedPayload> }
@@ -239,6 +245,16 @@ export function mapInboundEnvelopeToEvent(
       }
       return {
         kind: "motion_lab_raw_event_recorded",
+        envelope: withPayload(envelope, parsed.payload),
+      };
+    }
+    case INBOUND_MESSAGE_TYPES.SYSTEM_DESKTOP_SETTINGS_QUERY: {
+      const parsed = parseSystemDesktopSettingsQueryPayload(envelope);
+      if (!parsed.ok) {
+        return protocolPayloadError(envelope, parsed.error);
+      }
+      return {
+        kind: "desktop_settings_query",
         envelope: withPayload(envelope, parsed.payload),
       };
     }

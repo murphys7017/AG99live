@@ -1,4 +1,4 @@
-import type { ProtocolEnvelope, SystemModelSyncPayload } from "../../types/protocol.js";
+import type { ProtocolEnvelope, SystemModelSyncPayload, SystemDesktopSettingsQueryPayload } from "../../types/protocol.js";
 import type { MotionPayloadNormalizer } from "../../types/motion.js";
 import type { AdapterConnectionState } from "../state/adapterConnectionState.js";
 import { parseInboundEnvelope } from "./inboundProtocol.js";
@@ -31,6 +31,7 @@ export interface AdapterInboundRuntimeDeps {
   stopAudioAndSettleTurn: (turnId: string | null, reason: string) => void;
   findActiveAudioSegment: () => { turnId: string | null; messageId: string } | null;
   acknowledgeMotionLabRawEventPersisted: (eventId: string) => void;
+  handleDesktopSettingsQuery: (envelope: ProtocolEnvelope<SystemDesktopSettingsQueryPayload>) => void;
   startMicrophoneCapture: (origin?: "manual" | "ptt" | "auto") => Promise<boolean>;
   normalizeMotionPayload: MotionPayloadNormalizer;
   reportOutputSegmentRejected: (
@@ -143,6 +144,8 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
         : null,
       acknowledgeMotionLabRawEventPersisted: (eventId) =>
         deps.acknowledgeMotionLabRawEventPersisted(eventId),
+      handleDesktopSettingsQuery: (envelope) =>
+        deps.handleDesktopSettingsQuery(envelope),
       rewriteModelSyncEnvelope: (env) => rewriteModelSyncEnvelope(env),
       rewriteSocketUrl: (url) => rewriteSocketUrl(url),
       rewriteHttpUrl: (url) => rewriteHttpUrl(url),

@@ -119,6 +119,34 @@ export interface SystemMotionLabRawEventRecordedPayload {
   event_id: string;
 }
 
+export type DesktopSettingsAction = "list" | "set";
+
+/**
+ * Adapter asks the desktop for a machine-local setting. `list` fetches the
+ * current value together with the options this desktop actually offers;
+ * `set` applies the value the control page chose.
+ */
+export interface SystemDesktopSettingsQueryPayload {
+  request_id: string;
+  key: string;
+  action: DesktopSettingsAction;
+  value?: string;
+}
+
+export interface SystemDesktopSettingOption {
+  id: string;
+  label: string;
+}
+
+export interface SystemDesktopSettingsResultPayload {
+  request_id: string;
+  key: string;
+  ok: boolean;
+  value?: string;
+  options?: SystemDesktopSettingOption[];
+  error?: string;
+}
+
 export interface SystemSemanticAxisProfileSavedPayload {
   request_id: string;
   model_name: string;

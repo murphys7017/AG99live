@@ -692,6 +692,7 @@ astrbot_plugin_web_control:
     - "Share the existing motion-tuning protocol normalizers and serializer across desktop and Web control flows."
     - "Decouple the control page from the Electron window-shell stylesheet so the embedded page scrolls and owns its own theme."
     - "Make the plugin config a single declarative spec on the backend and render the control page form from it."
+    - "Broker machine-local desktop settings (microphone device first) from the control page through the adapter to the connected client."
   non_actions:
     - "Do not migrate microphone, global hotkeys, Spout/ESP32, or desktop live-preview ownership in this batch."
     - "Keep existing desktop helper views until the local-runtime bridge is implemented and accepted."
@@ -713,6 +714,11 @@ astrbot_plugin_web_control:
     - "Plugin config (self._plugin.config + save_config) and platform config (AstrBot PlatformManager-owned platform_config) are separate persistence owners; unifying them in the page is not yet possible without AstrBot-side platform config persistence."
     - "The plugin config shape was previously declared three times: _conf_schema.json, the web_control validator, and the Vue template. web_control.CONFIG_SCHEMA is now the single source for validation, defaults and the served form metadata."
     - "The bridge reduces a rejected API call to a bare message string and drops any field pointer, so save_settings reports a rejected patch as HTTP 200 with {ok:false, error:{code, field}} instead of using the error channel."
+    - "A machine-local setting does not have to be controlled locally: the desktop is already connected to the adapter over a single-client WebSocket, so the adapter can broker page request -> client answer. The adapter owns no such value and only caches the last answer for the offline view."
+    - "Desktop settings use one uniform shape for every key: {value, options:[{id,label}]}. list returns the current value plus the options the client actually has; set applies the page's choice. No capture mode is needed, because a keyboard key is already an enumerable DOM code in DOM_CODE_TO_UIOHOOK_KEYCODE and a microphone is an enumerable device list."
+    - "The broker is keyed by request_id, has an 8s timeout, and releases waiters on disconnect and on terminate so a dropped client cannot hang the page."
+    - "The desktop rejects a set value that is not in the option list it just reported, so a stale page cannot push an arbitrary device id into the capture runtime."
+    - "The page shows the last known desktop value with its report time and an explicit not-connected/not-editable note while the client is offline, rather than showing an empty or invented value."
   validation:
     - "npm run build:astrbot-page passed and generated astrbot_plugin_ag99live_adapter/views/control-panel."
     - "Adapter run() now unregisters its control-platform entry on every exit; terminate() cleanup remains identity-checked."
@@ -724,11 +730,13 @@ astrbot_plugin_web_control:
     - "Desktop rendering parity was proven mechanically: the pre-change and post-change renderer CSS were compared as 1300 selector|property pairs and every value was identical; the only structural change is the intended rule split."
     - "Config boundary check passed 41 assertions over the served spec, accepted patches, 16 rejection cases, projection of hand-edited config and provider listing."
     - "Control page verified in a real browser against the built artifact with a stub bridge fed by the real backend spec: all four sections and ten fields render from the schema, the provider picker lists real providers, an inline field error appears for a blanked required field, the dirty indicator and save enable/disable work, and a save clears the dirty state."
+    - "Desktop settings broker passed 26 boundary assertions: offline rejection, list and set round trips through the real protocol builder, option and timestamp capture, client rejection propagation without caching, timeout with pending cleanup, waiter release on disconnect, stray reply rejection, and the offline payload still listing every declared setting."
+    - "Control page verified against a stub client in both states: connected, the microphone picker lists the client's options, selecting a device posts set and the reported timestamp updates; offline, the status reads not connected, the control is disabled, the last report time is shown and the refresh button is disabled."
   evidence_gap:
     - "The active plugin was not reloaded; opening the view and exercising authenticated API requests in the live AstrBot Dashboard remains unverified."
-    - "Desktop-local device controls and live motion preview are intentionally not exposed by this first Web control batch."
+    - "Desktop-local device controls and live motion preview beyond the microphone remain unexposed by the broker."
     - "Electron desktop windows were verified by compiled-CSS parity and typecheck only; no live Electron run confirmed the unchanged desktop appearance."
-    - "The new control/config/schema route and the field-anchored save rejection were exercised through a stub bridge, not against a live reloaded AstrBot."
+    - "The new control/config/schema route, the field-anchored save rejection and the desktop settings broker were exercised through a stub bridge and a fake client, not against a live reloaded AstrBot and a running desktop app."
     - "A failure in control/samples still raises the page-level error banner even though motion tuning is not the active section."
 
 spout_async_readback:

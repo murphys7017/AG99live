@@ -15,6 +15,12 @@ from .live2d.semantic_axis_profile import (
     SemanticAxisProfileError,
     SemanticAxisProfileRevisionError,
 )
+from .protocol.constants import (
+    DESKTOP_SETTINGS_ACTION_LIST,
+    DESKTOP_SETTINGS_ACTION_SET,
+    DESKTOP_SETTINGS_ACTIONS,
+)
+from .runtime.desktop_settings_broker import DesktopSettingsError
 from .runtime.plugin_runtime import (
     get_control_platform,
     get_plugin_context,
@@ -218,6 +224,38 @@ _FIELDS_BY_PATH = {
 }
 
 
+@dataclass(frozen=True)
+class DesktopSetting:
+    """A setting the desktop owns but the control page can still drive.
+
+    The value physically belongs to the machine running the desktop; the page
+    reaches it through the adapter's broker, so the adapter never stores it as
+    authoritative. This spec exists only so the page can label the control.
+    """
+
+    key: str
+    label: str
+    description: str
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "key": self.key,
+            "label": self.label,
+            "description": self.description,
+        }
+
+
+DESKTOP_SETTINGS_SPEC: tuple[DesktopSetting, ...] = (
+    DesktopSetting(
+        key="microphone_device",
+        label="麦克风设备",
+        description="桌宠从这台电脑上的哪个麦克风收音。设备由桌面端枚举，选项以桌面端实际可用为准。",
+    ),
+)
+
+_DESKTOP_SETTINGS_BY_KEY = {setting.key: setting for setting in DESKTOP_SETTINGS_SPEC}
+
+
 class ConfigValidationError(ValueError):
     """A rejected settings patch, anchored to the offending field when known."""
 
@@ -386,6 +424,8 @@ def register_web_control_page(context: Any, plugin: Any) -> bool:
     routes = (
         ("/overview", api.get_overview, ["GET"], "AG99live control page overview"),
         ("/config/schema", api.get_config_schema, ["GET"], "Read AG99live config form schema"),
+        ("/desktop/settings", api.get_desktop_settings, ["GET"], "Read desktop-owned settings"),
+        ("/desktop/settings", api.apply_desktop_setting, ["POST"], "Query or apply a desktop-owned setting"),
         ("/settings", api.get_settings, ["GET"], "Read AG99live adapter settings"),
         ("/settings", api.save_settings, ["POST"], "Save AG99live adapter settings"),
         ("/profile", api.get_profile, ["GET"], "Read a Live2D semantic profile"),
@@ -446,6 +486,59 @@ class WebControlPageApi:
         if response := _require_dashboard_user():
             return response
         return jsonify({"settings": _project_settings(self._plugin.config)})
+
+    async def get_desktop_settings(self):
+        """Report what the desktop last said, which stays valid while it is offline."""
+        if response := _require_dashboard_user():
+            return response
+        platform_id = str(request.args.get("platform_id") or "").strip()
+        return jsonify(_desktop_settings_payload(get_control_platform(platform_id)))
+
+    async def apply_desktop_setting(self):
+        """Broker one list/set exchange between this page and the connected desktop."""
+        if response := _require_dashboard_user():
+            return response
+        body = await _read_json_body()
+        if isinstance(body, tuple):
+            return body[1]
+        platform, error = _resolve_platform_from_body(body)
+        if error:
+            return error
+
+        key = str(body.get("key") or "").strip()
+        action = str(body.get("action") or DESKTOP_SETTINGS_ACTION_LIST).strip()
+        if key not in _DESKTOP_SETTINGS_BY_KEY:
+            return _error("desktop_setting_unsupported", 400)
+        if action not in DESKTOP_SETTINGS_ACTIONS:
+            return _error("desktop_setting_action_invalid", 400)
+
+        value: str | None = None
+        if action == DESKTOP_SETTINGS_ACTION_SET:
+            raw = body.get("value")
+            if not isinstance(raw, str) or not raw.strip():
+                return _error("desktop_setting_value_required", 400)
+            value = raw.strip()
+
+        try:
+            entry = await platform.desktop_settings_broker.query(
+                key=key,
+                action=action,
+                value=value,
+            )
+        except DesktopSettingsError as exc:
+            # Reuse the same builder the read path uses: a raw broker snapshot
+            # has no labels, and the page renders from these entries directly.
+            return jsonify({
+                "ok": False,
+                "error": {"code": str(exc), "key": key},
+                **_desktop_settings_payload(platform),
+            })
+        return jsonify({
+            "ok": True,
+            "key": key,
+            "entry": entry,
+            **_desktop_settings_payload(platform),
+        })
 
     async def save_settings(self):
         if response := _require_dashboard_user():
@@ -631,6 +724,38 @@ def _resolve_platform_from_query():
     if not platform:
         return None, _error("platform_not_found", 404)
     return platform, None
+
+
+def _resolve_platform_from_body(body: dict[str, Any]):
+    platform = get_control_platform(str(body.get("platform_id") or "").strip())
+    if not platform:
+        return None, _error("platform_not_found", 404)
+    return platform, None
+
+
+def _desktop_settings_payload(platform: Any) -> dict[str, Any]:
+    """Assemble the offline-safe view of every declared desktop setting.
+
+    A setting the desktop has never reported is present with an empty value
+    rather than missing, so the page renders a stable list and can say
+    "not reported yet" instead of silently dropping the control.
+    """
+    connected = bool(platform and platform.desktop_settings_broker.connected)
+    snapshot = platform.desktop_settings_broker.snapshot() if platform else {}
+    return {
+        "connected": connected,
+        "platformId": str(getattr(platform, "platform_id", "") or ""),
+        "settings": {
+            setting.key: {
+                **setting.to_json(),
+                **(
+                    snapshot.get(setting.key)
+                    or {"value": "", "options": [], "reportedAt": ""}
+                ),
+            }
+            for setting in DESKTOP_SETTINGS_SPEC
+        },
+    }
 
 
 def _resolve_model(model_info: dict[str, Any], model_name: str) -> dict[str, Any] | None:

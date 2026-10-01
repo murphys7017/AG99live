@@ -12,6 +12,7 @@ import type {
   SystemSemanticAxisProfileSaveFailedPayload,
   SystemMotionTuningSamplesStatePayload,
   SystemMotionLabRawEventRecordedPayload,
+  SystemDesktopSettingsQueryPayload,
   SystemServerInfoPayload,
 } from "../../types/protocol.js";
 import {
@@ -339,6 +340,39 @@ export function parseSystemMotionLabRawEventRecordedPayload(
     return invalidPayload(envelope.type, "payload.event_id", "non-empty string");
   }
   return { ok: true, payload: { event_id: eventId.payload.trim() } };
+}
+
+export function parseSystemDesktopSettingsQueryPayload(
+  envelope: ProtocolEnvelope<unknown>,
+): PayloadParseResult<SystemDesktopSettingsQueryPayload> {
+  const record = parseObjectPayload(envelope);
+  if (!record.ok) return record;
+  const requestId = requiredString(envelope.type, record.payload, "request_id");
+  if (!requestId.ok) return requestId;
+  if (!requestId.payload.trim()) {
+    return invalidPayload(envelope.type, "payload.request_id", "non-empty string");
+  }
+  const key = requiredString(envelope.type, record.payload, "key");
+  if (!key.ok) return key;
+  if (!key.payload.trim()) {
+    return invalidPayload(envelope.type, "payload.key", "non-empty string");
+  }
+  const action = requiredString(envelope.type, record.payload, "action");
+  if (!action.ok) return action;
+  if (action.payload !== "list" && action.payload !== "set") {
+    return invalidPayload(envelope.type, "payload.action", "list or set");
+  }
+  const payload: SystemDesktopSettingsQueryPayload = {
+    request_id: requestId.payload.trim(),
+    key: key.payload.trim(),
+    action: action.payload,
+  };
+  if (record.payload.value !== undefined) {
+    const value = requiredString(envelope.type, record.payload, "value");
+    if (!value.ok) return value;
+    payload.value = value.payload;
+  }
+  return { ok: true, payload };
 }
 
 export function parseSystemServerInfoPayload(

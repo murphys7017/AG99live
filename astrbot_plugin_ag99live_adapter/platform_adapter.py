@@ -35,6 +35,8 @@ from .runtime.plugin_runtime import (
 )
 from .runtime.state import RuntimeState
 from .protocol.builder import build_system_motion_tuning_samples_state
+from .protocol.constants import TYPE_SYSTEM_DESKTOP_SETTINGS_RESULT
+from .runtime.desktop_settings_broker import DesktopSettingsBroker
 from .runtime.session_state import SessionState
 from .runtime.turn_identity_map import TurnIdentityMap
 from .transport.websocket_server import WebSocketTransport
@@ -183,6 +185,10 @@ class OLVPetPlatformAdapter(Platform):
             send_current_model_and_conf=self._send_current_model_and_conf,
             send_motion_tuning_samples_state=self._send_motion_tuning_samples_state,
             on_disconnect=self._handle_transport_disconnect,
+        )
+        self.desktop_settings_broker = DesktopSettingsBroker(
+            send_json=self.transport.send_json,
+            is_connected=lambda: self.transport._ws_client is not None,
         )
         self.turn_coordinator = TurnCoordinator(
             session_state=self.session_state,
@@ -385,6 +391,9 @@ class OLVPetPlatformAdapter(Platform):
         return await self._send_json(payload)
 
     async def _handle_frontend_system(self, message: dict[str, Any]) -> None:
+        if message.get("type") == TYPE_SYSTEM_DESKTOP_SETTINGS_RESULT:
+            self.desktop_settings_broker.resolve(message.get("payload") or {})
+            return
         await self.frontend_system_handler.handle(
             message,
             send_json=self.transport.bind_current_client_sender(),
@@ -394,6 +403,7 @@ class OLVPetPlatformAdapter(Platform):
     async def terminate(self) -> None:
         logger.info("AG99live adapter terminate() called")
         try:
+            self.desktop_settings_broker.fail_pending("adapter_terminated")
             await self.transport.stop()
         finally:
             unregister_control_platform(self.platform_id, self)
@@ -414,6 +424,12 @@ class OLVPetPlatformAdapter(Platform):
         后续所有者清理。全部尝试结束后再把失败汇总交回 transport。
         """
         cleanup_failures: list[tuple[str, Exception]] = []
+
+        try:
+            self.desktop_settings_broker.fail_pending("desktop_client_offline")
+        except Exception as exc:
+            cleanup_failures.append(("desktop_settings_broker", exc))
+            logger.exception("DesktopSettingsBroker disconnect cleanup failed")
 
         try:
             self.turn_coordinator.reset_turn_tracking()

@@ -30,6 +30,7 @@ from .constants import (
     TYPE_OUTPUT_SEGMENT,
     TYPE_OUTPUT_TRANSCRIPTION,
     TYPE_SYSTEM_BACKGROUND_LIST,
+    TYPE_SYSTEM_DESKTOP_SETTINGS_QUERY,
     TYPE_SYSTEM_HEARTBEAT_ACK,
     TYPE_SYSTEM_HISTORY_CREATED,
     TYPE_SYSTEM_HISTORY_DATA,
@@ -360,4 +361,31 @@ def build_control_error(
         turn_id=turn_id,
         source=SOURCE_ADAPTER,
         payload={"message": message},
+    )
+
+
+def build_system_desktop_settings_query(
+    *,
+    request_id: str,
+    key: str,
+    action: str,
+    value: str | None = None,
+) -> dict[str, Any]:
+    """Ask the connected desktop for a machine-local setting.
+
+    ``action`` is ``list`` to fetch the current value plus its option list, or
+    ``set`` to apply the page's choice. The desktop owns these values; the
+    adapter only brokers one request/response exchange per request_id.
+    """
+    payload: dict[str, Any] = {
+        "request_id": request_id,
+        "key": key,
+        "action": action,
+    }
+    if value is not None:
+        payload["value"] = value
+    return build_message_envelope(
+        TYPE_SYSTEM_DESKTOP_SETTINGS_QUERY,
+        source=SOURCE_ADAPTER,
+        payload=payload,
     )

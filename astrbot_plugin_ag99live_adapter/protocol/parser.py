@@ -26,6 +26,7 @@ from .constants import (
     TYPE_INPUT_AUDIO_STREAM_END,
     TYPE_INPUT_AUDIO_STREAM_START,
     TYPE_INPUT_TEXT,
+    TYPE_SYSTEM_DESKTOP_SETTINGS_RESULT,
     TYPE_SYSTEM_HISTORY_DELETE,
     TYPE_SYSTEM_HISTORY_LOAD,
     TYPE_SYSTEM_MOTION_LAB_RAW_EVENT,
@@ -339,6 +340,44 @@ def _validate_payload(message_type: str, payload: dict[str, Any]) -> None:
             raise ProtocolError(
                 "`system.motion_lab_raw_event` payload.message_id must be a non-empty string when present."
             )
+        return
+
+
+    if message_type == TYPE_SYSTEM_DESKTOP_SETTINGS_RESULT:
+        _require_payload_string(message_type, payload, "request_id")
+        _require_payload_string(message_type, payload, "key")
+        ok = payload.get("ok")
+        if not isinstance(ok, bool):
+            raise ProtocolError(
+                f"`{message_type}` requires `payload.ok` to be a boolean."
+            )
+        if not ok:
+            if not _normalize_optional_string(payload.get("error")):
+                raise ProtocolError(
+                    f"`{message_type}` requires `payload.error` to be a non-empty "
+                    "string when ok is false."
+                )
+            return
+        # `value` may legitimately be empty (e.g. no input device selected yet),
+        # so only its type is constrained, not its length.
+        if not isinstance(payload.get("value"), str):
+            raise ProtocolError(
+                f"`{message_type}` requires `payload.value` to be a string."
+            )
+        options = payload.get("options")
+        if options is None:
+            return
+        if not isinstance(options, list):
+            raise ProtocolError(
+                f"`{message_type}` requires `payload.options` to be a list when provided."
+            )
+        for index, option in enumerate(options):
+            if not isinstance(option, Mapping):
+                raise ProtocolError(
+                    f"`{message_type}` requires `payload.options[{index}]` to be an object."
+                )
+            _require_payload_string(message_type, option, "id")
+            _require_payload_string(message_type, option, "label")
         return
 
 

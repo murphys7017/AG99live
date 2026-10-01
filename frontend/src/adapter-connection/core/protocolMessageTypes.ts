@@ -5,6 +5,7 @@ export const INBOUND_MESSAGE_TYPES = {
   SYSTEM_SEMANTIC_AXIS_PROFILE_SAVE_FAILED: "system.semantic_axis_profile_save_failed",
   SYSTEM_MOTION_TUNING_SAMPLES_STATE: "system.motion_tuning_samples_state",
   SYSTEM_MOTION_LAB_RAW_EVENT_RECORDED: "system.motion_lab_raw_event_recorded",
+  SYSTEM_DESKTOP_SETTINGS_QUERY: "system.desktop_settings_query",
   SYSTEM_HISTORY_LIST: "system.history_list",
   SYSTEM_HISTORY_CREATED: "system.history_created",
   SYSTEM_HISTORY_DATA: "system.history_data",
@@ -33,5 +34,6 @@ export const OUTBOUND_MESSAGE_TYPES = {
   SYSTEM_MOTION_TUNING_SAMPLE_SAVE: "system.motion_tuning_sample_save",
   SYSTEM_MOTION_TUNING_SAMPLE_DELETE: "system.motion_tuning_sample_delete",
   SYSTEM_MOTION_LAB_RAW_EVENT: "system.motion_lab_raw_event",
+  SYSTEM_DESKTOP_SETTINGS_RESULT: "system.desktop_settings_result",
   ENGINE_MOTION_INTENT: "engine.motion_intent",
 } as const;

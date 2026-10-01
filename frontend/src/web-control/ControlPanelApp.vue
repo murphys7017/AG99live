@@ -3,6 +3,12 @@ import { computed, onMounted, ref, watch } from "vue";
 import MotionTuningPanel from "../components/MotionTuningPanel.vue";
 import SemanticAxisProfileEditor from "../components/SemanticAxisProfileEditor.vue";
 import SettingsForm from "./SettingsForm.vue";
+import DesktopSettingsPanel from "./DesktopSettingsPanel.vue";
+import {
+  desktopErrorMessage,
+  type DesktopSettingsQueryResponse,
+  type DesktopSettingsState,
+} from "./desktopSettings";
 import {
   CONFIG_ERROR_FALLBACKS,
   writeField,
@@ -70,6 +76,13 @@ const configDefaults = ref<ConfigValues>({});
 const configProviders = ref<ProviderOption[]>([]);
 const settingsFieldError = ref("");
 const settingsFieldErrorCode = ref("");
+const desktopSettings = ref<DesktopSettingsState>({
+  connected: false,
+  platformId: "",
+  settings: {},
+});
+const desktopBusy = ref(false);
+const desktopError = ref("");
 
 const activePlatform = computed(() =>
   overview.value.platforms.find((item) => item.platform_id === selectedPlatformId.value) ?? null,
@@ -122,6 +135,7 @@ async function loadOverview(): Promise<void> {
     }
     await loadConfigSchema();
     await loadSettings();
+    await loadDesktopSettings();
     if (selectedPlatformId.value) {
       await Promise.all([loadProfile(), loadSamples()]);
     }
@@ -223,6 +237,62 @@ function descriptionFor(field: ConfigField): string {
   const bridge = window.AstrBotPluginView;
   const localized = bridge ? bridge.t(`views.control-panel.fields.${field.key}.hint`, "") : "";
   return localized || field.description;
+}
+
+const desktopSettingEntries = computed(() =>
+  Object.values(desktopSettings.value.settings).sort((a, b) =>
+    a.key.localeCompare(b.key),
+  ),
+);
+
+async function loadDesktopSettings(): Promise<void> {
+  desktopError.value = "";
+  if (!selectedPlatformId.value) {
+    desktopSettings.value = { connected: false, platformId: "", settings: {} };
+    return;
+  }
+  try {
+    desktopSettings.value = await apiGet<DesktopSettingsState>(
+      "control/desktop/settings",
+      { platform_id: selectedPlatformId.value },
+    );
+  } catch (error) {
+    desktopError.value = desktopErrorMessage(error instanceof Error ? error.message : "");
+  }
+}
+
+async function queryDesktopSetting(
+  key: string,
+  action: "list" | "set",
+  value?: string,
+): Promise<void> {
+  if (!selectedPlatformId.value) return;
+  desktopBusy.value = true;
+  desktopError.value = "";
+  try {
+    const response = await apiPost<DesktopSettingsQueryResponse>(
+      "control/desktop/settings",
+      { platform_id: selectedPlatformId.value, key, action, value },
+    );
+    desktopSettings.value = {
+      connected: response.connected,
+      platformId: selectedPlatformId.value,
+      settings: response.settings ?? desktopSettings.value.settings,
+    };
+    if (!response.ok) {
+      desktopError.value = desktopErrorMessage(response.error?.code);
+    }
+  } catch (error) {
+    desktopError.value = error instanceof Error ? error.message : String(error);
+  } finally {
+    desktopBusy.value = false;
+  }
+}
+
+async function refreshDesktopSettings(): Promise<void> {
+  for (const entry of desktopSettingEntries.value) {
+    await queryDesktopSetting(entry.key, "list");
+  }
 }
 
 async function loadProfile(): Promise<void> {
@@ -423,7 +493,7 @@ onMounted(() => void loadOverview());
         <div v-else class="web-control-empty">尚未发现 AG99live Adapter 实例。请先在 AstrBot 中启用插件并配置平台。</div>
         <div class="web-control-footnote">
           <strong>桌面运行状态</strong>
-          <p>本页面可配置 AstrBot 插件参数、Live2D Profile 和动作样例。麦克风、全局按键、Spout/ESP32 及桌面实时动作预览仍由本机运行时持有；它们的 Web 控制桥接尚未完成。</p>
+          <p>本页面可配置 AstrBot 插件参数、Live2D Profile 和动作样例。麦克风设备由桌面端自己枚举选项，页面只负责转发，因此需要桌面端处于连接状态。全局按键、渲染参数、Spout/ESP32 及桌面实时动作预览仍由本机运行时持有，尚未接入这条转发链路。</p>
         </div>
       </section>
 
@@ -441,6 +511,14 @@ onMounted(() => void loadOverview());
           :description-for="descriptionFor"
           :message="message"
           @change="applyFieldChange"
+        />
+        <DesktopSettingsPanel
+          :settings="desktopSettingEntries"
+          :connected="desktopSettings.connected"
+          :busy="desktopBusy"
+          :error="desktopError"
+          :on-refresh="refreshDesktopSettings"
+          :on-apply="(key, value) => queryDesktopSetting(key, 'set', value)"
         />
         <div class="web-control-form-actions">
           <span class="web-control-form-actions__status">

@@ -22,6 +22,7 @@ import type {
   SystemHistoryListPayload,
   SystemModelSyncPayload,
   SystemMotionTuningSamplesStatePayload,
+  SystemDesktopSettingsQueryPayload,
   SystemServerInfoPayload,
 } from "../../types/protocol.js";
 import type { InboundAdapterEvent, InboundEventMappingContext } from "./inboundEvents.js";
@@ -89,6 +90,8 @@ export interface InboundDispatchDeps {
   } | null;
   motionTuningAdapter: { applyMotionTuningSamplesState: (envelope: ProtocolEnvelope<SystemMotionTuningSamplesStatePayload>) => void } | null;
   acknowledgeMotionLabRawEventPersisted: (eventId: string) => void;
+  // machine-local settings the control page drives through the adapter
+  handleDesktopSettingsQuery: (envelope: ProtocolEnvelope<SystemDesktopSettingsQueryPayload>) => void;
   // url rewriting
   rewriteModelSyncEnvelope: (envelope: ProtocolEnvelope<SystemModelSyncPayload>) => ProtocolEnvelope<SystemModelSyncPayload>;
   rewriteSocketUrl: (rawUrl: string) => string;
@@ -143,6 +146,9 @@ export async function dispatchInboundEvent(
       } else {
         dispatchInboundFeatureEvent(deps, event);
       }
+      return;
+    case "desktop_settings_query":
+      deps.handleDesktopSettingsQuery(event.envelope);
       return;
     case "output_segment":
     case "output_transcription":

@@ -20,6 +20,8 @@ import {
   sendText as sendTextAction,
 } from "./outbound/outboundActions.js";
 import { createAdapterOutboundClient } from "./outbound/outboundClient.js";
+import { OUTBOUND_MESSAGE_TYPES } from "./core/protocolMessageTypes.js";
+import { createDesktopSettingsResponder } from "./features/desktopSettings.js";
 import { useAdapterMotionTuning } from "./motion-tuning/useAdapterMotionTuning.js";
 import {
   createAdapterMicrophoneRuntime,
@@ -267,6 +269,26 @@ export function createAdapterConnection(
     return requirePlaybackAudioControl().findOpenAudioSegment();
   }
 
+  // Declared before the inbound runtime: answering a desktop settings query
+  // needs a way back to the adapter, and inbound handling is wired below.
+  const outboundClient = createAdapterOutboundClient({
+    getSocket: () => socket,
+    buildEnvelope: buildMessageEnvelope as (typeof buildMessageEnvelope),
+  });
+
+  const desktopSettingsResponder = createDesktopSettingsResponder(
+    {
+      currentMicrophoneDeviceId: () => state.microphoneDeviceId,
+      applyMicrophoneDevice: (deviceId) => microphoneRuntime.setMicrophoneDevice(deviceId),
+    },
+    (payload) => {
+      outboundClient.send(
+        OUTBOUND_MESSAGE_TYPES.SYSTEM_DESKTOP_SETTINGS_RESULT,
+        payload,
+      );
+    },
+  );
+
   const inboundRuntime = createAdapterInboundRuntime({
     state,
     getSessionStore: () => sessionStore,
@@ -302,11 +324,9 @@ export function createAdapterConnection(
       }, envelope.turn_id);
     },
     notifyTurnLifecycle: (event) => turnLifecycleObserver?.(event),
-  });
-
-  const outboundClient = createAdapterOutboundClient({
-    getSocket: () => socket,
-    buildEnvelope: buildMessageEnvelope as (typeof buildMessageEnvelope),
+    handleDesktopSettingsQuery: (envelope) => {
+      void desktopSettingsResponder(envelope);
+    },
   });
 
   const outboundCtx = {
