@@ -1440,17 +1440,65 @@ private:
   std::atomic<std::uint64_t> next_turn_id_{1};
 };
 
+const std::filesystem::path& ExecutableDirectory() {
+  static const std::filesystem::path directory = [] {
+    std::wstring buffer(32768, L'\0');
+    const DWORD length = GetModuleFileNameW(
+        nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+    if (length == 0
+        || static_cast<std::size_t>(length) >= buffer.size()) {
+      return std::filesystem::path{};
+    }
+    buffer.resize(length);
+    return std::filesystem::path(buffer).parent_path();
+  }();
+  return directory;
+}
+
 csmByte* LoadFile(const std::string path, csmSizeInt* size) {
   if (path.empty() || !size) {
     return nullptr;
   }
 
-  std::filesystem::path resolved_path = path;
   constexpr std::string_view shader_prefix = "FrameworkShaders/";
-  if (path.rfind(shader_prefix.data(), 0) == 0 &&
-      !g_shader_directory.empty()) {
-    resolved_path =
-        g_shader_directory / std::filesystem::path(path.substr(shader_prefix.size()));
+  const bool is_shader = path.rfind(shader_prefix.data(), 0) == 0;
+  const std::filesystem::path relative_shader =
+      is_shader
+      ? std::filesystem::path(path.substr(shader_prefix.size()))
+      : std::filesystem::path{};
+
+  // Prefer assets shipped next to the executable so a packaged build does not
+  // depend on the SDK location that happened to be configured at compile time.
+  const std::filesystem::path local_shader =
+      is_shader ? ExecutableDirectory() / relative_shader
+                : std::filesystem::path{};
+  if (is_shader && !local_shader.empty()) {
+    std::error_code error;
+    if (std::filesystem::is_regular_file(local_shader, error)) {
+      if (FILE* file = std::fopen(local_shader.string().c_str(), "rb")) {
+        std::fseek(file, 0, SEEK_END);
+        const long length = std::ftell(file);
+        std::fseek(file, 0, SEEK_SET);
+        if (length > 0) {
+          auto* buffer = static_cast<csmByte*>(
+              std::malloc(static_cast<std::size_t>(length)));
+          if (buffer && std::fread(
+                  buffer, 1, static_cast<std::size_t>(length), file)
+                  == static_cast<std::size_t>(length)) {
+            std::fclose(file);
+            *size = static_cast<csmSizeInt>(length);
+            return buffer;
+          }
+          std::free(buffer);
+        }
+        std::fclose(file);
+      }
+    }
+  }
+
+  std::filesystem::path resolved_path = path;
+  if (is_shader && !g_shader_directory.empty()) {
+    resolved_path = g_shader_directory / relative_shader;
   }
 
   FILE* file = nullptr;
