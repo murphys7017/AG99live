@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import MotionTuningPanel from "../components/MotionTuningPanel.vue";
 import SemanticAxisProfileEditor from "../components/SemanticAxisProfileEditor.vue";
 import SettingsForm from "./SettingsForm.vue";
@@ -251,14 +251,24 @@ async function loadDesktopSettings(): Promise<void> {
     desktopSettings.value = { connected: false, platformId: "", settings: {} };
     return;
   }
+  const wasConnected = desktopSettings.value.connected;
   try {
-    desktopSettings.value = await apiGet<DesktopSettingsState>(
-      "control/desktop/settings",
-      { platform_id: selectedPlatformId.value },
-    );
+    const next = await apiGet<DesktopSettingsState>("control/desktop/settings", {
+      platform_id: selectedPlatformId.value,
+    });
+    desktopSettings.value = next;
+    // The desktop comes and goes while it restarts. Once it is back, pull the
+    // real option list so the panel stops showing the offline snapshot.
+    if (!wasConnected && next.connected && !hasReportedOptions(next)) {
+      await refreshDesktopSettings();
+    }
   } catch (error) {
     desktopError.value = desktopErrorMessage(error instanceof Error ? error.message : "");
   }
+}
+
+function hasReportedOptions(state: DesktopSettingsState): boolean {
+  return Object.values(state.settings).some((entry) => entry.options.length > 0);
 }
 
 async function queryDesktopSetting(
@@ -294,6 +304,33 @@ async function refreshDesktopSettings(): Promise<void> {
     await queryDesktopSetting(entry.key, "list");
   }
 }
+
+// The desktop client restarts on its own schedule, so a one-shot read goes
+// stale within seconds. Poll only while the section that shows it is open.
+const DESKTOP_STATE_POLL_MS = 8000;
+let desktopPollTimer: ReturnType<typeof setInterval> | null = null;
+
+function stopDesktopPolling(): void {
+  if (desktopPollTimer !== null) {
+    clearInterval(desktopPollTimer);
+    desktopPollTimer = null;
+  }
+}
+
+function startDesktopPolling(): void {
+  stopDesktopPolling();
+  if (section.value !== "settings" || desktopBusy.value) return;
+  desktopPollTimer = setInterval(() => {
+    if (!document.hidden && !desktopBusy.value) void loadDesktopSettings();
+  }, DESKTOP_STATE_POLL_MS);
+}
+
+watch(section, () => {
+  if (section.value === "settings") void loadDesktopSettings();
+  startDesktopPolling();
+});
+
+onBeforeUnmount(stopDesktopPolling);
 
 async function loadProfile(): Promise<void> {
   if (!selectedPlatformId.value) return;
