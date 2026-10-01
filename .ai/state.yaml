@@ -175,6 +175,8 @@ frontend_performance_occupancy_second_pass:
     - "Use the existing rendered-frame event for external output capture and disable preserveDrawingBuffer on the Live2D WebGL context."
     - "Lower hidden-tab rendering to 10 FPS while enabling 30 FPS when Spout or ESP32 output is actively consuming frames."
     - "Remove redundant DesktopBridge receive-side persistence and deep copies before structured IPC or BroadcastChannel cloning."
+    - "Use shallow playback coordinator projections instead of deeply traversing committed motion payload and speech-cue trees on state changes."
+    - "Remove the redundant renderer-side clone of native microphone PCM buffers after Electron IPC ownership transfer."
   non_actions:
     - "Do not change the creation, visibility, or hide behavior of the four auxiliary tool windows."
     - "Keep manual Spout/ESP32 enable switches, output formats, crop/scale settings, and the foreground frame-rate cap unchanged."
@@ -182,6 +184,7 @@ frontend_performance_occupancy_second_pass:
     - "`npm run typecheck` passed for renderer, WebSDK, and Node projects."
     - "`npm run build` passed."
     - "`git diff --check` passed."
+    - "The second pass preserves store readiness tracking while eliminating deep traversal of nested committed payloads; renderer/WebSDK/Node typechecks and production build pass."
     - "The focused desktop bridge test did not reach execution because its test tsconfig compiles the vendored Cubism Framework with existing strict-null and missing-Core-global errors."
   evidence_gap:
     - "Live Electron, Live2D, Spout, and ESP32 acceptance is required for capture cadence, frame stability, alpha/JPEG edges, and actual CPU/GPU reduction."
@@ -503,6 +506,7 @@ context:
     - Cross-Turn motion history is connection-scoped, bounded to the most recent four valid motion payloads, and is Prompt guidance only; it cannot override the current semantic intent or alter playback.
     - B7-1 speech-following visibility and lateral direction selection are implemented in the existing SpeechPoseStage; ordinary speech prefers head/body yaw or roll, while emphatic speech retains pitch when available. Runtime visual validation remains pending.
     - B7-2 part coordination keeps relation-graph and Schedule ownership unchanged: the existing SpeechPoseStage now uses semantic gaze/head/body strength to choose one lateral gesture family, selects a matching body channel, and combines emotion_label with intent_tags for the existing preset decision. Runtime visual validation remains pending.
+    - SpeechPose directions now follow the mapped semantic target for each phrase's primary aligned sequence step; untagged poses keep one deterministic direction across the segment, while phrase timing and magnitude variation remain intact.
     - B7-3 cross-segment handoff lets the next audio-backed segment start while the previous segment only owns its motion tail; Direct Plan replacement remains atomic in LAppModel, transfers matching ParameterPresentation response state, and projects a successful replacement as completed Timeline ownership without changing motion-only pacing or adding another controller.
     - Complete motion resources enter the same history as pose and sequence payloads, but contribute only their shape/resource usage when no semantic axis levels exist.
     - Official Cubism Framework/Core are the target frozen driver boundary; historical AG99 changes in that directory are architecture debt, not a reason to add more business logic there.
@@ -585,6 +589,7 @@ verification:
     - Lip-sync remains an immediate high-priority contribution and prevents active response dynamics from delaying mouth output; presentation nodes track direct-only targets instead of lip-sync-contaminated values.
     - "`npm run typecheck:renderer`, `npm run typecheck:websdk`, `npm run typecheck:node`, and `git diff --check` pass for the B6-1 response-policy batch."
     - The current motion-quality batch removes global semantic-reversal hesitation and routes reversal preparation through the owning semantic parameter track; renderer and WebSDK typechecks pass. The basic model-engine smoke command remains blocked by pre-existing strict-type and missing-Core-global errors in the frozen Cubism Framework test compilation.
+    - Speech-pose coherence checks cover stable untagged direction, semantic and inverted-binding direction, emphatic pitch, and sequence reversal; the focused emitted test and renderer typecheck pass. The test tsconfig still exits on pre-existing frozen Cubism Framework errors, and live model visual acceptance remains pending.
     - Cross-Turn motion diversity now replaces the single previous-motion snapshot with one bounded TurnCoordinator history; Prompt context includes recent action shapes, main axis directions, intent tags, repeated direction counts, and sequence usage.
     - The diversity summary is advisory only: current semantic intent remains authoritative, and no protocol, timeline, parameter mixer, WebSDK, or Physics path was added.
     - Python compile, protocol manifest, and diff checks pass for the cross-Turn diversity batch; live multi-Turn Prompt and Live2D acceptance remains user-led.

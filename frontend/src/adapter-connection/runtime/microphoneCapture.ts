@@ -1,5 +1,5 @@
 import type { DesktopMicrophoneAudioChunk } from "../../types/desktop.js";
-import { cloneArrayBuffer, float32ToPcm16le } from "./audioStreamFrame.js";
+import { float32ToPcm16le } from "./audioStreamFrame.js";
 
 export type MicrophoneAudioChunk = DesktopMicrophoneAudioChunk;
 
@@ -255,7 +255,7 @@ async function tryStartNativeMicrophoneCaptureRuntime(
     }
     options.onChunk({
       audio: chunk.audio,
-      pcm16le: chunk.pcm16le ? cloneArrayBuffer(chunk.pcm16le) : undefined,
+      pcm16le: chunk.pcm16le,
       sampleRate: chunk.sampleRate,
       channels: chunk.channels,
     });

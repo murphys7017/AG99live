@@ -45,7 +45,3 @@ export function float32ToPcm16le(input: Float32Array): ArrayBuffer {
   }
   return output;
 }
-
-export function cloneArrayBuffer(input: ArrayBuffer): ArrayBuffer {
-  return input.slice(0);
-}

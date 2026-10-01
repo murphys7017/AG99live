@@ -166,7 +166,7 @@ export function usePlaybackCompletionCoordinator(
       phase: session.phase,
     })),
     () => flushPendingCompletions("playback_state_changed"),
-    { deep: true, immediate: true },
+    { immediate: true },
   );
   const unsubscribeExecutionStateChanges =
     options.timelineRuntime.subscribeExecutionStateChanges(() => {

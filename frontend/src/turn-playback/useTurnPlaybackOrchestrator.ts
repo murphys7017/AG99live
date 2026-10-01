@@ -120,6 +120,7 @@ export function useTurnPlaybackOrchestrator(
     });
   }
 
+  // Segments are committed atomically; only readiness and lifecycle replacements matter here.
   const stopSessionWatch = watch(
     () => options.sessionStore.getSessions().map((session) => ({
       id: session.id,
@@ -135,17 +136,17 @@ export function useTurnPlaybackOrchestrator(
           audioUrl: segment.audio.url,
           audioReleased: segment.audio.released,
           audioTerminal: segment.audio.terminal,
-          motionPayload: segment.motion.payload,
+          motionPayloadPresent: segment.motion.payload !== null,
           motionReleased: segment.motion.released,
           motionAbsent: segment.motion.absent,
           motionFailed: segment.motion.failed,
           motionCompleted: segment.motion.completed,
-          speechCues: segment.speech.cues,
+          speechCueCount: segment.speech.cues.length,
         } : null;
       }),
     })),
     scheduleReadySegments,
-    { deep: true, immediate: true },
+    { immediate: true },
   );
   const unsubscribeExecutionStateChanges =
     options.timelineRuntime.subscribeExecutionStateChanges(scheduleReadySegments);
