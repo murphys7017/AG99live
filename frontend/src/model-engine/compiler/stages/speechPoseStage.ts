@@ -265,28 +265,25 @@ function resolveSemanticGestureDirection(
   channel: SpeechGestureChannel,
   event: ModelParameterCompileContext["performanceSchedule"]["events"][number],
 ): number {
-  const alignedStepWeights = new Map<number, number>();
-  for (const phraseIndex of event.phraseIndices ?? []) {
-    const alignment = context.performanceSchedule.estimatedAlignments.find(
-      (entry) => entry.phraseIndex === phraseIndex && entry.primaryForPhrase,
-    );
-    if (alignment) {
-      alignedStepWeights.set(
-        alignment.stepIndex,
-        (alignedStepWeights.get(alignment.stepIndex) ?? 0) + alignment.overlapRatio,
+  let stepIndex = -1;
+  if (context.semanticSequenceStepAxes) {
+    const windowStartMs = event.windowStartMs ?? event.atMs;
+    const windowEndMs = event.windowEndMs ?? windowStartMs;
+    let greatestOverlapMs = 0;
+    for (const [index, step] of context.performanceSchedule.semanticSteps.entries()) {
+      const overlapMs = Math.min(windowEndMs, step.endMs)
+        - Math.max(windowStartMs, step.startMs);
+      if (overlapMs > greatestOverlapMs) {
+        stepIndex = index;
+        greatestOverlapMs = overlapMs;
+      }
+    }
+    if (stepIndex < 0) {
+      stepIndex = context.performanceSchedule.semanticSteps.findIndex(
+        (step) => event.atMs >= step.startMs && event.atMs < step.endMs,
       );
     }
   }
-  const alignedStepIndex = [...alignedStepWeights.entries()]
-    .sort(([leftIndex, leftWeight], [rightIndex, rightWeight]) => (
-      rightWeight - leftWeight || leftIndex - rightIndex
-    ))[0]?.[0];
-  const stepIndex = context.semanticSequenceStepAxes
-    ? alignedStepIndex ?? context.performanceSchedule.semanticSteps.findIndex(
-      (step) => (event.localAtMs ?? 0) >= step.startMs
-        && (event.localAtMs ?? 0) < step.endMs,
-    )
-    : -1;
   const axisValues = stepIndex >= 0
     ? context.semanticSequenceStepAxes?.[stepIndex] ?? []
     : context.semanticMotion.axes;

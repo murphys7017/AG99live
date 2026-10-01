@@ -210,7 +210,7 @@ const sequenceOptions = {
   ...optionsBase,
   assistantText: "Left! Right!",
 };
-const sequenceGesture = compileGesture({
+const sequenceIntent: NormalizedSemanticMotionIntentV4 = {
   schema_version: SCHEMA_MOTION_INTENT_V4,
   profile_id: profile.profile_id,
   profile_revision: profile.revision,
@@ -222,13 +222,52 @@ const sequenceGesture = compileGesture({
     { axis_levels: { head_yaw: -3 }, duration_weight: 1 },
     { axis_levels: { head_yaw: 3 }, duration_weight: 1 },
   ],
-}, { turnId: "turn-9", messageId: "message-8" }, sequenceOptions);
+};
+const sequenceGesture = compileGesture(
+  sequenceIntent,
+  { turnId: "turn-9", messageId: "message-8" },
+  sequenceOptions,
+);
 const sequenceGestureValues = sequenceGesture.points
   .map((point) => point.value)
   .filter((value) => value !== 0);
 assert.ok(sequenceGestureValues.length >= 2);
 assert.ok(sequenceGestureValues.some((value) => value < 0));
 assert.ok(sequenceGestureValues.some((value) => value > 0));
+
+const delayedSequenceOptions: Omit<CompileOptions, "samplingIdentity"> = {
+  ...sequenceOptions,
+  targetDurationMs: 800,
+  model: makeValidModelSummary({
+    name: modelId,
+    semantic_axis_profile: profile,
+    voice_following_profile: {
+      schema_version: SCHEMA_VOICE_FOLLOWING_PROFILE_V3,
+      model_id: modelId,
+      revision: 1,
+      channels: {
+        head_yaw: {
+          channel: "head_yaw",
+          semantic_axis_id: "head_yaw",
+          layer: "head",
+          amplitude_ratio: 0.3,
+          follow_delay_ms: 580,
+        },
+      },
+    },
+  }) as unknown as CompileOptions["model"],
+};
+const delayedSequenceGesture = compileGesture(
+  sequenceIntent,
+  { turnId: "turn-10", messageId: "message-9" },
+  delayedSequenceOptions,
+);
+const delayedSequenceGestureValues = delayedSequenceGesture.points
+  .map((point) => point.value)
+  .filter((value) => value !== 0);
+assert.equal(delayedSequenceGesture.delay_ms, 580);
+assert.ok(delayedSequenceGestureValues.length > 0);
+assert.ok(delayedSequenceGestureValues.every((value) => value > 0));
 
 const pitchProfile: SemanticAxisProfile = {
   ...profile,
