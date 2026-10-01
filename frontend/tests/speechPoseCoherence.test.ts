@@ -206,9 +206,29 @@ const firstInvertedGestureValue = invertedGesture.points
   .find((point) => point.value !== 0)?.value;
 assert.ok(firstInvertedGestureValue !== undefined && firstInvertedGestureValue < 0);
 
+const sequencePitchProfile: SemanticAxisProfile = {
+  ...profile,
+  axes: [
+    ...profile.axes,
+    {
+      ...profile.axes[0],
+      id: "head_pitch",
+      label: "Head pitch",
+      parameter_bindings: profile.axes[0].parameter_bindings.map((binding) => ({
+        ...binding,
+        parameter_id: "ParamAngleY",
+      })),
+    },
+  ],
+};
 const sequenceOptions = {
   ...optionsBase,
   assistantText: "Left! Right!",
+  model: makeValidModelSummary({
+    name: modelId,
+    semantic_axis_profile: sequencePitchProfile,
+    voice_following_profile: optionsBase.model.voice_following_profile,
+  }) as unknown as CompileOptions["model"],
 };
 const sequenceIntent: NormalizedSemanticMotionIntentV4 = {
   schema_version: SCHEMA_MOTION_INTENT_V4,
@@ -240,7 +260,7 @@ const delayedSequenceOptions: Omit<CompileOptions, "samplingIdentity"> = {
   targetDurationMs: 800,
   model: makeValidModelSummary({
     name: modelId,
-    semantic_axis_profile: profile,
+    semantic_axis_profile: sequencePitchProfile,
     voice_following_profile: {
       schema_version: SCHEMA_VOICE_FOLLOWING_PROFILE_V3,
       model_id: modelId,
@@ -268,6 +288,41 @@ const delayedSequenceGestureValues = delayedSequenceGesture.points
 assert.equal(delayedSequenceGesture.delay_ms, 580);
 assert.ok(delayedSequenceGestureValues.length > 0);
 assert.ok(delayedSequenceGestureValues.every((value) => value > 0));
+
+const sparseDelayedSequenceGesture = compileGesture({
+  ...sequenceIntent,
+  motion_steps: [
+    { axis_levels: { head_yaw: -3 }, duration_weight: 1 },
+    { axis_levels: { head_yaw: 3 }, duration_weight: 1 },
+    { axis_levels: { head_pitch: 2 }, duration_weight: 2 },
+  ],
+}, { turnId: "turn-11", messageId: "message-10" }, {
+  ...delayedSequenceOptions,
+  targetDurationMs: 900,
+  model: makeValidModelSummary({
+    name: modelId,
+    semantic_axis_profile: sequencePitchProfile,
+    voice_following_profile: {
+      schema_version: SCHEMA_VOICE_FOLLOWING_PROFILE_V3,
+      model_id: modelId,
+      revision: 1,
+      channels: {
+        head_yaw: {
+          channel: "head_yaw",
+          semantic_axis_id: "head_yaw",
+          layer: "head",
+          amplitude_ratio: 0.3,
+          follow_delay_ms: 600,
+        },
+      },
+    },
+  }) as unknown as CompileOptions["model"],
+});
+const sparseDelayedGestureValues = sparseDelayedSequenceGesture.points
+  .map((point) => point.value)
+  .filter((value) => value !== 0);
+assert.ok(sparseDelayedGestureValues.length > 0);
+assert.ok(sparseDelayedGestureValues.every((value) => value > 0));
 
 const pitchProfile: SemanticAxisProfile = {
   ...profile,

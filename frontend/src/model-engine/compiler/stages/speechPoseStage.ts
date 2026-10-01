@@ -284,12 +284,19 @@ function resolveSemanticGestureDirection(
       );
     }
   }
-  const axisValues = stepIndex >= 0
-    ? context.semanticSequenceStepAxes?.[stepIndex] ?? []
-    : context.semanticMotion.axes;
-  const semanticAxis = axisValues.find(
-    (entry) => entry.axisId === channel.semantic_axis_id,
-  );
+  let semanticAxis: ModelParameterCompileContext["semanticMotion"]["axes"][number] | undefined;
+  if (stepIndex >= 0 && context.semanticSequenceStepAxes) {
+    // Sequence steps are sparse; keep the last explicit value active until replaced.
+    for (let index = stepIndex; index >= 0 && !semanticAxis; index -= 1) {
+      semanticAxis = context.semanticSequenceStepAxes[index]?.find(
+        (entry) => entry.axisId === channel.semantic_axis_id,
+      );
+    }
+  } else {
+    semanticAxis = context.semanticMotion.axes.find(
+      (entry) => entry.axisId === channel.semantic_axis_id,
+    );
+  }
   const axis = context.state.axisById.get(channel.semantic_axis_id);
   if (!semanticAxis || !axis) {
     return 0;

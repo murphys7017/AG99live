@@ -231,6 +231,8 @@ export function useSpoutFramePublisher(
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       }
       gl.bindBuffer(gl.PIXEL_PACK_BUFFER, buffer);
+      const previousPackAlignment = gl.getParameter(gl.PACK_ALIGNMENT) as number;
+      gl.pixelStorei(gl.PACK_ALIGNMENT, 1);
       const readStartedAt = performance.now();
       try {
         gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, 0);
@@ -243,6 +245,7 @@ export function useSpoutFramePublisher(
         pendingReadback = { width, height, readPixelsMs: readDuration };
         gl.flush();
       } finally {
+        gl.pixelStorei(gl.PACK_ALIGNMENT, previousPackAlignment);
         gl.bindBuffer(gl.PIXEL_PACK_BUFFER, previousPixelPackBuffer);
         if (previousFramebuffer) {
           gl.bindFramebuffer(gl.FRAMEBUFFER, previousFramebuffer);
