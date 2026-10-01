@@ -114,6 +114,24 @@ void test_segment_rejection_boundaries() {
   }
 }
 
+void test_parameter_plan_motion_slot() {
+  auto raw = make_segment("m-plan", 0);
+  raw["payload"]["motion"] = {
+      {"state", "present"},
+      {"message_type", "engine.parameter_plan"},
+      {"mode", "expressive"},
+      {"source", "frontend"},
+      {"payload",
+       {
+           {"schema_version", "engine.parameter_plan.v3"},
+       }},
+  };
+  const auto segment = ag99::runtime::parse_output_segment(
+      ag99::runtime::parse_envelope(raw));
+  assert(segment.motion.state == ag99::runtime::MotionSlot::State::Present);
+  assert(segment.motion.message_type == "engine.parameter_plan");
+}
+
 void test_binary_audio_round_trip() {
   const ag99::runtime::AudioChunkMetadata metadata{
       "mic:1", "turn-1", 7, "pcm16le", 16000, 1, "ptt"};
@@ -242,6 +260,7 @@ void test_audio_control_builders() {
 int main() {
   test_envelope_and_segment();
   test_segment_rejection_boundaries();
+  test_parameter_plan_motion_slot();
   test_binary_audio_round_trip();
   test_segment_reorder_and_duplicate_rejection();
   test_input_text_builder();

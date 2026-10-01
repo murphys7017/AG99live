@@ -1,7 +1,4 @@
 #include <windows.h>
-#include <dwmapi.h>
-#include <d3d11.h>
-#include <dxgi.h>
 #include <mmsystem.h>
 #include <shellapi.h>
 #include <winhttp.h>
@@ -15,12 +12,15 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <condition_variable>
+#include <deque>
 #include <filesystem>
 #include <functional>
 #include <iostream>
 #include <malloc.h>
 #include <mutex>
 #include <optional>
+#include <random>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -31,14 +31,18 @@
 #include "ag99/runtime/protocol.hpp"
 #include "ag99/runtime/runtime_session.hpp"
 #include "ag99/runtime/winhttp_websocket.hpp"
+#include "ag99/live2d/d3d11_composition_surface.hpp"
+#include "ag99/live2d/d3d11_renderer.hpp"
 #include <CubismFramework.hpp>
 #include <CubismModelSettingJson.hpp>
+#include <Effect/CubismBreath.hpp>
+#include <Effect/CubismEyeBlink.hpp>
 #include <Id/CubismIdManager.hpp>
 #include <Model/CubismUserModel.hpp>
 #include <Motion/ACubismMotion.hpp>
-#include <Rendering/D3D11/CubismDeviceInfo_D3D11.hpp>
-#include <Rendering/D3D11/CubismRenderer_D3D11.hpp>
-#include <WICTextureLoader.h>
+#include <Motion/CubismMotion.hpp>
+#include <Motion/CubismExpressionMotionManager.hpp>
+#include <Physics/CubismPhysicsJson.hpp>
 
 namespace {
 
@@ -53,7 +57,6 @@ constexpr UINT kTrayExit = 1003;
 constexpr UINT kTrayDemoText = 1004;
 constexpr UINT kTrayMicToggle = 1005;
 
-HWND g_window = nullptr;
 NOTIFYICONDATAW g_tray_icon{};
 bool g_tray_icon_added = false;
 bool g_dragging = false;
@@ -62,7 +65,14 @@ POINT g_drag_origin{};
 std::atomic<double> g_audio_end_seconds{0.0};
 std::atomic<double> g_audio_start_seconds{0.0};
 std::atomic<float> g_audio_level{0.0f};
-std::atomic<bool> g_talk_motion_requested{false};
+std::atomic<float> g_lip_sync_intensity{0.0f};
+std::atomic<float> g_speech_energy_input{0.0f};
+std::atomic<float> g_speech_head_envelope{0.0f};
+std::atomic<float> g_speech_body_envelope{0.0f};
+std::atomic<float> g_speech_emphasis_envelope{0.0f};
+std::atomic<bool> g_speech_voiced{false};
+std::atomic<float> g_drag_x{0.0f};
+std::atomic<float> g_drag_y{0.0f};
 std::atomic<std::uint64_t> g_audio_serial{0};
 std::mutex g_audio_file_mutex;
 std::mutex g_audio_signal_mutex;
@@ -72,28 +82,137 @@ std::function<void(std::string)> g_send_text;
 std::function<void()> g_toggle_microphone;
 std::function<bool()> g_microphone_running;
 
+constexpr float kSpeechHeadAttack = 10.0f;
+constexpr float kSpeechHeadRelease = 3.4f;
+constexpr float kSpeechBodyAttack = 5.5f;
+constexpr float kSpeechBodyRelease = 2.4f;
+constexpr float kSpeechHeadActivityFloor = 0.42f;
+constexpr float kSpeechHeadGainSpan = 1.32f;
+constexpr float kSpeechHeadGainMax = 1.68f;
+constexpr float kSpeechPitchGainMax = 1.25f;
+constexpr float kSpeechBodyActivityFloor = 0.34f;
+constexpr float kSpeechBodyGainSpan = 1.0f;
+constexpr float kSpeechBodyGainMax = 1.18f;
+constexpr float kSpeechVoicedEnter = 0.028f;
+constexpr float kSpeechVoicedExit = 0.012f;
+constexpr float kSpeechEmphasisRiseThreshold = 1.5f;
+constexpr float kSpeechEmphasisRiseGain = 0.09f;
+constexpr float kSpeechEmphasisAttack = 18.0f;
+constexpr float kSpeechEmphasisRelease = 7.0f;
+constexpr float kSpeechEmphasisMax = 0.42f;
+
+float AdvanceSpeechEnvelope(
+    float current,
+    float target,
+    float delta_seconds,
+    float attack_per_second,
+    float release_per_second) {
+  const auto rate = target > current ? attack_per_second : release_per_second;
+  const auto blend = 1.0f - std::exp(
+      -std::max(0.0f, delta_seconds) * rate);
+  return current + (target - current) * blend;
+}
+
 double NowSeconds() {
   return std::chrono::duration<double>(
       std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
-void UpdateAudioLevel() {
+void UpdateAudioLevel(float delta_seconds) {
   const double now = NowSeconds();
   const double remaining = g_audio_end_seconds.load() - now;
   if (remaining <= 0.0) {
     g_audio_level.store(0.0f);
-    return;
-  }
-  const double elapsed = std::max(0.0, now - g_audio_start_seconds.load());
-  float level = 0.0f;
-  {
-    std::scoped_lock lock(g_audio_signal_mutex);
-    const auto index = static_cast<std::size_t>(elapsed * 50.0);
-    if (index < g_audio_rms.size()) {
-      level = std::clamp(g_audio_rms[index] * 4.0f, 0.0f, 1.0f);
+    g_lip_sync_intensity.store(0.0f);
+    g_speech_energy_input.store(0.0f);
+  } else {
+    const double elapsed = std::max(0.0, now - g_audio_start_seconds.load());
+    float level = 0.0f;
+    {
+      std::scoped_lock lock(g_audio_signal_mutex);
+      const auto index = static_cast<std::size_t>(elapsed * 50.0);
+      if (index < g_audio_rms.size()) {
+        level = std::max(0.0f, g_audio_rms[index]);
+      }
     }
+    g_audio_level.store(level);
+    g_lip_sync_intensity.store(std::clamp((level - 0.012f) * 30.0f, 0.0f, 1.0f));
+    g_speech_energy_input.store(std::clamp((level - 0.008f) * 5.5f, 0.0f, 1.0f));
   }
-  g_audio_level.store(level);
+  const float speech_energy = g_speech_energy_input.load();
+  const bool was_voiced = g_speech_voiced.load();
+  const bool voiced = speech_energy >= (was_voiced
+      ? kSpeechVoicedExit : kSpeechVoicedEnter);
+  g_speech_voiced.store(voiced);
+  const float target_energy = voiced ? speech_energy : 0.0f;
+  const float previous_head = g_speech_head_envelope.load();
+  const float head = AdvanceSpeechEnvelope(
+      previous_head,
+      target_energy,
+      delta_seconds,
+      kSpeechHeadAttack,
+      kSpeechHeadRelease);
+  const float body = AdvanceSpeechEnvelope(
+      g_speech_body_envelope.load(),
+      target_energy,
+      delta_seconds,
+      kSpeechBodyAttack,
+      kSpeechBodyRelease);
+  const float positive_rise = delta_seconds > 0.0f
+      ? std::max(0.0f, head - previous_head) / delta_seconds
+      : 0.0f;
+  const float emphasis_target = voiced
+      ? std::clamp(
+          (positive_rise - kSpeechEmphasisRiseThreshold)
+              * kSpeechEmphasisRiseGain,
+          0.0f,
+          kSpeechEmphasisMax)
+      : 0.0f;
+  const float emphasis = AdvanceSpeechEnvelope(
+      g_speech_emphasis_envelope.load(),
+      emphasis_target,
+      delta_seconds,
+      kSpeechEmphasisAttack,
+      kSpeechEmphasisRelease);
+  g_speech_head_envelope.store(head < 0.001f ? 0.0f : head);
+  g_speech_body_envelope.store(body < 0.001f ? 0.0f : body);
+  g_speech_emphasis_envelope.store(emphasis < 0.001f ? 0.0f : emphasis);
+}
+
+float GetSpeechAudioGain(std::string_view axis_id) {
+  const auto channel_name = axis_id.starts_with("voice_following.")
+      ? axis_id.substr(std::string_view("voice_following.").size())
+      : axis_id;
+  const auto separator = channel_name.find('|');
+  const auto channel = channel_name.substr(0, separator);
+  const bool body = channel.starts_with("body_");
+  const auto voiced = g_speech_voiced.load();
+  const auto activity_floor = voiced
+      ? (body ? kSpeechBodyActivityFloor : kSpeechHeadActivityFloor)
+      : 0.0f;
+  const auto raw_gain = body
+      ? std::min(
+          kSpeechBodyGainMax,
+          activity_floor
+              + g_speech_body_envelope.load() * kSpeechBodyGainSpan
+              + g_speech_emphasis_envelope.load() * 0.24f)
+      : std::min(
+          kSpeechHeadGainMax,
+          activity_floor
+              + g_speech_head_envelope.load() * kSpeechHeadGainSpan
+              + g_speech_emphasis_envelope.load() * 0.38f);
+  return channel.find("pitch") != std::string_view::npos
+      ? std::min(kSpeechPitchGainMax, raw_gain)
+      : raw_gain;
+}
+
+void ResetSpeechSignal() {
+  g_speech_head_envelope.store(0.0f);
+  g_speech_body_envelope.store(0.0f);
+  g_speech_emphasis_envelope.store(0.0f);
+  g_speech_voiced.store(false);
+  g_lip_sync_intensity.store(0.0f);
+  g_speech_energy_input.store(0.0f);
 }
 
 std::wstring WidenUtf8(std::string_view value) {
@@ -310,6 +429,7 @@ void StopCurrentAudio() {
   g_audio_end_seconds.store(0.0);
   g_audio_start_seconds.store(0.0);
   g_audio_level.store(0.0f);
+  ResetSpeechSignal();
   {
     std::scoped_lock signal_lock(g_audio_signal_mutex);
     g_audio_rms.clear();
@@ -349,7 +469,6 @@ std::optional<AudioPlayback> PlayAudioUrl(const std::string& url) {
   }
   g_audio_start_seconds.store(NowSeconds());
   g_audio_end_seconds.store(g_audio_start_seconds.load() + duration);
-  g_talk_motion_requested.store(true);
   return AudioPlayback{duration, serial};
 }
 
@@ -373,21 +492,12 @@ public:
 };
 
 Allocator g_allocator;
-ID3D11Device* g_device = nullptr;
-ID3D11DeviceContext* g_context = nullptr;
-IDXGISwapChain* g_swap_chain = nullptr;
-ID3D11RenderTargetView* g_render_target = nullptr;
 
 #ifndef AG99_CUBISM_SHADER_DIR
 #define AG99_CUBISM_SHADER_DIR ""
 #endif
 
 const std::filesystem::path g_shader_directory = AG99_CUBISM_SHADER_DIR;
-
-struct TextureResource {
-  ID3D11Resource* resource = nullptr;
-  ID3D11ShaderResourceView* view = nullptr;
-};
 
 void LogMessage(const csmChar* message) {
   if (message) {
@@ -400,34 +510,242 @@ bool ReadFile(const std::filesystem::path& path, std::vector<csmByte>& output);
 class NativeCubismModel final : public CubismUserModel {
 public:
   ~NativeCubismModel() override {
-    if (_idle_motion) {
-      ACubismMotion::Delete(_idle_motion);
+    if (_eye_blink) {
+      CubismEyeBlink::Delete(_eye_blink);
     }
-    if (_talk_motion) {
-      ACubismMotion::Delete(_talk_motion);
+    if (_breath) {
+      CubismBreath::Delete(_breath);
+    }
+    for (auto& [group, motions] : _motion_groups) {
+      for (auto* motion : motions) {
+        ACubismMotion::Delete(motion);
+      }
+    }
+    for (auto* expression : _expressions) {
+      ACubismMotion::Delete(expression);
+    }
+  }
+
+  bool LoadConfiguredEffects(
+      const std::filesystem::path& model_directory,
+      CubismModelSettingJson* setting) {
+    if (!setting) {
+      return false;
+    }
+
+    bool loaded_any = false;
+    const auto load_effect = [&](const char* file_name,
+                                 const char* label,
+                                 const auto& loader) {
+      if (!file_name || file_name[0] == '\0') {
+        return false;
+      }
+      std::vector<csmByte> bytes;
+      const auto path = model_directory / file_name;
+      if (!ReadFile(path, bytes)) {
+        std::cerr << "[cubism] failed to read " << label
+                  << ": " << path.string() << '\n';
+        return false;
+      }
+      loader(bytes);
+      return true;
+    };
+
+    loaded_any = load_effect(
+        setting->GetPhysicsFileName(),
+        "physics",
+        [this](const std::vector<csmByte>& bytes) {
+          LoadPhysics(
+              bytes.data(), static_cast<csmSizeInt>(bytes.size()));
+          ConfigurePhysicsResponse(bytes);
+        }) || loaded_any;
+    loaded_any = load_effect(
+        setting->GetPoseFileName(),
+        "pose",
+        [this](const std::vector<csmByte>& bytes) {
+          LoadPose(
+              bytes.data(), static_cast<csmSizeInt>(bytes.size()));
+        }) || loaded_any;
+
+    for (csmInt32 index = 0;
+         index < setting->GetExpressionCount();
+         ++index) {
+      const char* name = setting->GetExpressionName(index);
+      const char* file_name = setting->GetExpressionFileName(index);
+      if (!name || !file_name || file_name[0] == '\0') {
+        continue;
+      }
+      std::vector<csmByte> bytes;
+      const auto path = model_directory / file_name;
+      if (!ReadFile(path, bytes)) {
+        std::cerr << "[cubism] failed to read expression "
+                  << name << ": " << path.string() << '\n';
+        continue;
+      }
+      if (auto* expression = LoadExpression(
+              bytes.data(), static_cast<csmSizeInt>(bytes.size()), name)) {
+        _expression_names.emplace_back(name);
+        _expression_by_name.emplace(name, expression);
+        _expressions.push_back(expression);
+        loaded_any = true;
+      }
+    }
+    return loaded_any;
+  }
+
+  bool StartExpressionById(const std::string& expression_id) {
+    if (!_expressionManager || expression_id.empty()) {
+      return false;
+    }
+    const auto it = _expression_by_name.find(expression_id);
+    if (it == _expression_by_name.end() || !it->second) {
+      return false;
+    }
+    return _expressionManager->StartMotion(it->second, false)
+        != InvalidMotionQueueEntryHandleValue;
+  }
+
+  void ConfigurePhysicsResponse(const std::vector<csmByte>& bytes) {
+    if (bytes.empty() || !_model) {
+      return;
+    }
+    CubismPhysicsJson physics_json(
+        bytes.data(), static_cast<csmSizeInt>(bytes.size()));
+    _physics_input_parameter_ids.clear();
+    _physics_output_parameter_ids.clear();
+    for (csmInt32 setting_index = 0;
+         setting_index < physics_json.GetSubRigCount();
+         ++setting_index) {
+      for (csmInt32 input_index = 0;
+           input_index < physics_json.GetInputCount(setting_index);
+           ++input_index) {
+        const auto id = physics_json.GetInputSourceId(
+            setting_index, input_index);
+        if (id) {
+          _physics_input_parameter_ids.insert(id->GetString().GetRawString());
+        }
+      }
+      for (csmInt32 output_index = 0;
+           output_index < physics_json.GetOutputCount(setting_index);
+           ++output_index) {
+        const auto id = physics_json.GetOutputsDestinationId(
+            setting_index, output_index);
+        if (id) {
+          _physics_output_parameter_ids.insert(id->GetString().GetRawString());
+        }
+      }
+    }
+    RefreshPhysicsResponseParameterIndices();
+  }
+
+  void SetPhysicsResponseProtectedParameterIds(
+      const std::unordered_set<std::string>& parameter_ids) {
+    _physics_response_protected_parameter_ids = parameter_ids;
+    RefreshPhysicsResponseParameterIndices();
+  }
+
+  void SetPhysicsResponseScale(float scale) {
+    if (std::isfinite(scale) && scale > 0.0f) {
+      _physics_response_scale = scale;
     }
   }
 
   bool LoadDemoMotions(
       const std::filesystem::path& model_directory,
       CubismModelSettingJson* setting) {
-    _idle_motion = LoadDemoMotion(
-        model_directory, setting, "Idle", 0, "idle");
-    _talk_motion = LoadDemoMotion(
-        model_directory, setting, "Talk", 0, "talk");
-    if (!_idle_motion) {
-      std::cerr << "[cubism] no Idle/0 motion was available\n";
+    if (!setting) {
+      return false;
     }
-    if (!_talk_motion) {
-      std::cerr << "[cubism] no Talk/0 motion was available\n";
+    _eye_blink = CubismEyeBlink::Create(setting);
+    _breath = CubismBreath::Create();
+    if (_breath) {
+      csmVector<CubismBreath::BreathParameterData> breath_parameters;
+      auto* ids = CubismFramework::GetIdManager();
+      if (ids) {
+        breath_parameters.PushBack(CubismBreath::BreathParameterData(
+            ids->GetId("ParamAngleX"), 0.0f, 15.0f, 6.5345f, 0.5f));
+        breath_parameters.PushBack(CubismBreath::BreathParameterData(
+            ids->GetId("ParamAngleY"), 0.0f, 8.0f, 3.5345f, 0.5f));
+        breath_parameters.PushBack(CubismBreath::BreathParameterData(
+            ids->GetId("ParamAngleZ"), 0.0f, 10.0f, 5.5345f, 0.5f));
+        breath_parameters.PushBack(CubismBreath::BreathParameterData(
+            ids->GetId("ParamBodyAngleX"), 0.0f, 4.0f, 15.5345f, 0.5f));
+        breath_parameters.PushBack(CubismBreath::BreathParameterData(
+            ids->GetId("ParamBreath"), 0.5f, 0.5f, 3.2345f, 1.0f));
+      }
+      _breath->SetParameters(breath_parameters);
     }
-    return _idle_motion != nullptr || _talk_motion != nullptr;
+    csmVector<CubismIdHandle> eye_blink_ids;
+    for (csmInt32 index = 0;
+         index < setting->GetEyeBlinkParameterCount();
+         ++index) {
+      eye_blink_ids.PushBack(setting->GetEyeBlinkParameterId(index));
+    }
+    csmVector<CubismIdHandle> lip_sync_ids;
+    for (csmInt32 index = 0;
+         index < setting->GetLipSyncParameterCount();
+         ++index) {
+      lip_sync_ids.PushBack(setting->GetLipSyncParameterId(index));
+    }
+    _lip_sync_parameter_indices.clear();
+    for (csmInt32 index = 0; index < lip_sync_ids.GetSize(); ++index) {
+      const auto parameter_index = _model->GetParameterIndex(lip_sync_ids.At(index));
+      if (parameter_index >= 0) {
+        _lip_sync_parameter_indices.push_back(parameter_index);
+      }
+    }
+    for (csmInt32 group_index = 0;
+         group_index < setting->GetMotionGroupCount();
+         ++group_index) {
+      const char* group = setting->GetMotionGroupName(group_index);
+      if (!group) {
+        continue;
+      }
+      auto& motions = _motion_groups[group];
+      for (csmInt32 index = 0;
+           index < setting->GetMotionCount(group);
+           ++index) {
+        if (auto* motion = LoadDemoMotion(
+                model_directory, setting, group, index, group)) {
+          static_cast<CubismMotion*>(motion)->SetEffectIds(
+              eye_blink_ids, lip_sync_ids);
+          motions.push_back(motion);
+        }
+      }
+    }
+    if (_motion_groups["Idle"].empty()) {
+      std::cerr << "[cubism] no Idle group motions were available\n";
+    }
+    return !_motion_groups["Idle"].empty();
   }
 
-  void StartTalkMotion() {
-    if (_motionManager && _talk_motion) {
-      _motionManager->StartMotionPriority(_talk_motion, false, 2);
+  void ApplyLipSync(float intensity, bool active) {
+    if (!_model || !active || !std::isfinite(intensity)) {
+      return;
     }
+    const auto clamped_intensity = std::clamp(intensity, 0.0f, 1.0f);
+    for (const auto parameter_index : _lip_sync_parameter_indices) {
+      const auto minimum = _model->GetParameterMinimumValue(parameter_index);
+      const auto default_value = _model->GetParameterDefaultValue(parameter_index);
+      const auto maximum = _model->GetParameterMaximumValue(parameter_index);
+      if (!std::isfinite(minimum) || !std::isfinite(default_value)
+          || !std::isfinite(maximum) || minimum > default_value
+          || default_value >= maximum) {
+        continue;
+      }
+      _model->SetParameterValue(
+          parameter_index,
+          default_value + (maximum - default_value) * clamped_intensity);
+    }
+  }
+
+  void ApplyDrag(float drag_x, float drag_y) {
+    AddNormalizedParameterValue("ParamAngleX", drag_x);
+    AddNormalizedParameterValue("ParamAngleY", drag_y);
+    AddNormalizedParameterValue("ParamAngleZ", drag_x * drag_y * -1.0f);
+    AddNormalizedParameterValue("ParamBodyAngleX", drag_x);
+    AddNormalizedParameterValue("ParamEyeBallX", drag_x);
+    AddNormalizedParameterValue("ParamEyeBallY", drag_y);
   }
 
   void UpdateMotion(csmFloat32 delta_seconds) {
@@ -436,19 +754,120 @@ public:
     }
 
     _model->LoadParameters();
+    bool motion_updated = false;
     if (_motionManager->IsFinished()) {
-      if (g_audio_end_seconds.load() > NowSeconds() && _talk_motion) {
-        _motionManager->StartMotionPriority(_talk_motion, false, 2);
-      } else if (_idle_motion) {
-        _motionManager->StartMotionPriority(_idle_motion, false, 1);
+      const auto idle = _motion_groups.find("Idle");
+      if (idle != _motion_groups.end() && !idle->second.empty()) {
+        std::uniform_int_distribution<std::size_t> choose_idle(
+            0, idle->second.size() - 1);
+        _motionManager->StartMotionPriority(
+            idle->second[choose_idle(_motion_random)], false, 1);
       }
     } else {
-      _motionManager->UpdateMotion(_model, delta_seconds);
+      motion_updated = _motionManager->UpdateMotion(_model, delta_seconds);
     }
     _model->SaveParameters();
+    if (_eye_blink && !motion_updated) {
+      _eye_blink->UpdateParameters(_model, delta_seconds);
+    }
+    if (_expressionManager) {
+      _expressionManager->UpdateMotion(_model, delta_seconds);
+    }
+    if (_breath) {
+      _breath->UpdateParameters(_model, delta_seconds);
+    }
+  }
+
+  void UpdatePhysicsAndPose(csmFloat32 delta_seconds) {
+    if (!_model) {
+      return;
+    }
+    if (_physics) {
+      const bool scale_response = CapturePhysicsResponseBaseline();
+      _physics->Evaluate(_model, delta_seconds);
+      if (scale_response) {
+        ApplyPhysicsResponseScale();
+      }
+    }
+    if (_pose) {
+      _pose->UpdateParameters(_model, delta_seconds);
+    }
   }
 
 private:
+  void RefreshPhysicsResponseParameterIndices() {
+    _physics_response_parameter_indices.clear();
+    _physics_response_baseline_values.clear();
+    if (!_model) {
+      return;
+    }
+    for (const auto& parameter_id : _physics_output_parameter_ids) {
+      if (_physics_input_parameter_ids.contains(parameter_id)
+          || _physics_response_protected_parameter_ids.contains(parameter_id)) {
+        continue;
+      }
+      const auto parameter_index = _model->GetParameterIndex(
+          CubismFramework::GetIdManager()->GetId(parameter_id.c_str()));
+      if (parameter_index >= 0) {
+        _physics_response_parameter_indices.push_back(parameter_index);
+        _physics_response_baseline_values.push_back(0.0f);
+      }
+    }
+  }
+
+  bool CapturePhysicsResponseBaseline() {
+    if (_physics_response_scale == 1.0f
+        || _physics_response_parameter_indices.empty()) {
+      return false;
+    }
+    for (std::size_t index = 0;
+         index < _physics_response_parameter_indices.size();
+         ++index) {
+      _physics_response_baseline_values[index] =
+          _model->GetParameterValue(_physics_response_parameter_indices[index]);
+    }
+    return true;
+  }
+
+  void ApplyPhysicsResponseScale() {
+    for (std::size_t index = 0;
+         index < _physics_response_parameter_indices.size();
+         ++index) {
+      const auto parameter_index = _physics_response_parameter_indices[index];
+      const auto before = _physics_response_baseline_values[index];
+      const auto after = _model->GetParameterValue(parameter_index);
+      const auto minimum = _model->GetParameterMinimumValue(parameter_index);
+      const auto maximum = _model->GetParameterMaximumValue(parameter_index);
+      _model->SetParameterValue(
+          parameter_index,
+          std::clamp(
+              before + (after - before) * _physics_response_scale,
+              minimum,
+              maximum));
+    }
+  }
+
+  void AddNormalizedParameterValue(
+      const char* parameter_id,
+      float normalized_value) {
+    if (!_model || !parameter_id || !std::isfinite(normalized_value)) {
+      return;
+    }
+    const auto parameter_index = _model->GetParameterIndex(
+        CubismFramework::GetIdManager()->GetId(parameter_id));
+    if (parameter_index < 0) {
+      return;
+    }
+    const auto clamped = std::clamp(normalized_value, -1.0f, 1.0f);
+    const auto minimum = _model->GetParameterMinimumValue(parameter_index);
+    const auto default_value = _model->GetParameterDefaultValue(parameter_index);
+    const auto maximum = _model->GetParameterMaximumValue(parameter_index);
+    const auto delta = clamped >= 0.0f
+        ? (maximum - default_value) * clamped
+        : (default_value - minimum) * clamped;
+    _model->SetParameterValue(parameter_index, default_value + delta);
+  }
+
   ACubismMotion* LoadDemoMotion(
       const std::filesystem::path& model_directory,
       CubismModelSettingJson* setting,
@@ -481,8 +900,20 @@ private:
         index);
   }
 
-  ACubismMotion* _idle_motion = nullptr;
-  ACubismMotion* _talk_motion = nullptr;
+  std::unordered_map<std::string, std::vector<ACubismMotion*>> _motion_groups;
+  std::mt19937 _motion_random{std::random_device{}()};
+  std::vector<ACubismMotion*> _expressions;
+  std::vector<std::string> _expression_names;
+  std::unordered_map<std::string, ACubismMotion*> _expression_by_name;
+  std::vector<csmInt32> _lip_sync_parameter_indices;
+  std::unordered_set<std::string> _physics_input_parameter_ids;
+  std::unordered_set<std::string> _physics_output_parameter_ids;
+  std::unordered_set<std::string> _physics_response_protected_parameter_ids;
+  std::vector<csmInt32> _physics_response_parameter_indices;
+  std::vector<csmFloat32> _physics_response_baseline_values;
+  csmFloat32 _physics_response_scale = 1.0f;
+  CubismEyeBlink* _eye_blink = nullptr;
+  CubismBreath* _breath = nullptr;
 };
 
 class MicrophoneCapture final {
@@ -691,10 +1122,20 @@ public:
                 on_model_sync_(std::move(sync));
               }
             },
-        }) {}
+        }) {
+    audio_worker_ = std::thread([this] {
+      AudioWorkerLoop();
+    });
+  }
+
+  ~RuntimeBridge() {
+    Close();
+  }
 
   bool Connect(const std::string& url) {
-    closing_.store(false);
+    if (closing_.load()) {
+      return false;
+    }
     return websocket_.connect(
         url,
         {
@@ -738,63 +1179,59 @@ public:
   }
 
   void Close() {
-    closing_.store(true);
-    microphone_.Stop("runtime_shutdown");
-    websocket_.close();
-    std::vector<std::thread> workers;
-    {
-      std::scoped_lock lock(worker_mutex_);
-      workers.swap(audio_workers_);
+    const bool was_closing = closing_.exchange(true);
+    if (!was_closing) {
+      microphone_.Stop("runtime_shutdown");
+      websocket_.close();
     }
-    for (auto& worker : workers) {
-      if (worker.joinable()) {
-        worker.join();
-      }
+    audio_queue_condition_.notify_all();
+    if (audio_worker_.joinable()) {
+      audio_worker_.join();
     }
-    StopCurrentAudio();
+    if (!was_closing) {
+      StopCurrentAudio();
+    }
   }
 
 private:
+  struct AudioQueueItem {
+    std::string url;
+    std::string turn_id;
+    bool has_motion = false;
+    ag99::runtime::Json motion_payload = ag99::runtime::Json::object();
+  };
+
   void OnSegment(ag99::runtime::OutputSegment segment) {
-    if (segment.motion.state == ag99::runtime::MotionSlot::State::Present
-        && on_motion_intent_) {
-      on_motion_intent_(segment.motion.payload);
+    if (closing_.load()) {
+      return;
     }
     if (segment.text.state == ag99::runtime::TextSlot::State::Present) {
       std::cout << "[assistant] " << segment.text.content << '\n';
     }
     const auto turn_id = segment.envelope.turn_id.value_or("");
     if (segment.audio.state == ag99::runtime::AudioSlot::State::Present) {
-      std::scoped_lock lock(worker_mutex_);
-      audio_workers_.emplace_back([this, url = std::move(segment.audio.url), turn_id] {
-        const auto playback = PlayAudioUrl(url);
-        if (!playback) {
-          if (!closing_.load() && !turn_id.empty()) {
-            const auto failed =
-                ag99::runtime::build_control_playback_finished(
-                    turn_id,
-                    false,
-                    "audio_download_failed");
-            websocket_.send_text(failed.dump());
-          }
+      AudioQueueItem item;
+      item.url = std::move(segment.audio.url);
+      item.turn_id = turn_id;
+      if (segment.motion.state == ag99::runtime::MotionSlot::State::Present) {
+        item.has_motion = true;
+        item.motion_payload = std::move(segment.motion.payload);
+      }
+      {
+        std::scoped_lock lock(audio_queue_mutex_);
+        if (closing_.load()) {
           return;
         }
-        const auto deadline = NowSeconds() + playback->duration_seconds;
-        while (!closing_.load() && NowSeconds() < deadline) {
-          std::this_thread::sleep_for(std::chrono::milliseconds(25));
-        }
-        if (closing_.load()
-            || g_audio_serial.load() != playback->serial
-            || turn_id.empty()) {
-          return;
-        }
-        const auto finished =
-            ag99::runtime::build_control_playback_finished(turn_id);
-        websocket_.send_text(finished.dump());
-      });
+        audio_queue_.push_back(std::move(item));
+      }
+      audio_queue_condition_.notify_one();
       return;
     }
 
+    if (segment.motion.state == ag99::runtime::MotionSlot::State::Present
+        && on_motion_intent_) {
+      on_motion_intent_(segment.motion.payload);
+    }
     if (!turn_id.empty() && websocket_.connected()) {
       const auto finished =
           ag99::runtime::build_control_playback_finished(turn_id);
@@ -802,14 +1239,74 @@ private:
     }
   }
 
+  void AudioWorkerLoop() {
+    while (true) {
+      AudioQueueItem item;
+      {
+        std::unique_lock lock(audio_queue_mutex_);
+        audio_queue_condition_.wait(lock, [this] {
+          return closing_.load() || !audio_queue_.empty();
+        });
+        if (closing_.load()) {
+          return;
+        }
+        item = std::move(audio_queue_.front());
+        audio_queue_.pop_front();
+      }
+
+      const auto playback = PlayAudioUrl(item.url);
+      if (!playback) {
+        SendPlaybackFinished(
+            item.turn_id,
+            false,
+            std::string_view{"audio_download_failed"});
+        continue;
+      }
+
+      if (closing_.load()) {
+        continue;
+      }
+      if (item.has_motion && on_motion_intent_) {
+        on_motion_intent_(item.motion_payload);
+      }
+      const auto deadline = NowSeconds() + playback->duration_seconds;
+      while (!closing_.load()
+             && g_audio_serial.load() == playback->serial
+             && NowSeconds() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(25));
+      }
+      if (closing_.load()
+          || g_audio_serial.load() != playback->serial) {
+        continue;
+      }
+      SendPlaybackFinished(item.turn_id);
+    }
+  }
+
+  void SendPlaybackFinished(
+      const std::string& turn_id,
+      bool success = true,
+      std::optional<std::string_view> reason = std::nullopt) {
+    if (closing_.load() || turn_id.empty()) {
+      return;
+    }
+    const auto finished = ag99::runtime::build_control_playback_finished(
+        turn_id,
+        success,
+        reason);
+    websocket_.send_text(finished.dump());
+  }
+
   ag99::runtime::WinHttpWebSocketClient websocket_;
   MicrophoneCapture microphone_;
   std::function<void(ag99::runtime::ModelSync)> on_model_sync_;
   std::function<void(const ag99::runtime::Json&)> on_motion_intent_;
   ag99::runtime::RuntimeProtocolSession session_;
-  std::mutex worker_mutex_;
-  std::vector<std::thread> audio_workers_;
+  std::mutex audio_queue_mutex_;
+  std::condition_variable audio_queue_condition_;
+  std::deque<AudioQueueItem> audio_queue_;
   std::atomic<bool> closing_{false};
+  std::thread audio_worker_;
   std::atomic<std::uint64_t> next_turn_id_{1};
 };
 
@@ -873,25 +1370,24 @@ bool ReadFile(const std::filesystem::path& path, std::vector<csmByte>& output) {
 class NativeModel final {
 public:
   ~NativeModel() {
+    _renderer.Shutdown();
     if (_model) {
-      _model->DeleteRenderer();
       delete _model;
       _model = nullptr;
     }
     delete _setting;
     _setting = nullptr;
 
-    for (TextureResource& texture : _textures) {
-      if (texture.view) {
-        texture.view->Release();
-      }
-      if (texture.resource) {
-        texture.resource->Release();
-      }
-    }
   }
 
-  bool Load(const std::filesystem::path& model_json, UINT width, UINT height) {
+  bool Load(
+      const std::filesystem::path& model_json,
+      UINT width,
+      UINT height,
+      ID3D11Device* device,
+      ID3D11DeviceContext* context) {
+    _width = width;
+    _height = height;
     std::vector<csmByte> setting_bytes;
     if (!ReadFile(model_json, setting_bytes)) {
       std::cerr << "Failed to read model setting: " << model_json.string() << '\n';
@@ -917,42 +1413,20 @@ public:
       std::cerr << "Cubism model creation failed\n";
       return false;
     }
-    _mouth_parameter_index = _model->GetModel()->GetParameterIndex(
-        CubismFramework::GetIdManager()->GetId("ParamMouthOpenY"));
+    _model->LoadConfiguredEffects(model_dir, _setting);
 
-    _model->CreateRenderer(width, height);
-    auto* renderer =
-        _model->GetRenderer<Rendering::CubismRenderer_D3D11>();
-    if (!renderer) {
-      std::cerr << "Cubism D3D11 renderer creation failed\n";
+    if (!_renderer.Initialize(
+            *_model, *_setting, device, context, model_dir,
+            width, height)) {
       return false;
     }
 
     csmMap<csmString, csmFloat32> layout;
     _setting->GetLayoutMap(layout);
     _model->GetModelMatrix()->SetupFromLayout(layout);
-
-    for (csmInt32 index = 0; index < _setting->GetTextureCount(); ++index) {
-      const char* texture_name = _setting->GetTextureFileName(index);
-      if (!texture_name || texture_name[0] == '\0') {
-        continue;
-      }
-
-      const std::filesystem::path texture_path = model_dir / texture_name;
-      TextureResource texture;
-      const HRESULT result = DirectX::CreateWICTextureFromFile(
-          g_device, g_context, texture_path.wstring().c_str(),
-          &texture.resource, &texture.view);
-      if (FAILED(result)) {
-        std::cerr << "Failed to load texture: " << texture_path.string()
-                  << " (0x" << std::hex
-                  << static_cast<unsigned long>(result) << std::dec << ")\n";
-        return false;
-      }
-
-      renderer->BindTexture(
-          static_cast<csmUint32>(index), texture.view);
-      _textures.push_back(texture);
+    if (_width < _height && _model->GetModel()->GetCanvasWidth() > 1.0f) {
+      // Match the Native SDK's portrait-window layout correction once.
+      _model->GetModelMatrix()->SetWidth(2.0f);
     }
 
     if (!_model->LoadDemoMotions(model_dir, _setting)) {
@@ -960,7 +1434,6 @@ public:
                    "rendering will continue without motion playback\n";
     }
 
-    renderer->IsPremultipliedAlpha(false);
     std::cout << "Loaded Live2D model: " << model_json.string() << '\n';
     return true;
   }
@@ -977,39 +1450,86 @@ public:
               now - _last_update_seconds, 0.0, 0.1))
         : 1.0f / 60.0f;
     _last_update_seconds = now;
-    if (g_talk_motion_requested.exchange(false)) {
-      _model->StartTalkMotion();
-    }
     _model->UpdateMotion(delta_seconds);
     ApplyQueuedMotion();
-    UpdateAudioLevel();
-    if (_mouth_parameter_index >= 0) {
-      const float mouth = 0.08f + g_audio_level.load() * 0.92f;
-      cubism_model->SetParameterValue(_mouth_parameter_index, mouth);
-    }
+    _model->ApplyDrag(g_drag_x.load(), g_drag_y.load());
+    UpdateAudioLevel(delta_seconds);
+    ApplyQueuedParameterPlan();
+    _model->ApplyLipSync(
+        g_lip_sync_intensity.load(),
+        g_audio_end_seconds.load() > NowSeconds());
+    _model->UpdatePhysicsAndPose(delta_seconds);
     cubism_model->Update();
 
-    auto* renderer =
-        _model->GetRenderer<Rendering::CubismRenderer_D3D11>();
-    renderer->StartFrame(g_context);
-
-    CubismMatrix44 matrix;
-    matrix.LoadIdentity();
-    matrix.MultiplyByMatrix(_model->GetModelMatrix());
-    renderer->SetMvpMatrix(&matrix);
-    renderer->DrawModel();
-    renderer->EndFrame();
+    _renderer.Draw();
   }
 
   void SetModelSync(const ag99::runtime::Json& payload) {
     std::scoped_lock lock(_motion_mutex);
     _model_sync_payload = payload;
+    std::unordered_set<std::string> protected_parameter_ids;
+    const auto model_info = payload.find("model_info");
+    if (model_info != payload.end() && model_info->is_object()) {
+      const auto models = model_info->find("models");
+      const auto selected_model = ReadString(*model_info, "selected_model");
+      if (models != model_info->end() && models->is_array()) {
+        for (const auto& model : *models) {
+          if (!model.is_object()
+              || (!selected_model.empty()
+                  && ReadString(model, "name") != selected_model)) {
+            continue;
+          }
+          const auto profile = model.find("semantic_axis_profile");
+          if (profile == model.end() || !profile->is_object()) {
+            continue;
+          }
+          const auto axes = profile->find("axes");
+          if (axes == profile->end() || !axes->is_array()) {
+            continue;
+          }
+          for (const auto& axis : *axes) {
+            if (!axis.is_object()) {
+              continue;
+            }
+            const auto bindings = axis.find("parameter_bindings");
+            if (bindings == axis.end() || !bindings->is_array()) {
+              continue;
+            }
+            for (const auto& binding : *bindings) {
+              if (!binding.is_object()) {
+                continue;
+              }
+              const auto parameter_id = binding.find("parameter_id");
+              if (parameter_id != binding.end()
+                  && parameter_id->is_string()
+                  && !parameter_id->get<std::string>().empty()) {
+                protected_parameter_ids.insert(
+                    parameter_id->get<std::string>());
+              }
+            }
+          }
+        }
+      }
+    }
+    if (_model) {
+      _model->SetPhysicsResponseProtectedParameterIds(protected_parameter_ids);
+    }
     std::cerr << "[motion] model sync received\n";
   }
 
-  void QueueMotionIntent(const ag99::runtime::Json& intent) {
+  void QueueMotionPayload(const ag99::runtime::Json& payload) {
     std::scoped_lock lock(_motion_mutex);
-    _pending_motion_intent = intent;
+    const auto schema = ReadString(payload, "schema_version");
+    if (schema == std::string(ag99::runtime::kParameterPlanSchema)) {
+      _pending_parameter_plan = payload;
+      _pending_motion_intent.reset();
+      _active_motion.reset();
+      std::cerr << "[motion] parameter plan queued\n";
+      return;
+    }
+    _pending_motion_intent = payload;
+    _pending_parameter_plan.reset();
+    _active_parameter_plan.reset();
     std::cerr << "[motion] intent queued\n";
   }
 
@@ -1022,6 +1542,7 @@ private:
 
     csmInt32 parameter_index = -1;
     float neutral_value = 0.0f;
+    int start_at_ms = 0;
     std::vector<Keyframe> keyframes;
   };
 
@@ -1031,6 +1552,49 @@ private:
     int blend_in_ms = 120;
     int blend_out_ms = 180;
     std::vector<MotionTrack> tracks;
+  };
+
+  struct ParameterPlanTrackPoint {
+    int at_ms = 0;
+    int transition_ms = 0;
+    float value = 0.0f;
+  };
+
+  struct ParameterPlanBinding {
+    std::string axis_id;
+    std::string parameter_id;
+    csmInt32 parameter_index = -1;
+    int activation_at_ms = 0;
+    float target_value = 0.0f;
+    float neutral_target_value = 0.0f;
+    float initial_value = 0.0f;
+    float weight = 1.0f;
+    std::vector<ParameterPlanTrackPoint> keyframes;
+    std::vector<ParameterPlanTrackPoint> modulation_points;
+    float modulation_amplitude = 0.0f;
+    int modulation_direction = 1;
+    int modulation_delay_ms = 0;
+    float max_velocity = 1.0f;
+    float max_acceleration = 1.0f;
+    float max_speech_offset = 0.0f;
+    std::string response_kind = "bounded";
+    float response_frequency_hz = 0.0f;
+    float response_damping_ratio = 0.0f;
+    float driven_offset = 0.0f;
+    float velocity = 0.0f;
+    double last_elapsed_ms = -1.0;
+  };
+
+  struct ParameterPlan {
+    double started_at = 0.0;
+    int duration_ms = 0;
+    int blend_in_ms = 0;
+    int hold_ms = 0;
+    int blend_out_ms = 0;
+    std::string curve_preset = "smooth_hold";
+    std::string expression_id;
+    double release_started_at_ms = -1.0;
+    std::vector<ParameterPlanBinding> bindings;
   };
 
   static double Clamp(double value, double minimum, double maximum) {
@@ -1052,6 +1616,674 @@ private:
     const auto it = object.find(key);
     return it != object.end() && it->is_string()
         ? it->get<std::string>() : std::string{};
+  }
+
+  static bool HasOnlyKeys(
+      const ag99::runtime::Json& object,
+      std::initializer_list<const char*> keys) {
+    if (!object.is_object()) {
+      return false;
+    }
+    for (const auto& [key, _] : object.items()) {
+      bool allowed = false;
+      for (const auto* candidate : keys) {
+        if (key == candidate) {
+          allowed = true;
+          break;
+        }
+      }
+      if (!allowed) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  static bool IsFiniteNumber(const ag99::runtime::Json& value) {
+    return value.is_number() && std::isfinite(value.get<double>());
+  }
+
+  static bool IsIntegerInRange(
+      const ag99::runtime::Json& value,
+      int minimum,
+      int maximum) {
+    return value.is_number_integer()
+        && value.get<std::int64_t>() >= minimum
+        && value.get<std::int64_t>() <= maximum;
+  }
+
+  static std::optional<ParameterPlanTrackPoint> ParseTrackPoint(
+      const ag99::runtime::Json& value,
+      int duration_ms,
+      bool modulation) {
+    const bool valid_shape = modulation
+        ? HasOnlyKeys(value, {"at_ms", "transition_ms", "value"})
+        : HasOnlyKeys(value, {"at_ms", "transition_ms", "target_value", "input_value"});
+    if (!value.is_object() || !valid_shape) {
+      return std::nullopt;
+    }
+    const auto at = value.find("at_ms");
+    const auto transition = value.find("transition_ms");
+    const char* value_key = modulation ? "value" : "target_value";
+    const auto target = value.find(value_key);
+    if (at == value.end() || transition == value.end() || target == value.end()
+        || !IsIntegerInRange(*at, 0, duration_ms)
+        || !IsIntegerInRange(*transition, 0, duration_ms)
+        || !IsFiniteNumber(*target)) {
+      return std::nullopt;
+    }
+    const auto at_ms = static_cast<int>(at->get<std::int64_t>());
+    const auto transition_ms = static_cast<int>(transition->get<std::int64_t>());
+    if (at_ms + transition_ms > duration_ms) {
+      return std::nullopt;
+    }
+    return ParameterPlanTrackPoint{
+        at_ms,
+        transition_ms,
+        static_cast<float>(target->get<double>())};
+  }
+
+  std::optional<ParameterPlan> ParseParameterPlan(
+      const ag99::runtime::Json& payload) const {
+    if (!payload.is_object()
+        || ReadString(payload, "schema_version")
+            != std::string(ag99::runtime::kParameterPlanSchema)
+        || !HasOnlyKeys(payload, {
+             "schema_version", "profile_id", "profile_revision", "model_id",
+             "mode", "emotion_label", "resource", "timing", "parameters",
+             "diagnostics", "summary"})) {
+      return std::nullopt;
+    }
+    const auto profile = SelectedModelProfile();
+    if (!profile) {
+      std::cerr << "[motion] parameter plan profile is unavailable\n";
+      return std::nullopt;
+    }
+    const auto profile_id = ReadString(*profile, "profile_id");
+    const auto model_id = ReadString(*profile, "model_id");
+    if ((!profile_id.empty() && ReadString(payload, "profile_id") != profile_id)
+        || (!model_id.empty() && ReadString(payload, "model_id") != model_id)) {
+      std::cerr << "[motion] parameter plan profile/model mismatch\n";
+      return std::nullopt;
+    }
+    const auto revision = payload.find("profile_revision");
+    if (revision == payload.end() || !revision->is_number_integer()
+        || revision->get<std::int64_t>() <= 0) {
+      return std::nullopt;
+    }
+    if (const auto profile_revision = profile->find("revision");
+        profile_revision != profile->end() && profile_revision->is_number_integer()
+        && revision->get<std::int64_t>() != profile_revision->get<std::int64_t>()) {
+      std::cerr << "[motion] parameter plan profile revision mismatch\n";
+      return std::nullopt;
+    }
+    const auto mode = ReadString(payload, "mode");
+    if (mode != "idle" && mode != "expressive"
+        || ReadString(payload, "emotion_label").empty()) {
+      return std::nullopt;
+    }
+    const auto timing = payload.find("timing");
+    if (timing == payload.end() || !timing->is_object()
+        || !HasOnlyKeys(*timing, {
+             "duration_ms", "blend_in_ms", "hold_ms", "blend_out_ms", "curve_preset"})) {
+      return std::nullopt;
+    }
+    const auto duration = timing->find("duration_ms");
+    const auto blend_in = timing->find("blend_in_ms");
+    const auto hold = timing->find("hold_ms");
+    const auto blend_out = timing->find("blend_out_ms");
+    if (duration == timing->end() || blend_in == timing->end()
+        || hold == timing->end() || blend_out == timing->end()
+        || !IsIntegerInRange(*duration, 320, 15000)
+        || !IsIntegerInRange(*blend_in, 0, 15000)
+        || !IsIntegerInRange(*hold, 0, 15000)
+        || !IsIntegerInRange(*blend_out, 0, 15000)) {
+      return std::nullopt;
+    }
+    const int duration_ms = static_cast<int>(duration->get<std::int64_t>());
+    const int blend_in_ms = static_cast<int>(blend_in->get<std::int64_t>());
+    const int hold_ms = static_cast<int>(hold->get<std::int64_t>());
+    const int blend_out_ms = static_cast<int>(blend_out->get<std::int64_t>());
+    if (blend_in_ms + hold_ms + blend_out_ms != duration_ms) {
+      return std::nullopt;
+    }
+    ParameterPlan plan{
+        .started_at = NowSeconds(),
+        .duration_ms = duration_ms,
+        .blend_in_ms = blend_in_ms,
+        .hold_ms = hold_ms,
+        .blend_out_ms = blend_out_ms,
+        .curve_preset = ReadString(*timing, "curve_preset"),
+    };
+    if (plan.curve_preset.empty()) {
+      plan.curve_preset = "smooth_hold";
+    }
+    static constexpr std::array<std::string_view, 5> kCurves = {
+        "smooth_hold", "snap_hold_soft_release", "slow_build_quick_release",
+        "pulse_settle", "breathing_swell"};
+    if (std::find(kCurves.begin(), kCurves.end(), plan.curve_preset)
+        == kCurves.end()) {
+      return std::nullopt;
+    }
+
+    std::unordered_set<std::string> resource_parameter_ids;
+    if (const auto resource = payload.find("resource");
+        resource != payload.end() && !resource->is_null()) {
+      if (!resource->is_object()
+          || !HasOnlyKeys(*resource, {
+               "kind", "resource_id", "expression_id", "parameter_ids"})
+          || ReadString(*resource, "kind") != "expression"
+          || ReadString(*resource, "resource_id").empty()
+          || ReadString(*resource, "expression_id").empty()
+          || !resource->contains("parameter_ids")
+          || !resource->at("parameter_ids").is_array()
+          || resource->at("parameter_ids").empty()) {
+        return std::nullopt;
+      }
+      for (const auto& parameter_id : resource->at("parameter_ids")) {
+        if (!parameter_id.is_string()
+            || parameter_id.get<std::string>().empty()) {
+          return std::nullopt;
+        }
+        resource_parameter_ids.insert(parameter_id.get<std::string>());
+      }
+      plan.expression_id = ReadString(*resource, "expression_id");
+    }
+
+    const auto parameters = payload.find("parameters");
+    if (parameters == payload.end() || !parameters->is_array()
+        || parameters->empty()) {
+      return std::nullopt;
+    }
+    std::unordered_set<std::string> parameter_ids;
+    for (const auto& item : *parameters) {
+      if (!item.is_object()
+          || !HasOnlyKeys(item, {
+               "axis_id", "parameter_id", "activation_at_ms", "target_value",
+               "neutral_target_value", "weight", "input_value", "source",
+               "keyframes", "modulation", "dynamics"})) {
+        return std::nullopt;
+      }
+      const auto axis_id = ReadString(item, "axis_id");
+      const auto parameter_id = ReadString(item, "parameter_id");
+      const auto activation = item.find("activation_at_ms");
+      const auto target = item.find("target_value");
+      const auto neutral = item.find("neutral_target_value");
+      const auto weight = item.find("weight");
+      const auto source = ReadString(item, "source");
+      static constexpr std::array<std::string_view, 6> kSources = {
+          "semantic_axis", "relation_graph", "speech_pose",
+          "expression", "continuity", "manual"};
+      if (axis_id.empty() || parameter_id.empty()
+          || !parameter_ids.insert(parameter_id).second
+          || activation == item.end() || target == item.end()
+          || neutral == item.end() || weight == item.end()
+          || !IsIntegerInRange(*activation, 0, duration_ms)
+          || !IsFiniteNumber(*target) || !IsFiniteNumber(*neutral)
+          || !IsFiniteNumber(*weight) || weight->get<double>() < 0.0
+          || weight->get<double>() > 1.0
+          || std::find(kSources.begin(), kSources.end(), source) == kSources.end()) {
+        return std::nullopt;
+      }
+      const auto dynamics = item.find("dynamics");
+      if (dynamics == item.end() || !dynamics->is_object()
+          || !HasOnlyKeys(*dynamics, {
+               "max_velocity", "max_acceleration", "max_speech_offset", "response"})) {
+        return std::nullopt;
+      }
+      const auto max_velocity = dynamics->find("max_velocity");
+      const auto max_acceleration = dynamics->find("max_acceleration");
+      const auto max_speech_offset = dynamics->find("max_speech_offset");
+      const auto response = dynamics->find("response");
+      if (max_velocity == dynamics->end() || max_acceleration == dynamics->end()
+          || max_speech_offset == dynamics->end() || response == dynamics->end()
+          || !IsFiniteNumber(*max_velocity) || max_velocity->get<double>() <= 0
+          || !IsFiniteNumber(*max_acceleration) || max_acceleration->get<double>() <= 0
+          || !IsFiniteNumber(*max_speech_offset) || max_speech_offset->get<double>() < 0
+          || !response->is_object()) {
+        return std::nullopt;
+      }
+      ParameterPlanBinding binding{
+          .axis_id = axis_id,
+          .parameter_id = parameter_id,
+          .activation_at_ms = static_cast<int>(activation->get<std::int64_t>()),
+          .target_value = static_cast<float>(target->get<double>()),
+          .neutral_target_value = static_cast<float>(neutral->get<double>()),
+          .weight = static_cast<float>(weight->get<double>()),
+          .max_velocity = static_cast<float>(max_velocity->get<double>()),
+          .max_acceleration = static_cast<float>(max_acceleration->get<double>()),
+          .max_speech_offset = static_cast<float>(max_speech_offset->get<double>()),
+      };
+      const auto response_kind = ReadString(*response, "kind");
+      if (response_kind == "bounded") {
+        if (!HasOnlyKeys(*response, {"kind"})) {
+          return std::nullopt;
+        }
+      } else if (response_kind == "spring") {
+        if (!HasOnlyKeys(*response, {"kind", "frequency_hz", "damping_ratio"})
+            || !response->contains("frequency_hz")
+            || !response->contains("damping_ratio")
+            || !IsFiniteNumber(response->at("frequency_hz"))
+            || !IsFiniteNumber(response->at("damping_ratio"))
+            || response->at("frequency_hz").get<double>() <= 0
+            || response->at("frequency_hz").get<double>() > 10
+            || response->at("damping_ratio").get<double>() < 0.5
+            || response->at("damping_ratio").get<double>() >= 1) {
+          return std::nullopt;
+        }
+        binding.response_frequency_hz =
+            static_cast<float>(response->at("frequency_hz").get<double>());
+        binding.response_damping_ratio =
+            static_cast<float>(response->at("damping_ratio").get<double>());
+      } else {
+        return std::nullopt;
+      }
+      binding.response_kind = response_kind;
+
+      if (const auto keyframes = item.find("keyframes");
+          keyframes != item.end()) {
+        if (!keyframes->is_array() || keyframes->size() < 2
+            || keyframes->size() > 4) {
+          return std::nullopt;
+        }
+        int previous_at = -1;
+        int previous_end = -1;
+        for (const auto& point : *keyframes) {
+          const auto parsed = ParseTrackPoint(
+              point, duration_ms, false);
+          if (!parsed || parsed->at_ms <= previous_at
+              || parsed->at_ms < previous_end) {
+            return std::nullopt;
+          }
+          previous_at = parsed->at_ms;
+          previous_end = parsed->at_ms + parsed->transition_ms;
+          binding.keyframes.push_back(*parsed);
+        }
+        if (binding.keyframes.front().at_ms != binding.activation_at_ms
+            || binding.keyframes.front().transition_ms != 0) {
+          return std::nullopt;
+        }
+      }
+      if (const auto modulation = item.find("modulation");
+          modulation != item.end()) {
+        if (!modulation->is_object()
+            || !HasOnlyKeys(*modulation, {
+                 "kind", "preset", "amplitude", "direction", "delay_ms", "points"})
+            || ReadString(*modulation, "kind") != "speech_gesture_track"
+            || (ReadString(*modulation, "preset") != "calm_explain"
+                && ReadString(*modulation, "preset") != "lively_chat"
+                && ReadString(*modulation, "preset") != "gentle_support"
+                && ReadString(*modulation, "preset") != "emphatic")
+            || !modulation->contains("amplitude")
+            || !modulation->contains("direction")
+            || !modulation->contains("delay_ms")
+            || !modulation->contains("points")
+            || !IsFiniteNumber(modulation->at("amplitude"))
+            || modulation->at("amplitude").get<double>() < 0
+            || (modulation->at("direction") != 1
+                && modulation->at("direction") != -1)
+            || !IsIntegerInRange(modulation->at("delay_ms"), 0, 600)
+            || !modulation->at("points").is_array()
+            || modulation->at("points").size() < 3
+            || modulation->at("points").size() > 8) {
+          return std::nullopt;
+        }
+        binding.modulation_amplitude =
+            std::min(
+                binding.max_speech_offset,
+                static_cast<float>(modulation->at("amplitude").get<double>()));
+        binding.modulation_direction =
+            modulation->at("direction").get<int>();
+        binding.modulation_delay_ms =
+            static_cast<int>(modulation->at("delay_ms").get<std::int64_t>());
+        int previous_at = -1;
+        int previous_end = -1;
+        for (const auto& point : modulation->at("points")) {
+          const auto parsed = ParseTrackPoint(point, duration_ms, true);
+          if (!parsed || parsed->at_ms <= previous_at
+              || parsed->at_ms < previous_end
+              || parsed->at_ms + parsed->transition_ms
+                   + binding.modulation_delay_ms > duration_ms) {
+            return std::nullopt;
+          }
+          previous_at = parsed->at_ms;
+          previous_end = parsed->at_ms + parsed->transition_ms;
+          binding.modulation_points.push_back(*parsed);
+        }
+        if (binding.modulation_points.front().at_ms != 0
+            || binding.modulation_points.front().transition_ms != 0
+            || std::abs(binding.modulation_points.front().value) > 1e-6f) {
+          return std::nullopt;
+        }
+      }
+      const auto parameter_id_handle =
+          CubismFramework::GetIdManager()->GetId(parameter_id.c_str());
+      binding.parameter_index = _model->GetModel()->GetParameterIndex(
+          parameter_id_handle);
+      if (binding.parameter_index < 0) {
+        std::cerr << "[motion] parameter plan parameter is missing: "
+                  << parameter_id << '\n';
+        return std::nullopt;
+      }
+      const auto minimum = _model->GetModel()->GetParameterMinimumValue(
+          binding.parameter_index);
+      const auto maximum = _model->GetModel()->GetParameterMaximumValue(
+          binding.parameter_index);
+      if (binding.target_value < minimum || binding.target_value > maximum
+          || binding.neutral_target_value < minimum
+          || binding.neutral_target_value > maximum) {
+        return std::nullopt;
+      }
+      binding.initial_value = _model->GetModel()->GetParameterValue(
+          binding.parameter_index);
+      for (const auto& point : binding.keyframes) {
+        if (point.value < minimum || point.value > maximum) {
+          return std::nullopt;
+        }
+      }
+      if (resource_parameter_ids.contains(parameter_id)) {
+        return std::nullopt;
+      }
+      plan.bindings.push_back(std::move(binding));
+    }
+    if (plan.bindings.empty()) {
+      return std::nullopt;
+    }
+    return plan;
+  }
+
+  static float ResolveTrack(
+      const std::vector<ParameterPlanTrackPoint>& points,
+      double elapsed_ms,
+      float fallback) {
+    if (points.size() < 2) {
+      return fallback;
+    }
+    auto previous = points.front();
+    for (std::size_t index = 1; index < points.size(); ++index) {
+      const auto next = points[index];
+      if (elapsed_ms < next.at_ms) {
+        return previous.value;
+      }
+      const auto transition_end = next.at_ms + next.transition_ms;
+      if (next.transition_ms > 0 && elapsed_ms < transition_end) {
+        const auto t = static_cast<float>(
+            std::clamp((elapsed_ms - next.at_ms) / next.transition_ms, 0.0, 1.0));
+        return previous.value + (next.value - previous.value) * t;
+      }
+      previous = next;
+    }
+    return previous.value;
+  }
+
+  static float ClampFloat(float value, float minimum, float maximum) {
+    return std::max(minimum, std::min(maximum, value));
+  }
+
+  struct DynamicsState {
+    float value = 0.0f;
+    float velocity = 0.0f;
+  };
+
+  static DynamicsState AdvanceBounded(
+      float previous,
+      float target,
+      float velocity,
+      float delta_seconds,
+      float max_velocity,
+      float max_acceleration) {
+    const float remaining = target - previous;
+    const float velocity_delta = max_acceleration * delta_seconds;
+    if (std::abs(remaining) <= 0.001f
+        && std::abs(velocity) <= velocity_delta) {
+      return {target, 0.0f};
+    }
+    const float direction = remaining == 0.0f ? 0.0f : remaining > 0 ? 1.0f : -1.0f;
+    const float braking_speed = std::sqrt(
+        std::max(0.0f, 2.0f * max_acceleration * std::abs(remaining)));
+    const float desired_velocity = direction
+        * std::min(max_velocity, braking_speed);
+    const float next_velocity = ClampFloat(
+        desired_velocity,
+        velocity - velocity_delta,
+        velocity + velocity_delta);
+    const float next_value = previous + next_velocity * delta_seconds;
+    if (direction != 0.0f
+        && ((target - next_value > 0) != (direction > 0))) {
+      return {target, 0.0f};
+    }
+    if (std::abs(target - next_value) <= 0.001f
+        && std::abs(next_velocity) <= velocity_delta
+    ) {
+      return {target, 0.0f};
+    }
+    return {next_value, next_velocity};
+  }
+
+  static float ResolveDampedSpringVelocity(
+      float previous,
+      float target,
+      float velocity,
+      float delta_seconds,
+      float frequency_hz,
+      float damping_ratio) {
+    const float displacement = previous - target;
+    const float angular_frequency =
+        2.0f * 3.14159265358979323846f * frequency_hz;
+    const float damped_frequency = angular_frequency
+        * std::sqrt(std::max(0.0f, 1.0f - damping_ratio * damping_ratio));
+    if (damped_frequency <= 1e-6f) {
+      return 0.0f;
+    }
+    const float decay = std::exp(
+        -damping_ratio * angular_frequency * delta_seconds);
+    const float phase = damped_frequency * delta_seconds;
+    const float cosine = std::cos(phase);
+    const float sine = std::sin(phase);
+    const float velocity_term =
+        (velocity + damping_ratio * angular_frequency * displacement)
+        / damped_frequency;
+    const float projected_displacement =
+        displacement * cosine + velocity_term * sine;
+    return decay * (
+        -damping_ratio * angular_frequency * projected_displacement
+        - displacement * damped_frequency * sine
+        + velocity_term * damped_frequency * cosine);
+  }
+
+  static DynamicsState AdvanceSpringStep(
+      float previous,
+      float target,
+      float velocity,
+      float delta_seconds,
+      float max_velocity,
+      float max_acceleration,
+      float frequency_hz,
+      float damping_ratio) {
+    const float remaining = target - previous;
+    const float velocity_delta = max_acceleration * delta_seconds;
+    if (std::abs(remaining) <= 0.001f
+        && std::abs(velocity) <= velocity_delta) {
+      return {target, 0.0f};
+    }
+    const float desired_velocity = ResolveDampedSpringVelocity(
+        previous, target, velocity, delta_seconds,
+        frequency_hz, damping_ratio);
+    const float acceleration_limited_velocity = ClampFloat(
+        desired_velocity,
+        velocity - velocity_delta,
+        velocity + velocity_delta);
+    const float next_velocity = ClampFloat(
+        acceleration_limited_velocity, -max_velocity, max_velocity);
+    const float next_value = previous
+        + (velocity + next_velocity) * 0.5f * delta_seconds;
+    if (std::abs(target - next_value) <= 0.001f
+        && std::abs(next_velocity) <= velocity_delta) {
+      return {target, 0.0f};
+    }
+    return {next_value, next_velocity};
+  }
+
+  static DynamicsState AdvanceSpring(
+      float previous,
+      float target,
+      float velocity,
+      float delta_seconds,
+      float max_velocity,
+      float max_acceleration,
+      float frequency_hz,
+      float damping_ratio) {
+    const int steps = std::max(
+        1, static_cast<int>(std::ceil(delta_seconds / (1.0f / 120.0f))));
+    const float step_seconds = delta_seconds / steps;
+    float value = previous;
+    float current_velocity = velocity;
+    for (int index = 0; index < steps; ++index) {
+      const auto state = AdvanceSpringStep(
+          value, target, current_velocity, step_seconds,
+          max_velocity, max_acceleration, frequency_hz, damping_ratio);
+      value = state.value;
+      current_velocity = state.velocity;
+    }
+    return {value, current_velocity};
+  }
+
+  static float ResolveEnvelopeTarget(
+      const ParameterPlanBinding& binding,
+      float frame_target,
+      double elapsed_ms,
+      const ParameterPlan& plan) {
+    const auto elapsed = std::max(0.0, elapsed_ms);
+    if (plan.blend_in_ms > 0 && elapsed < plan.blend_in_ms) {
+      const auto progress = static_cast<float>(elapsed / plan.blend_in_ms);
+      if (plan.curve_preset == "slow_build_quick_release") {
+        return binding.initial_value
+            + (frame_target - binding.initial_value) * progress * progress;
+      }
+      if (plan.curve_preset == "pulse_settle") {
+        const auto x = progress - 1.0f;
+        const auto eased = 1.0f + 2.70158f * x * x * x + 1.70158f * x * x;
+        return binding.initial_value
+            + (frame_target - binding.initial_value)
+                * std::min(1.08f, eased);
+      }
+    }
+    if (elapsed < plan.blend_in_ms + plan.hold_ms
+        && (plan.curve_preset == "breathing_swell"
+            || plan.curve_preset == "pulse_settle")) {
+      const auto progress = plan.hold_ms > 0
+          ? static_cast<float>((elapsed - plan.blend_in_ms) / plan.hold_ms)
+          : 1.0f;
+      return binding.initial_value
+          + (frame_target - binding.initial_value)
+              * (1.0f - 0.06f * std::sin(3.14159265358979323846f * progress));
+    }
+    return frame_target;
+  }
+
+  void ApplyQueuedParameterPlan() {
+    std::scoped_lock lock(_motion_mutex);
+    if (!_model || !_model->GetModel()) {
+      return;
+    }
+    if (_pending_parameter_plan) {
+      const auto parsed = ParseParameterPlan(*_pending_parameter_plan);
+      _pending_parameter_plan.reset();
+      if (parsed) {
+        if (!parsed->expression_id.empty()
+            && !_model->StartExpressionById(parsed->expression_id)) {
+          std::cerr << "[motion] expression resource not found: "
+                    << parsed->expression_id << '\n';
+          _active_parameter_plan.reset();
+        } else {
+          _active_parameter_plan = *parsed;
+          std::cerr << "[motion] activated parameter plan with "
+                    << _active_parameter_plan->bindings.size()
+                    << " bindings for "
+                    << _active_parameter_plan->duration_ms << " ms\n";
+        }
+      } else {
+        std::cerr << "[motion] parameter plan rejected\n";
+      }
+    }
+    if (!_active_parameter_plan) {
+      return;
+    }
+    auto& plan = *_active_parameter_plan;
+    const double elapsed_ms = (NowSeconds() - plan.started_at) * 1000.0;
+    bool all_activated = true;
+    for (const auto& binding : plan.bindings) {
+      all_activated &= elapsed_ms >= binding.activation_at_ms;
+    }
+    if (plan.release_started_at_ms < 0.0
+        && all_activated
+        && elapsed_ms >= plan.duration_ms - plan.blend_out_ms) {
+      plan.release_started_at_ms = elapsed_ms;
+    }
+    for (auto& binding : plan.bindings) {
+      if (elapsed_ms < binding.activation_at_ms) {
+        continue;
+      }
+      auto frame_target = ResolveTrack(
+          binding.keyframes, elapsed_ms, binding.target_value);
+      if (!binding.modulation_points.empty() && binding.modulation_amplitude > 0.0f) {
+        const auto gesture = ResolveTrack(
+            binding.modulation_points,
+            std::max(0.0, elapsed_ms - binding.modulation_delay_ms),
+            0.0f);
+        frame_target += gesture * binding.modulation_amplitude
+            * static_cast<float>(binding.modulation_direction)
+            * GetSpeechAudioGain(binding.axis_id);
+      }
+      const auto target = ResolveEnvelopeTarget(
+          binding, frame_target, elapsed_ms, plan);
+      const auto base = _model->GetModel()->GetParameterValue(binding.parameter_index);
+      const auto target_offset = target - base;
+      if (binding.last_elapsed_ms < 0.0) {
+        binding.last_elapsed_ms = elapsed_ms;
+      } else if (elapsed_ms > binding.last_elapsed_ms) {
+        const auto delta_seconds = static_cast<float>(
+            std::min(0.1, (elapsed_ms - binding.last_elapsed_ms) / 1000.0));
+        const auto previous_offset = binding.driven_offset;
+        const auto next_state = binding.response_kind == "spring"
+            ? AdvanceSpring(
+                previous_offset, target_offset, binding.velocity,
+                delta_seconds, binding.max_velocity, binding.max_acceleration,
+                binding.response_frequency_hz, binding.response_damping_ratio)
+            : AdvanceBounded(
+                previous_offset, target_offset, binding.velocity,
+                delta_seconds, binding.max_velocity, binding.max_acceleration);
+        binding.velocity = next_state.velocity;
+        binding.driven_offset = next_state.value;
+        binding.last_elapsed_ms = elapsed_ms;
+      }
+      float ownership = 1.0f;
+      if (plan.release_started_at_ms >= 0.0
+          && plan.blend_out_ms > 0
+          && elapsed_ms >= plan.release_started_at_ms) {
+        const auto t = static_cast<float>(std::clamp(
+            (elapsed_ms - plan.release_started_at_ms) / plan.blend_out_ms,
+            0.0, 1.0));
+        ownership = 1.0f - t * t * (3.0f - 2.0f * t);
+      } else if (plan.release_started_at_ms >= 0.0) {
+        ownership = 0.0f;
+      }
+      const auto current = _model->GetModel()->GetParameterValue(
+          binding.parameter_index);
+      const auto mixed = current * (1.0f - binding.weight * ownership)
+          + (base + binding.driven_offset) * binding.weight * ownership;
+      const auto minimum = _model->GetModel()->GetParameterMinimumValue(
+          binding.parameter_index);
+      const auto maximum = _model->GetModel()->GetParameterMaximumValue(
+          binding.parameter_index);
+      _model->GetModel()->SetParameterValue(
+          binding.parameter_index,
+          ClampFloat(mixed, minimum, maximum));
+    }
+    if (plan.release_started_at_ms >= 0.0
+        && elapsed_ms >= plan.release_started_at_ms + plan.blend_out_ms) {
+      _active_parameter_plan.reset();
+    }
   }
 
   const ag99::runtime::Json* SelectedModelProfile() const {
@@ -1105,6 +2337,15 @@ private:
       return std::nullopt;
     }
 
+    struct AxisDefinition {
+      double neutral = 0.0;
+      double value_min = 0.0;
+      double value_max = 100.0;
+      double strong_min = 0.0;
+      double strong_max = 100.0;
+      std::string group;
+    };
+
     struct AxisValue {
       double value = 0.0;
       double neutral = 0.0;
@@ -1112,6 +2353,42 @@ private:
     };
 
     using AxisMap = std::unordered_map<std::string, AxisValue>;
+    const auto read_range = [](const ag99::runtime::Json& axis,
+                               const char* key,
+                               double fallback_min,
+                               double fallback_max) {
+      std::array<double, 2> result{fallback_min, fallback_max};
+      const auto range = axis.find(key);
+      if (range != axis.end() && range->is_array() && range->size() == 2
+          && (*range)[0].is_number() && (*range)[1].is_number()) {
+        result[0] = (*range)[0].get<double>();
+        result[1] = (*range)[1].get<double>();
+      }
+      return result;
+    };
+    std::unordered_map<std::string, AxisDefinition> axis_definitions;
+    for (const auto& axis : *axes) {
+      if (!axis.is_object()) {
+        continue;
+      }
+      const auto id = ReadString(axis, "id");
+      if (id.empty()) {
+        continue;
+      }
+      const auto value_range = read_range(axis, "value_range", 0.0, 100.0);
+      const auto strong_range = read_range(
+          axis, "strong_range", value_range[0], value_range[1]);
+      axis_definitions.emplace(
+          id,
+          AxisDefinition{
+              ReadNumber(axis, "neutral", 50.0),
+              value_range[0],
+              value_range[1],
+              strong_range[0],
+              strong_range[1],
+              ReadString(axis, "semantic_group")});
+    }
+
     const auto resolve_axis_levels = [&](const ag99::runtime::Json& levels) {
       AxisMap resolved;
       std::unordered_set<std::string> explicit_axes;
@@ -1132,7 +2409,12 @@ private:
         if (role != "primary" && role != "hint") {
           continue;
         }
-        const double neutral = ReadNumber(axis, "neutral", 50.0);
+        const auto definition_it = axis_definitions.find(id);
+        if (definition_it == axis_definitions.end()) {
+          continue;
+        }
+        const auto& definition = definition_it->second;
+        const double neutral = definition.neutral;
         double value = neutral;
         const auto anchors = axis.find("level_anchors");
         if (anchors != axis.end() && anchors->is_object()) {
@@ -1142,68 +2424,137 @@ private:
             value = anchor->get<double>();
           }
         }
-        const auto range = axis.find("value_range");
-        if (range != axis.end() && range->is_array() && range->size() == 2) {
-          value = Clamp(
-              value, (*range)[0].get<double>(), (*range)[1].get<double>());
-        }
-        resolved.emplace(
-            id, AxisValue{value, neutral, ReadString(axis, "semantic_group")});
+        value = Clamp(value, definition.value_min, definition.value_max);
+        resolved.emplace(id, AxisValue{value, neutral, definition.group});
         explicit_axes.insert(id);
       }
 
       const auto relation_graph = profile->find("relation_graph");
       const auto edges = relation_graph != profile->end()
           ? relation_graph->find("edges") : profile->end();
-      if (edges != profile->end() && edges->is_array()) {
-        for (int pass = 0; pass < 3; ++pass) {
-          for (const auto& edge : *edges) {
-            if (!edge.is_object()) {
-              continue;
-            }
-            const auto source_id = ReadString(edge, "source_axis_id");
-            const auto target_id = ReadString(edge, "target_axis_id");
-            const auto source = resolved.find(source_id);
-            if (source == resolved.end() || target_id.empty()) {
-              continue;
-            }
-            const auto target_axis = std::ranges::find_if(
-                *axes, [&target_id](const auto& axis) {
-                  return axis.is_object()
-                      && ReadString(axis, "id") == target_id;
-                });
-            if (target_axis == axes->end()) {
-              continue;
-            }
-            const double target_neutral =
-                ReadNumber(*target_axis, "neutral", 50.0);
-            const auto target_range = target_axis->find("value_range");
-            const double target_min = target_range != target_axis->end()
-                && target_range->is_array() && target_range->size() == 2
-                ? (*target_range)[0].get<double>() : 0.0;
-            const double target_max = target_range != target_axis->end()
-                && target_range->is_array() && target_range->size() == 2
-                ? (*target_range)[1].get<double>() : 100.0;
-            const double source_delta =
-                source->second.value - source->second.neutral;
-            const double scale = ReadNumber(edge, "scale", 0.0);
-            const double direction =
-                ReadString(edge, "mode") == "opposite_direction" ? -1.0 : 1.0;
-            const double candidate = Clamp(
-                target_neutral + source_delta * scale * direction,
-                target_min,
-                target_max);
-            if (explicit_axes.contains(target_id)) {
-              continue;
-            }
-            resolved[target_id] = AxisValue{
-                candidate,
-                target_neutral,
-                ReadString(*target_axis, "semantic_group")};
+      if (edges == profile->end() || !edges->is_array()) {
+        return resolved;
+      }
+
+      const auto maps_equal = [](const AxisMap& left, const AxisMap& right) {
+        if (left.size() != right.size()) {
+          return false;
+        }
+        for (const auto& [axis_id, value] : left) {
+          const auto other = right.find(axis_id);
+          if (other == right.end()
+              || std::abs(value.value - other->second.value) > 1e-6) {
+            return false;
           }
         }
+        return true;
+      };
+
+      AxisMap previous_values = resolved;
+      const int max_passes = std::max(
+          2,
+          static_cast<int>(edges->size()) + 2);
+      for (int pass = 0; pass < max_passes; ++pass) {
+        AxisMap current_values = resolved;
+        for (const auto& edge : *edges) {
+          if (!edge.is_object()) {
+            continue;
+          }
+          const auto source_id = ReadString(edge, "source_axis_id");
+          const auto target_id = ReadString(edge, "target_axis_id");
+          const auto source = previous_values.find(source_id);
+          const auto target_definition = axis_definitions.find(target_id);
+          if (source == previous_values.end()
+              || target_definition == axis_definitions.end()) {
+            continue;
+          }
+
+          const auto& target_axis = target_definition->second;
+          const double source_delta =
+              source->second.value - source->second.neutral;
+          const double scale = ReadNumber(edge, "scale", 0.0);
+          const double deadzone = std::max(
+              0.0,
+              ReadNumber(edge, "deadzone", 0.0));
+          const double max_delta = std::max(
+              0.0,
+              ReadNumber(edge, "max_delta", 0.0));
+          const double direction =
+              ReadString(edge, "mode") == "opposite_direction" ? -1.0 : 1.0;
+          const auto derive_target = [&]() {
+            const double raw_candidate =
+                target_axis.neutral + source_delta * scale * direction;
+            const double max_delta_value = target_axis.neutral + Clamp(
+                raw_candidate - target_axis.neutral,
+                -max_delta,
+                max_delta);
+            const double constrained_value = Clamp(
+                max_delta_value,
+                target_axis.value_min,
+                target_axis.value_max);
+            return AxisValue{
+                constrained_value,
+                target_axis.neutral,
+                target_axis.group};
+          };
+
+          if (ReadString(edge, "kind") == "derive") {
+            if (explicit_axes.contains(target_id)
+                || std::abs(source_delta) <= deadzone) {
+              continue;
+            }
+            current_values[target_id] = derive_target();
+            continue;
+          }
+
+          if (ReadString(edge, "kind") != "bounded_ratio") {
+            continue;
+          }
+          const auto target = current_values.find(target_id);
+          if (target == current_values.end()) {
+            if (std::abs(source_delta) <= deadzone) {
+              continue;
+            }
+            current_values[target_id] = derive_target();
+            continue;
+          }
+
+          const double target_delta =
+              target->second.value - target_axis.neutral;
+          const double strong_half_span = std::max(
+              std::abs(target_axis.strong_max - target_axis.neutral),
+              std::abs(target_axis.neutral - target_axis.strong_min));
+          const double hard_cap = std::max(
+              max_delta,
+              strong_half_span + std::min(deadzone, 6.0));
+          const bool direction_mismatch =
+              source_delta != 0.0
+              && target_delta != 0.0
+              && source_delta * target_delta * direction < 0.0;
+          const double limit = direction_mismatch
+              ? std::min(
+                  hard_cap * 0.5,
+                  std::max(
+                      deadzone * 0.6,
+                      std::abs(source_delta) * (scale * 0.35)
+                          + deadzone * 0.5))
+              : std::min(
+                  hard_cap,
+                  std::max(
+                      deadzone,
+                      std::abs(source_delta) * scale + deadzone));
+          target->second.value = Clamp(
+              target_axis.neutral + Clamp(target_delta, -limit, limit),
+              target_axis.value_min,
+              target_axis.value_max);
+        }
+
+        if (maps_equal(previous_values, current_values)) {
+          return current_values;
+        }
+        previous_values = std::move(current_values);
       }
-      return resolved;
+      return previous_values;
     };
 
     std::vector<std::pair<ag99::runtime::Json, int>> input_steps;
@@ -1350,6 +2701,7 @@ private:
         plan.tracks.push_back(MotionTrack{
             parameter,
             neutral_target,
+              keyframes.front().at_ms,
             std::move(keyframes)});
         bound_parameters.insert(parameter);
       }
@@ -1385,41 +2737,67 @@ private:
       if (track.keyframes.empty()) {
         continue;
       }
-      double value = track.keyframes.back().target_value;
-      if (elapsed_ms < _active_motion->blend_in_ms) {
-        const double t = Clamp(
-            elapsed_ms / std::max(1, _active_motion->blend_in_ms), 0.0, 1.0);
-        const double smooth = t * t * (3.0 - 2.0 * t);
-        value = track.neutral_value
-            + (track.keyframes.front().target_value - track.neutral_value)
-                * smooth;
-      } else {
-        for (std::size_t index = 1; index < track.keyframes.size(); ++index) {
-          const auto& previous = track.keyframes[index - 1];
-          const auto& next = track.keyframes[index];
-          if (elapsed_ms < next.at_ms) {
-            const double window = std::max(
-                1, next.at_ms - previous.at_ms);
+        double value = track.neutral_value;
+        const double track_start_ms = track.start_at_ms;
+        if (elapsed_ms >= track_start_ms) {
+          const double track_blend_out_start_ms = std::max(
+              track_start_ms,
+              static_cast<double>(_active_motion->duration_ms
+                  - _active_motion->blend_out_ms));
+          const double next_keyframe_ms = track.keyframes.size() > 1
+              ? static_cast<double>(track.keyframes[1].at_ms)
+              : static_cast<double>(_active_motion->duration_ms);
+          const double blend_in_end_ms = std::min({
+              track_start_ms
+                  + static_cast<double>(_active_motion->blend_in_ms),
+              next_keyframe_ms,
+              track_blend_out_start_ms,
+              static_cast<double>(_active_motion->duration_ms)});
+          if (elapsed_ms < blend_in_end_ms) {
             const double t = Clamp(
-                (elapsed_ms - previous.at_ms) / window, 0.0, 1.0);
+                (elapsed_ms - track_start_ms)
+                    / std::max(1.0, blend_in_end_ms - track_start_ms),
+                0.0, 1.0);
             const double smooth = t * t * (3.0 - 2.0 * t);
-            value = previous.target_value
-                + (next.target_value - previous.target_value) * smooth;
-            break;
+            value = track.neutral_value
+                + (track.keyframes.front().target_value
+                    - track.neutral_value) * smooth;
+          } else {
+            value = track.keyframes.back().target_value;
+            for (std::size_t index = 1;
+                 index < track.keyframes.size();
+                 ++index) {
+              const auto& previous = track.keyframes[index - 1];
+              const auto& next = track.keyframes[index];
+              if (elapsed_ms < next.at_ms) {
+                const double previous_at_ms = index == 1
+                    ? std::max(
+                          static_cast<double>(previous.at_ms),
+                          blend_in_end_ms)
+                    : static_cast<double>(previous.at_ms);
+                const double window = std::max(
+                    1.0,
+                    static_cast<double>(next.at_ms) - previous_at_ms);
+                const double t = Clamp(
+                    (elapsed_ms - previous_at_ms) / window, 0.0, 1.0);
+                const double smooth = t * t * (3.0 - 2.0 * t);
+                value = previous.target_value
+                    + (next.target_value - previous.target_value) * smooth;
+                break;
+              }
+            }
+            if (elapsed_ms >= track_blend_out_start_ms) {
+              const double t = Clamp(
+                  (elapsed_ms - track_blend_out_start_ms)
+                      / std::max(
+                          1.0,
+                          static_cast<double>(_active_motion->duration_ms)
+                              - track_blend_out_start_ms),
+                  0.0, 1.0);
+              const double smooth = t * t * (3.0 - 2.0 * t);
+              value += (track.neutral_value - value) * smooth;
+            }
           }
-        }
-        if (elapsed_ms >= _active_motion->duration_ms
-            - _active_motion->blend_out_ms) {
-          const double t = Clamp(
-              (elapsed_ms - (_active_motion->duration_ms
-                  - _active_motion->blend_out_ms))
-                  / std::max(1, _active_motion->blend_out_ms),
-              0.0, 1.0);
-          const double smooth = t * t * (3.0 - 2.0 * t);
-          value = track.keyframes.back().target_value
-              + (track.neutral_value - track.keyframes.back().target_value)
-                  * smooth;
-        }
       }
       const double minimum = _model->GetModel()->GetParameterMinimumValue(
           track.parameter_index);
@@ -1436,12 +2814,15 @@ private:
 
   NativeCubismModel* _model = nullptr;
   CubismModelSettingJson* _setting = nullptr;
-  std::vector<TextureResource> _textures;
-  csmInt32 _mouth_parameter_index = -1;
+  ag99::live2d::D3D11Renderer _renderer;
+  UINT _width = 0;
+  UINT _height = 0;
   double _last_update_seconds = 0.0;
   ag99::runtime::Json _model_sync_payload = ag99::runtime::Json::object();
   std::optional<MotionPlan> _active_motion;
   std::optional<ag99::runtime::Json> _pending_motion_intent;
+  std::optional<ParameterPlan> _active_parameter_plan;
+  std::optional<ag99::runtime::Json> _pending_parameter_plan;
   mutable std::mutex _motion_mutex;
 };
 
@@ -1510,10 +2891,25 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lpa
     }
     case WM_MOUSEMOVE:
       if (g_dragging && (wparam & MK_LBUTTON) != 0) {
+        RECT client_rect{};
+        GetClientRect(window, &client_rect);
+        const auto client_width = std::max<LONG>(1, client_rect.right);
+        const auto client_height = std::max<LONG>(1, client_rect.bottom);
+        const auto client_x = std::clamp<LONG>(
+            GET_X_LPARAM(lparam), 0, client_width);
+        const auto client_y = std::clamp<LONG>(
+            GET_Y_LPARAM(lparam), 0, client_height);
+        const auto drag_x = static_cast<float>(
+            (static_cast<double>(client_x) / client_width) * 2.0 - 1.0);
+        const auto drag_y = static_cast<float>(
+            1.0 - (static_cast<double>(client_y) / client_height) * 2.0);
+        g_drag_x.store(std::clamp(drag_x, -1.0f, 1.0f));
+        g_drag_y.store(std::clamp(drag_y, -1.0f, 1.0f));
         POINT cursor{};
         GetCursorPos(&cursor);
         SetWindowPos(
-            window, HWND_TOP, g_drag_origin.x + cursor.x - g_drag_cursor.x,
+            window, HWND_TOPMOST,
+            g_drag_origin.x + cursor.x - g_drag_cursor.x,
             g_drag_origin.y + cursor.y - g_drag_cursor.y, 0, 0,
             SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
       }
@@ -1569,72 +2965,6 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lpa
   return DefWindowProcW(window, message, wparam, lparam);
 }
 
-bool CreateRenderTarget() {
-  ID3D11Texture2D* back_buffer = nullptr;
-  if (FAILED(g_swap_chain->GetBuffer(0, IID_PPV_ARGS(&back_buffer)))) {
-    return false;
-  }
-
-  const HRESULT result = g_device->CreateRenderTargetView(
-      back_buffer, nullptr, &g_render_target);
-  back_buffer->Release();
-  return SUCCEEDED(result);
-}
-
-bool CreateDevice(HWND window, UINT width, UINT height) {
-  DXGI_SWAP_CHAIN_DESC description{};
-  description.BufferCount = 2;
-  description.BufferDesc.Width = width;
-  description.BufferDesc.Height = height;
-  description.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-  description.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-  description.OutputWindow = window;
-  description.SampleDesc.Count = 1;
-  description.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
-  description.Windowed = TRUE;
-
-  D3D_FEATURE_LEVEL feature_level{};
-  const HRESULT result = D3D11CreateDeviceAndSwapChain(
-      nullptr,
-      D3D_DRIVER_TYPE_HARDWARE,
-      nullptr,
-      D3D11_CREATE_DEVICE_SINGLETHREADED,
-      nullptr,
-      0,
-      D3D11_SDK_VERSION,
-      &description,
-      &g_swap_chain,
-      &g_device,
-      &feature_level,
-      &g_context);
-  if (FAILED(result)) {
-    std::cerr << "D3D11CreateDeviceAndSwapChain failed: 0x"
-              << std::hex << static_cast<unsigned long>(result) << '\n';
-    return false;
-  }
-
-  return CreateRenderTarget();
-}
-
-void ReleaseGraphics() {
-  if (g_render_target) {
-    g_render_target->Release();
-    g_render_target = nullptr;
-  }
-  if (g_swap_chain) {
-    g_swap_chain->Release();
-    g_swap_chain = nullptr;
-  }
-  if (g_context) {
-    g_context->Release();
-    g_context = nullptr;
-  }
-  if (g_device) {
-    g_device->Release();
-    g_device = nullptr;
-  }
-}
-
 HWND CreateWindowHandle(HINSTANCE instance, UINT width, UINT height) {
   WNDCLASSEXW window_class{
       sizeof(WNDCLASSEXW),
@@ -1655,7 +2985,7 @@ HWND CreateWindowHandle(HINSTANCE instance, UINT width, UINT height) {
   }
 
   HWND window = CreateWindowExW(
-      WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+      WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_NOREDIRECTIONBITMAP,
       kWindowClassName,
       kWindowTitle,
       WS_POPUP,
@@ -1673,15 +3003,12 @@ HWND CreateWindowHandle(HINSTANCE instance, UINT width, UINT height) {
 
   const int x = (GetSystemMetrics(SM_CXSCREEN) - static_cast<int>(width)) / 2;
   const int y = (GetSystemMetrics(SM_CYSCREEN) - static_cast<int>(height)) / 2;
-  SetWindowPos(window, HWND_TOP, x, y, static_cast<int>(width),
-               static_cast<int>(height), SWP_NOACTIVATE | SWP_SHOWWINDOW);
-
-  MARGINS margins{-1, -1, -1, -1};
-  DwmExtendFrameIntoClientArea(window, &margins);
+  SetWindowPos(window, HWND_TOPMOST, x, y, static_cast<int>(width),
+               static_cast<int>(height), SWP_NOACTIVATE);
   return window;
 }
 
-bool StartCubism() {
+bool StartCubism(ID3D11Device* device) {
   CubismFramework::Option option{};
   option.LogFunction = LogMessage;
   option.LoadFileFunction = LoadFile;
@@ -1692,14 +3019,14 @@ bool StartCubism() {
   }
 
   CubismFramework::Initialize();
-  Rendering::CubismRenderer_D3D11::SetConstantSettings(2, g_device);
+  ag99::live2d::D3D11Renderer::ConfigureDevice(device);
   return true;
 }
 
 void StopCubism() {
   // The D3D11 device-info map owns resources through Cubism's allocator.
   // Release it before Dispose/CleanUp clears that allocator.
-  Rendering::CubismDeviceInfo_D3D11::ReleaseAllDeviceInfo();
+  ag99::live2d::D3D11Renderer::ReleaseDeviceResources();
   if (CubismFramework::IsInitialized()) {
     CubismFramework::Dispose();
   }
@@ -1713,18 +3040,22 @@ int Run(
   constexpr UINT width = 640;
   constexpr UINT height = 820;
   HWND window = CreateWindowHandle(instance, width, height);
-  if (!window || !CreateDevice(window, width, height)) {
-    RemoveTrayIcon();
-    ReleaseGraphics();
+  if (!window) {
     return 1;
   }
-  g_window = window;
+  ag99::live2d::D3D11CompositionSurface surface;
+  if (FAILED(surface.Initialize(window, width, height))) {
+    DestroyWindow(window);
+    UnregisterClassW(kWindowClassName, instance);
+    return 1;
+  }
   AddTrayIcon(window);
 
-  if (!StartCubism()) {
+  if (!StartCubism(surface.Device())) {
     RemoveTrayIcon();
+    surface.Shutdown();
     DestroyWindow(window);
-    ReleaseGraphics();
+    UnregisterClassW(kWindowClassName, instance);
     return 1;
   }
 
@@ -1736,7 +3067,7 @@ int Run(
           model.SetModelSync(sync.payload);
         },
         [&model](const ag99::runtime::Json& motion_intent) {
-          model.QueueMotionIntent(motion_intent);
+          model.QueueMotionPayload(motion_intent);
         });
     g_send_text = [&runtime](std::string text) {
       if (!runtime.SendText(text)) {
@@ -1749,7 +3080,8 @@ int Run(
     g_microphone_running = [&runtime] {
       return runtime.MicrophoneRunning();
     };
-    if (!model_json.empty() && !model.Load(model_json, width, height)) {
+    if (!model_json.empty() && !model.Load(
+            model_json, width, height, surface.Device(), surface.Context())) {
       result_code = 1;
     } else {
       if (!runtime.Connect("ws://127.0.0.1:12396")) {
@@ -1771,11 +3103,25 @@ int Run(
           DispatchMessageW(&message);
         }
 
-        constexpr float clear_color[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-        g_context->OMSetRenderTargets(1, &g_render_target, nullptr);
-        g_context->ClearRenderTargetView(g_render_target, clear_color);
+        const HRESULT begin_result = surface.BeginFrame();
+        if (FAILED(begin_result)) {
+          std::cerr << "D3D11 BeginFrame failed: 0x" << std::hex
+                    << static_cast<unsigned long>(begin_result) << std::dec
+                    << '\n';
+          result_code = 1;
+          running = false;
+          continue;
+        }
         model.UpdateAndDraw();
-        g_swap_chain->Present(1, 0);
+        const HRESULT present_result = surface.Present(1, 0);
+        if (FAILED(present_result)) {
+          std::cerr << "D3D11 Present failed: 0x" << std::hex
+                    << static_cast<unsigned long>(present_result) << std::dec
+                    << '\n';
+          result_code = 1;
+          running = false;
+          continue;
+        }
         Sleep(1);
       }
     }
@@ -1786,10 +3132,10 @@ int Run(
   }
 
   StopCurrentAudio();
+  StopCubism();
+  surface.Shutdown();
   DestroyWindow(window);
   UnregisterClassW(kWindowClassName, instance);
-  StopCubism();
-  ReleaseGraphics();
   return result_code;
 }
 

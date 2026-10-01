@@ -75,6 +75,33 @@ target_link_libraries(Framework PRIVATE
   d3dcompiler
 )
 
+add_library(ag99_live2d_renderer_core STATIC
+  src/d3d11_composition_surface.cpp
+  src/d3d11_renderer.cpp
+)
+target_include_directories(ag99_live2d_renderer_core
+  PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include"
+  PRIVATE
+    "${CUBISM_CORE_PATH}/include"
+    "${CUBISM_FRAMEWORK_PATH}/src"
+    "${DIRECTXTK_PATH}/Inc"
+)
+target_compile_definitions(ag99_live2d_renderer_core PRIVATE
+  UNICODE
+  _UNICODE
+  NOMINMAX
+  WIN32_LEAN_AND_MEAN
+)
+target_link_libraries(ag99_live2d_renderer_core PUBLIC
+  Framework
+  ag99_cubism_core
+  ag99_directxtk
+  d3d11
+  d3dcompiler
+  dcomp
+  dxgi
+)
+
 target_compile_definitions(ag99-render-host PRIVATE
   UNICODE
   _UNICODE
@@ -89,12 +116,9 @@ target_include_directories(ag99-render-host PRIVATE
 )
 target_link_libraries(ag99-render-host PRIVATE
   Framework
+  ag99_live2d_renderer_core
   ag99_cubism_core
-  ag99_directxtk
   ag99_runtime_core
-  d3d11
-  d3dcompiler
-  dwmapi
   shell32
   winmm
 )

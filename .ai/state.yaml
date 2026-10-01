@@ -1,3 +1,62 @@
+live2d_render_component_design:
+  recorded_at: "2026-10-01"
+  class: refactor
+  risk: high
+  status: d3d11_surface_implemented_pending_visual_acceptance
+  scope:
+    - "Audit native C++ translation coverage against the frontend business code."
+    - "Deliver a design document and boundary contract for a new Live2D rendering component."
+    - "Extract Cubism D3D11 renderer ownership, texture binding, projection, and draw calls into ag99_live2d_renderer_core."
+    - "Move D3D11 device/context, premultiplied-alpha DirectComposition surface, render target, transparent frame clear, and Present into ag99_live2d_renderer_core."
+    - "Keep HWND, tray, frame loop, model/runtime lifecycle, and action/audio behavior in the native Host."
+    - "Specify compiler (10 stages + PerformanceSchedule), parameter runtime, and host contracts."
+    - "Define the replacement sequence with no compatibility layer, per Replacement Over Compatibility."
+  findings:
+    - "Protocol and parameter-plan validation layers are faithful translations and are reusable as-is."
+    - "The parameter runtime is about one third translated; the frontend multi-contributor mixer, interaction sway, and interaction gaze are absent."
+    - "CompileMotionPlan is a parallel re-implementation, not a translation, and omits the 2332-line PerformanceSchedule layer that sits between the two stage groups."
+    - "Audit follow-up fixed three trajectory/signal bugs: blend-in now captures the live parameter value, bounded/spring responses retain frontend-style velocity state with analytic damped-spring integration, and lip-sync uses the frontend RMS noise gate and independent intensity/energy channels."
+    - "Spectral emphasis remains partial: native emphasis currently follows RMS envelope rise because the audio path has no frequency-spectrum input."
+    - "protocol.cpp already parses speech cues, but the host discards text and speech cues before they can reach the compiler, so PerformanceSchedule cannot be ported until that is fixed."
+    - "The first backend is intentionally D3D11-only; its fixed-size surface does not implement resize or device-loss recovery."
+  validation:
+    - "`cmake --build render-core/build --config Release --parallel 2` passed; ag99_live2d_renderer_core.lib and ag99-render-host.exe produced."
+    - "`cmake --build render-core/build/runtime-core --config Release --target ag99-runtime-protocol-smoke --parallel 2` passed; smoke executable exited 0."
+    - "`git diff --check` passed."
+    - "`cmake --build render-core/build --config Release --target ag99_live2d_renderer_core ag99-render-host --parallel 2` passed after extracting the D3D11 composition surface."
+    - "The native host loaded the Mk6 model, exposed its window, and exited with code 0 after the tray exit command; the captured desktop was occupied by a full-screen game, so model visibility and alpha edges were not confirmed."
+    - "Surface shutdown now clears and flushes D3D11 state, detaches the DirectComposition root/content, commits that detach, and then releases dependent resources."
+    - "Golden-sample equivalence and per-frame trajectory comparison are specified but not implemented; live visual acceptance is still required."
+  open_decisions:
+    - "D-1 authoritative compiler owner: C++ versus TypeScript. render-core/README.md:83-96 already records the native runtime plane as the intended direction but says nothing about the compiler."
+    - "D-2 Motion Lab and Action Lab depend on the TypeScript compiler; deleting it requires rewriting the inlined preview compiler."
+    - "D-4 six performanceSchedule.ts helper contracts remain unexamined, so stage 7 and stage 9 failure-reason sets are incomplete."
+    - "D-5 implement spectral emphasis natively or declare an explicit degradation."
+  evidence_gap:
+    - "Native visual acceptance is still pending; model proportions, motion quality, lip-sync appearance, Physics feel, transparent alpha edges, Spout output, and live Adapter playback need a suitable desktop capture/session."
+
+native_runtime_frontend_plan_bridge:
+  recorded_at: "2026-10-01"
+  class: feature
+  risk: high
+  status: source_complete_pending_live_acceptance
+  scope:
+    - "Accept engine.parameter_plan.v3 in the native output-segment protocol."
+    - "Translate frontend timing, keyframes, speech modulation, response dynamics, and expression resources into the native frame loop."
+    - "Apply configured LipSync parameters from the decoded PCM16 RMS envelope."
+    - "Apply physics output ownership filtering from physics3.json and frontend-style speech envelopes."
+    - "Translate normalized mouse drag into the frontend Angle/Body/EyeBall parameter writes."
+  non_actions:
+    - "Do not change settings pages, Spout, VAD, or the Adapter's current motion-intent emission path."
+    - "Do not commit Git changes without explicit user approval."
+  validation:
+    - "`cmake --build render-core/build --config Release --parallel 2` passed."
+    - "`cmake --build render-core/build/runtime-core --config Release --target ag99-runtime-protocol-smoke --parallel 2` passed."
+    - "Protocol smoke executable passed, including engine.parameter_plan.v3 motion-slot acceptance."
+    - "`git diff --check` passed."
+  evidence_gap:
+    - "Live native host verification is still required for direct parameter-plan delivery, expression playback, drag look, and multi-parameter lip-sync quality."
+
 native_runtime_motion_plan:
   recorded_at: "2026-09-30"
   class: feature

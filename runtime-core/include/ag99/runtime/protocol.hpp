@@ -18,6 +18,7 @@ using Json = nlohmann::json;
 inline constexpr std::string_view kProtocolVersion = "v2";
 inline constexpr std::string_view kOutputSegmentSchema = "output.segment.v5";
 inline constexpr std::string_view kMotionIntentSchema = "engine.motion_intent.v4";
+inline constexpr std::string_view kParameterPlanSchema = "engine.parameter_plan.v3";
 inline constexpr std::string_view kModelInfoSchema = "live2d_scan.v4";
 
 class ProtocolError final : public std::runtime_error {

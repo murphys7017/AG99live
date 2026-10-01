@@ -198,11 +198,21 @@ MotionSlot parse_motion_slot(const Json& value) {
     throw ProtocolError("payload.motion.payload must be an object");
   }
   const auto schema_it = payload_it->find("schema_version");
-  if (message_type != "engine.motion_intent"
-      || schema_it == payload_it->end()
-      || !schema_it->is_string()
-      || schema_it->get<std::string>() != kMotionIntentSchema) {
-    throw ProtocolError("payload.motion must contain engine.motion_intent.v4");
+  if (schema_it == payload_it->end()
+      || !schema_it->is_string()) {
+    throw ProtocolError(
+        "payload.motion must contain engine.motion_intent.v4 or engine.parameter_plan.v3");
+  }
+  const auto schema = schema_it->get<std::string>();
+  const bool supported_motion_intent =
+      message_type == "engine.motion_intent"
+      && schema == kMotionIntentSchema;
+  const bool supported_parameter_plan =
+      message_type == "engine.parameter_plan"
+      && schema == kParameterPlanSchema;
+  if (!supported_motion_intent && !supported_parameter_plan) {
+    throw ProtocolError(
+        "payload.motion must contain engine.motion_intent.v4 or engine.parameter_plan.v3");
   }
   return MotionSlot{
       MotionSlot::State::Present,

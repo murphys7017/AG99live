@@ -28,3 +28,5 @@ deploy_adapter.ps1
 /promo-video/
 runtime-core/build/
 render-core/build/
+/render-core/build-symbols/
+/render-core-window.png
