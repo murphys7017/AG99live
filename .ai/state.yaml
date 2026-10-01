@@ -1,3 +1,29 @@
+native_microphone_capture_thread_safety:
+  recorded_at: "2026-10-02"
+  class: bugfix
+  risk: high
+  status: source_complete_pending_live_acceptance
+  scope:
+    - "Move microphone frame transmission off the waveIn driver callback onto a dedicated sender thread, so the driver never blocks on network I/O."
+    - "Stop calling Stop() from the driver callback; CloseDevice runs waveInReset, which waits for that callback to drain and previously caused a deadlock plus a use-after-free of the active WAVEHDR."
+    - "Serialise Stop, CloseDevice, and the sender join so concurrent stop paths cannot close the same HWAVEIN twice."
+    - "Guard the capture queue and stream identity with a dedicated mutex that is never held across a waveIn or websocket call, and make the device handle atomic for the driver callback."
+    - "Bound the capture queue and report dropped bytes instead of blocking capture."
+  non_actions:
+    - "Do not change the binary audio protocol, the stream identifiers, or the tray commands."
+    - "Do not start the microphone automatically; control.start_mic remains unhandled."
+  review: >-
+    Two defects were introduced and corrected during self-review before commit: a
+    first version let CloseDevice take a different lock from Stop, which
+    serialised nothing, and a second version held stop_mutex_ across the sender
+    join while the sender needed that same lock, which deadlocked. The final
+    shape releases stop_mutex_ before joining and serialises joins separately.
+  validation:
+    - "`cmake --build render-core/build --config Release --target ag99-render-host` passed with no errors and no compiler warnings."
+    - "Live run against the local Adapter with `--text=` still reaches `[motion] compiled 5 parameter tracks for 800 ms` with no exception, confirming no regression in the text playback path."
+  evidence_gap:
+    - "The microphone path itself was never exercised: it can only be started from the tray menu, and the Adapter's control.start_mic is still reported as an ignored message type. Start, sustained capture, stop from the tray, and stop at shutdown all need a manual run."
+
 native_motion_compile_crash_fix:
   recorded_at: "2026-10-02"
   class: bugfix

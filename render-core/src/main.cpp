@@ -917,11 +917,18 @@ public:
     if (running_.load() || !websocket_.connected()) {
       return false;
     }
+    if (audio_worker_.joinable()) {
+      audio_worker_.join();
+    }
 
     const auto serial = next_stream_serial_.fetch_add(1);
-    stream_id_ = "native-mic-" + std::to_string(serial);
-    turn_id_ = stream_id_;
-    sequence_ = 0;
+    {
+      std::scoped_lock lock(queue_mutex_);
+      stream_id_ = "native-mic-" + std::to_string(serial);
+      turn_id_ = stream_id_;
+      sequence_ = 0;
+      pending_frames_.clear();
+    }
 
     WAVEFORMATEX format{};
     format.wFormatTag = WAVE_FORMAT_PCM;
@@ -932,17 +939,18 @@ public:
     format.nAvgBytesPerSec = format.nSamplesPerSec * format.nBlockAlign;
     format.cbSize = 0;
 
+    HWAVEIN device = nullptr;
     const auto open_result = waveInOpen(
-        &device_,
+        &device,
         WAVE_MAPPER,
         &format,
         reinterpret_cast<DWORD_PTR>(&WaveInCallback),
         reinterpret_cast<DWORD_PTR>(this),
         CALLBACK_FUNCTION);
     if (open_result != MMSYSERR_NOERROR) {
-      device_ = nullptr;
       return false;
     }
+    device_.store(device);
 
     for (auto& buffer : buffers_) {
       buffer.assign(kBufferBytes, 0);
@@ -954,69 +962,100 @@ public:
       auto& header = headers_[index];
       header.lpData = reinterpret_cast<LPSTR>(buffers_[index].data());
       header.dwBufferLength = static_cast<DWORD>(buffers_[index].size());
-      if (waveInPrepareHeader(device_, &header, sizeof(header))
+      if (waveInPrepareHeader(device, &header, sizeof(header))
           != MMSYSERR_NOERROR) {
-        Stop("capture_setup_failed");
+        CloseDevice();
         return false;
       }
       prepared_[index] = true;
-      if (waveInAddBuffer(device_, &header, sizeof(header))
+      if (waveInAddBuffer(device, &header, sizeof(header))
           != MMSYSERR_NOERROR) {
-        Stop("capture_setup_failed");
+        CloseDevice();
         return false;
       }
     }
 
+    const std::string stream_id = StreamId();
+    const std::string turn_id = TurnId();
     const auto start_message = ag99::runtime::build_input_audio_stream_start(
-        stream_id_,
+        stream_id,
         "microphone",
         16000,
         1,
         "manual",
         std::nullopt,
-        turn_id_);
+        turn_id);
     if (!websocket_.send_text(start_message.dump())) {
-      Stop("capture_start_send_failed");
+      CloseDevice();
       return false;
     }
 
+    audio_worker_ = std::thread([this] { AudioSenderLoop(); });
+    {
+      std::scoped_lock lock(queue_mutex_);
+      running_stream_active_ = true;
+    }
     running_.store(true);
-    if (waveInStart(device_) != MMSYSERR_NOERROR) {
+    if (waveInStart(device) != MMSYSERR_NOERROR) {
       Stop("capture_device_start_failed");
       return false;
     }
     return true;
   }
 
+  // Never call this from the waveIn driver callback: CloseDevice runs
+  // waveInReset, which waits for that callback to drain.
   void Stop(std::string_view reason) {
-    const bool was_running = running_.exchange(false);
-    if (device_) {
-      waveInStop(device_);
-      waveInReset(device_);
-      for (std::size_t index = 0; index < headers_.size(); ++index) {
-        if (prepared_[index]) {
-          waveInUnprepareHeader(device_, &headers_[index], sizeof(WAVEHDR));
-          prepared_[index] = false;
-        }
+    running_.store(false);
+    {
+      // Released before joining: the sender thread may be inside CloseDevice
+      // and needs this same lock to finish.
+      std::scoped_lock stop_lock(stop_mutex_);
+      CloseDevice();
+    }
+    queue_condition_.notify_all();
+    {
+      // Serialises concurrent Stop callers so only one of them joins.
+      std::scoped_lock join_lock(join_mutex_);
+      if (audio_worker_.joinable()) {
+        audio_worker_.join();
       }
-      waveInClose(device_);
-      device_ = nullptr;
     }
 
-    if (was_running && !stream_id_.empty() && websocket_.connected()) {
-      const auto last_sequence = sequence_ == 0
-          ? std::optional<std::uint64_t>{}
-          : std::optional<std::uint64_t>{sequence_ - 1};
-      const auto end_message = ag99::runtime::build_input_audio_stream_end(
-          stream_id_,
-          reason,
-          false,
-          last_sequence,
-          "manual");
-      websocket_.send_text(end_message.dump());
+    std::string stream_id;
+    std::optional<std::uint64_t> last_sequence;
+    std::uint64_t dropped = 0;
+    bool was_running = running_stream_active_;
+    {
+      std::scoped_lock queue_lock(queue_mutex_);
+      if (was_running) {
+        stream_id = stream_id_;
+        last_sequence = sequence_ == 0
+            ? std::nullopt
+            : std::optional<std::uint64_t>{sequence_ - 1};
+      }
+      running_stream_active_ = false;
+      dropped = dropped_frames_;
+      dropped_frames_ = 0;
+      stream_id_.clear();
+      turn_id_.clear();
+      sequence_ = 0;
+      pending_frames_.clear();
     }
-    stream_id_.clear();
-    turn_id_.clear();
+    if (dropped > 0) {
+      std::cerr << "[microphone] dropped " << dropped
+                << " captured bytes while sending\n";
+    }
+    if (stream_id.empty() || !websocket_.connected()) {
+      return;
+    }
+    const auto end_message = ag99::runtime::build_input_audio_stream_end(
+        stream_id,
+        reason,
+        false,
+        last_sequence,
+        "manual");
+    websocket_.send_text(end_message.dump());
   }
 
   bool running() const noexcept {
@@ -1026,6 +1065,9 @@ public:
 private:
   static constexpr std::size_t kBufferCount = 4;
   static constexpr std::size_t kBufferBytes = 3200;
+  // Capture runs at 16 kHz mono, so 100 ms of audio; anything queued beyond
+  // this was already dropped by the driver before we could send it.
+  static constexpr std::size_t kMaxQueuedFrames = 16;
 
   static void CALLBACK WaveInCallback(
       HWAVEIN,
@@ -1040,46 +1082,131 @@ private:
     capture->OnBuffer(reinterpret_cast<WAVEHDR*>(parameter1));
   }
 
+  // Driver callback: copy, re-arm, return. No allocation-heavy work, no
+  // network I/O, and never a device teardown from this thread.
   void OnBuffer(WAVEHDR* header) {
     if (!running_.load() || !header || header->dwBytesRecorded == 0) {
       return;
     }
+    {
+      std::scoped_lock lock(queue_mutex_);
+      if (pending_frames_.size() >= kMaxQueuedFrames) {
+        dropped_frames_ += header->dwBytesRecorded;
+      } else {
+        pending_frames_.emplace_back(
+            reinterpret_cast<const std::uint8_t*>(header->lpData),
+            reinterpret_cast<const std::uint8_t*>(header->lpData)
+                + header->dwBytesRecorded);
+      }
+    }
+    queue_condition_.notify_one();
 
-    const auto payload = std::span<const std::uint8_t>(
-        reinterpret_cast<const std::uint8_t*>(header->lpData),
-        header->dwBytesRecorded);
-    const ag99::runtime::AudioChunkMetadata metadata{
-        stream_id_,
-        turn_id_,
-        sequence_++,
-        "pcm16le",
-        16000,
-        1,
-        "manual"};
-    try {
-      const auto frame = ag99::runtime::build_binary_audio_frame(
-          metadata, payload);
-      websocket_.send_binary(frame);
-    } catch (const std::exception& error) {
-      std::cerr << "[microphone] failed to build audio frame: "
-                << error.what() << '\n';
-      Stop("capture_frame_failed");
+    header->dwBytesRecorded = 0;
+    const HWAVEIN device = device_.load();
+    if (device) {
+      waveInAddBuffer(device, header, sizeof(WAVEHDR));
+    }
+  }
+
+  void AudioSenderLoop() {
+    while (true) {
+      std::vector<std::uint8_t> payload;
+      ag99::runtime::AudioChunkMetadata metadata{};
+      {
+        std::unique_lock lock(queue_mutex_);
+        queue_condition_.wait(lock, [this] {
+          return !pending_frames_.empty() || !running_.load();
+        });
+        if (pending_frames_.empty()) {
+          return;
+        }
+        payload = std::move(pending_frames_.front());
+        pending_frames_.pop_front();
+        metadata = ag99::runtime::AudioChunkMetadata{
+            stream_id_,
+            turn_id_,
+            sequence_++,
+            "pcm16le",
+            16000,
+            1,
+            "manual"};
+      }
+      if (metadata.stream_id.empty()) {
+        continue;
+      }
+      try {
+        const auto frame = ag99::runtime::build_binary_audio_frame(
+            metadata, std::span<const std::uint8_t>(payload));
+        if (!websocket_.send_binary(frame)) {
+          throw std::runtime_error("audio_frame_send_failed");
+        }
+      } catch (const std::exception& error) {
+        std::cerr << "[microphone] audio frame send failed: "
+                  << error.what() << '\n';
+        // Never call Stop() from this thread: it joins this thread. Tear the
+        // device down here (safe, we are not the driver callback) and let the
+        // main thread run the full stop when it next does.
+        running_.store(false);
+        CloseDevice();
+        return;
+      }
+    }
+  }
+
+  // Must run off the driver callback. stop_mutex_ serialises callers and is
+  // recursive because Stop() calls into this.
+  void CloseDevice() {
+    std::scoped_lock lock(stop_mutex_);
+    const HWAVEIN device = device_.exchange(nullptr);
+    if (!device) {
       return;
     }
-    header->dwBytesRecorded = 0;
-    waveInAddBuffer(device_, header, sizeof(WAVEHDR));
+    waveInStop(device);
+    waveInReset(device);
+    for (std::size_t index = 0; index < headers_.size(); ++index) {
+      if (prepared_[index]) {
+        waveInUnprepareHeader(device, &headers_[index], sizeof(WAVEHDR));
+        prepared_[index] = false;
+      }
+    }
+    waveInClose(device);
+  }
+
+  std::string StreamId() const {
+    std::scoped_lock lock(queue_mutex_);
+    return stream_id_;
+  }
+
+  std::string TurnId() const {
+    std::scoped_lock lock(queue_mutex_);
+    return turn_id_;
   }
 
   ag99::runtime::WinHttpWebSocketClient& websocket_;
-  HWAVEIN device_ = nullptr;
+  std::atomic<HWAVEIN> device_{nullptr};
   std::array<std::vector<std::uint8_t>, kBufferCount> buffers_{};
   std::array<WAVEHDR, kBufferCount> headers_{};
   std::array<bool, kBufferCount> prepared_{};
   std::atomic<bool> running_{false};
+  // Guards the capture queue and the stream identity fields. Never held
+  // across a waveIn or websocket call.
+  mutable std::mutex queue_mutex_;
+  std::condition_variable queue_condition_;
+  std::deque<std::vector<std::uint8_t>> pending_frames_;
+  std::uint64_t dropped_frames_ = 0;
+  // True between a successful stream start and its matching end, so Stop
+  // still emits input.audio_stream_end after the sender already cleared
+  // running_.
+  bool running_stream_active_ = false;
   std::string stream_id_;
   std::string turn_id_;
   std::uint64_t sequence_ = 0;
   std::atomic<std::uint64_t> next_stream_serial_{1};
+  // Serialises Stop against CloseDevice, including the Stop -> CloseDevice
+  // re-entry, so the waveIn teardown runs exactly once.
+  std::recursive_mutex stop_mutex_;
+  std::mutex join_mutex_;
+  std::thread audio_worker_;
 };
 
 class RuntimeBridge final {
