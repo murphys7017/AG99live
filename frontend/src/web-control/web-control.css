@@ -1,23 +1,6 @@
-html,
-body,
-#app {
-  width: 100%;
-  min-width: 320px;
-  min-height: 100%;
-  margin: 0;
-}
-
-body {
-  overflow: auto;
-  background: #171a1d;
-  color: #edf0f1;
-}
-
-button,
-input,
-select {
-  font: inherit;
-}
+/* AG99live control page chrome (shell, navigation, header, content sections).
+   The document base, design tokens and shared-component theming live in
+   ./theme.css; this file only styles the page's own surfaces. */
 
 .web-control-shell {
   display: grid;
@@ -112,7 +95,8 @@ select {
   justify-content: space-between;
   gap: 18px;
   border-bottom: 1px solid #343a3d;
-  background: rgb(23 26 29 / 95%);
+  /* Opaque: the header stays sticky over scrolling content. */
+  background: var(--wc-bg);
 }
 
 .web-control-header p,
@@ -423,4 +407,75 @@ select {
     gap: 10px;
     margin-left: 0;
   }
+}
+
+/* ---------- Schema-driven settings form ----------
+   Structure only. The control page renders its fields from the backend config
+   spec, so these rules must cover every field kind the spec can declare. */
+
+.web-control-settings-group__description {
+  margin: -4px 0 2px;
+  color: #97a3a1;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.web-control-field {
+  gap: 7px;
+}
+
+.web-control-field__label {
+  color: #bdc6c4;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.web-control-field__hint {
+  color: #8d9a9c;
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.web-control-field__error {
+  color: #f0c9c1;
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.web-control-settings-group input:disabled,
+.web-control-settings-group select:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.web-control-checkbox {
+  align-items: flex-start;
+}
+
+.web-control-checkbox__copy {
+  display: grid;
+  gap: 3px;
+}
+
+.web-control-checkbox__copy strong {
+  color: #bdc6c4;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.web-control-checkbox__copy small {
+  color: #8d9a9c;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.55;
+}
+
+.web-control-form-actions {
+  align-items: center;
+  gap: 14px;
+}
+
+.web-control-form-actions__status {
+  color: #8d9a9c;
+  font-size: 12px;
 }

@@ -10,6 +10,7 @@ live2d_render_component_design:
     - "Move D3D11 device/context, premultiplied-alpha DirectComposition surface, render target, transparent frame clear, and Present into ag99_live2d_renderer_core."
     - "Keep HWND, tray, frame loop, model/runtime lifecycle, and action/audio behavior in the native Host."
     - "Translate frontend thinking sway and cursor-gaze behavior into Native turn lifecycle and parameter contributions."
+    - "Preserve the complete output.segment through audio queue delivery to the Native motion compiler input."
     - "Specify compiler (10 stages + PerformanceSchedule), parameter runtime, and host contracts."
     - "Define the replacement sequence with no compatibility layer, per Replacement Over Compatibility."
   findings:
@@ -21,7 +22,7 @@ live2d_render_component_design:
     - "CompileMotionPlan is a parallel re-implementation, not a translation, and omits the 2332-line PerformanceSchedule layer that sits between the two stage groups."
     - "Audit follow-up fixed three trajectory/signal bugs: blend-in now captures the live parameter value, bounded/spring responses retain frontend-style velocity state with analytic damped-spring integration, and lip-sync uses the frontend RMS noise gate and independent intensity/energy channels."
     - "Spectral emphasis remains partial: native emphasis currently follows RMS envelope rise because the audio path has no frequency-spectrum input."
-    - "protocol.cpp already parses speech cues, but the host discards text and speech cues before they can reach the compiler, so PerformanceSchedule cannot be ported until that is fixed."
+    - "protocol.cpp parses text and speech cues, and the host now retains the complete output.segment through its audio queue, pending motion state, and CompileMotionPlan entry point; the compiler currently reads only motion.payload, so text and cues are not yet consumed."
     - "The first backend is intentionally D3D11-only; its fixed-size surface does not implement resize or device-loss recovery."
   validation:
     - "`cmake --build render-core/build --config Release --parallel 2` passed; ag99_live2d_renderer_core.lib and ag99-render-host.exe produced."
@@ -30,6 +31,7 @@ live2d_render_component_design:
     - "Native parameter-mixer Release build passed; protocol smoke executable exited 0."
     - "`cmake --build render-core/build --config Release --parallel 2` passed after interaction lifecycle integration; `ag99-runtime-protocol-smoke.exe` exited 0."
     - "`cmake --build render-core/build --config Release --target ag99_live2d_renderer_core ag99-render-host --parallel 2` passed after extracting the D3D11 composition surface."
+    - "`cmake --build render-core/build --config Release --parallel 2` passed after preserving complete output.segment data through Native audio/motion delivery."
     - "The native host loaded the Mk6 model, exposed its window, and exited with code 0 after the tray exit command; the captured desktop was occupied by a full-screen game, so model visibility and alpha edges were not confirmed."
     - "Surface shutdown now clears and flushes D3D11 state, detaches the DirectComposition root/content, commits that detach, and then releases dependent resources."
     - "Golden-sample equivalence and per-frame trajectory comparison are specified but not implemented; live visual acceptance is still required."
@@ -680,22 +682,37 @@ verification:
     - Live AstrBot, Electron, TTS, ESP32, and Live2D runtime acceptance remains user-led.
 
 astrbot_plugin_web_control:
-  recorded_at: "2026-10-01"
-  class: feature
-  risk: high
+  recorded_at: "2026-10-02"
+  class: bugfix
+  risk: medium
   status: source_complete_pending_live_acceptance
   scope:
     - "Add an AstrBot Plugin View for Adapter settings, Live2D semantic-profile editing, and motion-tuning sample management."
     - "Register dashboard-authenticated plugin APIs under the AG99live plugin route and use the plugin-page bridge for requests."
     - "Share the existing motion-tuning protocol normalizers and serializer across desktop and Web control flows."
+    - "Decouple the control page from the Electron window-shell stylesheet so the embedded page scrolls and owns its own theme."
+    - "Make the plugin config a single declarative spec on the backend and render the control page form from it."
   non_actions:
     - "Do not migrate microphone, global hotkeys, Spout/ESP32, or desktop live-preview ownership in this batch."
     - "Keep existing desktop helper views until the local-runtime bridge is implemented and accepted."
     - "Do not reload the active AstrBot plugin; commit only the Web control scope approved on 2026-10-01."
+    - "Do not restyle the desktop Electron windows; the control page theme layer is scoped to the plugin page only."
+    - "Do not migrate web_control.py to astrbot.api.web; the installed SDK does not expose it."
+    - "Do not choose the control page visual theme; it is pending separate user direction."
   findings:
     - "The running AstrBot supports views/<page>/index.html, relative bridge endpoints, and register_web_api routes prefixed by the plugin name."
     - "The installed SDK does not expose astrbot.api.web; the implementation uses its Quart-compatible request context and g.username."
+    - "The installed AstrBot is 4.28.1. Its astrbot/api/ has no web module, so the documented astrbot.api.web migration would break this plugin until the host is upgraded."
+    - "AstrBot 4.28.1 parent and bridge match the current master contract: status==error is rejected, data is unwrapped with data ?? response, and the bridge exposes onContext, t and upload/download/SSE."
     - "PlatformManager does not call terminate() when run() exits with an exception, so the control-platform registry is also cleared in run()'s finally block."
+    - "The control page was unscrollable because it imported the former src/style.css, whose Electron window-shell reset pins html/body/#app to height:100% + overflow:hidden and clips overflowing content; the page only overrode body, never #app. Verified: scroll reported moved:false/atEnd:true while later config groups and the save button were unreachable."
+    - "src/style.css mixed two ownership concerns: the Electron desktop chrome and the components shared with the plugin page. It is now split into styles/desktop-app.css, styles/shared-components.css and styles/desktop-windows.css; the desktop imports all three in the original cascade order and the control page imports only the shared one."
+    - "Three shared-component rules (settings-card header/eyebrow/h2, history-item header) were defined inside the desktop block and were relocated to styles/shared-components.css."
+    - "styles/shared-components.css depends on the --ink-* tokens declared by the desktop block, so web-control/theme.css redefines them for the dark control surface."
+    - "The host is Vue 3 + Vuetify 3 with a blue primary (light #3c96ca, dark #5ba4d4) and light/dark/system modes. It syncs theme to a plugin page three ways: a ?theme= query param, bridge context isDark, and <html data-theme>; the control page currently ignores all three, so a light-mode host renders a dark island. Theme work is deliberately deferred."
+    - "Plugin config (self._plugin.config + save_config) and platform config (AstrBot PlatformManager-owned platform_config) are separate persistence owners; unifying them in the page is not yet possible without AstrBot-side platform config persistence."
+    - "The plugin config shape was previously declared three times: _conf_schema.json, the web_control validator, and the Vue template. web_control.CONFIG_SCHEMA is now the single source for validation, defaults and the served form metadata."
+    - "The bridge reduces a rejected API call to a bare message string and drops any field pointer, so save_settings reports a rejected patch as HTTP 200 with {ok:false, error:{code, field}} instead of using the error channel."
   validation:
     - "npm run build:astrbot-page passed and generated astrbot_plugin_ag99live_adapter/views/control-panel."
     - "Adapter run() now unregisters its control-platform entry on every exit; terminate() cleanup remains identity-checked."
@@ -703,9 +720,16 @@ astrbot_plugin_web_control:
     - "AstrBot plugin structure checker reported 0 errors and 0 warnings."
     - "git diff --check passed."
     - "Full compileall could not write existing __pycache__ files while the AstrBot runtime was active; the changed module passed in-memory syntax compilation."
+    - "vue-tsc typecheck:renderer passed after the stylesheet split and after the schema-driven form."
+    - "Desktop rendering parity was proven mechanically: the pre-change and post-change renderer CSS were compared as 1300 selector|property pairs and every value was identical; the only structural change is the intended rule split."
+    - "Config boundary check passed 41 assertions over the served spec, accepted patches, 16 rejection cases, projection of hand-edited config and provider listing."
+    - "Control page verified in a real browser against the built artifact with a stub bridge fed by the real backend spec: all four sections and ten fields render from the schema, the provider picker lists real providers, an inline field error appears for a blanked required field, the dirty indicator and save enable/disable work, and a save clears the dirty state."
   evidence_gap:
     - "The active plugin was not reloaded; opening the view and exercising authenticated API requests in the live AstrBot Dashboard remains unverified."
     - "Desktop-local device controls and live motion preview are intentionally not exposed by this first Web control batch."
+    - "Electron desktop windows were verified by compiled-CSS parity and typecheck only; no live Electron run confirmed the unchanged desktop appearance."
+    - "The new control/config/schema route and the field-anchored save rejection were exercised through a stub bridge, not against a live reloaded AstrBot."
+    - "A failure in control/samples still raises the page-level error banner even though motion tuning is not the active section."
 
 spout_async_readback:
   recorded_at: "2026-10-02"

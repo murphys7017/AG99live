@@ -2,7 +2,11 @@ import { createApp } from "vue";
 import App from "./App.vue";
 import { getWindowRole } from "./app/useWindowRole";
 import { createDesktopBridge, desktopBridgeKey } from "./desktop-bridge/useDesktopBridge";
-import "./style.css";
+// Import order matters: it reproduces the historical single-file cascade of the
+// former src/style.css, so the Electron desktop rendering stays identical.
+import "./styles/desktop-app.css";
+import "./styles/shared-components.css";
+import "./styles/desktop-windows.css";
 
 const role = getWindowRole();
 const roleTitles: Record<string, string> = {

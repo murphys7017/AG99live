@@ -1,0 +1,334 @@
+/* AG99live Electron BrowserWindow-level shells: desktop shell, pet window and
+   overlay card. Desktop-only: the AstrBot plugin control page must NOT import this file. */
+
+.desktop-shell {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.desktop-shell--pet {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+}
+
+.desktop-shell--overlay {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  align-items: flex-end;
+  justify-content: flex-end;
+  padding: 0;
+  background: transparent;
+}
+
+.desktop-pet {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  background: transparent;
+}
+
+.desktop-pet__canvas-shell {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  border-radius: 0;
+  overflow: visible;
+  background: transparent;
+}
+
+.desktop-pet__canvas-mount,
+.desktop-pet__canvas {
+  width: 100%;
+  height: 100%;
+}
+
+.desktop-pet__canvas-mount {
+  position: relative;
+  user-select: none;
+  touch-action: none;
+  background: transparent;
+}
+
+.desktop-pet__canvas-mount--dragging {
+  cursor: grabbing;
+}
+
+.desktop-pet__canvas {
+  display: block;
+  background: transparent;
+}
+
+.desktop-pet__error {
+  position: absolute;
+  left: 20px;
+  right: 20px;
+  bottom: 12px;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 16px;
+  background: rgba(255, 244, 244, 0.94);
+  color: #9a3f3f;
+  font-size: 12px;
+}
+
+.overlay-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  height: auto;
+  overflow: hidden;
+  padding: 6px 8px 8px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(8, 8, 8, 0.76);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.4);
+  user-select: none;
+  touch-action: none;
+}
+
+.overlay-card__drag-zone {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  cursor: grab;
+}
+
+.overlay-card--dragging .overlay-card__drag-zone {
+  cursor: grabbing;
+}
+
+.overlay-card__grip {
+  width: 48px;
+  height: 5px;
+  margin: 0 auto;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+  opacity: 0.72;
+}
+
+.overlay-card__message {
+  margin: 0;
+  min-height: 20px;
+  max-height: 62px;
+  padding: 0 4px;
+  color: rgba(255, 255, 255, 0.94);
+  font-size: 14px;
+  line-height: 1.5;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.overlay-card__message[data-empty="true"] {
+  color: rgba(255, 255, 255, 0.56);
+}
+
+.overlay-card__status-row,
+.overlay-card__composer,
+.overlay-card__icon-group {
+  display: flex;
+}
+
+.overlay-card__status-row {
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 4px;
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.overlay-card__status-label {
+  font-size: 12px;
+  line-height: 1;
+}
+
+.overlay-card__icon-group {
+  align-items: center;
+  gap: 6px;
+}
+
+.overlay-card__icon-pill,
+.overlay-card__icon-button,
+.overlay-card__send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.overlay-card__icon-pill,
+.overlay-card__icon-button {
+  width: 26px;
+  height: 26px;
+}
+
+.overlay-card__icon-pill[data-active="true"] {
+  background: rgba(126, 181, 255, 0.26);
+  color: rgba(255, 255, 255, 0.96);
+}
+
+.overlay-card__icon-button--mic[data-active="true"] {
+  background: rgba(126, 181, 255, 0.26);
+  color: rgba(255, 255, 255, 0.96);
+}
+
+.overlay-card__icon-button--feedback[data-active="true"] {
+  background: rgba(126, 181, 255, 0.26);
+  color: rgba(255, 255, 255, 0.96);
+}
+
+.overlay-card__icon-button,
+.overlay-card__send {
+  cursor: pointer;
+  transition:
+    transform 120ms ease,
+    background 120ms ease;
+}
+
+.overlay-card__icon-button:hover,
+.overlay-card__send:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.overlay-card__icon-button:active,
+.overlay-card__send:active {
+  transform: translateY(1px);
+}
+
+.overlay-card__icon-button:disabled {
+  cursor: default;
+  opacity: 0.42;
+}
+
+.overlay-card__icon-button:disabled:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.overlay-card__icon {
+  width: 15px;
+  height: 15px;
+}
+
+.overlay-card__composer {
+  gap: 8px;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.overlay-card__input {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.28);
+  color: rgba(255, 255, 255, 0.96);
+  outline: none;
+  user-select: text;
+  touch-action: auto;
+}
+
+.overlay-card__input::placeholder {
+  color: rgba(255, 255, 255, 0.44);
+}
+
+.overlay-card__input:focus {
+  border-color: rgba(255, 255, 255, 0.28);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.08);
+}
+
+.overlay-card__send {
+  width: 32px;
+  height: 32px;
+}
+
+.no-drag,
+.no-drag button,
+.no-drag input,
+.no-drag textarea {
+  -webkit-app-region: no-drag;
+}
+
+@media (max-width: 720px) {
+  .pet-window {
+    padding-inline: 12px;
+  }
+
+  .pet-window__toolbar {
+    inset-inline: 12px;
+    padding: 10px 12px;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .pet-window__actions {
+    justify-content: flex-end;
+  }
+
+  .control-dock__status,
+  .settings-section__header,
+  .settings-grid,
+  .settings-card__meta,
+  .settings-card__stack {
+    grid-template-columns: 1fr;
+  }
+
+  .control-dock__actions {
+    flex-direction: column;
+  }
+
+  .action-preview__filters {
+    grid-template-columns: 1fr;
+  }
+
+  .action-preview__plan-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .profile-editor__layout,
+  .profile-editor__form,
+  .motion-tuning__layout,
+  .motion-tuning__plan-columns {
+    grid-template-columns: 1fr;
+  }
+
+  .profile-editor__binding-item,
+  .profile-editor__relation-item {
+    flex-direction: column;
+  }
+
+  .profile-editor__binding-form {
+    grid-template-columns: 1fr;
+  }
+
+  .desktop-panel {
+    padding: 14px;
+  }
+
+  .desktop-panel__body {
+    padding: 20px;
+    border-radius: 24px;
+  }
+
+  .desktop-panel__header {
+    flex-direction: column;
+  }
+
+  .overlay-card {
+    width: 100%;
+  }
+}

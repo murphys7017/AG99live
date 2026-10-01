@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from copy import deepcopy
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from math import isfinite
 from typing import Any
@@ -16,93 +17,361 @@ from .live2d.semantic_axis_profile import (
 )
 from .runtime.plugin_runtime import (
     get_control_platform,
+    get_plugin_context,
     list_control_platforms,
     set_plugin_config,
 )
 
 _PLUGIN_NAME = "astrbot_plugin_ag99live_adapter"
 _PAGE_API_PREFIX = "/control"
-_SETTINGS_SECTIONS = {
-    "general": {"client_uid", "client_nickname", "chat_buffer_size"},
-    "live2d_input": {"model_name", "image_cooldown_seconds"},
-    "performance_curve": {"enabled", "provider_id"},
-    "vad": {"prob_threshold", "required_hits", "required_misses"},
+
+
+@dataclass(frozen=True)
+class ConfigField:
+    """One editable plugin setting.
+
+    The control page renders its settings form from this spec, so a field is
+    declared exactly once and validation, defaults and UI metadata cannot drift.
+    """
+
+    key: str
+    kind: str
+    label: str
+    description: str
+    default: Any
+    minimum: float | None = None
+    maximum: float | None = None
+    step: float | None = None
+    max_length: int | None = None
+    required: bool = True
+    options_from: str | None = None
+
+    def to_json(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "key": self.key,
+            "kind": self.kind,
+            "label": self.label,
+            "description": self.description,
+            "default": self.default,
+            "required": self.required,
+        }
+        optional = {
+            "minimum": self.minimum,
+            "maximum": self.maximum,
+            "step": self.step,
+            "maxLength": self.max_length,
+            "optionsFrom": self.options_from,
+        }
+        for name, value in optional.items():
+            if value is not None:
+                payload[name] = value
+        return payload
+
+
+@dataclass(frozen=True)
+class ConfigSection:
+    key: str
+    label: str
+    description: str
+    fields: tuple[ConfigField, ...]
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "key": self.key,
+            "label": self.label,
+            "description": self.description,
+            "fields": [field.to_json() for field in self.fields],
+        }
+
+
+CONFIG_SCHEMA: tuple[ConfigSection, ...] = (
+    ConfigSection(
+        key="general",
+        label="基础身份与会话",
+        description="桌面端在 AstrBot 中使用的身份标识，以及它维护的对话上下文长度。",
+        fields=(
+            ConfigField(
+                key="client_uid",
+                kind="text",
+                label="Client UID",
+                description="桌面端前端在 AstrBot 中使用的用户 ID。",
+                default="desktop-client",
+                max_length=128,
+            ),
+            ConfigField(
+                key="client_nickname",
+                kind="text",
+                label="显示名称",
+                description="桌面端前端在 AstrBot 中显示的用户昵称。",
+                default="DesktopUser",
+                max_length=128,
+            ),
+            ConfigField(
+                key="chat_buffer_size",
+                kind="int",
+                label="对话缓冲条数",
+                description="桌面端维护的最近用户/助手文本条数。",
+                default=10,
+                minimum=1,
+                maximum=100,
+                step=1,
+            ),
+        ),
+    ),
+    ConfigSection(
+        key="live2d_input",
+        label="Live2D 与图片输入",
+        description="控制桌面端优先加载的 Live2D 模型，以及图片输入的节流策略。",
+        fields=(
+            ConfigField(
+                key="model_name",
+                kind="model",
+                label="优先模型",
+                description="优先加载的 Live2D 模型目录名。留空时使用扫描到的第一个模型。",
+                default="",
+                max_length=255,
+                required=False,
+                options_from="models",
+            ),
+            ConfigField(
+                key="image_cooldown_seconds",
+                kind="int",
+                label="图片输入冷却（秒）",
+                description=(
+                    "冷却期内的新图片会被丢弃，但文本仍正常提交；0 表示不限制。"
+                ),
+                default=0,
+                minimum=0,
+                maximum=86400,
+                step=1,
+            ),
+        ),
+    ),
+    ConfigSection(
+        key="performance_curve",
+        label="可选表演曲线",
+        description="为动作生成进入、保持和退出节奏提示；失败或超时不影响原动作播放。",
+        fields=(
+            ConfigField(
+                key="enabled",
+                kind="bool",
+                label="启用独立表演曲线 Provider",
+                description="调用独立 Provider 为动作生成进入、保持和退出节奏提示。",
+                default=False,
+            ),
+            ConfigField(
+                key="provider_id",
+                kind="provider",
+                label="表演曲线 Provider",
+                description="启用后必须选择一个聊天 Provider，不复用当前会话聊天模型。",
+                default="",
+                max_length=255,
+                required=False,
+                options_from="providers",
+            ),
+        ),
+    ),
+    ConfigSection(
+        key="vad",
+        label="语音断句",
+        description="Silero VAD 判定当前音频帧为语音的阈值，以及开始/结束所需的连续帧数。",
+        fields=(
+            ConfigField(
+                key="prob_threshold",
+                kind="float",
+                label="语音概率阈值",
+                description="Silero VAD 判定当前音频帧为语音的概率阈值。",
+                default=0.4,
+                minimum=0.01,
+                maximum=1.0,
+                step=0.01,
+            ),
+            ConfigField(
+                key="required_hits",
+                kind="int",
+                label="开始命中帧数",
+                description="开始一次语音输入前要求连续命中的帧数。",
+                default=3,
+                minimum=1,
+                maximum=120,
+                step=1,
+            ),
+            ConfigField(
+                key="required_misses",
+                kind="int",
+                label="结束静音帧数",
+                description="结束一次语音输入前要求连续静音的帧数。",
+                default=24,
+                minimum=1,
+                maximum=1000,
+                step=1,
+            ),
+        ),
+    ),
+)
+
+_SECTIONS_BY_KEY = {section.key: section for section in CONFIG_SCHEMA}
+_FIELDS_BY_PATH = {
+    f"{section.key}.{field.key}": field
+    for section in CONFIG_SCHEMA
+    for field in section.fields
 }
+
+
+class ConfigValidationError(ValueError):
+    """A rejected settings patch, anchored to the offending field when known."""
+
+    def __init__(self, code: str, field: str = "", detail: str = "") -> None:
+        super().__init__(code)
+        self.code = code
+        self.field = field
+        self.detail = detail
+
+    def to_json(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {"code": self.code}
+        if self.field:
+            payload["field"] = self.field
+        if self.detail:
+            payload["detail"] = self.detail
+        return payload
+
+
+def default_settings() -> dict[str, dict[str, Any]]:
+    return {
+        section.key: {field.key: field.default for field in section.fields}
+        for section in CONFIG_SCHEMA
+    }
 
 
 def normalize_settings_patch(value: Any) -> dict[str, dict[str, Any]]:
     if not isinstance(value, dict) or not value:
-        raise ValueError("settings_patch_must_be_non_empty_object")
+        raise ConfigValidationError("settings_patch_must_be_non_empty_object")
 
     normalized: dict[str, dict[str, Any]] = {}
-    for section, fields in value.items():
-        if section not in _SETTINGS_SECTIONS or not isinstance(fields, dict):
-            raise ValueError(f"settings_section_invalid:{section}")
-        allowed_fields = _SETTINGS_SECTIONS[section]
-        if not fields or set(fields) - allowed_fields:
-            raise ValueError(f"settings_fields_invalid:{section}")
-        normalized[section] = {
-            key: _normalize_setting_value(section, key, field_value)
-            for key, field_value in fields.items()
+    for section_key, fields in value.items():
+        section = _SECTIONS_BY_KEY.get(section_key)
+        if section is None or not isinstance(fields, dict) or not fields:
+            raise ConfigValidationError("settings_fields_invalid", str(section_key))
+        normalized[section_key] = {
+            field_key: _normalize_setting_value(
+                f"{section_key}.{field_key}",
+                _field(section_key, field_key),
+                fields[field_key],
+            )
+            for field_key in fields
         }
 
-    if normalized.get("performance_curve", {}).get("enabled"):
-        provider_id = normalized.get("performance_curve", {}).get("provider_id")
-        if provider_id is None:
-            provider_id = ""
-        if not provider_id.strip():
-            raise ValueError("performance_curve_provider_required")
+    _normalize_cross_field(normalized)
+    _verify_providers(normalized)
     return normalized
 
 
-def _normalize_setting_value(section: str, key: str, value: Any) -> Any:
-    if section == "general" and key in {"client_uid", "client_nickname"}:
-        if not isinstance(value, str) or not value.strip() or len(value.strip()) > 128:
-            raise ValueError(f"settings_value_invalid:{section}.{key}")
-        return value.strip()
-    if section == "general" and key == "chat_buffer_size":
-        return _bounded_integer(section, key, value, minimum=1, maximum=100)
-    if section == "live2d_input" and key == "model_name":
-        if not isinstance(value, str) or len(value.strip()) > 255:
-            raise ValueError(f"settings_value_invalid:{section}.{key}")
-        return value.strip()
-    if section == "live2d_input" and key == "image_cooldown_seconds":
-        return _bounded_integer(section, key, value, minimum=0, maximum=86400)
-    if section == "performance_curve" and key == "enabled":
-        if not isinstance(value, bool):
-            raise ValueError(f"settings_value_invalid:{section}.{key}")
-        return value
-    if section == "performance_curve" and key == "provider_id":
-        if not isinstance(value, str) or len(value.strip()) > 255:
-            raise ValueError(f"settings_value_invalid:{section}.{key}")
-        return value.strip()
-    if section == "vad" and key == "prob_threshold":
+def _field(section_key: str, field_key: str) -> ConfigField:
+    field = _FIELDS_BY_PATH.get(f"{section_key}.{field_key}")
+    if field is None:
+        raise ConfigValidationError(
+            "settings_field_unsupported", f"{section_key}.{field_key}"
+        )
+    return field
+
+
+def _normalize_setting_value(path: str, field: ConfigField, value: Any) -> Any:
+    if field.kind in {"text", "model", "provider"}:
+        if not isinstance(value, str):
+            raise ConfigValidationError("settings_value_invalid", path)
+        normalized = value.strip()
+        if field.max_length is not None and len(normalized) > field.max_length:
+            raise ConfigValidationError("settings_value_too_long", path)
+        if field.required and not normalized:
+            raise ConfigValidationError("settings_value_required", path)
+        return normalized
+    if field.kind == "int":
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ConfigValidationError("settings_value_invalid", path)
+        return _bounded_value(field, value, path)
+    if field.kind == "float":
         if isinstance(value, bool) or not isinstance(value, (float, int)):
-            raise ValueError(f"settings_value_invalid:{section}.{key}")
+            raise ConfigValidationError("settings_value_invalid", path)
         numeric = float(value)
-        if not isfinite(numeric) or not 0 < numeric <= 1:
-            raise ValueError(f"settings_value_out_of_range:{section}.{key}")
-        return numeric
-    if section == "vad" and key == "required_hits":
-        return _bounded_integer(section, key, value, minimum=1, maximum=120)
-    if section == "vad" and key == "required_misses":
-        return _bounded_integer(section, key, value, minimum=1, maximum=1000)
-    raise ValueError(f"settings_field_unsupported:{section}.{key}")
+        if not isfinite(numeric):
+            raise ConfigValidationError("settings_value_invalid", path)
+        return _bounded_value(field, numeric, path)
+    if field.kind == "bool":
+        if not isinstance(value, bool):
+            raise ConfigValidationError("settings_value_invalid", path)
+        return value
+    raise ConfigValidationError("settings_field_unsupported", path)
 
 
-def _bounded_integer(
-    section: str,
-    key: str,
-    value: Any,
-    *,
-    minimum: int,
-    maximum: int,
-) -> int:
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError(f"settings_value_invalid:{section}.{key}")
-    if not minimum <= value <= maximum:
-        raise ValueError(f"settings_value_out_of_range:{section}.{key}")
+def _bounded_value(field: ConfigField, value: Any, path: str) -> Any:
+    if field.minimum is not None and value < field.minimum:
+        raise ConfigValidationError("settings_value_out_of_range", path)
+    if field.maximum is not None and value > field.maximum:
+        raise ConfigValidationError("settings_value_out_of_range", path)
     return value
+
+
+def _normalize_cross_field(normalized: dict[str, dict[str, Any]]) -> None:
+    curve = normalized.get("performance_curve")
+    if curve and curve.get("enabled") and not str(curve.get("provider_id") or "").strip():
+        raise ConfigValidationError(
+            "performance_curve_provider_required", "performance_curve.provider_id"
+        )
+
+
+def _verify_providers(normalized: dict[str, dict[str, Any]]) -> None:
+    """Reject a saved provider id that no longer exists in AstrBot.
+
+    Only an explicit save is rejected: reading settings must still work when a
+    configured provider has been removed, so the page can show and fix it.
+    """
+    known: list[str] | None = None
+    for section in CONFIG_SCHEMA:
+        values = normalized.get(section.key)
+        if not isinstance(values, dict):
+            continue
+        for field in section.fields:
+            if field.kind != "provider":
+                continue
+            provider_id = str(values.get(field.key) or "").strip()
+            if not provider_id:
+                continue
+            if known is None:
+                known = [option["id"] for option in _list_chat_providers()]
+            if known and provider_id not in known:
+                raise ConfigValidationError(
+                    "settings_provider_unknown",
+                    f"{section.key}.{field.key}",
+                    provider_id,
+                )
+
+
+def _list_chat_providers() -> list[dict[str, str]]:
+    context = get_plugin_context()
+    if context is None:
+        return []
+    try:
+        providers = context.get_all_providers()
+    except Exception:  # pragma: no cover - provider manager is optional at runtime
+        logger.debug("AG99live web control could not list chat providers")
+        return []
+    options: list[dict[str, str]] = []
+    for provider in providers:
+        try:
+            meta = provider.meta()
+        except Exception:
+            continue
+        provider_id = str(getattr(meta, "id", "") or "").strip()
+        if not provider_id:
+            continue
+        options.append(
+            {
+                "id": provider_id,
+                "model": str(getattr(meta, "model", "") or ""),
+                "type": str(getattr(meta, "type", "") or ""),
+            }
+        )
+    return sorted(options, key=lambda option: option["id"])
 
 
 def register_web_control_page(context: Any, plugin: Any) -> bool:
@@ -116,6 +385,7 @@ def register_web_control_page(context: Any, plugin: Any) -> bool:
     api = WebControlPageApi(plugin)
     routes = (
         ("/overview", api.get_overview, ["GET"], "AG99live control page overview"),
+        ("/config/schema", api.get_config_schema, ["GET"], "Read AG99live config form schema"),
         ("/settings", api.get_settings, ["GET"], "Read AG99live adapter settings"),
         ("/settings", api.save_settings, ["POST"], "Save AG99live adapter settings"),
         ("/profile", api.get_profile, ["GET"], "Read a Live2D semantic profile"),
@@ -150,11 +420,27 @@ class WebControlPageApi:
                 "host": platform.host,
                 "websocket_port": platform.port,
                 "http_port": platform.http_port,
+                "speaker_name": platform.speaker_name,
+                "auto_start_mic": platform.auto_start_mic,
                 "connected": platform.transport._ws_client is not None,
                 "selected_model": str(model_info.get("selected_model") or ""),
                 "available_models": list(model_info.get("available_models") or []),
             })
         return jsonify({"platforms": platforms})
+
+    async def get_config_schema(self):
+        """Serve the form spec the control page renders the settings form from.
+
+        The page must not carry its own copy of the config shape: validation,
+        defaults and the rendered form all read this single spec.
+        """
+        if response := _require_dashboard_user():
+            return response
+        return jsonify({
+            "sections": [section.to_json() for section in CONFIG_SCHEMA],
+            "defaults": default_settings(),
+            "providers": _list_chat_providers(),
+        })
 
     async def get_settings(self):
         if response := _require_dashboard_user():
@@ -169,8 +455,13 @@ class WebControlPageApi:
             return body[1]
         try:
             patch = normalize_settings_patch(body.get("settings"))
+        except ConfigValidationError as exc:
+            # The bridge collapses an error response to a bare message string and
+            # drops the field pointer, so a rejected patch is reported as a normal
+            # result the page can anchor to the offending control and localize.
+            return jsonify({"ok": False, "error": exc.to_json()})
         except ValueError as exc:
-            return _error(str(exc), 400)
+            return _error("settings_patch_invalid", 400, detail=str(exc))
 
         save_config = getattr(self._plugin.config, "save_config", None)
         if not callable(save_config):
@@ -202,7 +493,7 @@ class WebControlPageApi:
                 except Exception:
                     logger.exception("AG99live web settings rollback failed")
                 return _error("settings_save_failed", 500, detail=str(exc))
-        return jsonify({"settings": _project_settings(self._plugin.config)})
+        return jsonify({"ok": True, "settings": _project_settings(self._plugin.config)})
 
     async def get_profile(self):
         if response := _require_dashboard_user():
@@ -385,11 +676,29 @@ def _samples_response(platform: Any):
 
 
 def _project_settings(config: Any) -> dict[str, dict[str, Any]]:
+    """Return a complete, valid settings shape for the page.
+
+    Stored config is editable outside this plugin (AstrBot's own config UI and
+    hand edits), so a value that no longer satisfies the spec degrades to the
+    declared default instead of failing the whole page load. The page can then
+    show the offending field and let the user correct it.
+    """
     source = config if isinstance(config, dict) else {}
-    return {
-        section: deepcopy(source.get(section) or {})
-        for section in _SETTINGS_SECTIONS
-    }
+    projected: dict[str, dict[str, Any]] = {}
+    for section in CONFIG_SCHEMA:
+        stored = source.get(section.key)
+        stored = stored if isinstance(stored, dict) else {}
+        values: dict[str, Any] = {}
+        for field in section.fields:
+            raw = stored.get(field.key, field.default)
+            try:
+                values[field.key] = _normalize_setting_value(
+                    f"{section.key}.{field.key}", field, raw
+                )
+            except ConfigValidationError:
+                values[field.key] = field.default
+        projected[section.key] = values
+    return projected
 
 
 def _error(code: str, status: int, *, detail: str = ""):

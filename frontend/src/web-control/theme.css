@@ -1,0 +1,261 @@
+/* AG99live AstrBot plugin control page — document base and dark theme layer.
+ *
+ * The control page is an embedded scrolling document, not an Electron
+ * BrowserWindow. It therefore owns its own document base here and must not
+ * inherit styles/desktop-app.css, whose window-shell reset pins
+ * html/body/#app to height:100% + overflow:hidden and clips the page.
+ *
+ * The shared components (styles/shared-components.css) ship a light cream/blue
+ * theme because that is what the Electron desktop windows use. Every rule below
+ * re-themes the surfaces the control page renders. Colours are expressed as
+ * tokens so the visual language can be reworked centrally. */
+
+:root {
+  color-scheme: dark;
+
+  /* Shared-component ink tokens. The desktop declares light-on-cream values in
+     styles/desktop-app.css, which this page does not import, so every
+     `color: var(--ink-*)` in the shared components needs a definition here. */
+  --ink-strong: #e8edee;
+  --ink-main: #c1cbcc;
+  --ink-soft: #8d9a9c;
+  --sky: #9cc6ea;
+  --amber: #d9a460;
+  --amber-soft: #3a2e20;
+  --line-soft: rgb(150 170 168 / 16%);
+  --glass: rgb(31 36 39 / 86%);
+  --glass-strong: rgb(38 44 47 / 94%);
+  --shadow: 0 18px 48px rgb(0 0 0 / 45%);
+
+  /* Control-page surface tokens. */
+  --wc-bg: #171a1d;
+  --wc-surface: #202528;
+  --wc-surface-raised: #262c2f;
+  --wc-surface-sunken: #1b1f22;
+  --wc-border: #333a3d;
+  --wc-border-soft: rgb(150 170 168 / 12%);
+  --wc-chip: #2c3437;
+  --wc-accent: #b9d7c9;
+  --wc-accent-soft: #23302c;
+  --wc-accent-ink: #152c23;
+  --wc-danger-bg: #382a28;
+  --wc-danger-ink: #f0c9c1;
+  --wc-danger-border: #795b54;
+}
+
+/* Document base: grow with content, never clip, scroll on the document itself. */
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  width: 100%;
+  min-width: 320px;
+  height: auto;
+  min-height: 100%;
+  margin: 0;
+  overflow: visible;
+}
+
+body {
+  overflow: auto;
+  background: var(--wc-bg);
+  color: #edf0f1;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+img {
+  display: block;
+  max-width: 100%;
+}
+
+* {
+  scrollbar-color: #3a4346 transparent;
+}
+
+/* Native controls follow the dark surface. */
+input[type="checkbox"],
+input[type="radio"],
+input[type="range"] {
+  accent-color: var(--wc-accent);
+}
+
+select option {
+  background: #22282a;
+  color: #edf0f1;
+}
+
+/* ---------- Shared component surfaces ---------- */
+
+.settings-card {
+  border-color: var(--wc-border-soft);
+  background: var(--wc-surface);
+}
+
+/* The desktop renders this as a window-sized hero heading; a dense control page
+   needs a section-scale heading instead. */
+.settings-card h2 {
+  font-size: 20px;
+}
+
+.settings-card__badge {
+  background: var(--wc-chip);
+  color: var(--sky);
+}
+
+.settings-card__input {
+  border-color: var(--wc-border);
+  background: var(--wc-surface-sunken);
+  color: var(--ink-strong);
+}
+
+.settings-card__input:focus {
+  border-color: rgb(185 215 201 / 60%);
+  box-shadow: 0 0 0 3px rgb(185 215 201 / 16%);
+}
+
+.settings-card__input::placeholder,
+.motion-tuning__textarea::placeholder {
+  color: #6f7c7e;
+}
+
+.settings-card__button {
+  background: var(--wc-accent);
+  color: var(--wc-accent-ink);
+}
+
+.settings-card__button--ghost {
+  background: var(--wc-chip);
+  color: var(--sky);
+}
+
+.settings-card__meta div,
+.settings-card__stack div {
+  background: var(--wc-surface-raised);
+}
+
+.settings-toggle {
+  background: var(--wc-surface-raised);
+}
+
+.settings-toggle__control {
+  background: #4a5457;
+}
+
+.settings-toggle__control::after {
+  background: #dfe6e6;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 40%);
+}
+
+.settings-toggle__input:checked + .settings-toggle__control {
+  background: var(--wc-accent);
+}
+
+.settings-slider {
+  border-color: var(--wc-border-soft);
+  background: var(--wc-surface-raised);
+}
+
+.settings-slider__value {
+  color: var(--sky);
+}
+
+.settings-slider__input {
+  accent-color: var(--wc-accent);
+}
+
+.action-preview__analysis span,
+.action-preview__atom-metrics span,
+.motion-tuning__record-meta span,
+.profile-editor__meta span,
+.profile-editor__summary span,
+.profile-editor__binding-metrics span {
+  background: var(--wc-chip);
+  color: var(--sky);
+}
+
+.action-preview__error {
+  background: var(--wc-danger-bg);
+  color: var(--wc-danger-ink);
+}
+
+.action-preview__group,
+.action-preview__plan,
+.motion-tuning__sample-form,
+.motion-tuning__samples,
+.profile-editor__section,
+.profile-editor__axis-tools,
+.profile-editor__axis-check,
+.profile-editor__axis-button,
+.motion-tuning__record,
+.motion-tuning__toggle {
+  border-color: var(--wc-border-soft);
+  background: var(--wc-surface-raised);
+}
+
+.action-preview__atom-item,
+.action-preview__plan-output,
+.motion-tuning__textarea,
+.motion-tuning__sample-item,
+.profile-editor__binding-item {
+  border-color: var(--wc-border-soft);
+  background: var(--wc-surface-sunken);
+}
+
+.action-preview__atom-item[data-selected="true"],
+.profile-editor__axis-row[data-selected="true"] .profile-editor__axis-button,
+.motion-tuning__record[data-selected="true"] {
+  border-color: rgb(185 215 201 / 55%);
+  background: var(--wc-accent-soft);
+  box-shadow: 0 0 0 2px rgb(185 215 201 / 12%);
+}
+
+.motion-tuning__textarea {
+  color: var(--ink-strong);
+}
+
+.motion-tuning__sample-item,
+.profile-editor__binding-item {
+  background: var(--wc-surface);
+}
+
+.profile-editor__relation-item {
+  border-color: var(--wc-border-soft);
+  background: var(--wc-surface-sunken);
+}
+
+.profile-editor__validation {
+  border-color: var(--wc-danger-border);
+  background: var(--wc-danger-bg);
+  color: var(--wc-danger-ink);
+}
+
+.history-item {
+  border-color: var(--wc-border-soft);
+  background: var(--wc-surface);
+}
+
+.history-item[data-role="assistant"] {
+  background: var(--wc-surface-raised);
+}
+
+.history-item[data-role="user"] {
+  background: #2b2a24;
+}
+
+.history-item[data-role="error"] {
+  background: var(--wc-danger-bg);
+}
+
+.history-empty {
+  border-color: var(--wc-border);
+  background: var(--wc-surface-raised);
+}

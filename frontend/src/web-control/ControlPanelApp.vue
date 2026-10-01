@@ -1,7 +1,18 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import MotionTuningPanel from "../components/MotionTuningPanel.vue";
 import SemanticAxisProfileEditor from "../components/SemanticAxisProfileEditor.vue";
+import SettingsForm from "./SettingsForm.vue";
+import {
+  CONFIG_ERROR_FALLBACKS,
+  writeField,
+  type ConfigField,
+  type ConfigSection,
+  type ConfigSchemaResponse,
+  type ConfigValues,
+  type ProviderOption,
+  type SettingsSaveResponse,
+} from "./configSchema";
 import type {
   DesktopMotionTuningSample,
   DesktopMotionTuningSamplesStatus,
@@ -16,31 +27,13 @@ import {
 } from "../adapter-connection/features/motionTuningPayload.js";
 
 type ControlSection = "overview" | "settings" | "profile" | "action-lab";
-type PluginSettings = {
-  general: {
-    client_uid: string;
-    client_nickname: string;
-    chat_buffer_size: number;
-  };
-  live2d_input: {
-    model_name: string;
-    image_cooldown_seconds: number;
-  };
-  performance_curve: {
-    enabled: boolean;
-    provider_id: string;
-  };
-  vad: {
-    prob_threshold: number;
-    required_hits: number;
-    required_misses: number;
-  };
-};
 type AdapterSummary = {
   platform_id: string;
   host: string;
   websocket_port: number;
   http_port: number;
+  speaker_name: string;
+  auto_start_mic: boolean;
   connected: boolean;
   selected_model: string;
   available_models: string[];
@@ -70,12 +63,13 @@ const motionTuningStatus = ref<DesktopMotionTuningSamplesStatus>({
   diagnostics: [],
   effectiveExamples: [],
 });
-const settings = reactive<PluginSettings>({
-  general: { client_uid: "desktop-client", client_nickname: "DesktopUser", chat_buffer_size: 10 },
-  live2d_input: { model_name: "", image_cooldown_seconds: 0 },
-  performance_curve: { enabled: false, provider_id: "" },
-  vad: { prob_threshold: 0.4, required_hits: 3, required_misses: 24 },
-});
+const settings = ref<ConfigValues>({});
+const savedSettings = ref<ConfigValues>({});
+const configSections = ref<ConfigSection[]>([]);
+const configDefaults = ref<ConfigValues>({});
+const configProviders = ref<ProviderOption[]>([]);
+const settingsFieldError = ref("");
+const settingsFieldErrorCode = ref("");
 
 const activePlatform = computed(() =>
   overview.value.platforms.find((item) => item.platform_id === selectedPlatformId.value) ?? null,
@@ -126,6 +120,7 @@ async function loadOverview(): Promise<void> {
     if (!overview.value.platforms.some((item) => item.platform_id === selectedPlatformId.value)) {
       selectedPlatformId.value = overview.value.platforms[0]?.platform_id ?? "";
     }
+    await loadConfigSchema();
     await loadSettings();
     if (selectedPlatformId.value) {
       await Promise.all([loadProfile(), loadSamples()]);
@@ -137,23 +132,67 @@ async function loadOverview(): Promise<void> {
   }
 }
 
+async function loadConfigSchema(): Promise<void> {
+  const response = await apiGet<ConfigSchemaResponse>("control/config/schema");
+  configSections.value = response.sections;
+  configDefaults.value = response.defaults;
+  configProviders.value = response.providers;
+}
+
 async function loadSettings(): Promise<void> {
-  const response = await apiGet<{ settings: Partial<PluginSettings> }>("control/settings");
-  for (const key of Object.keys(settings) as (keyof PluginSettings)[]) {
-    const next = response.settings[key];
-    if (next) Object.assign(settings[key], next);
+  const response = await apiGet<{ settings: ConfigValues }>("control/settings");
+  const next: ConfigValues = JSON.parse(JSON.stringify(configDefaults.value));
+  for (const [section, fields] of Object.entries(response.settings)) {
+    next[section] = { ...(next[section] ?? {}), ...fields };
+  }
+  settings.value = next;
+  savedSettings.value = JSON.parse(JSON.stringify(next));
+  settingsFieldError.value = "";
+  settingsFieldErrorCode.value = "";
+}
+
+function applyFieldChange(path: string, value: string | number | boolean): void {
+  writeField(settings.value, path, value);
+  if (settingsFieldError.value) {
+    settingsFieldError.value = "";
+    settingsFieldErrorCode.value = "";
   }
 }
+
+const settingsDirty = computed(() => {
+  const current = settings.value;
+  const saved = savedSettings.value;
+  return Object.keys(current).some(
+    (section) =>
+      Object.keys(current[section] ?? {}).some(
+        (key) => current[section][key] !== saved[section]?.[key],
+      ),
+  );
+});
 
 async function saveSettings(): Promise<void> {
   settingsSaving.value = true;
   resetMessage();
   try {
-    const response = await apiPost<{ settings: PluginSettings }>("control/settings", {
-      settings: JSON.parse(JSON.stringify(settings)),
+    const response = await apiPost<SettingsSaveResponse>("control/settings", {
+      settings: JSON.parse(JSON.stringify(settings.value)),
     });
-    for (const key of Object.keys(settings) as (keyof PluginSettings)[]) {
-      Object.assign(settings[key], response.settings[key]);
+    if (!response.ok) {
+      settingsFieldError.value = response.error?.field ?? "";
+      settingsFieldErrorCode.value = response.error?.code ?? "settings_value_invalid";
+      pageError.value = "";
+      pageNotice.value = "";
+      if (!settingsFieldError.value) {
+        pageError.value = message(
+          `errors.${settingsFieldErrorCode.value}`,
+          "配置未被保存。",
+        );
+      }
+      return;
+    }
+    if (response.settings) {
+      settings.value = JSON.parse(JSON.stringify(response.settings));
+      savedSettings.value = JSON.parse(JSON.stringify(response.settings));
     }
     await loadOverview();
     if (!pageError.value) {
@@ -164,6 +203,26 @@ async function saveSettings(): Promise<void> {
   } finally {
     settingsSaving.value = false;
   }
+}
+
+function message(key: string, fallback: string): string {
+  const bridge = window.AstrBotPluginView;
+  const short = key.startsWith("errors.") ? key.slice("errors.".length) : key;
+  const localized = bridge ? bridge.t(key, "") : "";
+  if (localized) return localized;
+  return CONFIG_ERROR_FALLBACKS[short] ?? fallback;
+}
+
+function labelFor(field: ConfigField): string {
+  const bridge = window.AstrBotPluginView;
+  const localized = bridge ? bridge.t(`views.control-panel.fields.${field.key}`, "") : "";
+  return localized || field.label;
+}
+
+function descriptionFor(field: ConfigField): string {
+  const bridge = window.AstrBotPluginView;
+  const localized = bridge ? bridge.t(`views.control-panel.fields.${field.key}.hint`, "") : "";
+  return localized || field.description;
 }
 
 async function loadProfile(): Promise<void> {
@@ -354,6 +413,8 @@ onMounted(() => void loadOverview());
             </div>
             <dl>
               <div><dt>模型</dt><dd>{{ item.selected_model || "未选择" }}</dd></div>
+              <div><dt>说话人</dt><dd>{{ item.speaker_name || "AstrBot" }}</dd></div>
+              <div><dt>自动开麦</dt><dd>{{ item.auto_start_mic ? "已开启" : "已关闭" }}</dd></div>
               <div><dt>WebSocket</dt><dd>{{ item.host }}:{{ item.websocket_port }}</dd></div>
               <div><dt>HTTP</dt><dd>{{ item.host }}:{{ item.http_port }}</dd></div>
             </dl>
@@ -368,31 +429,27 @@ onMounted(() => void loadOverview());
 
       <section v-else-if="section === 'settings'" class="web-control-content">
         <div class="web-control-section-heading"><div><p>ADAPTER</p><h2>插件运行参数</h2></div></div>
-        <div class="web-control-settings-grid">
-          <section class="web-control-settings-group">
-            <header><h2>基础身份</h2><span>GENERAL</span></header>
-            <label>Client UID<input v-model.trim="settings.general.client_uid" maxlength="128" /></label>
-            <label>显示名称<input v-model.trim="settings.general.client_nickname" maxlength="128" /></label>
-            <label>对话缓冲条数<input v-model.number="settings.general.chat_buffer_size" type="number" min="1" max="100" /></label>
-          </section>
-          <section class="web-control-settings-group">
-            <header><h2>Live2D 输入</h2><span>MODEL</span></header>
-            <label>优先模型<select v-model="settings.live2d_input.model_name"><option value="">自动选择</option><option v-for="name in modelNameOptions" :key="name" :value="name">{{ name }}</option></select></label>
-            <label>图片输入冷却（秒）<input v-model.number="settings.live2d_input.image_cooldown_seconds" type="number" min="0" max="86400" /></label>
-          </section>
-          <section class="web-control-settings-group">
-            <header><h2>表演曲线</h2><span>OPTIONAL</span></header>
-            <label class="web-control-checkbox"><input v-model="settings.performance_curve.enabled" type="checkbox" />启用独立表演曲线 Provider</label>
-            <label>Provider ID<input v-model.trim="settings.performance_curve.provider_id" maxlength="255" :disabled="!settings.performance_curve.enabled" /></label>
-          </section>
-          <section class="web-control-settings-group">
-            <header><h2>语音断句</h2><span>VAD</span></header>
-            <label>语音概率阈值<input v-model.number="settings.vad.prob_threshold" type="number" min="0.01" max="1" step="0.01" /></label>
-            <label>开始命中帧数<input v-model.number="settings.vad.required_hits" type="number" min="1" max="120" /></label>
-            <label>结束静音帧数<input v-model.number="settings.vad.required_misses" type="number" min="1" max="1000" /></label>
-          </section>
+        <SettingsForm
+          :sections="configSections"
+          :values="settings"
+          :providers="configProviders"
+          :models="modelNameOptions"
+          :field-error-path="settingsFieldError"
+          :field-error-code="settingsFieldErrorCode"
+          :disabled="settingsSaving"
+          :label-for="labelFor"
+          :description-for="descriptionFor"
+          :message="message"
+          @change="applyFieldChange"
+        />
+        <div class="web-control-form-actions">
+          <span class="web-control-form-actions__status">
+            {{ settingsDirty ? "有未保存的修改" : "配置已与 AstrBot 同步" }}
+          </span>
+          <button type="button" :disabled="settingsSaving || !settingsDirty" @click="void saveSettings()">
+            {{ settingsSaving ? "保存中…" : "保存设置" }}
+          </button>
         </div>
-        <div class="web-control-form-actions"><button type="button" :disabled="settingsSaving" @click="void saveSettings()">{{ settingsSaving ? "保存中…" : "保存设置" }}</button></div>
       </section>
 
       <section v-else-if="section === 'profile'" class="web-control-content">
