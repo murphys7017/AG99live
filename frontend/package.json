@@ -25,6 +25,7 @@
     "test": "npm run test:compile && node scripts/run-compiled-tests.cjs",
     "build": "npm run typecheck && electron-vite build",
     "build:web": "vue-tsc --noEmit -p tsconfig.json && vite build",
+    "build:astrbot-page": "vue-tsc --noEmit -p tsconfig.json && vite build --config vite.astrbot-page.config.ts",
     "package:win": "npm run build:spout-sender && npm run build && electron-builder --win --x64",
     "package:win:dir": "npm run build:spout-sender && npm run build && electron-builder --win --x64 --dir",
     "preview": "vite preview"

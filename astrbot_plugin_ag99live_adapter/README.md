@@ -44,6 +44,12 @@ AstrBot Persona
 
 `control.interrupt` 只停止目标 Turn。连接断开时，Adapter 请求停止全部在飞 AstrBot event，再独立清理 Turn、段、曲线请求和身份映射；晚到输出不会重新进入播放。
 
+## AstrBot Web 控制台
+
+启用插件后，在 AstrBot WebUI 的插件详情页打开 **AG99live 控制台**，可以编辑 Adapter 配置、Live2D 语义轴 Profile 和动作调参样例。页面通过 AstrBot 插件视图 bridge 访问受认证的插件 API，不单独启动 Web 服务。
+
+麦克风、全局快捷键、Spout/ESP32 和桌面实时动作预览仍由 AG99live 桌面运行时持有；这些本机控制尚未迁入 AstrBot 页面，现有桌面界面也暂时保留。
+
 ## 开发
 
 在仓库根目录执行：

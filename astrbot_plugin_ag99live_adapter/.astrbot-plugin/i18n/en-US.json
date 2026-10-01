@@ -1,0 +1,8 @@
+{
+  "views": {
+    "control-panel": {
+      "title": "AG99live Control Panel",
+      "description": "Configure the AG99live Adapter, edit Live2D profiles, and manage motion samples."
+    }
+  }
+}

@@ -15,6 +15,7 @@ _state_lock = threading.RLock()
 _plugin_context: Any = None
 _plugin_config: dict[str, Any] = {}
 _plugin_config_path: str | None = None
+_control_platforms: dict[str, Any] = {}
 PLUGIN_CONFIG_BASENAME = "astrbot_plugin_ag99live_adapter_config.json"
 _default_plugin_config_paths = tuple(
     os.path.join(get_astrbot_config_path(), filename)
@@ -46,6 +47,32 @@ def set_plugin_context(context: Any) -> None:
 def get_plugin_context() -> Any:
     with _state_lock:
         return _plugin_context
+
+
+def register_control_platform(platform_id: str, platform: Any) -> None:
+    key = str(platform_id or "").strip()
+    if not key:
+        raise ValueError("control_platform_id_required")
+    with _state_lock:
+        _control_platforms[key] = platform
+
+
+def unregister_control_platform(platform_id: str, platform: Any) -> None:
+    key = str(platform_id or "").strip()
+    with _state_lock:
+        if _control_platforms.get(key) is platform:
+            del _control_platforms[key]
+
+
+def get_control_platform(platform_id: str) -> Any | None:
+    key = str(platform_id or "").strip()
+    with _state_lock:
+        return _control_platforms.get(key)
+
+
+def list_control_platforms() -> list[Any]:
+    with _state_lock:
+        return list(_control_platforms.values())
 
 
 def set_plugin_config(config: Mapping[str, Any] | None) -> None:

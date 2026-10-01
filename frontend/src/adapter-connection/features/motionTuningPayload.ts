@@ -1,8 +1,13 @@
 import { cloneJson } from "../../utils/cloneJson.js";
-import type { DesktopMotionTuningSample } from "../../types/desktop.js";
+import type {
+  DesktopMotionTuningEffectiveExample,
+  DesktopMotionTuningSample,
+  DesktopMotionTuningSamplesStatus,
+} from "../../types/desktop.js";
 import type { MotionTuningSampleProtocolPayload } from "../../types/protocol.js";
 import { cloneCompiledSemanticMotion } from "../../model-engine/compiler/compiledSemanticMotionParser.js";
 import { SCHEMA_MOTION_TUNING_SAMPLE_V2 } from "../../types/protocolSchema.generated.js";
+import { isObject, isPresent, normalizeText } from "../../utils/guards.js";
 
 export function serializeMotionTuningSample(
   sample: DesktopMotionTuningSample,
@@ -115,6 +120,96 @@ export function normalizeMotionTuningSamplePayload(
       : normalizeMotionTuningAxisRecord(candidate.adjusted_axes),
     compiledSemanticMotion,
   };
+}
+
+export function normalizeMotionTuningSamplesStatePayload(value: unknown): {
+  samples: DesktopMotionTuningSample[];
+  status: DesktopMotionTuningSamplesStatus;
+} {
+  const candidate = isObject(value) ? value : {};
+  const rawStatus = isObject(candidate.status) ? candidate.status : {};
+  return {
+    samples: Array.isArray(candidate.samples)
+      ? candidate.samples
+        .map((sample) => normalizeMotionTuningSamplePayload(sample))
+        .filter(isPresent)
+      : [],
+    status: {
+      rootError: normalizeText(rawStatus.root_error),
+      loadError: normalizeText(rawStatus.load_error),
+      diagnostics: Array.isArray(rawStatus.diagnostics)
+        ? rawStatus.diagnostics.map(normalizeText).filter(Boolean)
+        : [],
+      effectiveExamples: Array.isArray(rawStatus.effective_examples)
+        ? rawStatus.effective_examples
+          .map(normalizeMotionTuningEffectiveExamplePayload)
+          .filter(isPresent)
+        : [],
+    },
+  };
+}
+
+export function normalizeMotionTuningEffectiveExamplePayload(
+  value: unknown,
+): DesktopMotionTuningEffectiveExample | null {
+  if (!isObject(value) || !isObject(value.output)) {
+    return null;
+  }
+  const output = value.output;
+  const axisLevels = normalizeMotionTuningAxisRecord(output.axis_levels);
+  const motionSteps = normalizeMotionTuningMotionSteps(output.motion_steps);
+  if (!Object.keys(axisLevels).length && !motionSteps?.length) {
+    return null;
+  }
+  return {
+    category: normalizeText(value.category),
+    input: normalizeText(value.input),
+    output: {
+      intentTags: Array.isArray(output.intent_tags)
+        ? output.intent_tags.map(normalizeText).filter(Boolean)
+        : [],
+      durationHintMs: typeof output.duration_hint_ms === "number"
+        && Number.isFinite(output.duration_hint_ms)
+        ? output.duration_hint_ms
+        : null,
+      axisLevels: Object.keys(axisLevels).length ? axisLevels : undefined,
+      motionSteps,
+      expressionResourceId: normalizeText(output.expression_resource_id) || undefined,
+      motionResourceId: normalizeText(output.motion_resource_id) || undefined,
+    },
+    source: normalizeText(value.source),
+    tags: Array.isArray(value.tags)
+      ? value.tags.map(normalizeText).filter(Boolean)
+      : [],
+  };
+}
+
+function normalizeMotionTuningMotionSteps(
+  value: unknown,
+): DesktopMotionTuningEffectiveExample["output"]["motionSteps"] {
+  if (!Array.isArray(value) || value.length < 2 || value.length > 4) {
+    return undefined;
+  }
+  const steps = value.map((item) => {
+    if (!isObject(item)) {
+      return null;
+    }
+    const axisLevels = normalizeMotionTuningAxisRecord(item.axis_levels);
+    const durationWeight = item.duration_weight;
+    if (
+      !Object.keys(axisLevels).length
+      || typeof durationWeight !== "number"
+      || !Number.isInteger(durationWeight)
+      || durationWeight < 1
+      || durationWeight > 3
+    ) {
+      return null;
+    }
+    return { axisLevels, durationWeight };
+  });
+  return steps.every((step) => step !== null)
+    ? steps as NonNullable<DesktopMotionTuningEffectiveExample["output"]["motionSteps"]>
+    : undefined;
 }
 
 function normalizeMotionTuningAxisRecord(value: unknown): Record<string, number> {

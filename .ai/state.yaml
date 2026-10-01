@@ -586,3 +586,31 @@ verification:
     - Audio stop releases LipSync, the browser audio sink, the segment Timeline, and the connection playback flag independently; failures remain visible only after every owner has attempted its transition.
     - LipSync runtime lifecycle callbacks are observers; their failures are logged without suppressing terminal settlement or sink stop, while real sink errors continue to propagate.
     - Live AstrBot, Electron, TTS, ESP32, and Live2D runtime acceptance remains user-led.
+
+astrbot_plugin_web_control:
+  recorded_at: "2026-10-01"
+  class: feature
+  risk: high
+  status: source_complete_pending_live_acceptance
+  scope:
+    - "Add an AstrBot Plugin View for Adapter settings, Live2D semantic-profile editing, and motion-tuning sample management."
+    - "Register dashboard-authenticated plugin APIs under the AG99live plugin route and use the plugin-page bridge for requests."
+    - "Share the existing motion-tuning protocol normalizers and serializer across desktop and Web control flows."
+  non_actions:
+    - "Do not migrate microphone, global hotkeys, Spout/ESP32, or desktop live-preview ownership in this batch."
+    - "Keep existing desktop helper views until the local-runtime bridge is implemented and accepted."
+    - "Do not reload the active AstrBot plugin; commit only the Web control scope approved on 2026-10-01."
+  findings:
+    - "The running AstrBot supports views/<page>/index.html, relative bridge endpoints, and register_web_api routes prefixed by the plugin name."
+    - "The installed SDK does not expose astrbot.api.web; the implementation uses its Quart-compatible request context and g.username."
+    - "PlatformManager does not call terminate() when run() exits with an exception, so the control-platform registry is also cleared in run()'s finally block."
+  validation:
+    - "npm run build:astrbot-page passed and generated astrbot_plugin_ag99live_adapter/views/control-panel."
+    - "Adapter run() now unregisters its control-platform entry on every exit; terminate() cleanup remains identity-checked."
+    - "AstrBot venv smoke check passed for valid/invalid settings, module syntax, and all eight registered plugin routes."
+    - "AstrBot plugin structure checker reported 0 errors and 0 warnings."
+    - "git diff --check passed."
+    - "Full compileall could not write existing __pycache__ files while the AstrBot runtime was active; the changed module passed in-memory syntax compilation."
+  evidence_gap:
+    - "The active plugin was not reloaded; opening the view and exercising authenticated API requests in the live AstrBot Dashboard remains unverified."
+    - "Desktop-local device controls and live motion preview are intentionally not exposed by this first Web control batch."

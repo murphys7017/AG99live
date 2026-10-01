@@ -1,0 +1,8 @@
+{
+  "views": {
+    "control-panel": {
+      "title": "AG99live 控制台",
+      "description": "配置 AG99live Adapter、编辑 Live2D Profile 并管理动作样例。"
+    }
+  }
+}

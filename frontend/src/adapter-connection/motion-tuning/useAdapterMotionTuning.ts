@@ -1,5 +1,4 @@
 import type {
-  DesktopMotionTuningEffectiveExample,
   DesktopMotionTuningSample,
   DesktopMotionTuningSamplesStatus,
 } from "../../types/desktop.js";
@@ -10,6 +9,7 @@ import type {
   SystemMotionTuningSamplesStatePayload,
 } from "../../types/protocol.js";
 import {
+  normalizeMotionTuningEffectiveExamplePayload,
   normalizeMotionTuningSamplePayload,
   serializeMotionTuningSample,
 } from "../features/motionTuningPayload.js";
@@ -69,8 +69,8 @@ export function useAdapterMotionTuning(
       : [];
     const effectiveExamples = Array.isArray(payload.effective_examples)
       ? payload.effective_examples
-        .map((item) => normalizeEffectiveExamplePayload(item))
-        .filter((item): item is DesktopMotionTuningEffectiveExample => item !== null)
+        .map((item) => normalizeMotionTuningEffectiveExamplePayload(item))
+        .filter((item) => item !== null)
       : [];
     state.motionTuningSamples = samples;
     state.motionTuningSamplesStatus = {
@@ -152,108 +152,4 @@ export function useAdapterMotionTuning(
     saveMotionTuningSample,
     deleteMotionTuningSample,
   };
-}
-
-function normalizeEffectiveExamplePayload(
-  value: unknown,
-): DesktopMotionTuningEffectiveExample | null {
-  if (!value || typeof value !== "object") {
-    return null;
-  }
-  const candidate = value as {
-    category?: unknown;
-    input?: unknown;
-    output?: unknown;
-    source?: unknown;
-    tags?: unknown;
-  };
-  if (!candidate.output || typeof candidate.output !== "object") {
-    return null;
-  }
-  const output = candidate.output as {
-    intent_tags?: unknown;
-    duration_hint_ms?: unknown;
-    axis_levels?: unknown;
-    motion_steps?: unknown;
-    expression_resource_id?: unknown;
-    motion_resource_id?: unknown;
-  };
-  const axisLevels = normalizeMotionTuningAxisRecord(output.axis_levels);
-  const motionSteps = normalizeMotionTuningMotionSteps(output.motion_steps);
-  if (!Object.keys(axisLevels).length && !motionSteps?.length) {
-    return null;
-  }
-  return {
-    category: typeof candidate.category === "string" ? candidate.category.trim() : "",
-    input: typeof candidate.input === "string" ? candidate.input.trim() : "",
-    output: {
-      intentTags: Array.isArray(output.intent_tags)
-        ? output.intent_tags
-          .map((tag) => (typeof tag === "string" ? tag.trim() : ""))
-          .filter(Boolean)
-        : [],
-      durationHintMs: typeof output.duration_hint_ms === "number"
-        && Number.isFinite(output.duration_hint_ms)
-        ? output.duration_hint_ms
-        : null,
-      axisLevels: Object.keys(axisLevels).length ? axisLevels : undefined,
-      motionSteps,
-      expressionResourceId: typeof output.expression_resource_id === "string"
-        ? output.expression_resource_id.trim() || undefined
-        : undefined,
-      motionResourceId: typeof output.motion_resource_id === "string"
-        ? output.motion_resource_id.trim() || undefined
-        : undefined,
-    },
-    source: typeof candidate.source === "string" ? candidate.source.trim() : "",
-    tags: Array.isArray(candidate.tags)
-      ? candidate.tags.map((tag: unknown) => String(tag).trim()).filter(Boolean)
-      : [],
-  };
-}
-
-function normalizeMotionTuningMotionSteps(
-  value: unknown,
-): DesktopMotionTuningEffectiveExample["output"]["motionSteps"] {
-  if (!Array.isArray(value) || value.length < 2 || value.length > 4) {
-    return undefined;
-  }
-  const steps = value.map((item) => {
-    if (!item || typeof item !== "object") {
-      return null;
-    }
-    const candidate = item as {
-      axis_levels?: unknown;
-      duration_weight?: unknown;
-    };
-    const axisLevels = normalizeMotionTuningAxisRecord(candidate.axis_levels);
-    const durationWeight = candidate.duration_weight;
-    if (
-      !Object.keys(axisLevels).length
-      || typeof durationWeight !== "number"
-      || !Number.isInteger(durationWeight)
-      || durationWeight < 1
-      || durationWeight > 3
-    ) {
-      return null;
-    }
-    return { axisLevels, durationWeight };
-  });
-  return steps.every((step) => step !== null)
-    ? steps as NonNullable<DesktopMotionTuningEffectiveExample["output"]["motionSteps"]>
-    : undefined;
-}
-
-function normalizeMotionTuningAxisRecord(value: unknown): Record<string, number> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return {};
-  }
-  const result: Record<string, number> = {};
-  for (const [key, item] of Object.entries(value)) {
-    if (!key.trim() || typeof item !== "number" || !Number.isFinite(item)) {
-      continue;
-    }
-    result[key.trim()] = item;
-  }
-  return result;
 }

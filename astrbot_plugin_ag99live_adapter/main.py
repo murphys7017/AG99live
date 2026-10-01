@@ -53,6 +53,9 @@ class MyPlugin(Star):
         self._official_core_compatibility = not register_ag99live_interaction_contributors(
             context
         )
+        from .web_control import register_web_control_page
+
+        self._web_control_page_registered = register_web_control_page(context, self)
         if self._official_core_compatibility:
             logger.info(
                 "AG99live official AstrBot compatibility enabled: "

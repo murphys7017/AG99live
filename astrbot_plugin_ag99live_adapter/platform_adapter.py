@@ -28,8 +28,10 @@ from .services.message_factory import MessageFactory
 from .transport.static_routes import build_static_routes, list_background_files
 from .runtime.plugin_runtime import (
     get_config_value,
+    register_control_platform,
     get_plugin_config_snapshot,
     get_plugin_context,
+    unregister_control_platform,
 )
 from .runtime.state import RuntimeState
 from .protocol.builder import build_system_motion_tuning_samples_state
@@ -208,6 +210,7 @@ class OLVPetPlatformAdapter(Platform):
             f"(host={self.host}, ws_port={self.port}, http_port={self.http_port})"
         )
         self._refresh_runtime_settings()
+        register_control_platform(self.platform_id, self)
 
     def meta(self) -> PlatformMetadata:
         metadata = PlatformMetadata(
@@ -238,6 +241,7 @@ class OLVPetPlatformAdapter(Platform):
             logger.exception("AG99live adapter failed during run()")
             raise
         finally:
+            unregister_control_platform(self.platform_id, self)
             self._event_loop = None
 
     async def send_by_session(self, session: MessageSesion, message_chain):
@@ -389,13 +393,16 @@ class OLVPetPlatformAdapter(Platform):
 
     async def terminate(self) -> None:
         logger.info("AG99live adapter terminate() called")
-        await self.transport.stop()
         try:
-            motion_lab_recorder = self.runtime_state.motion_lab_recorder
-            if motion_lab_recorder is not None:
-                await motion_lab_recorder.close()
+            await self.transport.stop()
         finally:
-            self._event_loop = None
+            unregister_control_platform(self.platform_id, self)
+            try:
+                motion_lab_recorder = self.runtime_state.motion_lab_recorder
+                if motion_lab_recorder is not None:
+                    await motion_lab_recorder.close()
+            finally:
+                self._event_loop = None
 
     async def _send_json(self, payload: dict[str, Any]) -> bool:
         return await self.transport.send_json(payload)
