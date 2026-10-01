@@ -26,6 +26,7 @@
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "ag99/runtime/protocol.hpp"
@@ -719,24 +720,8 @@ public:
     return !_motion_groups["Idle"].empty();
   }
 
-  void ApplyLipSync(float intensity, bool active) {
-    if (!_model || !active || !std::isfinite(intensity)) {
-      return;
-    }
-    const auto clamped_intensity = std::clamp(intensity, 0.0f, 1.0f);
-    for (const auto parameter_index : _lip_sync_parameter_indices) {
-      const auto minimum = _model->GetParameterMinimumValue(parameter_index);
-      const auto default_value = _model->GetParameterDefaultValue(parameter_index);
-      const auto maximum = _model->GetParameterMaximumValue(parameter_index);
-      if (!std::isfinite(minimum) || !std::isfinite(default_value)
-          || !std::isfinite(maximum) || minimum > default_value
-          || default_value >= maximum) {
-        continue;
-      }
-      _model->SetParameterValue(
-          parameter_index,
-          default_value + (maximum - default_value) * clamped_intensity);
-    }
+  const std::vector<csmInt32>& LipSyncParameterIndices() const noexcept {
+    return _lip_sync_parameter_indices;
   }
 
   void ApplyDrag(float drag_x, float drag_y) {
@@ -1454,8 +1439,7 @@ public:
     ApplyQueuedMotion();
     _model->ApplyDrag(g_drag_x.load(), g_drag_y.load());
     UpdateAudioLevel(delta_seconds);
-    ApplyQueuedParameterPlan();
-    _model->ApplyLipSync(
+    ApplyParameterFrame(
         g_lip_sync_intensity.load(),
         g_audio_end_seconds.load() > NowSeconds());
     _model->UpdatePhysicsAndPose(delta_seconds);
@@ -1597,8 +1581,61 @@ private:
     std::vector<ParameterPlanBinding> bindings;
   };
 
+  enum class ParameterContributionOwner {
+    InteractionSway,
+    InteractionGaze,
+    DirectPlan,
+    LipSync,
+  };
+
+  struct ParameterFrameContribution {
+    std::string parameter_id;
+    csmInt32 parameter_index = -1;
+    ParameterContributionOwner owner = ParameterContributionOwner::DirectPlan;
+    std::string source;
+    float value = 0.0f;
+    float weight = 1.0f;
+    int priority = 0;
+    ParameterPlanBinding* presentation_binding = nullptr;
+    double elapsed_ms = 0.0;
+  };
+
+  struct ParameterFrameSnapshot {
+    std::string parameter_id;
+    float base_value = 0.0f;
+    float minimum_value = 0.0f;
+    float maximum_value = 0.0f;
+  };
+
+  struct ParameterFrameGroup {
+    csmInt32 parameter_index = -1;
+    std::string parameter_id;
+    std::vector<ParameterFrameContribution*> contributions;
+    ParameterFrameSnapshot snapshot;
+  };
+
   static double Clamp(double value, double minimum, double maximum) {
     return std::max(minimum, std::min(maximum, value));
+  }
+
+  static float Smoothstep(float value) {
+    const auto clamped = std::clamp(value, 0.0f, 1.0f);
+    return clamped * clamped * (3.0f - 2.0f * clamped);
+  }
+
+  static std::string ParameterIdRaw(
+      CubismModel* model,
+      csmInt32 parameter_index) {
+    if (!model || parameter_index < 0
+        || parameter_index >= model->GetParameterCount()) {
+      return {};
+    }
+    const auto parameter_id = model->GetParameterId(
+        static_cast<csmUint32>(parameter_index));
+    if (!parameter_id) {
+      return {};
+    }
+    return parameter_id->GetString().GetRawString();
   }
 
   static double ReadNumber(
@@ -2174,17 +2211,17 @@ private:
       const auto progress = plan.hold_ms > 0
           ? static_cast<float>((elapsed - plan.blend_in_ms) / plan.hold_ms)
           : 1.0f;
-      return binding.initial_value
-          + (frame_target - binding.initial_value)
+      return binding.neutral_target_value
+          + (frame_target - binding.neutral_target_value)
               * (1.0f - 0.06f * std::sin(3.14159265358979323846f * progress));
     }
     return frame_target;
   }
 
-  void ApplyQueuedParameterPlan() {
+  bool ApplyParameterFrame(float lip_sync_intensity, bool lip_sync_active) {
     std::scoped_lock lock(_motion_mutex);
     if (!_model || !_model->GetModel()) {
-      return;
+      return false;
     }
     if (_pending_parameter_plan) {
       const auto parsed = ParseParameterPlan(*_pending_parameter_plan);
@@ -2206,84 +2243,278 @@ private:
         std::cerr << "[motion] parameter plan rejected\n";
       }
     }
-    if (!_active_parameter_plan) {
-      return;
-    }
-    auto& plan = *_active_parameter_plan;
-    const double elapsed_ms = (NowSeconds() - plan.started_at) * 1000.0;
-    bool all_activated = true;
-    for (const auto& binding : plan.bindings) {
-      all_activated &= elapsed_ms >= binding.activation_at_ms;
-    }
-    if (plan.release_started_at_ms < 0.0
-        && all_activated
-        && elapsed_ms >= plan.duration_ms - plan.blend_out_ms) {
-      plan.release_started_at_ms = elapsed_ms;
-    }
-    for (auto& binding : plan.bindings) {
-      if (elapsed_ms < binding.activation_at_ms) {
-        continue;
+    auto* cubism_model = _model->GetModel();
+    std::vector<ParameterFrameContribution> contributions;
+    double elapsed_ms = 0.0;
+    bool clear_active_plan = false;
+
+    if (_active_parameter_plan) {
+      auto& plan = *_active_parameter_plan;
+      elapsed_ms = (NowSeconds() - plan.started_at) * 1000.0;
+      bool all_activated = true;
+      for (const auto& binding : plan.bindings) {
+        all_activated &= elapsed_ms >= binding.activation_at_ms;
       }
-      auto frame_target = ResolveTrack(
-          binding.keyframes, elapsed_ms, binding.target_value);
-      if (!binding.modulation_points.empty() && binding.modulation_amplitude > 0.0f) {
-        const auto gesture = ResolveTrack(
-            binding.modulation_points,
-            std::max(0.0, elapsed_ms - binding.modulation_delay_ms),
-            0.0f);
-        frame_target += gesture * binding.modulation_amplitude
-            * static_cast<float>(binding.modulation_direction)
-            * GetSpeechAudioGain(binding.axis_id);
+      if (plan.release_started_at_ms < 0.0
+          && all_activated
+          && elapsed_ms >= plan.duration_ms - plan.blend_out_ms) {
+        plan.release_started_at_ms = elapsed_ms;
       }
-      const auto target = ResolveEnvelopeTarget(
-          binding, frame_target, elapsed_ms, plan);
-      const auto base = _model->GetModel()->GetParameterValue(binding.parameter_index);
-      const auto target_offset = target - base;
-      if (binding.last_elapsed_ms < 0.0) {
-        binding.last_elapsed_ms = elapsed_ms;
-      } else if (elapsed_ms > binding.last_elapsed_ms) {
-        const auto delta_seconds = static_cast<float>(
-            std::min(0.1, (elapsed_ms - binding.last_elapsed_ms) / 1000.0));
-        const auto previous_offset = binding.driven_offset;
-        const auto next_state = binding.response_kind == "spring"
-            ? AdvanceSpring(
-                previous_offset, target_offset, binding.velocity,
-                delta_seconds, binding.max_velocity, binding.max_acceleration,
-                binding.response_frequency_hz, binding.response_damping_ratio)
-            : AdvanceBounded(
-                previous_offset, target_offset, binding.velocity,
-                delta_seconds, binding.max_velocity, binding.max_acceleration);
-        binding.velocity = next_state.velocity;
-        binding.driven_offset = next_state.value;
-        binding.last_elapsed_ms = elapsed_ms;
-      }
+
       float ownership = 1.0f;
-      if (plan.release_started_at_ms >= 0.0
-          && plan.blend_out_ms > 0
-          && elapsed_ms >= plan.release_started_at_ms) {
-        const auto t = static_cast<float>(std::clamp(
-            (elapsed_ms - plan.release_started_at_ms) / plan.blend_out_ms,
-            0.0, 1.0));
-        ownership = 1.0f - t * t * (3.0f - 2.0f * t);
-      } else if (plan.release_started_at_ms >= 0.0) {
-        ownership = 0.0f;
+      if (plan.release_started_at_ms >= 0.0) {
+        if (plan.blend_out_ms <= 0
+            || elapsed_ms >= plan.release_started_at_ms + plan.blend_out_ms) {
+          ownership = 0.0f;
+        } else {
+          const auto progress = static_cast<float>(
+              (elapsed_ms - plan.release_started_at_ms) / plan.blend_out_ms);
+          ownership = Smoothstep(1.0f - progress);
+        }
       }
-      const auto current = _model->GetModel()->GetParameterValue(
-          binding.parameter_index);
-      const auto mixed = current * (1.0f - binding.weight * ownership)
-          + (base + binding.driven_offset) * binding.weight * ownership;
-      const auto minimum = _model->GetModel()->GetParameterMinimumValue(
-          binding.parameter_index);
-      const auto maximum = _model->GetModel()->GetParameterMaximumValue(
-          binding.parameter_index);
-      _model->GetModel()->SetParameterValue(
-          binding.parameter_index,
-          ClampFloat(mixed, minimum, maximum));
+
+      for (auto& binding : plan.bindings) {
+        if (elapsed_ms < binding.activation_at_ms) {
+          continue;
+        }
+        auto frame_target = ResolveTrack(
+            binding.keyframes, elapsed_ms, binding.target_value);
+        if (!binding.modulation_points.empty()
+            && binding.modulation_amplitude > 0.0f) {
+          const auto gesture = ResolveTrack(
+              binding.modulation_points,
+              std::max(0.0, elapsed_ms - binding.modulation_delay_ms),
+              0.0f);
+          frame_target += gesture * binding.modulation_amplitude
+              * static_cast<float>(binding.modulation_direction)
+              * GetSpeechAudioGain(binding.axis_id);
+        }
+        contributions.push_back(ParameterFrameContribution{
+            binding.parameter_id,
+            binding.parameter_index,
+            ParameterContributionOwner::DirectPlan,
+            "direct_plan:" + binding.axis_id,
+            frame_target,
+            binding.weight * ownership,
+            100,
+            &binding,
+            elapsed_ms});
+      }
+      clear_active_plan = plan.release_started_at_ms >= 0.0
+          && elapsed_ms >= plan.release_started_at_ms + plan.blend_out_ms;
     }
-    if (plan.release_started_at_ms >= 0.0
-        && elapsed_ms >= plan.release_started_at_ms + plan.blend_out_ms) {
+
+    if (!std::isfinite(lip_sync_intensity)
+        || lip_sync_intensity < 0.0f || lip_sync_intensity > 1.0f) {
+      std::cerr << "[parameter_mixer] lip sync intensity invalid\n";
+      return false;
+    }
+    if (lip_sync_active) {
+      for (const auto parameter_index : _model->LipSyncParameterIndices()) {
+        if (parameter_index < 0
+            || parameter_index >= cubism_model->GetParameterCount()) {
+          std::cerr << "[parameter_mixer] lip sync parameter is not writable\n";
+          return false;
+        }
+        const auto minimum = cubism_model->GetParameterMinimumValue(
+            static_cast<csmUint32>(parameter_index));
+        const auto default_value = cubism_model->GetParameterDefaultValue(
+            static_cast<csmUint32>(parameter_index));
+        const auto maximum = cubism_model->GetParameterMaximumValue(
+            static_cast<csmUint32>(parameter_index));
+        if (!std::isfinite(minimum) || !std::isfinite(default_value)
+            || !std::isfinite(maximum) || minimum > default_value
+            || default_value >= maximum) {
+          std::cerr << "[parameter_mixer] lip sync parameter range invalid: "
+                    << ParameterIdRaw(cubism_model, parameter_index) << '\n';
+          return false;
+        }
+        contributions.push_back(ParameterFrameContribution{
+            ParameterIdRaw(cubism_model, parameter_index),
+            parameter_index,
+            ParameterContributionOwner::LipSync,
+            "lip_sync",
+            default_value + (maximum - default_value) * lip_sync_intensity,
+            1.0f,
+            200,
+            nullptr,
+            elapsed_ms});
+      }
+    }
+
+    if (!ResolveAndWriteParameterFrame(contributions)) {
+      return false;
+    }
+    if (clear_active_plan) {
       _active_parameter_plan.reset();
     }
+    return true;
+  }
+
+  bool ResolveAndWriteParameterFrame(
+      std::vector<ParameterFrameContribution>& contributions) {
+    auto* model = _model ? _model->GetModel() : nullptr;
+    if (!model) {
+      return false;
+    }
+    if (contributions.empty()) {
+      return true;
+    }
+
+    const auto reject = [](const std::string& reason) {
+      std::cerr << "[parameter_mixer] " << reason << '\n';
+      return false;
+    };
+    std::vector<ParameterFrameGroup> groups;
+    groups.reserve(contributions.size());
+    std::unordered_map<csmInt32, std::size_t> group_by_index;
+    for (auto& contribution : contributions) {
+      if (contribution.parameter_id.empty()) {
+        return reject("parameter_id_missing");
+      }
+      if (contribution.parameter_index < 0
+          || contribution.parameter_index >= model->GetParameterCount()) {
+        return reject("parameter_index_invalid:" + contribution.parameter_id);
+      }
+      if (contribution.source.empty() || !std::isfinite(contribution.value)
+          || !std::isfinite(contribution.weight)
+          || contribution.weight < 0.0f || contribution.weight > 1.0f) {
+        return reject("contribution_invalid:" + contribution.parameter_id);
+      }
+
+      const auto [found, inserted] = group_by_index.emplace(
+          contribution.parameter_index, groups.size());
+      if (inserted) {
+        groups.push_back(ParameterFrameGroup{
+            contribution.parameter_index,
+            contribution.parameter_id,
+            {},
+            {}});
+      }
+      auto& group = groups[found->second];
+      if (group.parameter_id != contribution.parameter_id) {
+        return reject("parameter_identity_conflict:" + group.parameter_id
+            + ":" + contribution.parameter_id);
+      }
+      group.contributions.push_back(&contribution);
+    }
+
+    std::sort(groups.begin(), groups.end(), [](const auto& left, const auto& right) {
+      return left.parameter_index < right.parameter_index;
+    });
+    for (auto& group : groups) {
+      const auto actual_parameter_id = ParameterIdRaw(
+          model, group.parameter_index);
+      if (actual_parameter_id.empty()
+          || actual_parameter_id != group.parameter_id) {
+        return reject("parameter_identity_mismatch:" + group.parameter_id);
+      }
+      const auto index = static_cast<csmUint32>(group.parameter_index);
+      group.snapshot = ParameterFrameSnapshot{
+          actual_parameter_id,
+          model->GetParameterValue(group.parameter_index),
+          model->GetParameterMinimumValue(index),
+          model->GetParameterMaximumValue(index)};
+      if (!std::isfinite(group.snapshot.base_value)
+          || !std::isfinite(group.snapshot.minimum_value)
+          || !std::isfinite(group.snapshot.maximum_value)
+          || group.snapshot.minimum_value > group.snapshot.maximum_value) {
+        return reject("runtime_range_or_base_invalid:" + group.parameter_id);
+      }
+      std::stable_sort(
+          group.contributions.begin(),
+          group.contributions.end(),
+          [](const auto* left, const auto* right) {
+            if (left->priority != right->priority) {
+              return left->priority < right->priority;
+            }
+            return left->source < right->source;
+          });
+    }
+
+    std::vector<std::pair<csmInt32, float>> resolved_values;
+    resolved_values.reserve(groups.size());
+    for (auto& group : groups) {
+      const auto base_value = group.snapshot.base_value;
+      auto mixed_target = base_value;
+      auto direct_only_target = base_value;
+      bool has_lip_sync = false;
+      ParameterPlanBinding* presentation_binding = nullptr;
+      double presentation_elapsed_ms = 0.0;
+      for (const auto* contribution : group.contributions) {
+        mixed_target = mixed_target * (1.0f - contribution->weight)
+            + contribution->value * contribution->weight;
+        if (contribution->owner == ParameterContributionOwner::LipSync) {
+          has_lip_sync = true;
+        } else {
+          direct_only_target = direct_only_target * (1.0f - contribution->weight)
+              + contribution->value * contribution->weight;
+          if (contribution->presentation_binding) {
+            presentation_binding = contribution->presentation_binding;
+            presentation_elapsed_ms = contribution->elapsed_ms;
+          }
+        }
+      }
+
+      auto final_value = has_lip_sync ? mixed_target : direct_only_target;
+      if (presentation_binding && _active_parameter_plan) {
+        auto& binding = *presentation_binding;
+        const auto target = ResolveEnvelopeTarget(
+            binding,
+            direct_only_target,
+            presentation_elapsed_ms,
+            *_active_parameter_plan);
+        const auto target_offset = target - base_value;
+        if (binding.last_elapsed_ms < 0.0) {
+          binding.last_elapsed_ms = presentation_elapsed_ms;
+        } else if (presentation_elapsed_ms > binding.last_elapsed_ms) {
+          const auto delta_seconds = static_cast<float>(
+              (presentation_elapsed_ms - binding.last_elapsed_ms) / 1000.0);
+          const auto next_state = binding.response_kind == "spring"
+              ? AdvanceSpring(
+                  binding.driven_offset,
+                  target_offset,
+                  binding.velocity,
+                  delta_seconds,
+                  binding.max_velocity,
+                  binding.max_acceleration,
+                  binding.response_frequency_hz,
+                  binding.response_damping_ratio)
+              : AdvanceBounded(
+                  binding.driven_offset,
+                  target_offset,
+                  binding.velocity,
+                  delta_seconds,
+                  binding.max_velocity,
+                  binding.max_acceleration);
+          binding.velocity = next_state.velocity;
+          binding.driven_offset = next_state.value;
+          binding.last_elapsed_ms = presentation_elapsed_ms;
+        }
+        if (!has_lip_sync) {
+          final_value = base_value + binding.driven_offset;
+        }
+      }
+
+      if (!std::isfinite(final_value)) {
+        return reject("resolved_value_invalid:" + group.parameter_id);
+      }
+      resolved_values.emplace_back(
+          group.parameter_index,
+          std::clamp(
+              final_value,
+              group.snapshot.minimum_value,
+              group.snapshot.maximum_value));
+    }
+
+    for (const auto& [parameter_index, value] : resolved_values) {
+      model->SetParameterValue(parameter_index, value);
+      const auto readback = model->GetParameterValue(parameter_index);
+      if (!std::isfinite(readback) || std::abs(readback - value) > 0.001f) {
+        return reject("write_mismatch:" + ParameterIdRaw(model, parameter_index));
+      }
+    }
+    return true;
   }
 
   const ag99::runtime::Json* SelectedModelProfile() const {

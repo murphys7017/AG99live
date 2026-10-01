@@ -2,7 +2,7 @@ live2d_render_component_design:
   recorded_at: "2026-10-01"
   class: refactor
   risk: high
-  status: d3d11_surface_implemented_pending_visual_acceptance
+  status: d3d11_surface_and_partial_parameter_mixer_pending_visual_acceptance
   scope:
     - "Audit native C++ translation coverage against the frontend business code."
     - "Deliver a design document and boundary contract for a new Live2D rendering component."
@@ -13,7 +13,7 @@ live2d_render_component_design:
     - "Define the replacement sequence with no compatibility layer, per Replacement Over Compatibility."
   findings:
     - "Protocol and parameter-plan validation layers are faithful translations and are reusable as-is."
-    - "The parameter runtime is about one third translated; the frontend multi-contributor mixer, interaction sway, and interaction gaze are absent."
+    - "Native pre-Physics parameter mixing now freezes each touched parameter after drag, combines direct_plan (priority 100) and lip_sync (priority 200), validates parameter identity/ranges, and writes each index once; interaction sway and gaze collection remain absent."
     - "CompileMotionPlan is a parallel re-implementation, not a translation, and omits the 2332-line PerformanceSchedule layer that sits between the two stage groups."
     - "Audit follow-up fixed three trajectory/signal bugs: blend-in now captures the live parameter value, bounded/spring responses retain frontend-style velocity state with analytic damped-spring integration, and lip-sync uses the frontend RMS noise gate and independent intensity/energy channels."
     - "Spectral emphasis remains partial: native emphasis currently follows RMS envelope rise because the audio path has no frequency-spectrum input."
@@ -23,6 +23,7 @@ live2d_render_component_design:
     - "`cmake --build render-core/build --config Release --parallel 2` passed; ag99_live2d_renderer_core.lib and ag99-render-host.exe produced."
     - "`cmake --build render-core/build/runtime-core --config Release --target ag99-runtime-protocol-smoke --parallel 2` passed; smoke executable exited 0."
     - "`git diff --check` passed."
+    - "Native parameter-mixer Release build passed; protocol smoke executable exited 0."
     - "`cmake --build render-core/build --config Release --target ag99_live2d_renderer_core ag99-render-host --parallel 2` passed after extracting the D3D11 composition surface."
     - "The native host loaded the Mk6 model, exposed its window, and exited with code 0 after the tray exit command; the captured desktop was occupied by a full-screen game, so model visibility and alpha edges were not confirmed."
     - "Surface shutdown now clears and flushes D3D11 state, detaches the DirectComposition root/content, commits that detach, and then releases dependent resources."
@@ -33,7 +34,7 @@ live2d_render_component_design:
     - "D-4 six performanceSchedule.ts helper contracts remain unexamined, so stage 7 and stage 9 failure-reason sets are incomplete."
     - "D-5 implement spectral emphasis natively or declare an explicit degradation."
   evidence_gap:
-    - "Native visual acceptance is still pending; model proportions, motion quality, lip-sync appearance, Physics feel, transparent alpha edges, Spout output, and live Adapter playback need a suitable desktop capture/session."
+    - "Native visual acceptance is still pending; model proportions, motion quality, direct-plan/lip-sync composition, Physics feel, transparent alpha edges, Spout output, and live Adapter playback need a suitable desktop capture/session."
 
 native_runtime_frontend_plan_bridge:
   recorded_at: "2026-10-01"
