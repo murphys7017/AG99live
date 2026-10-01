@@ -1208,11 +1208,11 @@ private:
     if (segment.text.state == ag99::runtime::TextSlot::State::Present) {
       std::cout << "[assistant] " << segment.text.content << '\n';
     }
-    const auto turn_id = segment.envelope.turn_id.value_or("");
+    auto turn_id = segment.envelope.turn_id.value_or("");
     if (segment.audio.state == ag99::runtime::AudioSlot::State::Present) {
       AudioQueueItem item;
       item.url = std::move(segment.audio.url);
-      item.turn_id = turn_id;
+      item.turn_id = std::move(turn_id);
       if (segment.motion.state == ag99::runtime::MotionSlot::State::Present) {
         item.has_motion = true;
         item.motion_payload = std::move(segment.motion.payload);
@@ -3656,8 +3656,8 @@ private:
   std::optional<ag99::runtime::Json> _pending_motion_intent;
   std::optional<ParameterPlan> _active_parameter_plan;
   std::optional<ag99::runtime::Json> _pending_parameter_plan;
-  std::optional<std::string> _pending_motion_intent_turn_id;
   std::optional<std::string> _pending_parameter_plan_turn_id;
+  std::optional<std::string> _pending_motion_intent_turn_id;
   std::optional<std::string> _pending_thinking_turn_id;
   std::optional<InteractionSwayState> _interaction_sway;
   std::optional<InteractionGazeState> _interaction_gaze;
@@ -3992,6 +3992,36 @@ int Run(
   return result_code;
 }
 
+std::filesystem::path FindDefaultModelPath() {
+  std::wstring executable_path(32768, L'\0');
+  const DWORD path_length = GetModuleFileNameW(
+      nullptr,
+      executable_path.data(),
+      static_cast<DWORD>(executable_path.size()));
+  if (path_length == 0
+      || static_cast<std::size_t>(path_length) >= executable_path.size()) {
+    return {};
+  }
+  executable_path.resize(path_length);
+
+  auto directory = std::filesystem::path(executable_path).parent_path();
+  const std::filesystem::path relative_model =
+      L"astrbot_plugin_ag99live_adapter/live2ds/Mk6_1.0/Mk6.model3.json";
+  while (!directory.empty()) {
+    std::error_code error;
+    const auto candidate = directory / relative_model;
+    if (std::filesystem::is_regular_file(candidate, error)) {
+      return candidate;
+    }
+    const auto parent = directory.parent_path();
+    if (parent == directory) {
+      break;
+    }
+    directory = parent;
+  }
+  return {};
+}
+
 }  // namespace
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
@@ -4038,6 +4068,21 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
   }
   if (arguments) {
     LocalFree(arguments);
+  }
+  if (model_json.empty()) {
+    model_json = FindDefaultModelPath();
+    if (model_json.empty()) {
+      MessageBoxW(
+          nullptr,
+          L"Could not find the default Mk6 demo model. Run this executable "
+          L"from the repository build or pass a model3.json path.",
+          kWindowTitle,
+          MB_OK | MB_ICONERROR);
+      if (SUCCEEDED(com_result)) {
+        CoUninitialize();
+      }
+      return 1;
+    }
   }
   const int result = Run(instance, model_json, startup_text);
   if (SUCCEEDED(com_result)) {

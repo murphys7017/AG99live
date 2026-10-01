@@ -61,6 +61,17 @@ bool WinHttpWebSocketClient::connect(
   close();
   impl_->callbacks = std::move(callbacks);
   const auto wide_url = widen(url);
+  std::wstring http_url;
+  if (wide_url.starts_with(L"ws://")) {
+    http_url = L"http://" + wide_url.substr(5);
+  } else if (wide_url.starts_with(L"wss://")) {
+    http_url = L"https://" + wide_url.substr(6);
+  } else {
+    if (impl_->callbacks.on_error) {
+      impl_->callbacks.on_error("invalid_websocket_url");
+    }
+    return false;
+  }
   URL_COMPONENTS components{};
   components.dwStructSize = sizeof(components);
   wchar_t host[256]{};
@@ -70,8 +81,8 @@ bool WinHttpWebSocketClient::connect(
   components.lpszUrlPath = path;
   components.dwUrlPathLength = static_cast<DWORD>(std::size(path));
   if (wide_url.empty() || !WinHttpCrackUrl(
-          wide_url.c_str(),
-          static_cast<DWORD>(wide_url.size()),
+          http_url.c_str(),
+          static_cast<DWORD>(http_url.size()),
           0,
           &components)) {
     if (impl_->callbacks.on_error) {
