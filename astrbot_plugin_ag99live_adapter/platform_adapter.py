@@ -390,9 +390,10 @@ class OLVPetPlatformAdapter(Platform):
         )
         return await self._send_json(payload)
 
-    async def _handle_frontend_system(self, message: dict[str, Any]) -> None:
-        if message.get("type") == TYPE_SYSTEM_DESKTOP_SETTINGS_RESULT:
-            self.desktop_settings_broker.resolve(message.get("payload") or {})
+    async def _handle_frontend_system(self, message: Any) -> None:
+        # TurnCoordinator hands over a parsed ProtocolMessage, not the raw dict.
+        if message.type == TYPE_SYSTEM_DESKTOP_SETTINGS_RESULT:
+            self.desktop_settings_broker.resolve(message.payload)
             return
         await self.frontend_system_handler.handle(
             message,
