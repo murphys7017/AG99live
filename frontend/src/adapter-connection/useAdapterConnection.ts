@@ -21,7 +21,10 @@ import {
 } from "./outbound/outboundActions.js";
 import { createAdapterOutboundClient } from "./outbound/outboundClient.js";
 import { OUTBOUND_MESSAGE_TYPES } from "./core/protocolMessageTypes.js";
-import { createDesktopSettingsResponder } from "./features/desktopSettings.js";
+import {
+  createDesktopSettingsResponder,
+  type DesktopRuntimeSettingsAccess,
+} from "./features/desktopSettings.js";
 import { useSpoutSettings } from "../spout/useSpoutSettings.js";
 import { useEsp32DisplaySettings } from "../esp32-display/useEsp32DisplaySettings.js";
 import {
@@ -151,6 +154,7 @@ interface CreateAdapterConnectionOptions {
   sessionStore: SessionStore;
   modelSync: ModelSyncInstance;
   normalizeMotionPayload: MotionPayloadNormalizer;
+  desktopRuntimeSettings: DesktopRuntimeSettingsAccess;
 }
 
 export function createAdapterConnection(
@@ -286,46 +290,60 @@ export function createAdapterConnection(
   const { config: spoutConfig } = useSpoutSettings();
   const { config: esp32DisplayConfig } = useEsp32DisplaySettings();
 
+  // Desktop settings requests can arrive concurrently from the web control
+  // panel. Serialize the stop/apply/start sequence so an older request cannot
+  // restart the connection with a stale snapshot.
+  let esp32ConfigQueue: Promise<void> = Promise.resolve();
+
   async function applyEsp32DisplayConfig(
     nextConfig: ReturnType<typeof cloneEsp32DisplayConfig>,
   ): Promise<void> {
-    const currentConfig = cloneEsp32DisplayConfig(esp32DisplayConfig);
-    const connectionChanged = currentConfig.host !== nextConfig.host
-      || currentConfig.port !== nextConfig.port;
-    const restartConnection = currentConfig.enabled !== nextConfig.enabled
-      || (nextConfig.enabled && connectionChanged);
+    const request = async (): Promise<void> => {
+      const requested = cloneEsp32DisplayConfig(nextConfig);
+      const currentConfig = cloneEsp32DisplayConfig(esp32DisplayConfig);
+      const connectionChanged = currentConfig.host !== requested.host
+        || currentConfig.port !== requested.port;
+      const restartConnection = currentConfig.enabled !== requested.enabled
+        || (requested.enabled && connectionChanged);
 
-    if (!restartConnection) {
-      Object.assign(esp32DisplayConfig, cloneEsp32DisplayConfig(nextConfig));
-      return;
-    }
-
-    if (currentConfig.enabled || nextConfig.enabled) {
-      const stopped = await stopEsp32DisplayConnection();
-      if (!stopped.ok) {
-        throw new Error(stopped.error ?? "esp32_display_stop_failed");
+      if (!restartConnection) {
+        Object.assign(esp32DisplayConfig, requested);
+        return;
       }
-    }
 
-    Object.assign(esp32DisplayConfig, {
-      ...cloneEsp32DisplayConfig(nextConfig),
-      enabled: false,
-    });
-    if (!nextConfig.enabled) {
-      return;
-    }
+      if (currentConfig.enabled || requested.enabled) {
+        const stopped = await stopEsp32DisplayConnection();
+        if (!stopped.ok) {
+          throw new Error(stopped.error ?? "esp32_display_stop_failed");
+        }
+      }
 
-    // Keep this under the adapter broker's 8-second request timeout.
-    const started = await startEsp32DisplayConnection(nextConfig, 6);
-    if (!started.ok) {
-      esp32DisplayConfig.enabled = false;
-      throw new Error(started.error ?? "esp32_display_start_failed");
-    }
-    esp32DisplayConfig.enabled = true;
+      Object.assign(esp32DisplayConfig, { ...requested, enabled: false });
+      if (!requested.enabled) return;
+
+      // Keep this under the adapter broker's 8-second request timeout.
+      const started = await startEsp32DisplayConnection(requested, 6);
+      if (!started.ok) {
+        // The requested values remain persisted, but the actual connection is
+        // explicitly reported as disabled after a failed start.
+        esp32DisplayConfig.enabled = false;
+        throw new Error(started.error ?? "esp32_display_start_failed");
+      }
+      esp32DisplayConfig.enabled = true;
+    };
+    const previous = esp32ConfigQueue;
+    const current = previous.then(request, request);
+    esp32ConfigQueue = current.catch(() => undefined);
+    return current;
   }
 
   const desktopSettingsResponder = createDesktopSettingsResponder(
     {
+      currentDesktopScreenshotOnSendEnabled: () => state.desktopScreenshotOnSendEnabled,
+      applyDesktopScreenshotOnSendEnabled: setDesktopScreenshotOnSendEnabled,
+      currentPttModeEnabled: () => state.pttModeEnabled,
+      applyPttModeEnabled: setPttMode,
+      runtimeSettings: options.desktopRuntimeSettings,
       currentMicrophoneDeviceId: () => state.microphoneDeviceId,
       applyMicrophoneDevice: (deviceId) => microphoneRuntime.setMicrophoneDevice(deviceId),
       currentSpoutEnabled: () => spoutConfig.enabled,

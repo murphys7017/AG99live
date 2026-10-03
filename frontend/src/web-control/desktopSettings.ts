@@ -32,6 +32,7 @@ export type DesktopSettingEntry = {
 
 export type DesktopSettingsState = {
   connected: boolean;
+  connectionRevision: number;
   platformId: string;
   settings: Record<string, DesktopSettingEntry>;
 };
@@ -49,6 +50,7 @@ export type DesktopSettingsQueryResponse = {
   };
   error?: { code: string; key?: string };
   connected: boolean;
+  connectionRevision: number;
   settings: Record<string, DesktopSettingEntry>;
 };
 

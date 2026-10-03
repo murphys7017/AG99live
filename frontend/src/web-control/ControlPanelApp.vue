@@ -48,7 +48,6 @@ type OverviewResponse = { platforms: AdapterSummary[] };
 type ProfileResponse = {
   model_name: string;
   profile: SemanticAxisProfile;
-  models: { name: string; icon_url: string }[];
 };
 const section = ref<ControlSection>("overview");
 const pageError = ref("");
@@ -60,7 +59,6 @@ const overview = ref<OverviewResponse>({ platforms: [] });
 const selectedPlatformId = ref("");
 const selectedModelName = ref("");
 const profile = ref<SemanticAxisProfile | null>(null);
-const profileModels = ref<ProfileResponse["models"]>([]);
 const profileSaveResult = ref<DesktopSemanticAxisProfileSaveResult | null>(null);
 const motionTuningSamples = ref<DesktopMotionTuningSample[]>([]);
 const motionTuningStatus = ref<DesktopMotionTuningSamplesStatus>({
@@ -78,6 +76,7 @@ const settingsFieldError = ref("");
 const settingsFieldErrorCode = ref("");
 const desktopSettings = ref<DesktopSettingsState>({
   connected: false,
+  connectionRevision: 0,
   platformId: "",
   settings: {},
 });
@@ -247,20 +246,41 @@ const desktopSettingEntries = computed(() =>
 async function loadDesktopSettings(): Promise<void> {
   desktopError.value = "";
   if (!selectedPlatformId.value) {
-    desktopSettings.value = { connected: false, platformId: "", settings: {} };
+    desktopSettings.value = {
+      connected: false,
+      connectionRevision: 0,
+      platformId: "",
+      settings: {},
+    };
     return;
   }
-  const wasConnected = desktopSettings.value.connected;
+  const platformId = selectedPlatformId.value;
+  const wasConnected = desktopSettings.value.platformId === platformId
+    && desktopSettings.value.connected;
   try {
     const next = await apiGet<DesktopSettingsState>("control/desktop/settings", {
-      platform_id: selectedPlatformId.value,
+      platform_id: platformId,
     });
-    desktopSettings.value = next;
-    if (!wasConnected && next.connected) {
-      await refreshDesktopSettings();
+    if (selectedPlatformId.value !== platformId) return;
+    const current = desktopSettings.value;
+    const samePlatform = current.platformId === platformId;
+    const useObservedConnection = !samePlatform
+      || next.connectionRevision >= current.connectionRevision;
+    desktopSettings.value = {
+      connected: useObservedConnection ? next.connected : current.connected,
+      connectionRevision: samePlatform
+        ? Math.max(current.connectionRevision, next.connectionRevision)
+        : next.connectionRevision,
+      platformId,
+      settings: mergeDesktopSettings(next.settings, platformId),
+    };
+    if (!wasConnected && desktopSettings.value.connected) {
+      await refreshDesktopSettings(platformId);
     }
   } catch (error) {
-    desktopError.value = desktopErrorMessage(error instanceof Error ? error.message : "");
+    if (selectedPlatformId.value === platformId) {
+      desktopError.value = desktopErrorMessage(error instanceof Error ? error.message : "");
+    }
   }
 }
 
@@ -270,6 +290,7 @@ async function queryDesktopSetting(
   value?: string,
 ): Promise<void> {
   if (!selectedPlatformId.value) return;
+  const platformId = selectedPlatformId.value;
   desktopBusyCount.value += 1;
   desktopError.value = "";
   let rejectedError = "";
@@ -277,11 +298,19 @@ async function queryDesktopSetting(
   try {
     const response = await apiPost<DesktopSettingsQueryResponse>(
       "control/desktop/settings",
-      { platform_id: selectedPlatformId.value, key, action, value },
+      { platform_id: platformId, key, action, value },
     );
+    if (selectedPlatformId.value !== platformId) return;
+    const current = desktopSettings.value;
+    const samePlatform = current.platformId === platformId;
+    const useObservedConnection = !samePlatform
+      || response.connectionRevision >= current.connectionRevision;
     desktopSettings.value = {
-      connected: response.connected,
-      platformId: selectedPlatformId.value,
+      connected: useObservedConnection ? response.connected : current.connected,
+      connectionRevision: samePlatform
+        ? Math.max(current.connectionRevision, response.connectionRevision)
+        : response.connectionRevision,
+      platformId,
       settings: mergeDesktopSettings(
         response.key && response.settings?.[response.key]
           ? { [response.key]: response.settings[response.key] }
@@ -295,15 +324,17 @@ async function queryDesktopSetting(
       relatedKey = relatedDesktopSettingKey(key);
     }
   } catch (error) {
-    desktopError.value = error instanceof Error ? error.message : String(error);
+    if (selectedPlatformId.value === platformId) {
+      desktopError.value = error instanceof Error ? error.message : String(error);
+    }
   } finally {
     desktopBusyCount.value -= 1;
   }
-  if (rejectedError && action === "set") {
-    await refreshDesktopSettings();
+  if (rejectedError && action === "set" && selectedPlatformId.value === platformId) {
+    await refreshDesktopSettings(platformId);
     desktopError.value = rejectedError;
-  } else if (relatedKey) {
-    await queryDesktopSetting(relatedKey, "list");
+  } else if (relatedKey && selectedPlatformId.value === platformId) {
+    await queryDesktopSettingForPlatform(relatedKey, "list", platformId);
   }
 }
 
@@ -317,17 +348,30 @@ function relatedDesktopSettingKey(key: string): string {
   }
 }
 
-async function refreshDesktopSettings(): Promise<void> {
+async function refreshDesktopSettings(platformId = selectedPlatformId.value): Promise<void> {
+  if (!platformId || selectedPlatformId.value !== platformId) return;
   await Promise.all(
     desktopSettingEntries.value.map((entry) =>
-      queryDesktopSetting(entry.key, "list"),
+      queryDesktopSettingForPlatform(entry.key, "list", platformId),
     ),
   );
 }
 
+async function queryDesktopSettingForPlatform(
+  key: string,
+  action: "list" | "set",
+  platformId: string,
+  value?: string,
+): Promise<void> {
+  if (selectedPlatformId.value !== platformId) return;
+  await queryDesktopSetting(key, action, value);
+}
+
 function mergeDesktopSettings(
   nextSettings: DesktopSettingsState["settings"],
+  platformId = selectedPlatformId.value,
 ): DesktopSettingsState["settings"] {
+  if (desktopSettings.value.platformId !== platformId) return { ...nextSettings };
   const merged = { ...desktopSettings.value.settings };
   for (const [key, next] of Object.entries(nextSettings)) {
     const current = merged[key];
@@ -381,7 +425,6 @@ async function loadProfile(): Promise<void> {
     const response = await apiGet<ProfileResponse>("control/profile", query);
     selectedModelName.value = response.model_name;
     profile.value = response.profile;
-    profileModels.value = response.models;
   } catch (error) {
     profile.value = null;
     if (error instanceof Error && !error.message.includes("semantic_axis_profile_not_found")) {
@@ -569,7 +612,7 @@ onMounted(() => void loadOverview());
         <div v-else class="web-control-empty">尚未发现 AG99live Adapter 实例。请先在 AstrBot 中启用插件并配置平台。</div>
         <div class="web-control-footnote">
           <strong>桌面运行状态</strong>
-          <p>本页面可配置 AstrBot 插件参数、Live2D Profile、动作样例，以及桌面端的麦克风、Spout 输出和 ESP32 小屏。全局按键、渲染参数和桌面实时动作预览仍由本机运行时持有，尚未接入这条转发链路。</p>
+          <p>本页面可配置 AstrBot 插件参数、Live2D Profile、动作样例，以及桌面端的截图、按键说话、模型表现、麦克风、Spout 输出和 ESP32 小屏。PTT 按键绑定与桌面实时动作预览仍由本机运行时处理。</p>
         </div>
       </section>
 
@@ -609,7 +652,12 @@ onMounted(() => void loadOverview());
       <section v-else-if="section === 'profile'" class="web-control-content">
         <div class="web-control-section-heading">
           <div><p>LIVE2D / CAPABILITIES</p><h2>语义轴 Profile</h2></div>
-          <label v-if="profileModels.length" class="web-control-model-picker"><span>模型</span><select v-model="selectedModelName"><option v-for="item in profileModels" :key="item.name" :value="item.name">{{ item.name }}</option></select></label>
+          <label v-if="modelNameOptions.length" class="web-control-model-picker">
+            <span>模型</span>
+            <select v-model="selectedModelName">
+              <option v-for="name in modelNameOptions" :key="name" :value="name">{{ name }}</option>
+            </select>
+          </label>
         </div>
         <SemanticAxisProfileEditor
           v-if="profile"

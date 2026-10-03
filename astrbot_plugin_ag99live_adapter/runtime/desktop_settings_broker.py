@@ -21,6 +21,7 @@ from uuid import uuid4
 from ..protocol.builder import build_system_desktop_settings_query
 
 DESKTOP_SETTINGS_QUERY_TIMEOUT_SECONDS = 8.0
+DESKTOP_SETTINGS_MIN_ESP32_SET_BUDGET_SECONDS = 7.25
 
 
 class DesktopSettingsError(RuntimeError):
@@ -40,6 +41,7 @@ class DesktopSettingsBroker:
         self._timeout_seconds = timeout_seconds
         self._pending: dict[str, asyncio.Future[dict[str, Any]]] = {}
         self._snapshot: dict[str, dict[str, Any]] = {}
+        self._esp32_set_lock = asyncio.Lock()
 
     @property
     def connected(self) -> bool:
@@ -60,24 +62,56 @@ class DesktopSettingsBroker:
             raise DesktopSettingsError("desktop_client_offline")
 
         request_id = uuid4().hex
-        future: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
-        self._pending[request_id] = future
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self._timeout_seconds
+        future: asyncio.Future[dict[str, Any]] = loop.create_future()
+        esp32_set = action == "set" and key.startswith("esp32_display_")
+        lock_acquired = False
         try:
-            sent = await self._send_json(
-                build_system_desktop_settings_query(
-                    request_id=request_id,
-                    key=key,
-                    action=action,
-                    value=value,
+            if esp32_set:
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    raise asyncio.TimeoutError
+                await asyncio.wait_for(
+                    self._esp32_set_lock.acquire(), remaining
                 )
+                lock_acquired = True
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                raise asyncio.TimeoutError
+            if (
+                esp32_set
+                and remaining < DESKTOP_SETTINGS_MIN_ESP32_SET_BUDGET_SECONDS
+            ):
+                raise asyncio.TimeoutError
+            self._pending[request_id] = future
+            sent = await asyncio.wait_for(
+                self._send_json(
+                    build_system_desktop_settings_query(
+                        request_id=request_id,
+                        key=key,
+                        action=action,
+                        value=value,
+                    )
+                ),
+                remaining,
             )
             if not sent:
                 raise DesktopSettingsError("desktop_client_send_failed")
-            result = await asyncio.wait_for(future, self._timeout_seconds)
+            response_timeout = (
+                self._timeout_seconds
+                if esp32_set
+                else deadline - loop.time()
+            )
+            if response_timeout <= 0:
+                raise asyncio.TimeoutError
+            result = await asyncio.wait_for(future, response_timeout)
         except asyncio.TimeoutError as exc:
             raise DesktopSettingsError("desktop_client_timeout") from exc
         finally:
             self._pending.pop(request_id, None)
+            if lock_acquired:
+                self._esp32_set_lock.release()
 
         if not result.get("ok"):
             raise DesktopSettingsError(

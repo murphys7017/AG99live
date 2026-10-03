@@ -11,11 +11,13 @@ import {
   type InjectionKey,
 } from "vue";
 import { buildParameterActionPreview } from "../action-lab/parameterActionPreview";
+import type { DesktopRuntimeSettingsAccess } from "../adapter-connection/features/desktopSettings.js";
 import { createModelSync } from "../adapter-connection/model-sync/useModelSync";
 import { useDesktopBridge } from "../desktop-bridge/useDesktopBridge";
 import { createPetRuntimeSnapshotPublisher } from "../desktop-bridge/usePetRuntimeSnapshotPublisher";
 import { usePreviewMotionPlayer } from "../live2d-renderer/usePreviewMotionPlayer";
 import {
+  applyLive2dPresentationSettingsSnapshot,
   cloneLive2dPresentationSettings,
   type Live2dPresentationSettings,
 } from "../live2d-renderer/settings";
@@ -71,17 +73,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
   const modelSync = createModelSync();
   const { state, selectedModel, selectedSemanticAxisProfile } = modelSync;
   useCursorGaze(selectedModel);
-  const conversationPlayback = createConversationPlaybackRuntime({
-    sessionStore,
-    modelSync,
-    normalizeMotionPayload,
-  });
-  const { adapter, playbackTimeline } = conversationPlayback;
   const bridge = useDesktopBridge();
-  const motionPlayer = usePreviewMotionPlayer();
-  const manualPreviewText = ref("");
-  let manualPreviewRequestId = "";
-  const approvedAssistantSegmentKeys = reactive(new Set<string>());
   const motionEngineSettings = reactive(
     cloneModelEngineSettings(bridge.state.snapshot.motionEngineSettings),
   );
@@ -90,6 +82,47 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       bridge.state.snapshot.live2dPresentationSettings,
     ),
   );
+  const desktopRuntimeSettings: DesktopRuntimeSettingsAccess = {
+    currentAmbientMotionEnabled: () => live2dPresentationSettings.ambientMotionEnabled,
+    applyAmbientMotionEnabled: (enabled) => {
+      applyLive2dPresentationSettingsSnapshot(live2dPresentationSettings, {
+        ...live2dPresentationSettings,
+        ambientMotionEnabled: enabled,
+      });
+    },
+    currentPhysicsResponseScale: () => live2dPresentationSettings.physicsResponseScale,
+    applyPhysicsResponseScale: (scale) => {
+      applyLive2dPresentationSettingsSnapshot(live2dPresentationSettings, {
+        ...live2dPresentationSettings,
+        physicsResponseScale: scale,
+      });
+    },
+    currentRenderDprCap: () => live2dPresentationSettings.renderDprCap,
+    applyRenderDprCap: (cap) => {
+      applyLive2dPresentationSettingsSnapshot(live2dPresentationSettings, {
+        ...live2dPresentationSettings,
+        renderDprCap: cap,
+      });
+    },
+    currentMotionIntensityScale: () => motionEngineSettings.motionIntensityScale,
+    applyMotionIntensityScale: (scale) => {
+      applyModelEngineSettings(motionEngineSettings, {
+        ...motionEngineSettings,
+        motionIntensityScale: scale,
+      });
+    },
+  };
+  const conversationPlayback = createConversationPlaybackRuntime({
+    sessionStore,
+    modelSync,
+    normalizeMotionPayload,
+    desktopRuntimeSettings,
+  });
+  const { adapter, playbackTimeline } = conversationPlayback;
+  const motionPlayer = usePreviewMotionPlayer();
+  const manualPreviewText = ref("");
+  let manualPreviewRequestId = "";
+  const approvedAssistantSegmentKeys = reactive(new Set<string>());
   const initialMotionPlaybackRecords: DesktopMotionPlaybackRecord[] =
     bridge.state.snapshot.motionPlaybackRecords.map((record) =>
       cloneJson(record) as DesktopMotionPlaybackRecord);

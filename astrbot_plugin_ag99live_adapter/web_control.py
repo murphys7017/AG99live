@@ -30,6 +30,7 @@ from .runtime.plugin_runtime import (
 
 _PLUGIN_NAME = "astrbot_plugin_ag99live_adapter"
 _PAGE_API_PREFIX = "/control"
+_DESKTOP_CONNECTION_REVISIONS: dict[str, tuple[bool, int]] = {}
 
 
 @dataclass(frozen=True)
@@ -262,6 +263,51 @@ DESKTOP_SETTINGS_SPEC: tuple[DesktopSetting, ...] = (
         key="microphone_device",
         label="麦克风设备",
         description="桌宠从这台电脑上的哪个麦克风收音。设备由桌面端枚举，选项以桌面端实际可用为准。",
+    ),
+    DesktopSetting(
+        key="desktop_screenshot_on_send",
+        label="发送消息时附带桌面截图",
+        description="发送文本或按键说话时附带当前桌面截图，帮助模型理解屏幕内容。",
+        kind="toggle",
+    ),
+    DesktopSetting(
+        key="ptt_mode_enabled",
+        label="按键说话模式",
+        description="启用后由已绑定的按键控制麦克风采集。",
+        kind="toggle",
+    ),
+    DesktopSetting(
+        key="live2d_ambient_motion_enabled",
+        label="Live2D 默认待机动作",
+        description="控制模型没有播放对话动作时是否持续播放默认待机动作。",
+        kind="toggle",
+    ),
+    DesktopSetting(
+        key="live2d_physics_response_scale",
+        label="Live2D Physics 响应强度",
+        description="调整非语义姿态参数的 Cubism Physics 响应倍率。",
+        kind="range",
+        minimum=0.5,
+        maximum=2,
+        step=0.05,
+    ),
+    DesktopSetting(
+        key="live2d_render_dpr_cap",
+        label="Live2D 渲染 DPR 上限",
+        description="限制模型画布的设备像素比上限；较低值可减少渲染负载。",
+        kind="range",
+        minimum=1,
+        maximum=2.5,
+        step=0.25,
+    ),
+    DesktopSetting(
+        key="motion_engine_intensity_scale",
+        label="ModelEngine 动作强度",
+        description="调整语义动作强度倍率，不影响模型 Profile 中的轴范围。",
+        kind="range",
+        minimum=0.5,
+        maximum=2.5,
+        step=0.05,
     ),
     DesktopSetting(
         key="spout_enabled",
@@ -852,10 +898,19 @@ def _desktop_settings_payload(platform: Any) -> dict[str, Any]:
     "not reported yet" instead of silently dropping the control.
     """
     connected = bool(platform and platform.desktop_settings_broker.connected)
+    platform_id = str(getattr(platform, "platform_id", "") or "")
+    previous_connected, revision = _DESKTOP_CONNECTION_REVISIONS.get(
+        platform_id,
+        (connected, 0),
+    )
+    if connected != previous_connected:
+        revision += 1
+    _DESKTOP_CONNECTION_REVISIONS[platform_id] = (connected, revision)
     snapshot = platform.desktop_settings_broker.snapshot() if platform else {}
     return {
         "connected": connected,
-        "platformId": str(getattr(platform, "platform_id", "") or ""),
+        "connectionRevision": revision,
+        "platformId": platform_id,
         "settings": {
             setting.key: {
                 "order": order,

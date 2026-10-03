@@ -22,6 +22,19 @@ import {
   type Esp32DisplayConfig,
 } from "../../esp32-display/types.js";
 import { listMicrophoneInputDevices } from "../runtime/microphoneDevices.js";
+import {
+  MAX_LIVE2D_RENDER_DPR_CAP,
+  MAX_PHYSICS_RESPONSE_SCALE,
+  MIN_LIVE2D_RENDER_DPR_CAP,
+  MIN_PHYSICS_RESPONSE_SCALE,
+  LIVE2D_RENDER_DPR_CAP_STEP,
+  PHYSICS_RESPONSE_SCALE_STEP,
+} from "../../live2d-renderer/settings.js";
+import {
+  MAX_MOTION_INTENSITY_SCALE,
+  MIN_MOTION_INTENSITY_SCALE,
+  MOTION_INTENSITY_SCALE_STEP,
+} from "../../model-engine/settings.js";
 
 export interface DesktopSettingEntry {
   value: string;
@@ -31,8 +44,24 @@ export interface DesktopSettingEntry {
   step?: number;
 }
 
+export interface DesktopRuntimeSettingsAccess {
+  currentAmbientMotionEnabled: () => boolean;
+  applyAmbientMotionEnabled: (enabled: boolean) => void;
+  currentPhysicsResponseScale: () => number;
+  applyPhysicsResponseScale: (scale: number) => void;
+  currentRenderDprCap: () => number;
+  applyRenderDprCap: (cap: number) => void;
+  currentMotionIntensityScale: () => number;
+  applyMotionIntensityScale: (scale: number) => void;
+}
+
 /** Desktop-local state this responder reads and mutates. */
 export interface DesktopSettingAccess {
+  currentDesktopScreenshotOnSendEnabled: () => boolean;
+  applyDesktopScreenshotOnSendEnabled: (enabled: boolean) => void;
+  currentPttModeEnabled: () => boolean;
+  applyPttModeEnabled: (enabled: boolean) => void;
+  runtimeSettings: DesktopRuntimeSettingsAccess;
   currentMicrophoneDeviceId: () => string;
   applyMicrophoneDevice: (deviceId: string) => void;
   currentSpoutEnabled: () => boolean;
@@ -81,6 +110,38 @@ function booleanSettingHandler(
       const enabled = value === "true";
       apply(enabled);
       return { value: String(current()), options: [] };
+    },
+  };
+}
+
+function boundedNumberSettingHandler(
+  current: () => number,
+  apply: (value: number) => void,
+  minimum: number,
+  maximum: number,
+  step: number,
+): DesktopSettingHandler {
+  return {
+    list: async () => ({
+      value: String(current()),
+      options: [],
+      minimum,
+      maximum,
+      step,
+    }),
+    set: async (value) => {
+      const parsed = parseFiniteNumber(value);
+      if (parsed < minimum || parsed > maximum) {
+        throw new Error("desktop_setting_value_out_of_range");
+      }
+      apply(parsed);
+      return {
+        value: String(current()),
+        options: [],
+        minimum,
+        maximum,
+        step,
+      };
     },
   };
 }
@@ -271,11 +332,45 @@ const ESP32_SETTING_KEYS = [
   "esp32_display_crop_w",
   "esp32_display_crop_h",
 ] as const;
+const ESP32_SETTING_KEY_SET: ReadonlySet<string> = new Set(ESP32_SETTING_KEYS);
 
 const DESKTOP_SETTING_HANDLERS: Record<
   string,
   (access: DesktopSettingAccess) => DesktopSettingHandler
 > = {
+  desktop_screenshot_on_send: (access) => booleanSettingHandler(
+    access.currentDesktopScreenshotOnSendEnabled,
+    access.applyDesktopScreenshotOnSendEnabled,
+  ),
+  ptt_mode_enabled: (access) => booleanSettingHandler(
+    access.currentPttModeEnabled,
+    access.applyPttModeEnabled,
+  ),
+  live2d_ambient_motion_enabled: (access) => booleanSettingHandler(
+    access.runtimeSettings.currentAmbientMotionEnabled,
+    access.runtimeSettings.applyAmbientMotionEnabled,
+  ),
+  live2d_physics_response_scale: (access) => boundedNumberSettingHandler(
+    access.runtimeSettings.currentPhysicsResponseScale,
+    access.runtimeSettings.applyPhysicsResponseScale,
+    MIN_PHYSICS_RESPONSE_SCALE,
+    MAX_PHYSICS_RESPONSE_SCALE,
+    PHYSICS_RESPONSE_SCALE_STEP,
+  ),
+  live2d_render_dpr_cap: (access) => boundedNumberSettingHandler(
+    access.runtimeSettings.currentRenderDprCap,
+    access.runtimeSettings.applyRenderDprCap,
+    MIN_LIVE2D_RENDER_DPR_CAP,
+    MAX_LIVE2D_RENDER_DPR_CAP,
+    LIVE2D_RENDER_DPR_CAP_STEP,
+  ),
+  motion_engine_intensity_scale: (access) => boundedNumberSettingHandler(
+    access.runtimeSettings.currentMotionIntensityScale,
+    access.runtimeSettings.applyMotionIntensityScale,
+    MIN_MOTION_INTENSITY_SCALE,
+    MAX_MOTION_INTENSITY_SCALE,
+    MOTION_INTENSITY_SCALE_STEP,
+  ),
   microphone_device: microphoneDeviceHandler,
   spout_enabled: (access) => booleanSettingHandler(
     access.currentSpoutEnabled,
@@ -293,7 +388,9 @@ export function createDesktopSettingsResponder(
 ): (
   envelope: ProtocolEnvelope<SystemDesktopSettingsQueryPayload>,
 ) => Promise<void> {
-  return async function handleDesktopSettingsQuery(
+  let esp32RequestQueue: Promise<void> = Promise.resolve();
+
+  async function processDesktopSettingsQuery(
     envelope: ProtocolEnvelope<SystemDesktopSettingsQueryPayload>,
   ): Promise<void> {
     const { request_id: requestId, key, action, value } = envelope.payload;
@@ -331,5 +428,24 @@ export function createDesktopSettingsResponder(
         error: error instanceof Error ? error.message : "desktop_setting_failed",
       });
     }
+  }
+
+  return function handleDesktopSettingsQuery(
+    envelope: ProtocolEnvelope<SystemDesktopSettingsQueryPayload>,
+  ): Promise<void> {
+    if (
+      envelope.payload.action !== "set"
+      || !ESP32_SETTING_KEY_SET.has(envelope.payload.key)
+    ) {
+      return processDesktopSettingsQuery(envelope);
+    }
+    // Queue the complete read-modify-apply operation so concurrent ESP32
+    // field updates cannot each snapshot the same stale configuration.
+    const current = esp32RequestQueue.then(
+      () => processDesktopSettingsQuery(envelope),
+      () => processDesktopSettingsQuery(envelope),
+    );
+    esp32RequestQueue = current.catch(() => undefined);
+    return current;
   };
 }

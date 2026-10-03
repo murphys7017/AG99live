@@ -3,6 +3,7 @@ import {
   type AdapterConnectionCompositionInstance,
   type AdapterConnectionInstance,
 } from "../adapter-connection/useAdapterConnection.js";
+import type { DesktopRuntimeSettingsAccess } from "../adapter-connection/features/desktopSettings.js";
 import type { ModelSyncInstance } from "../adapter-connection/model-sync/useModelSync.js";
 import { createBrowserAudioTimelineSink } from "../playback-timeline/audioSink.js";
 import { createSpeechOutputRuntime } from "../playback-timeline/speechOutputRuntime.js";
@@ -36,6 +37,7 @@ export function createConversationPlaybackRuntime(options: {
   sessionStore: SessionStore;
   modelSync: ModelSyncInstance;
   normalizeMotionPayload: MotionPayloadNormalizer;
+  desktopRuntimeSettings: DesktopRuntimeSettingsAccess;
 }): ConversationPlaybackRuntime {
   let motionRuntime: PlaybackTimelineMotionRuntime | null = null;
   function requireMotionRuntime(): PlaybackTimelineMotionRuntime {
@@ -56,6 +58,7 @@ export function createConversationPlaybackRuntime(options: {
     sessionStore: options.sessionStore,
     modelSync: options.modelSync,
     normalizeMotionPayload: options.normalizeMotionPayload,
+    desktopRuntimeSettings: options.desktopRuntimeSettings,
   });
   const speechOutputRuntime = createSpeechOutputRuntime();
   const audioSink = createBrowserAudioTimelineSink({ speechOutputRuntime });
