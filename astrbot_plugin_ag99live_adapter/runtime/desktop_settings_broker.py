@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable
 from uuid import uuid4
@@ -91,6 +92,14 @@ class DesktopSettingsBroker:
             ],
             "reportedAt": datetime.now(timezone.utc).isoformat(),
         }
+        for field in ("minimum", "maximum", "step"):
+            bound = result.get(field)
+            if (
+                isinstance(bound, (int, float))
+                and not isinstance(bound, bool)
+                and math.isfinite(bound)
+            ):
+                entry[field] = bound
         self._snapshot[key] = entry
         return dict(entry)
 

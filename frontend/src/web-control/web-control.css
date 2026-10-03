@@ -304,6 +304,27 @@
   width: 100%;
 }
 
+.web-control-settings-group input[type="range"] {
+  min-height: 20px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  accent-color: #98c5ae;
+}
+
+.web-control-range {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 4rem;
+  align-items: center;
+  gap: 12px;
+}
+
+.web-control-range output {
+  color: #bdc6c4;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
 .web-control-settings-group .web-control-checkbox {
   display: flex;
   align-items: center;

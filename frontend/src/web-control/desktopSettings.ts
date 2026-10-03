@@ -14,12 +14,19 @@ export type DesktopSettingOption = {
   label: string;
 };
 
+export type DesktopSettingKind = "toggle" | "text" | "number" | "range" | "select";
+
 export type DesktopSettingEntry = {
   key: string;
+  order: number;
   label: string;
   description: string;
+  kind: DesktopSettingKind;
   value: string;
   options: DesktopSettingOption[];
+  minimum?: number;
+  maximum?: number;
+  step?: number;
   reportedAt: string;
 };
 
@@ -32,7 +39,14 @@ export type DesktopSettingsState = {
 export type DesktopSettingsQueryResponse = {
   ok: boolean;
   key?: string;
-  entry?: { value: string; options: DesktopSettingOption[]; reportedAt: string };
+  entry?: {
+    value: string;
+    options: DesktopSettingOption[];
+    minimum?: number;
+    maximum?: number;
+    step?: number;
+    reportedAt: string;
+  };
   error?: { code: string; key?: string };
   connected: boolean;
   settings: Record<string, DesktopSettingEntry>;
@@ -45,7 +59,9 @@ export const DESKTOP_ERROR_FALLBACKS: Record<string, string> = {
   desktop_setting_unsupported: "该配置项尚未接入桌面端。",
   desktop_setting_action_invalid: "不支持的请求动作。",
   desktop_setting_value_required: "请选择一个取值。",
-  desktop_setting_value_not_available: "桌面端当前没有这个设备，可能已被拔出或改名。",
+  desktop_setting_value_invalid: "取值格式不正确。",
+  desktop_setting_value_out_of_range: "取值超出允许范围。",
+  desktop_setting_value_not_available: "桌面端当前没有这个选项或设备，可能已变化。",
   desktop_setting_failed: "桌面端处理该配置时出错。",
   platform_not_found: "没有找到对应的 Adapter 实例。",
 };

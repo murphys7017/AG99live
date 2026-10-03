@@ -11,11 +11,33 @@ const props = defineProps<{
   onApply: (key: string, value: string) => void;
 }>();
 
-function onSelect(entry: DesktopSettingEntry, event: Event): void {
-  const target = event.target as HTMLSelectElement;
-  if (target.value !== entry.value) {
-    props.onApply(entry.key, target.value);
+function isDisabled(entry: DesktopSettingEntry): boolean {
+  return props.busy || !props.connected || !entry.reportedAt;
+}
+
+function applyValue(entry: DesktopSettingEntry, value: string): void {
+  if (value !== entry.value) {
+    props.onApply(entry.key, value);
   }
+}
+
+function onToggle(entry: DesktopSettingEntry, event: Event): void {
+  const target = event.target as HTMLInputElement;
+  applyValue(entry, String(target.checked));
+}
+
+function onInput(entry: DesktopSettingEntry, event: Event): void {
+  const target = event.target as HTMLInputElement | HTMLSelectElement;
+  applyValue(entry, target.value);
+}
+
+function formatRangeValue(entry: DesktopSettingEntry): string {
+  if (!entry.value) return "—";
+  const value = Number(entry.value);
+  if (!Number.isFinite(value)) return entry.value;
+  return entry.key.includes("crop_") || entry.key.endsWith("jpeg_quality")
+    ? `${Math.round(value * 100)}%`
+    : entry.value;
 }
 </script>
 
@@ -27,38 +49,88 @@ function onSelect(entry: DesktopSettingEntry, event: Event): void {
         <span>DESKTOP</span>
       </header>
       <p class="web-control-settings-group__description">
-        这些配置属于桌面端所在的那台电脑，由桌面端自己提供可选值并应用。服务端只负责转发。
+        设置由桌面端应用并保存；此页面只通过已连接的桌面端转发修改。
+      </p>
+      <p v-if="props.error" class="web-control-field__error" role="alert">
+        {{ props.error }}
       </p>
 
       <p v-if="!settings.length" class="web-control-empty">暂无桌面端配置项。</p>
 
-      <label v-for="entry in settings" :key="entry.key" class="web-control-field">
-        <span class="web-control-field__label">{{ entry.label }}</span>
+      <template v-for="entry in settings" :key="entry.key">
+        <label v-if="entry.kind === 'toggle'" class="web-control-checkbox">
+          <input
+            type="checkbox"
+            :checked="entry.value === 'true'"
+            :disabled="isDisabled(entry)"
+            @change="onToggle(entry, $event)"
+          />
+          <span class="web-control-checkbox__copy">
+            <strong>{{ entry.label }}</strong>
+            <small>{{ entry.description }}</small>
+          </span>
+        </label>
 
-        <select
-          :value="entry.value"
-          :disabled="props.busy || !props.connected || !entry.options.length"
-          @change="onSelect(entry, $event)"
-        >
-          <option v-if="!entry.options.length" value="">尚未获取到可选项</option>
-          <option
-            v-for="option in entry.options"
-            :key="option.id"
-            :value="option.id"
-          >{{ option.label }}</option>
-        </select>
+        <label v-else class="web-control-field">
+          <span class="web-control-field__label">{{ entry.label }}</span>
 
-        <span class="web-control-field__hint">{{ entry.description }}</span>
+          <input
+            v-if="entry.kind === 'text'"
+            type="text"
+            :value="entry.value"
+            :maxlength="255"
+            :disabled="isDisabled(entry)"
+            @change="onInput(entry, $event)"
+          />
+          <input
+            v-else-if="entry.kind === 'number'"
+            type="number"
+            :value="entry.value"
+            :min="entry.minimum"
+            :max="entry.maximum"
+            :step="entry.step"
+            :disabled="isDisabled(entry)"
+            @change="onInput(entry, $event)"
+          />
+          <div v-else-if="entry.kind === 'range'" class="web-control-range">
+            <input
+              type="range"
+              :value="entry.value"
+              :min="entry.minimum"
+              :max="entry.maximum"
+              :step="entry.step"
+              :disabled="isDisabled(entry)"
+              @change="onInput(entry, $event)"
+            />
+            <output>{{ formatRangeValue(entry) }}</output>
+          </div>
+          <select
+            v-else
+            :value="entry.value"
+            :disabled="isDisabled(entry) || !entry.options.length"
+            @change="onInput(entry, $event)"
+          >
+            <option v-if="!entry.options.length" value="">尚未获取到可选项</option>
+            <option
+              v-for="option in entry.options"
+              :key="option.id"
+              :value="option.id"
+            >{{ option.label }}</option>
+          </select>
+
+          <span class="web-control-field__hint">{{ entry.description }}</span>
+        </label>
+
         <span v-if="entry.reportedAt" class="web-control-field__hint">
-          最后由桌面端上报于 {{ formatReportedAt(entry.reportedAt) }}
+          {{ entry.label }}：桌面端上报于 {{ formatReportedAt(entry.reportedAt) }}
+        </span>
+        <span v-else class="web-control-field__hint">
+          {{ entry.label }}：尚未收到桌面端的当前值。
         </span>
         <span v-if="!props.connected" class="web-control-field__hint">
           桌面端未连接，以上为最后一次已知的值，当前不可修改。
         </span>
-        <span v-if="props.error" class="web-control-field__error" role="alert">
-          {{ props.error }}
-        </span>
-      </label>
+      </template>
 
       <div class="web-control-form-actions">
         <span class="web-control-form-actions__status">

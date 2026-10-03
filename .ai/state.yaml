@@ -1,3 +1,39 @@
+native_runtime_review_followups:
+  recorded_at: "2026-10-01"
+  class: bugfix
+  risk: high
+  status: partially_addressed_async_receive_cancellation_required
+  scope:
+    - "Serialize WinHTTP WebSocket shutdown against sends, leave the receive active for the peer close response, run any remaining full close only after receive returns, and report shutdown/close/handle errors."
+    - "Mark microphone stream end as dropped after queue loss or sender failure; finalize the previous stream before a retry replaces its identity, and account for in-flight and queued bytes lost on send failure."
+    - "Retire output-segment turns on turn_finished/interrupt, reject segments for unstarted or recently retired turns, and bound active turns, pending segments, committed message IDs, and retired turn IDs."
+    - "Validate complete finite PCM RIFF/WAVE chunk structure before playback, require a valid duration and successful PlaySoundW start, and report specific playback failure reasons."
+    - "Keep Cubism asset paths wide through file access and decode SDK/model JSON path strings as UTF-8, including texture paths."
+  non_actions:
+    - "Do not launch the Native Host, connect to Adapter, or claim live microphone/audio/model-path verification."
+    - "Do not modify unrelated frontend/control-panel work already present in the worktree."
+    - "Do not commit."
+  review: >-
+    Adapter speech ingress rejects a microphone stream marked dropped, so capture
+    queue overflow and failed binary sends now invalidate that stream instead of
+    presenting it as complete. Turn assembly now requires control.turn_started
+    before accepting output, matching the Adapter's outbound ordering and
+    preventing terminal turns from being recreated by late segments. The WAV
+    parser matches the Adapter's finite RIFF PCM cache contract. Cubism's SDK
+    callback accepts std::string paths; the host treats those resource names as
+    UTF-8 and converts to native wide paths before Windows file access. The
+    WebSocket send/close race is removed and full close now waits until the
+    receive operation returns. A synchronous receive cannot be safely aborted
+    by closing its handle concurrently, so a silent peer can still delay close;
+    a bounded guarantee requires an asynchronous receive/cancellation design.
+  validation:
+    - "`cmake --build render-core/build --config Release --target ag99-render-host --parallel 4` passed after the final source changes."
+    - "`cmake --build runtime-core/build --config Release --target ag99-runtime-protocol-smoke --parallel 4` passed."
+    - "`ctest --test-dir runtime-core/build -C Release --output-on-failure` passed (1/1)."
+    - "`git diff --check` passed; only existing line-ending conversion warnings were emitted."
+  evidence_gap:
+    - "A silent peer may keep the synchronous WebSocket receive pending; async receive cancellation has not been implemented. No live WebSocket shutdown failure, microphone queue overflow/send failure, Adapter audio download/playback, or non-ASCII model asset path was exercised."
+
 native_microphone_capture_thread_safety:
   recorded_at: "2026-10-02"
   class: bugfix
@@ -845,3 +881,34 @@ spout_async_readback:
     - "`git diff --check` passed."
   evidence_gap:
     - "Compare renderer frame time, readback copy duration, GPU-busy skipped samples, IPC duration, native pipe throughput, output FPS, and visible frame latency on the target machine with Spout enabled."
+
+web_control_desktop_output_settings:
+  recorded_at: "2026-10-01"
+  class: feature
+  risk: medium
+  status: source_complete_pending_live_acceptance
+  scope:
+    - "Expose the existing Spout enable switch and the full ESP32 display configuration in the AstrBot Web control page."
+    - "Keep desktop settings machine-owned; the Adapter brokers typed-control metadata and string values without changing the protocol version."
+    - "Apply ESP32 enable/disable and host/port changes through the existing main-process IPC, and apply frame/crop options to the shared runtime configuration."
+    - "Render desktop settings as toggles, text, numbers, ranges, or desktop-provided selects and fetch the expanded setting list concurrently."
+  non_actions:
+    - "Do not migrate global hotkeys, rendering configuration, or live desktop preview in this batch."
+    - "Do not remove or restyle existing desktop settings windows."
+    - "Do not commit this work without an explicit request."
+  findings:
+    - "Spout enable updates the existing shared reactive setting, which continues to drive persistence, cross-window sync, and the frame publisher."
+    - "ESP32 enable remains a manual per-session setting; startup still forces it off, while host/port changes restart the existing TCP bridge."
+    - "Desktop-owned validation rejects invalid ports, enum values, quality, and crop geometry; crop slider maxima are reported dynamically and the paired field refreshes after a change."
+    - "ESP32 connection attempts initiated through the Web broker use a six-second start timeout under the Adapter broker's eight-second request timeout."
+    - "Parallel desktop-setting reads merge one returned key at a time so concurrent snapshots cannot overwrite unrelated newer values."
+  validation:
+    - "`npm run typecheck` passed for renderer, WebSDK, and Node targets."
+    - "`npm run build:astrbot-page` passed and regenerated the embedded control page assets."
+    - "The focused desktop-settings responder test passed for Spout enable, crop updates, dynamic bounds, and out-of-range rejection."
+    - "Python in-memory syntax and broker/spec boundary checks passed, including dynamic bounds persistence and rejected-value non-caching."
+    - "AstrBot plugin structure checker reported 0 errors and 0 warnings."
+    - "`git diff --check` passed."
+  evidence_gap:
+    - "Live authenticated requests against a reloaded AstrBot plugin and a connected desktop client have not been exercised."
+    - "A real ESP32 must verify manual start/stop, host/port reconnection, frame settings, crop behavior, and delivery; a Spout consumer must verify enable/disable and image output."

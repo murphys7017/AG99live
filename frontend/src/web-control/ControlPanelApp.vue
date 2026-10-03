@@ -81,7 +81,8 @@ const desktopSettings = ref<DesktopSettingsState>({
   platformId: "",
   settings: {},
 });
-const desktopBusy = ref(false);
+const desktopBusyCount = ref(0);
+const desktopBusy = computed(() => desktopBusyCount.value > 0);
 const desktopError = ref("");
 
 const activePlatform = computed(() =>
@@ -240,9 +241,7 @@ function descriptionFor(field: ConfigField): string {
 }
 
 const desktopSettingEntries = computed(() =>
-  Object.values(desktopSettings.value.settings).sort((a, b) =>
-    a.key.localeCompare(b.key),
-  ),
+  Object.values(desktopSettings.value.settings).sort((a, b) => a.order - b.order),
 );
 
 async function loadDesktopSettings(): Promise<void> {
@@ -257,18 +256,12 @@ async function loadDesktopSettings(): Promise<void> {
       platform_id: selectedPlatformId.value,
     });
     desktopSettings.value = next;
-    // The desktop comes and goes while it restarts. Once it is back, pull the
-    // real option list so the panel stops showing the offline snapshot.
-    if (!wasConnected && next.connected && !hasReportedOptions(next)) {
+    if (!wasConnected && next.connected) {
       await refreshDesktopSettings();
     }
   } catch (error) {
     desktopError.value = desktopErrorMessage(error instanceof Error ? error.message : "");
   }
-}
-
-function hasReportedOptions(state: DesktopSettingsState): boolean {
-  return Object.values(state.settings).some((entry) => entry.options.length > 0);
 }
 
 async function queryDesktopSetting(
@@ -277,8 +270,10 @@ async function queryDesktopSetting(
   value?: string,
 ): Promise<void> {
   if (!selectedPlatformId.value) return;
-  desktopBusy.value = true;
+  desktopBusyCount.value += 1;
   desktopError.value = "";
+  let rejectedError = "";
+  let relatedKey = "";
   try {
     const response = await apiPost<DesktopSettingsQueryResponse>(
       "control/desktop/settings",
@@ -287,22 +282,66 @@ async function queryDesktopSetting(
     desktopSettings.value = {
       connected: response.connected,
       platformId: selectedPlatformId.value,
-      settings: response.settings ?? desktopSettings.value.settings,
+      settings: mergeDesktopSettings(
+        response.key && response.settings?.[response.key]
+          ? { [response.key]: response.settings[response.key] }
+          : response.settings ?? desktopSettings.value.settings,
+      ),
     };
     if (!response.ok) {
-      desktopError.value = desktopErrorMessage(response.error?.code);
+      rejectedError = desktopErrorMessage(response.error?.code);
+      desktopError.value = rejectedError;
+    } else if (action === "set") {
+      relatedKey = relatedDesktopSettingKey(key);
     }
   } catch (error) {
     desktopError.value = error instanceof Error ? error.message : String(error);
   } finally {
-    desktopBusy.value = false;
+    desktopBusyCount.value -= 1;
+  }
+  if (rejectedError && action === "set") {
+    await refreshDesktopSettings();
+    desktopError.value = rejectedError;
+  } else if (relatedKey) {
+    await queryDesktopSetting(relatedKey, "list");
+  }
+}
+
+function relatedDesktopSettingKey(key: string): string {
+  switch (key) {
+    case "esp32_display_crop_x": return "esp32_display_crop_w";
+    case "esp32_display_crop_y": return "esp32_display_crop_h";
+    case "esp32_display_crop_w": return "esp32_display_crop_x";
+    case "esp32_display_crop_h": return "esp32_display_crop_y";
+    default: return "";
   }
 }
 
 async function refreshDesktopSettings(): Promise<void> {
-  for (const entry of desktopSettingEntries.value) {
-    await queryDesktopSetting(entry.key, "list");
+  await Promise.all(
+    desktopSettingEntries.value.map((entry) =>
+      queryDesktopSetting(entry.key, "list"),
+    ),
+  );
+}
+
+function mergeDesktopSettings(
+  nextSettings: DesktopSettingsState["settings"],
+): DesktopSettingsState["settings"] {
+  const merged = { ...desktopSettings.value.settings };
+  for (const [key, next] of Object.entries(nextSettings)) {
+    const current = merged[key];
+    const nextTime = Date.parse(next.reportedAt);
+    const currentTime = current ? Date.parse(current.reportedAt) : Number.NaN;
+    if (
+      !current
+      || (Number.isFinite(nextTime)
+        && (!Number.isFinite(currentTime) || nextTime >= currentTime))
+    ) {
+      merged[key] = next;
+    }
   }
+  return merged;
 }
 
 // The desktop client restarts on its own schedule, so a one-shot read goes
@@ -530,7 +569,7 @@ onMounted(() => void loadOverview());
         <div v-else class="web-control-empty">尚未发现 AG99live Adapter 实例。请先在 AstrBot 中启用插件并配置平台。</div>
         <div class="web-control-footnote">
           <strong>桌面运行状态</strong>
-          <p>本页面可配置 AstrBot 插件参数、Live2D Profile 和动作样例。麦克风设备由桌面端自己枚举选项，页面只负责转发，因此需要桌面端处于连接状态。全局按键、渲染参数、Spout/ESP32 及桌面实时动作预览仍由本机运行时持有，尚未接入这条转发链路。</p>
+          <p>本页面可配置 AstrBot 插件参数、Live2D Profile、动作样例，以及桌面端的麦克风、Spout 输出和 ESP32 小屏。全局按键、渲染参数和桌面实时动作预览仍由本机运行时持有，尚未接入这条转发链路。</p>
         </div>
       </section>
 

@@ -39,6 +39,42 @@ function getBridge(): DesktopBridge | null {
   return candidate;
 }
 
+export async function startEsp32DisplayConnection(
+  config: Esp32DisplayConfig,
+  timeoutSeconds = 8,
+): Promise<{ ok: boolean; error?: string }> {
+  const bridge = getBridge();
+  if (!bridge) {
+    return { ok: false, error: "preload_unavailable" };
+  }
+  try {
+    return await bridge.startEsp32Display(config.host, config.port, timeoutSeconds);
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "ipc_start_failed",
+    };
+  }
+}
+
+export async function stopEsp32DisplayConnection(): Promise<{
+  ok: boolean;
+  error?: string;
+}> {
+  const bridge = getBridge();
+  if (!bridge) {
+    return { ok: true };
+  }
+  try {
+    return await bridge.stopEsp32Display();
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "ipc_stop_failed",
+    };
+  }
+}
+
 export function useEsp32DisplayConnection(): Esp32DisplayConnection {
   const bridge = getBridge();
   const connected = ref(false);
@@ -69,14 +105,7 @@ export function useEsp32DisplayConnection(): Esp32DisplayConnection {
       lastError.value = "preload_unavailable";
       return false;
     }
-    let result: { ok: boolean; error?: string };
-    try {
-      result = await bridge.startEsp32Display(config.host, config.port, 8);
-    } catch (error) {
-      lastError.value = error instanceof Error ? error.message : "ipc_start_failed";
-      connected.value = false;
-      return false;
-    }
+    const result = await startEsp32DisplayConnection(config);
     if (!result.ok) {
       lastError.value = result.error ?? "start_failed";
       connected.value = false;
@@ -88,13 +117,9 @@ export function useEsp32DisplayConnection(): Esp32DisplayConnection {
   }
 
   async function stop(): Promise<void> {
-    if (!bridge) {
-      return;
-    }
-    try {
-      await bridge.stopEsp32Display();
-    } catch (error) {
-      lastError.value = error instanceof Error ? error.message : "ipc_stop_failed";
+    const result = await stopEsp32DisplayConnection();
+    if (!result.ok) {
+      lastError.value = result.error ?? "ipc_stop_failed";
     }
     connected.value = false;
   }

@@ -144,6 +144,9 @@ export interface SystemDesktopSettingsResultPayload {
   ok: boolean;
   value?: string;
   options?: SystemDesktopSettingOption[];
+  minimum?: number;
+  maximum?: number;
+  step?: number;
   error?: string;
 }
 

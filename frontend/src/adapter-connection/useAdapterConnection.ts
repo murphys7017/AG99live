@@ -22,6 +22,13 @@ import {
 import { createAdapterOutboundClient } from "./outbound/outboundClient.js";
 import { OUTBOUND_MESSAGE_TYPES } from "./core/protocolMessageTypes.js";
 import { createDesktopSettingsResponder } from "./features/desktopSettings.js";
+import { useSpoutSettings } from "../spout/useSpoutSettings.js";
+import { useEsp32DisplaySettings } from "../esp32-display/useEsp32DisplaySettings.js";
+import {
+  startEsp32DisplayConnection,
+  stopEsp32DisplayConnection,
+} from "../esp32-display/useEsp32DisplayConnection.js";
+import { cloneConfig as cloneEsp32DisplayConfig } from "../esp32-display/types.js";
 import { useAdapterMotionTuning } from "./motion-tuning/useAdapterMotionTuning.js";
 import {
   createAdapterMicrophoneRuntime,
@@ -276,10 +283,57 @@ export function createAdapterConnection(
     buildEnvelope: buildMessageEnvelope as (typeof buildMessageEnvelope),
   });
 
+  const { config: spoutConfig } = useSpoutSettings();
+  const { config: esp32DisplayConfig } = useEsp32DisplaySettings();
+
+  async function applyEsp32DisplayConfig(
+    nextConfig: ReturnType<typeof cloneEsp32DisplayConfig>,
+  ): Promise<void> {
+    const currentConfig = cloneEsp32DisplayConfig(esp32DisplayConfig);
+    const connectionChanged = currentConfig.host !== nextConfig.host
+      || currentConfig.port !== nextConfig.port;
+    const restartConnection = currentConfig.enabled !== nextConfig.enabled
+      || (nextConfig.enabled && connectionChanged);
+
+    if (!restartConnection) {
+      Object.assign(esp32DisplayConfig, cloneEsp32DisplayConfig(nextConfig));
+      return;
+    }
+
+    if (currentConfig.enabled || nextConfig.enabled) {
+      const stopped = await stopEsp32DisplayConnection();
+      if (!stopped.ok) {
+        throw new Error(stopped.error ?? "esp32_display_stop_failed");
+      }
+    }
+
+    Object.assign(esp32DisplayConfig, {
+      ...cloneEsp32DisplayConfig(nextConfig),
+      enabled: false,
+    });
+    if (!nextConfig.enabled) {
+      return;
+    }
+
+    // Keep this under the adapter broker's 8-second request timeout.
+    const started = await startEsp32DisplayConnection(nextConfig, 6);
+    if (!started.ok) {
+      esp32DisplayConfig.enabled = false;
+      throw new Error(started.error ?? "esp32_display_start_failed");
+    }
+    esp32DisplayConfig.enabled = true;
+  }
+
   const desktopSettingsResponder = createDesktopSettingsResponder(
     {
       currentMicrophoneDeviceId: () => state.microphoneDeviceId,
       applyMicrophoneDevice: (deviceId) => microphoneRuntime.setMicrophoneDevice(deviceId),
+      currentSpoutEnabled: () => spoutConfig.enabled,
+      applySpoutEnabled: (enabled) => {
+        spoutConfig.enabled = enabled;
+      },
+      currentEsp32DisplayConfig: () => cloneEsp32DisplayConfig(esp32DisplayConfig),
+      applyEsp32DisplayConfig,
     },
     (payload) => {
       outboundClient.send(

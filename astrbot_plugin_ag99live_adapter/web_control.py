@@ -236,13 +236,25 @@ class DesktopSetting:
     key: str
     label: str
     description: str
+    kind: str = "select"
+    minimum: float | None = None
+    maximum: float | None = None
+    step: float | None = None
 
     def to_json(self) -> dict[str, Any]:
-        return {
+        payload: dict[str, Any] = {
             "key": self.key,
             "label": self.label,
             "description": self.description,
+            "kind": self.kind,
         }
+        if self.minimum is not None:
+            payload["minimum"] = self.minimum
+        if self.maximum is not None:
+            payload["maximum"] = self.maximum
+        if self.step is not None:
+            payload["step"] = self.step
+        return payload
 
 
 DESKTOP_SETTINGS_SPEC: tuple[DesktopSetting, ...] = (
@@ -250,6 +262,96 @@ DESKTOP_SETTINGS_SPEC: tuple[DesktopSetting, ...] = (
         key="microphone_device",
         label="麦克风设备",
         description="桌宠从这台电脑上的哪个麦克风收音。设备由桌面端枚举，选项以桌面端实际可用为准。",
+    ),
+    DesktopSetting(
+        key="spout_enabled",
+        label="Spout 输出",
+        description="将 Live2D 画面发布给本机支持 Spout2 的应用。",
+        kind="toggle",
+    ),
+    DesktopSetting(
+        key="esp32_display_enabled",
+        label="ESP32 小屏输出",
+        description="手动连接并向 ESP32 小屏推送画面；桌面应用重启后默认关闭。",
+        kind="toggle",
+    ),
+    DesktopSetting(
+        key="esp32_display_host",
+        label="ESP32 目标地址",
+        description="小屏设备的 IP 地址或主机名；修改后会重新连接。",
+        kind="text",
+    ),
+    DesktopSetting(
+        key="esp32_display_port",
+        label="ESP32 端口",
+        description="小屏设备的 TCP 端口；修改后会重新连接。",
+        kind="number",
+        minimum=1,
+        maximum=65535,
+        step=1,
+    ),
+    DesktopSetting(
+        key="esp32_display_fps",
+        label="ESP32 帧率",
+        description="小屏画面的目标推送帧率。",
+        kind="select",
+    ),
+    DesktopSetting(
+        key="esp32_display_jpeg_quality",
+        label="ESP32 JPEG 质量",
+        description="推送画面的 JPEG 编码质量。",
+        kind="range",
+        minimum=0.01,
+        maximum=1,
+        step=0.01,
+    ),
+    DesktopSetting(
+        key="esp32_display_output_size",
+        label="ESP32 输出尺寸",
+        description="发送到小屏的正方形图像尺寸。",
+        kind="select",
+    ),
+    DesktopSetting(
+        key="esp32_display_scale_mode",
+        label="ESP32 缩放方式",
+        description="裁剪区域适配输出画布的方式。",
+        kind="select",
+    ),
+    DesktopSetting(
+        key="esp32_display_crop_x",
+        label="ESP32 裁剪 X",
+        description="裁剪区域左侧位置，占 Live2D 画布宽度的比例。",
+        kind="range",
+        minimum=0,
+        maximum=1,
+        step=0.01,
+    ),
+    DesktopSetting(
+        key="esp32_display_crop_y",
+        label="ESP32 裁剪 Y",
+        description="裁剪区域顶部位置，占 Live2D 画布高度的比例。",
+        kind="range",
+        minimum=0,
+        maximum=1,
+        step=0.01,
+    ),
+    DesktopSetting(
+        key="esp32_display_crop_w",
+        label="ESP32 裁剪宽度",
+        description="裁剪区域宽度，占 Live2D 画布宽度的比例。",
+        kind="range",
+        minimum=0.05,
+        maximum=1,
+        step=0.01,
+    ),
+    DesktopSetting(
+        key="esp32_display_crop_h",
+        label="ESP32 裁剪高度",
+        description="裁剪区域高度，占 Live2D 画布高度的比例。",
+        kind="range",
+        minimum=0.05,
+        maximum=1,
+        step=0.01,
     ),
 )
 
@@ -756,13 +858,18 @@ def _desktop_settings_payload(platform: Any) -> dict[str, Any]:
         "platformId": str(getattr(platform, "platform_id", "") or ""),
         "settings": {
             setting.key: {
+                "order": order,
                 **setting.to_json(),
                 **(
                     snapshot.get(setting.key)
-                    or {"value": "", "options": [], "reportedAt": ""}
+                    or {
+                        "value": "",
+                        "options": [],
+                        "reportedAt": "",
+                    }
                 ),
             }
-            for setting in DESKTOP_SETTINGS_SPEC
+            for order, setting in enumerate(DESKTOP_SETTINGS_SPEC)
         },
     }
 
