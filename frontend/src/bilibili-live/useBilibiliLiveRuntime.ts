@@ -20,7 +20,6 @@ const MAX_BUFFER_SIZE = 80;
 interface BilibiliLiveRuntimeOptions {
   sendText: (text: string) => Promise<boolean>;
   pushHistory: (role: "system" | "error", text: string) => void;
-  onStatusChanged?: () => void;
 }
 
 export function useBilibiliLiveRuntime(options: BilibiliLiveRuntimeOptions) {
@@ -78,13 +77,11 @@ export function useBilibiliLiveRuntime(options: BilibiliLiveRuntimeOptions) {
       status.connected = false;
       status.bufferedCount = 0;
       status.realRoomId = null;
-      notifyStatusChanged();
       return;
     }
     if (!normalized.roomId) {
       status.status = "error";
       status.lastError = "请输入 B 站直播间房间 ID。";
-      notifyStatusChanged();
       return;
     }
 
@@ -116,11 +113,9 @@ export function useBilibiliLiveRuntime(options: BilibiliLiveRuntimeOptions) {
           : nextStatus.lastError
             ? "error"
             : "connecting";
-        notifyStatusChanged();
       },
     });
     client.start();
-    notifyStatusChanged();
   }
 
   function getSettings(): BilibiliLiveSettings {
@@ -138,7 +133,6 @@ export function useBilibiliLiveRuntime(options: BilibiliLiveRuntimeOptions) {
     }
     status.bufferedCount = buffer.length;
     status.lastMessageAt = new Date(message.timestamp).toISOString();
-    notifyStatusChanged();
   }
 
   function ensureTickTimer(): void {
@@ -181,7 +175,6 @@ export function useBilibiliLiveRuntime(options: BilibiliLiveRuntimeOptions) {
       status.status = "error";
     } finally {
       sending = false;
-      notifyStatusChanged();
     }
   }
 
@@ -203,10 +196,6 @@ export function useBilibiliLiveRuntime(options: BilibiliLiveRuntimeOptions) {
     status.roomId = settings.roomId;
     status.hasCookie = Boolean(settings.cookie);
     status.bufferedCount = buffer.length;
-  }
-
-  function notifyStatusChanged(): void {
-    options.onStatusChanged?.();
   }
 
   return {
