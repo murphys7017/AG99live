@@ -1372,13 +1372,13 @@ class RuntimeBridge final {
 public:
   RuntimeBridge(
       std::function<void(ag99::runtime::ModelSync)> on_model_sync,
-      std::function<void(const ag99::runtime::Json&, const std::string&)> on_motion_intent,
+      std::function<void(ag99::runtime::OutputSegment)> on_output_segment,
       std::function<void(const std::string&)> on_turn_started,
       std::function<void(const std::string&)> on_turn_finished)
       : microphone_(websocket_),
         callback_lifetime_(std::make_shared<CallbackLifetime>()),
         on_model_sync_(std::move(on_model_sync)),
-        on_motion_intent_(std::move(on_motion_intent)),
+        on_output_segment_(std::move(on_output_segment)),
         on_turn_started_(std::move(on_turn_started)),
         on_turn_finished_(std::move(on_turn_finished)),
         session_({
@@ -1519,11 +1519,9 @@ public:
 
 private:
   struct AudioQueueItem {
-    std::string url;
+    ag99::runtime::OutputSegment segment;
     std::string turn_id;
     std::uint64_t generation = 0;
-    bool has_motion = false;
-    ag99::runtime::Json motion_payload = ag99::runtime::Json::object();
   };
 
   template <typename Callback>
@@ -1610,13 +1608,9 @@ private:
     auto turn_id = segment.envelope.turn_id.value_or("");
     if (segment.audio.state == ag99::runtime::AudioSlot::State::Present) {
       AudioQueueItem item;
-      item.url = std::move(segment.audio.url);
+      item.segment = std::move(segment);
       item.turn_id = std::move(turn_id);
       item.generation = connection_generation_.load();
-      if (segment.motion.state == ag99::runtime::MotionSlot::State::Present) {
-        item.has_motion = true;
-        item.motion_payload = std::move(segment.motion.payload);
-      }
       {
         std::scoped_lock lock(audio_queue_mutex_);
         if (closing_.load()) {
@@ -1629,8 +1623,8 @@ private:
     }
 
     if (segment.motion.state == ag99::runtime::MotionSlot::State::Present
-        && on_motion_intent_) {
-      on_motion_intent_(segment.motion.payload, turn_id);
+        && on_output_segment_) {
+      on_output_segment_(std::move(segment));
     }
     if (!turn_id.empty() && websocket_.connected()) {
       const auto finished =
@@ -1665,7 +1659,8 @@ private:
       }
 
       std::string playback_failure_reason;
-      const auto playback = PlayAudioUrl(item.url, playback_failure_reason);
+      const auto playback = PlayAudioUrl(
+          item.segment.audio.url, playback_failure_reason);
       if (item.generation != connection_generation_.load()
           || pending_closed_generation_.load() == item.generation) {
         StopCurrentAudio();
@@ -1688,8 +1683,10 @@ private:
           StopCurrentAudio();
           continue;
         }
-        if (item.has_motion && on_motion_intent_) {
-          on_motion_intent_(item.motion_payload, item.turn_id);
+        if (item.segment.motion.state
+                == ag99::runtime::MotionSlot::State::Present
+            && on_output_segment_) {
+          on_output_segment_(std::move(item.segment));
         }
       }
       const auto deadline = NowSeconds() + playback->duration_seconds;
@@ -1733,7 +1730,7 @@ private:
   std::mutex microphone_operation_mutex_;
   std::shared_ptr<CallbackLifetime> callback_lifetime_;
   std::function<void(ag99::runtime::ModelSync)> on_model_sync_;
-  std::function<void(const ag99::runtime::Json&, const std::string&)> on_motion_intent_;
+  std::function<void(ag99::runtime::OutputSegment)> on_output_segment_;
   std::function<void(const std::string&)> on_turn_started_;
   std::function<void(const std::string&)> on_turn_finished_;
   ag99::runtime::RuntimeProtocolSession session_;
@@ -2023,24 +2020,22 @@ public:
     std::cerr << "[motion] model sync received\n";
   }
 
-  void QueueMotionPayload(
-      const ag99::runtime::Json& payload,
-      const std::string& turn_id) {
+  void QueueOutputSegment(ag99::runtime::OutputSegment segment) {
     std::scoped_lock lock(_motion_mutex);
+    if (segment.motion.state != ag99::runtime::MotionSlot::State::Present) {
+      return;
+    }
+    const auto& payload = segment.motion.payload;
     const auto schema = ReadString(payload, "schema_version");
     if (schema == std::string(ag99::runtime::kParameterPlanSchema)) {
-      _pending_parameter_plan = payload;
-      _pending_parameter_plan_turn_id = turn_id;
-      _pending_motion_intent.reset();
-      _pending_motion_intent_turn_id.reset();
+      _pending_parameter_plan = std::move(segment);
+      _pending_motion_segment.reset();
       _active_motion.reset();
       std::cerr << "[motion] parameter plan queued\n";
       return;
     }
-    _pending_motion_intent = payload;
-    _pending_motion_intent_turn_id = turn_id;
+    _pending_motion_segment = std::move(segment);
     _pending_parameter_plan.reset();
-    _pending_parameter_plan_turn_id.reset();
     _active_parameter_plan.reset();
     std::cerr << "[motion] intent queued\n";
   }
@@ -2356,7 +2351,12 @@ private:
   }
 
   std::optional<ParameterPlan> ParseParameterPlan(
-      const ag99::runtime::Json& payload) const {
+      const ag99::runtime::OutputSegment& segment) const {
+    if (segment.motion.state != ag99::runtime::MotionSlot::State::Present) {
+      std::cerr << "[motion] output segment has no parameter plan\n";
+      return std::nullopt;
+    }
+    const auto& payload = segment.motion.payload;
     if (!payload.is_object()
         || ReadString(payload, "schema_version")
             != std::string(ag99::runtime::kParameterPlanSchema)
@@ -2972,9 +2972,9 @@ private:
     }
     if (_pending_parameter_plan) {
       const auto parsed = ParseParameterPlan(*_pending_parameter_plan);
+      const auto turn_id =
+          _pending_parameter_plan->envelope.turn_id.value_or("");
       _pending_parameter_plan.reset();
-      const auto turn_id = _pending_parameter_plan_turn_id.value_or("");
-      _pending_parameter_plan_turn_id.reset();
       if (parsed) {
         if (!parsed->expression_id.empty()
             && !_model->StartExpressionById(parsed->expression_id)) {
@@ -3638,7 +3638,12 @@ private:
   }
 
   std::optional<MotionPlan> CompileMotionPlan(
-      const ag99::runtime::Json& intent) const {
+      const ag99::runtime::OutputSegment& segment) const {
+    if (segment.motion.state != ag99::runtime::MotionSlot::State::Present) {
+      std::cerr << "[motion] output segment has no motion payload\n";
+      return std::nullopt;
+    }
+    const auto& intent = segment.motion.payload;
     if (!intent.is_object()
         || ReadString(intent, "schema_version") !=
             std::string(ag99::runtime::kMotionIntentSchema)) {
@@ -4045,19 +4050,19 @@ private:
     if (!_model || !_model->GetModel()) {
       return;
     }
-    if (_pending_motion_intent) {
+    if (_pending_motion_segment) {
       std::optional<MotionPlan> plan;
       try {
-        plan = CompileMotionPlan(*_pending_motion_intent);
+        plan = CompileMotionPlan(*_pending_motion_segment);
       } catch (const std::exception& error) {
         std::cerr << "[motion] compile threw " << typeid(error).name()
                   << ": " << error.what() << '\n';
       } catch (...) {
         std::cerr << "[motion] compile threw an unknown exception\n";
       }
-      _pending_motion_intent.reset();
-      const auto turn_id = _pending_motion_intent_turn_id.value_or("");
-      _pending_motion_intent_turn_id.reset();
+      const auto turn_id =
+          _pending_motion_segment->envelope.turn_id.value_or("");
+      _pending_motion_segment.reset();
       if (plan) {
         _active_motion = *plan;
         ReleaseThinkingSwayLocked(turn_id);
@@ -4158,13 +4163,11 @@ private:
   double _last_update_seconds = 0.0;
   ag99::runtime::Json _model_sync_payload = ag99::runtime::Json::object();
   std::optional<MotionPlan> _active_motion;
-  std::optional<ag99::runtime::Json> _pending_motion_intent;
+  std::optional<ag99::runtime::OutputSegment> _pending_motion_segment;
   std::optional<ParameterPlan> _active_parameter_plan;
-  std::optional<ag99::runtime::Json> _pending_parameter_plan;
+  std::optional<ag99::runtime::OutputSegment> _pending_parameter_plan;
   std::optional<std::unordered_set<std::string>>
       _pending_physics_response_protected_parameter_ids;
-  std::optional<std::string> _pending_parameter_plan_turn_id;
-  std::optional<std::string> _pending_motion_intent_turn_id;
   std::optional<std::string> _pending_thinking_turn_id;
   std::optional<InteractionSwayState> _interaction_sway;
   std::optional<InteractionGazeState> _interaction_gaze;
@@ -4687,10 +4690,8 @@ int Run(
         [&model](ag99::runtime::ModelSync sync) {
           model.SetModelSync(sync.payload);
         },
-        [&model](
-            const ag99::runtime::Json& motion_intent,
-            const std::string& turn_id) {
-          model.QueueMotionPayload(motion_intent, turn_id);
+        [&model](ag99::runtime::OutputSegment segment) {
+          model.QueueOutputSegment(std::move(segment));
         },
         [&model](const std::string& turn_id) {
           model.StartThinkingSway(turn_id);
