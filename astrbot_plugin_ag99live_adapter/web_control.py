@@ -630,6 +630,7 @@ def register_web_control_page(context: Any, plugin: Any) -> bool:
         ("/overview", api.get_overview, ["GET"], "AG99live control page overview"),
         ("/config/schema", api.get_config_schema, ["GET"], "Read AG99live config form schema"),
         ("/desktop/settings", api.get_desktop_settings, ["GET"], "Read desktop-owned settings"),
+        ("/desktop/settings/list", api.list_desktop_settings, ["POST"], "Read all desktop-owned settings"),
         ("/desktop/settings", api.apply_desktop_setting, ["POST"], "Query or apply a desktop-owned setting"),
         ("/settings", api.get_settings, ["GET"], "Read AG99live adapter settings"),
         ("/settings", api.save_settings, ["POST"], "Save AG99live adapter settings"),
@@ -707,6 +708,41 @@ class WebControlPageApi:
             return response
         platform_id = str(request.args.get("platform_id") or "").strip()
         return jsonify(_desktop_settings_payload(_live_control_platform(platform_id)))
+
+    async def list_desktop_settings(self):
+        """Read the complete desktop snapshot with one authenticated request."""
+        if response := _require_dashboard_user():
+            return response
+        body = await _read_json_body()
+        if isinstance(body, tuple):
+            return body[1]
+        platform, error = _resolve_platform_from_body(body)
+        if error:
+            return error
+        if not platform.desktop_settings_broker.connected:
+            return jsonify(_desktop_settings_payload(platform))
+
+        entries: dict[str, Any] = {}
+        for setting in DESKTOP_SETTINGS_SPEC:
+            try:
+                entries[setting.key] = await platform.desktop_settings_broker.query(
+                    key=setting.key,
+                    action=DESKTOP_SETTINGS_ACTION_LIST,
+                )
+            except DesktopSettingsError:
+                # Keep the last-known value for an individual setting if a device
+                # query fails; the page can still render the rest of the snapshot.
+                continue
+        payload = _desktop_settings_payload(platform)
+        payload["settings"] = {
+            setting.key: {
+                "order": order,
+                **setting.to_json(),
+                **(entries.get(setting.key) or payload["settings"][setting.key]),
+            }
+            for order, setting in enumerate(DESKTOP_SETTINGS_SPEC)
+        }
+        return jsonify(payload)
 
     async def apply_desktop_setting(self):
         """Broker one list/set exchange between this page and the connected desktop."""

@@ -213,7 +213,7 @@ async function saveSettings(): Promise<void> {
       settings.value = JSON.parse(JSON.stringify(response.settings));
       savedSettings.value = JSON.parse(JSON.stringify(response.settings));
     }
-    await loadOverview();
+    await Promise.all([loadOverviewSummary(), loadSettings()]);
     if (!pageError.value) {
       pageNotice.value = "AstrBot 插件配置已保存，Adapter 已刷新。";
     }
@@ -221,6 +221,13 @@ async function saveSettings(): Promise<void> {
     showError(error);
   } finally {
     settingsSaving.value = false;
+  }
+}
+
+async function loadOverviewSummary(): Promise<void> {
+  overview.value = await apiGet<OverviewResponse>("control/overview");
+  if (!overview.value.platforms.some((item) => item.platform_id === selectedPlatformId.value)) {
+    selectedPlatformId.value = overview.value.platforms[0]?.platform_id ?? "";
   }
 }
 
@@ -279,9 +286,33 @@ async function loadDesktopSettings(): Promise<void> {
       platformId,
       settings: mergeDesktopSettings(next.settings, platformId),
     };
-    if (!wasConnected && desktopSettings.value.connected) {
-      await refreshDesktopSettings(platformId);
+  } catch (error) {
+    if (selectedPlatformId.value === platformId) {
+      desktopError.value = desktopErrorMessage(error instanceof Error ? error.message : "");
     }
+  }
+}
+
+async function listDesktopSettings(platformId = selectedPlatformId.value): Promise<void> {
+  if (!platformId || selectedPlatformId.value !== platformId) return;
+  const wasConnected = desktopSettings.value.platformId === platformId
+    && desktopSettings.value.connected;
+  try {
+    const next = await apiPost<DesktopSettingsState>("control/desktop/settings/list", {
+      platform_id: platformId,
+    });
+    if (selectedPlatformId.value !== platformId) return;
+    const current = desktopSettings.value;
+    const samePlatform = current.platformId === platformId;
+    const useObservedConnection = !samePlatform || next.connectionRevision >= current.connectionRevision;
+    desktopSettings.value = {
+      connected: useObservedConnection ? next.connected : current.connected,
+      connectionRevision: samePlatform
+        ? Math.max(current.connectionRevision, next.connectionRevision)
+        : next.connectionRevision,
+      platformId,
+      settings: mergeDesktopSettings(next.settings, platformId),
+    };
   } catch (error) {
     if (selectedPlatformId.value === platformId) {
       desktopError.value = desktopErrorMessage(error instanceof Error ? error.message : "");
@@ -355,11 +386,7 @@ function relatedDesktopSettingKey(key: string): string {
 
 async function refreshDesktopSettings(platformId = selectedPlatformId.value): Promise<void> {
   if (!platformId || selectedPlatformId.value !== platformId) return;
-  await Promise.all(
-    desktopSettingEntries.value.map((entry) =>
-      queryDesktopSettingForPlatform(entry.key, "list", platformId),
-    ),
-  );
+  await listDesktopSettings(platformId);
 }
 
 async function queryDesktopSettingForPlatform(
@@ -414,7 +441,7 @@ function startDesktopPolling(): void {
 }
 
 watch(section, () => {
-  if (section.value === "settings") void loadDesktopSettings();
+  if (section.value === "settings") void listDesktopSettings();
   startDesktopPolling();
 });
 
