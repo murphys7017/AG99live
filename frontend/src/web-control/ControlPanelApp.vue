@@ -84,6 +84,11 @@ const desktopSettings = ref<DesktopSettingsState>({
 const desktopBusyCount = ref(0);
 const desktopBusy = computed(() => desktopBusyCount.value > 0);
 const desktopError = ref("");
+let overviewLoadRevision = 0;
+let profileLoadRevision = 0;
+let samplesLoadRevision = 0;
+const desktopRefreshes = new Map<string, Promise<void>>();
+const desktopWriteQueues = new Map<string, Promise<void>>();
 const {
   excludedParameterKeywordsText,
   persistParameterExcludeKeywords,
@@ -132,34 +137,42 @@ function resetMessage(): void {
 }
 
 async function loadOverview(): Promise<void> {
+  const revision = ++overviewLoadRevision;
   isLoading.value = true;
   resetMessage();
   try {
-    overview.value = await apiGet<OverviewResponse>("control/overview");
+    const nextOverview = await apiGet<OverviewResponse>("control/overview");
+    if (revision !== overviewLoadRevision) return;
+    overview.value = nextOverview;
     if (!overview.value.platforms.some((item) => item.platform_id === selectedPlatformId.value)) {
       selectedPlatformId.value = overview.value.platforms[0]?.platform_id ?? "";
     }
-    await loadConfigSchema();
-    await loadSettings();
+    await loadConfigSchema(revision);
+    if (revision !== overviewLoadRevision) return;
+    await loadSettings(revision);
+    if (revision !== overviewLoadRevision) return;
     await loadDesktopSettings();
+    if (revision !== overviewLoadRevision) return;
     if (selectedPlatformId.value) {
       await Promise.all([loadProfile(), loadSamples()]);
     }
   } catch (error) {
-    showError(error);
+    if (revision === overviewLoadRevision) showError(error);
   } finally {
-    isLoading.value = false;
+    if (revision === overviewLoadRevision) isLoading.value = false;
   }
 }
-async function loadConfigSchema(): Promise<void> {
+async function loadConfigSchema(revision?: number): Promise<void> {
   const response = await apiGet<ConfigSchemaResponse>("control/config/schema");
+  if (revision !== undefined && revision !== overviewLoadRevision) return;
   configSections.value = response.sections;
   configDefaults.value = response.defaults;
   configProviders.value = response.providers;
 }
 
-async function loadSettings(): Promise<void> {
+async function loadSettings(revision?: number): Promise<void> {
   const response = await apiGet<{ settings: ConfigValues }>("control/settings");
+  if (revision !== undefined && revision !== overviewLoadRevision) return;
   const next: ConfigValues = JSON.parse(JSON.stringify(configDefaults.value));
   for (const [section, fields] of Object.entries(response.settings)) {
     next[section] = { ...(next[section] ?? {}), ...fields };
@@ -225,9 +238,17 @@ async function saveSettings(): Promise<void> {
 }
 
 async function loadOverviewSummary(): Promise<void> {
-  overview.value = await apiGet<OverviewResponse>("control/overview");
-  if (!overview.value.platforms.some((item) => item.platform_id === selectedPlatformId.value)) {
-    selectedPlatformId.value = overview.value.platforms[0]?.platform_id ?? "";
+  const revision = ++overviewLoadRevision;
+  isLoading.value = true;
+  try {
+    const nextOverview = await apiGet<OverviewResponse>("control/overview");
+    if (revision !== overviewLoadRevision) return;
+    overview.value = nextOverview;
+    if (!overview.value.platforms.some((item) => item.platform_id === selectedPlatformId.value)) {
+      selectedPlatformId.value = overview.value.platforms[0]?.platform_id ?? "";
+    }
+  } finally {
+    if (revision === overviewLoadRevision) isLoading.value = false;
   }
 }
 
@@ -295,28 +316,37 @@ async function loadDesktopSettings(): Promise<void> {
 
 async function listDesktopSettings(platformId = selectedPlatformId.value): Promise<void> {
   if (!platformId || selectedPlatformId.value !== platformId) return;
-  const wasConnected = desktopSettings.value.platformId === platformId
-    && desktopSettings.value.connected;
-  try {
-    const next = await apiPost<DesktopSettingsState>("control/desktop/settings/list", {
-      platform_id: platformId,
-    });
-    if (selectedPlatformId.value !== platformId) return;
-    const current = desktopSettings.value;
-    const samePlatform = current.platformId === platformId;
-    const useObservedConnection = !samePlatform || next.connectionRevision >= current.connectionRevision;
-    desktopSettings.value = {
-      connected: useObservedConnection ? next.connected : current.connected,
-      connectionRevision: samePlatform
-        ? Math.max(current.connectionRevision, next.connectionRevision)
-        : next.connectionRevision,
-      platformId,
-      settings: mergeDesktopSettings(next.settings, platformId),
-    };
-  } catch (error) {
-    if (selectedPlatformId.value === platformId) {
-      desktopError.value = desktopErrorMessage(error instanceof Error ? error.message : "");
+  const currentRequest = desktopRefreshes.get(platformId);
+  if (currentRequest) return currentRequest;
+
+  const request = (async () => {
+    try {
+      const next = await apiPost<DesktopSettingsState>("control/desktop/settings/list", {
+        platform_id: platformId,
+      });
+      if (selectedPlatformId.value !== platformId) return;
+      const current = desktopSettings.value;
+      const samePlatform = current.platformId === platformId;
+      const useObservedConnection = !samePlatform || next.connectionRevision >= current.connectionRevision;
+      desktopSettings.value = {
+        connected: useObservedConnection ? next.connected : current.connected,
+        connectionRevision: samePlatform
+          ? Math.max(current.connectionRevision, next.connectionRevision)
+          : next.connectionRevision,
+        platformId,
+        settings: mergeDesktopSettings(next.settings, platformId),
+      };
+    } catch (error) {
+      if (selectedPlatformId.value === platformId) {
+        desktopError.value = desktopErrorMessage(error instanceof Error ? error.message : "");
+      }
     }
+  })();
+  desktopRefreshes.set(platformId, request);
+  try {
+    await request;
+  } finally {
+    if (desktopRefreshes.get(platformId) === request) desktopRefreshes.delete(platformId);
   }
 }
 
@@ -324,11 +354,11 @@ async function queryDesktopSetting(
   key: string,
   action: "list" | "set",
   value?: string,
+  platformId = selectedPlatformId.value,
 ): Promise<void> {
-  if (!selectedPlatformId.value) return;
-  const platformId = selectedPlatformId.value;
+  if (!platformId) return;
   desktopBusyCount.value += 1;
-  desktopError.value = "";
+  if (selectedPlatformId.value === platformId) desktopError.value = "";
   let rejectedError = "";
   let relatedKey = "";
   try {
@@ -384,6 +414,20 @@ function relatedDesktopSettingKey(key: string): string {
   }
 }
 
+function queueDesktopWrite(key: string, value: string): void {
+  const platformId = selectedPlatformId.value;
+  if (!platformId) return;
+  const queueKey = JSON.stringify([platformId, key]);
+  const previous = desktopWriteQueues.get(queueKey) ?? Promise.resolve();
+  const next = previous
+    .catch(() => undefined)
+    .then(() => queryDesktopSetting(key, "set", value, platformId))
+    .finally(() => {
+      if (desktopWriteQueues.get(queueKey) === next) desktopWriteQueues.delete(queueKey);
+    });
+  desktopWriteQueues.set(queueKey, next);
+}
+
 async function refreshDesktopSettings(platformId = selectedPlatformId.value): Promise<void> {
   if (!platformId || selectedPlatformId.value !== platformId) return;
   await listDesktopSettings(platformId);
@@ -396,7 +440,7 @@ async function queryDesktopSettingForPlatform(
   value?: string,
 ): Promise<void> {
   if (selectedPlatformId.value !== platformId) return;
-  await queryDesktopSetting(key, action, value);
+  await queryDesktopSetting(key, action, value, platformId);
 }
 
 function mergeDesktopSettings(
@@ -436,8 +480,19 @@ function startDesktopPolling(): void {
   stopDesktopPolling();
   if (section.value !== "settings" || desktopBusy.value) return;
   desktopPollTimer = setInterval(() => {
-    if (!document.hidden && !desktopBusy.value) void loadDesktopSettings();
+    if (!document.hidden && !desktopBusy.value) void listDesktopSettings();
   }, DESKTOP_STATE_POLL_MS);
+}
+
+function onVisibilityChange(): void {
+  if (document.hidden) {
+    stopDesktopPolling();
+    return;
+  }
+  if (section.value === "settings") {
+    void listDesktopSettings();
+    startDesktopPolling();
+  }
 }
 
 watch(section, () => {
@@ -446,18 +501,28 @@ watch(section, () => {
 });
 
 onBeforeUnmount(stopDesktopPolling);
+onMounted(() => document.addEventListener("visibilitychange", onVisibilityChange));
+onBeforeUnmount(() => document.removeEventListener("visibilitychange", onVisibilityChange));
 
 async function loadProfile(): Promise<void> {
-  if (!selectedPlatformId.value) return;
+  const platformId = selectedPlatformId.value;
+  if (!platformId) return;
+  const revision = ++profileLoadRevision;
+  const modelName = selectedModelName.value || activePlatform.value?.selected_model || "";
+  const isCurrent = () => revision === profileLoadRevision
+    && selectedPlatformId.value === platformId
+    && (selectedModelName.value || activePlatform.value?.selected_model || "") === modelName;
   const query = {
-    platform_id: selectedPlatformId.value,
-    model_name: selectedModelName.value || activePlatform.value?.selected_model || "",
+    platform_id: platformId,
+    model_name: modelName,
   };
   try {
     const response = await apiGet<ProfileResponse>("control/profile", query);
+    if (!isCurrent()) return;
     selectedModelName.value = response.model_name;
     profile.value = response.profile;
   } catch (error) {
+    if (!isCurrent()) return;
     profile.value = null;
     if (error instanceof Error && !error.message.includes("semantic_axis_profile_not_found")) {
       showError(error);
@@ -472,14 +537,15 @@ async function saveProfile(payload: {
   expectedRevision: number;
   profile: SemanticAxisProfile;
 }): Promise<void> {
-  if (!selectedPlatformId.value) return;
+  const platformId = selectedPlatformId.value;
+  if (!platformId) return;
   isSaving.value = true;
   resetMessage();
   try {
-    profileSaveResult.value = await apiPost<DesktopSemanticAxisProfileSaveResult>(
+    const result = await apiPost<DesktopSemanticAxisProfileSaveResult>(
       "control/profile",
       {
-        platform_id: selectedPlatformId.value,
+        platform_id: platformId,
         request_id: payload.requestId,
         model_name: payload.modelName,
         profile_id: payload.profileId,
@@ -487,9 +553,12 @@ async function saveProfile(payload: {
         profile: payload.profile,
       },
     );
+    if (selectedPlatformId.value !== platformId) return;
+    profileSaveResult.value = result;
     await loadProfile();
     pageNotice.value = "Profile 已保存。";
   } catch (error) {
+    if (selectedPlatformId.value !== platformId) return;
     profileSaveResult.value = {
       requestId: payload.requestId,
       ok: false,
@@ -507,50 +576,59 @@ async function saveProfile(payload: {
 }
 
 async function loadSamples(): Promise<void> {
-  if (!selectedPlatformId.value) return;
+  const platformId = selectedPlatformId.value;
+  if (!platformId) return;
+  const revision = ++samplesLoadRevision;
   try {
     const response = await apiGet<unknown>("control/samples", {
-      platform_id: selectedPlatformId.value,
+      platform_id: platformId,
     });
+    if (revision !== samplesLoadRevision || selectedPlatformId.value !== platformId) return;
     const normalized = normalizeMotionTuningSamplesStatePayload(response);
     motionTuningSamples.value = normalized.samples;
     motionTuningStatus.value = normalized.status;
   } catch (error) {
-    showError(error);
+    if (revision === samplesLoadRevision && selectedPlatformId.value === platformId) showError(error);
   }
 }
 
 async function saveSample(sample: DesktopMotionTuningSample): Promise<void> {
-  if (!selectedPlatformId.value) return;
+  const platformId = selectedPlatformId.value;
+  if (!platformId) return;
   try {
     const response = await apiPost<unknown>("control/samples", {
-      platform_id: selectedPlatformId.value,
+      platform_id: platformId,
       sample: serializeMotionTuningSample(sample),
     });
+    if (selectedPlatformId.value !== platformId) return;
+    samplesLoadRevision += 1;
     const normalized = normalizeMotionTuningSamplesStatePayload(response);
     motionTuningSamples.value = normalized.samples;
     motionTuningStatus.value = normalized.status;
     pageNotice.value = "动作样例已保存。";
     pageError.value = "";
   } catch (error) {
-    showError(error);
+    if (selectedPlatformId.value === platformId) showError(error);
   }
 }
 
 async function deleteSample(sampleId: string): Promise<void> {
-  if (!selectedPlatformId.value) return;
+  const platformId = selectedPlatformId.value;
+  if (!platformId) return;
   try {
     const response = await apiPost<unknown>("control/samples/delete", {
-      platform_id: selectedPlatformId.value,
+      platform_id: platformId,
       sample_id: sampleId,
     });
+    if (selectedPlatformId.value !== platformId) return;
+    samplesLoadRevision += 1;
     const normalized = normalizeMotionTuningSamplesStatePayload(response);
     motionTuningSamples.value = normalized.samples;
     motionTuningStatus.value = normalized.status;
     pageNotice.value = "动作样例已删除。";
     pageError.value = "";
   } catch (error) {
-    showError(error);
+    if (selectedPlatformId.value === platformId) showError(error);
   }
 }
 
@@ -568,9 +646,21 @@ function previewRecordedUnavailable(
 }
 
 watch(selectedPlatformId, async (next, previous) => {
-  if (!next || next === previous) return;
+  if (next === previous) return;
+  profileLoadRevision += 1;
+  samplesLoadRevision += 1;
+  profile.value = null;
+  profileSaveResult.value = null;
+  motionTuningSamples.value = [];
+  motionTuningStatus.value = {
+    rootError: "",
+    loadError: "",
+    diagnostics: [],
+    effectiveExamples: [],
+  };
+  if (!next) return;
   selectedModelName.value = activePlatform.value?.selected_model ?? "";
-  await loadOverview();
+  await Promise.all([loadProfile(), loadSamples(), listDesktopSettings(next)]);
 });
 
 watch(selectedModelName, (next, previous) => {
@@ -668,7 +758,7 @@ onMounted(() => void loadOverview());
           :busy="desktopBusy"
           :error="desktopError"
           :on-refresh="refreshDesktopSettings"
-          :on-apply="(key, value) => queryDesktopSetting(key, 'set', value)"
+          :on-apply="queueDesktopWrite"
         />
         <div class="web-control-form-actions">
           <span class="web-control-form-actions__status">
