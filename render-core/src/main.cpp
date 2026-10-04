@@ -530,6 +530,19 @@ void StopCurrentAudio() {
 struct AudioPlayback {
   double duration_seconds = 0.0;
   std::uint64_t serial = 0;
+  double started_at_seconds = 0.0;
+};
+
+// The render host keeps this clock metadata outside the wire protocol. It is
+// the shared time origin for one output segment's audio and motion paths.
+struct NativeSegmentClock {
+  std::string turn_id;
+  std::string message_id;
+  std::int64_t sequence = 0;
+  double started_at_seconds = 0.0;
+  double duration_seconds = 0.0;
+  std::uint64_t audio_serial = 0;
+  std::uint64_t generation = 0;
 };
 
 std::optional<AudioPlayback> PlayAudioUrl(
@@ -581,9 +594,10 @@ std::optional<AudioPlayback> PlayAudioUrl(
     std::scoped_lock signal_lock(g_audio_signal_mutex);
     g_audio_rms = rms;
   }
-  g_audio_start_seconds.store(NowSeconds());
-  g_audio_end_seconds.store(g_audio_start_seconds.load() + *duration);
-  return AudioPlayback{*duration, serial};
+  const auto started_at_seconds = NowSeconds();
+  g_audio_start_seconds.store(started_at_seconds);
+  g_audio_end_seconds.store(started_at_seconds + *duration);
+  return AudioPlayback{*duration, serial, started_at_seconds};
 }
 
 class Allocator final : public ICubismAllocator {
@@ -1372,13 +1386,17 @@ class RuntimeBridge final {
 public:
   RuntimeBridge(
       std::function<void(ag99::runtime::ModelSync)> on_model_sync,
-      std::function<void(ag99::runtime::OutputSegment)> on_output_segment,
+      std::function<void(
+          ag99::runtime::OutputSegment,
+          std::optional<NativeSegmentClock>)> on_output_segment,
+      std::function<void(std::uint64_t)> on_output_segment_reset,
       std::function<void(const std::string&)> on_turn_started,
       std::function<void(const std::string&)> on_turn_finished)
       : microphone_(websocket_),
         callback_lifetime_(std::make_shared<CallbackLifetime>()),
         on_model_sync_(std::move(on_model_sync)),
         on_output_segment_(std::move(on_output_segment)),
+        on_output_segment_reset_(std::move(on_output_segment_reset)),
         on_turn_started_(std::move(on_turn_started)),
         on_turn_finished_(std::move(on_turn_finished)),
         session_({
@@ -1521,6 +1539,8 @@ private:
   struct AudioQueueItem {
     ag99::runtime::OutputSegment segment;
     std::string turn_id;
+    std::string message_id;
+    std::int64_t sequence = 0;
     std::uint64_t generation = 0;
   };
 
@@ -1570,6 +1590,9 @@ private:
       audio_queue_.clear();
     }
     StopCurrentAudio();
+    if (on_output_segment_reset_) {
+      on_output_segment_reset_(connection_generation_.load());
+    }
   }
 
   void HandleTransportClosed(std::uint64_t generation) {
@@ -1609,7 +1632,9 @@ private:
     if (segment.audio.state == ag99::runtime::AudioSlot::State::Present) {
       AudioQueueItem item;
       item.segment = std::move(segment);
-      item.turn_id = std::move(turn_id);
+      item.turn_id = turn_id;
+      item.message_id = item.segment.envelope.message_id;
+      item.sequence = item.segment.sequence;
       item.generation = connection_generation_.load();
       {
         std::scoped_lock lock(audio_queue_mutex_);
@@ -1624,7 +1649,13 @@ private:
 
     if (segment.motion.state == ag99::runtime::MotionSlot::State::Present
         && on_output_segment_) {
-      on_output_segment_(std::move(segment));
+      NativeSegmentClock clock;
+      clock.turn_id = turn_id;
+      clock.message_id = segment.envelope.message_id;
+      clock.sequence = segment.sequence;
+      clock.started_at_seconds = NowSeconds();
+      clock.generation = connection_generation_.load();
+      on_output_segment_(std::move(segment), std::move(clock));
     }
     if (!turn_id.empty() && websocket_.connected()) {
       const auto finished =
@@ -1686,10 +1717,19 @@ private:
         if (item.segment.motion.state
                 == ag99::runtime::MotionSlot::State::Present
             && on_output_segment_) {
-          on_output_segment_(std::move(item.segment));
+          NativeSegmentClock clock;
+          clock.turn_id = item.turn_id;
+          clock.message_id = item.message_id;
+          clock.sequence = item.sequence;
+          clock.started_at_seconds = playback->started_at_seconds;
+          clock.duration_seconds = playback->duration_seconds;
+          clock.audio_serial = playback->serial;
+          clock.generation = item.generation;
+          on_output_segment_(std::move(item.segment), std::move(clock));
         }
       }
-      const auto deadline = NowSeconds() + playback->duration_seconds;
+      const auto deadline = playback->started_at_seconds
+          + playback->duration_seconds;
       while (!closing_.load()
              && pending_closed_generation_.load() != item.generation
              && g_audio_serial.load() == playback->serial
@@ -1730,7 +1770,10 @@ private:
   std::mutex microphone_operation_mutex_;
   std::shared_ptr<CallbackLifetime> callback_lifetime_;
   std::function<void(ag99::runtime::ModelSync)> on_model_sync_;
-  std::function<void(ag99::runtime::OutputSegment)> on_output_segment_;
+  std::function<void(
+      ag99::runtime::OutputSegment,
+      std::optional<NativeSegmentClock>)> on_output_segment_;
+  std::function<void(std::uint64_t)> on_output_segment_reset_;
   std::function<void(const std::string&)> on_turn_started_;
   std::function<void(const std::string&)> on_turn_finished_;
   ag99::runtime::RuntimeProtocolSession session_;
@@ -2020,8 +2063,14 @@ public:
     std::cerr << "[motion] model sync received\n";
   }
 
-  void QueueOutputSegment(ag99::runtime::OutputSegment segment) {
+  void QueueOutputSegment(
+      ag99::runtime::OutputSegment segment,
+      std::optional<NativeSegmentClock> clock = std::nullopt) {
     std::scoped_lock lock(_motion_mutex);
+    if (clock && clock->generation != 0
+        && clock->generation != _connection_generation) {
+      return;
+    }
     if (segment.motion.state != ag99::runtime::MotionSlot::State::Present) {
       return;
     }
@@ -2029,15 +2078,30 @@ public:
     const auto schema = ReadString(payload, "schema_version");
     if (schema == std::string(ag99::runtime::kParameterPlanSchema)) {
       _pending_parameter_plan = std::move(segment);
+      _pending_parameter_clock = std::move(clock);
       _pending_motion_segment.reset();
+      _pending_motion_clock.reset();
       _active_motion.reset();
       std::cerr << "[motion] parameter plan queued\n";
       return;
     }
     _pending_motion_segment = std::move(segment);
+    _pending_motion_clock = std::move(clock);
     _pending_parameter_plan.reset();
+    _pending_parameter_clock.reset();
     _active_parameter_plan.reset();
     std::cerr << "[motion] intent queued\n";
+  }
+
+  void ResetRuntimeSegments(std::uint64_t generation) {
+    std::scoped_lock lock(_motion_mutex);
+    _connection_generation = generation;
+    _pending_motion_segment.reset();
+    _pending_motion_clock.reset();
+    _active_motion.reset();
+    _pending_parameter_plan.reset();
+    _pending_parameter_clock.reset();
+    _active_parameter_plan.reset();
   }
 
   void StartThinkingSway(const std::string& turn_id) {
@@ -2351,7 +2415,8 @@ private:
   }
 
   std::optional<ParameterPlan> ParseParameterPlan(
-      const ag99::runtime::OutputSegment& segment) const {
+      const ag99::runtime::OutputSegment& segment,
+      double started_at_seconds) const {
     if (segment.motion.state != ag99::runtime::MotionSlot::State::Present) {
       std::cerr << "[motion] output segment has no parameter plan\n";
       return std::nullopt;
@@ -2420,7 +2485,7 @@ private:
       return std::nullopt;
     }
     ParameterPlan plan{
-        .started_at = NowSeconds(),
+        .started_at = started_at_seconds,
         .duration_ms = duration_ms,
         .blend_in_ms = blend_in_ms,
         .hold_ms = hold_ms,
@@ -2971,10 +3036,15 @@ private:
       _pending_physics_response_protected_parameter_ids.reset();
     }
     if (_pending_parameter_plan) {
-      const auto parsed = ParseParameterPlan(*_pending_parameter_plan);
+      const auto parsed = ParseParameterPlan(
+          *_pending_parameter_plan,
+          _pending_parameter_clock
+              ? _pending_parameter_clock->started_at_seconds
+              : NowSeconds());
       const auto turn_id =
           _pending_parameter_plan->envelope.turn_id.value_or("");
       _pending_parameter_plan.reset();
+      _pending_parameter_clock.reset();
       if (parsed) {
         if (!parsed->expression_id.empty()
             && !_model->StartExpressionById(parsed->expression_id)) {
@@ -3638,7 +3708,8 @@ private:
   }
 
   std::optional<MotionPlan> CompileMotionPlan(
-      const ag99::runtime::OutputSegment& segment) const {
+      const ag99::runtime::OutputSegment& segment,
+      double started_at_seconds) const {
     if (segment.motion.state != ag99::runtime::MotionSlot::State::Present) {
       std::cerr << "[motion] output segment has no motion payload\n";
       return std::nullopt;
@@ -4041,7 +4112,7 @@ private:
     if (plan.tracks.empty()) {
       return std::nullopt;
     }
-    plan.started_at = NowSeconds();
+    plan.started_at = started_at_seconds;
     return plan;
   }
 
@@ -4053,7 +4124,11 @@ private:
     if (_pending_motion_segment) {
       std::optional<MotionPlan> plan;
       try {
-        plan = CompileMotionPlan(*_pending_motion_segment);
+        plan = CompileMotionPlan(
+            *_pending_motion_segment,
+            _pending_motion_clock
+                ? _pending_motion_clock->started_at_seconds
+                : NowSeconds());
       } catch (const std::exception& error) {
         std::cerr << "[motion] compile threw " << typeid(error).name()
                   << ": " << error.what() << '\n';
@@ -4063,6 +4138,7 @@ private:
       const auto turn_id =
           _pending_motion_segment->envelope.turn_id.value_or("");
       _pending_motion_segment.reset();
+      _pending_motion_clock.reset();
       if (plan) {
         _active_motion = *plan;
         ReleaseThinkingSwayLocked(turn_id);
@@ -4164,8 +4240,11 @@ private:
   ag99::runtime::Json _model_sync_payload = ag99::runtime::Json::object();
   std::optional<MotionPlan> _active_motion;
   std::optional<ag99::runtime::OutputSegment> _pending_motion_segment;
+  std::optional<NativeSegmentClock> _pending_motion_clock;
   std::optional<ParameterPlan> _active_parameter_plan;
   std::optional<ag99::runtime::OutputSegment> _pending_parameter_plan;
+  std::optional<NativeSegmentClock> _pending_parameter_clock;
+  std::uint64_t _connection_generation = 0;
   std::optional<std::unordered_set<std::string>>
       _pending_physics_response_protected_parameter_ids;
   std::optional<std::string> _pending_thinking_turn_id;
@@ -4690,8 +4769,13 @@ int Run(
         [&model](ag99::runtime::ModelSync sync) {
           model.SetModelSync(sync.payload);
         },
-        [&model](ag99::runtime::OutputSegment segment) {
-          model.QueueOutputSegment(std::move(segment));
+        [&model](
+            ag99::runtime::OutputSegment segment,
+            std::optional<NativeSegmentClock> clock) {
+          model.QueueOutputSegment(std::move(segment), std::move(clock));
+        },
+        [&model](std::uint64_t generation) {
+          model.ResetRuntimeSegments(generation);
         },
         [&model](const std::string& turn_id) {
           model.StartThinkingSway(turn_id);

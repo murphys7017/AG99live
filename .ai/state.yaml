@@ -1,3 +1,25 @@
+native_runtime_segment_clock:
+  recorded_at: "2026-10-04"
+  class: feature
+  risk: high
+  status: source_complete_pending_live_acceptance
+  scope:
+    - "Carry native-only per-segment identity and connection generation through audio playback into motion-plan timing."
+    - "Use the audio playback start timestamp as the motion-plan time origin for audio segments; use delivery time for motion-only segments."
+    - "Clear pending and active motion/parameter plans when the runtime connection resets, and reject stale-generation motion callbacks."
+  non_actions:
+    - "Do not change wire protocol or claim hardware-accurate audio playback position."
+    - "Do not treat control.playback_finished as a per-segment acknowledgement; it is turn-level and needs a later native turn coordinator."
+    - "Do not modify Web control-panel work."
+  validation:
+    - "Release ag99-render-host build passed."
+    - "Release ag99-runtime-protocol-smoke build and ctest passed (1/1); smoke executable exited 0."
+    - "git diff --check passed with only existing line-ending conversion warnings."
+  evidence_gap:
+    - "PlaySoundW provides software start time and WAV-duration estimation, not an authoritative playback-position clock."
+    - "No live Adapter/audio/model playback or reconnect-during-motion acceptance was performed."
+    - "Turn-level acknowledgement still needs to wait for synth_finished and all segment terminals; current legacy per-segment acknowledgement paths remain."
+
 native_runtime_review_followups:
   recorded_at: "2026-10-04"
   class: bugfix
