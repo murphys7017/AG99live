@@ -78,6 +78,7 @@ target_link_libraries(Framework PRIVATE
 add_library(ag99_live2d_renderer_core STATIC
   src/d3d11_composition_surface.cpp
   src/d3d11_renderer.cpp
+  src/log.cpp
 )
 target_include_directories(ag99_live2d_renderer_core
   PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include"

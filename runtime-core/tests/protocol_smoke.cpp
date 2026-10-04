@@ -12,13 +12,14 @@ namespace {
 ag99::runtime::Json make_segment(
     std::string message_id,
     std::int64_t sequence,
-    std::string source = "adapter") {
+    std::string source = "adapter",
+    std::string turn_id = "turn-1") {
   return {
       {"type", "output.segment"},
       {"version", "v2"},
       {"message_id", std::move(message_id)},
       {"timestamp", "2026-10-01T00:00:00.000Z"},
-      {"turn_id", "turn-1"},
+      {"turn_id", std::move(turn_id)},
       {"source", std::move(source)},
       {"payload",
        {
@@ -155,6 +156,8 @@ void test_binary_audio_round_trip() {
 
 void test_segment_reorder_and_duplicate_rejection() {
   ag99::runtime::SegmentAssembler assembler;
+  assert(assembler.start_turn("turn-1"));
+  assert(!assembler.start_turn("turn-1"));
   auto second = ag99::runtime::parse_output_segment(
       ag99::runtime::parse_envelope(make_segment("m-2", 1)));
   auto first = ag99::runtime::parse_output_segment(
@@ -176,6 +179,36 @@ void test_segment_reorder_and_duplicate_rejection() {
           ag99::runtime::parse_envelope(make_segment("m-late", 0))));
   assert(!late.accepted);
   assert(late.reason == "segment_sequence_late");
+
+  assert(assembler.clear_turn("turn-1"));
+  const auto after_finish = assembler.ingest(
+      ag99::runtime::parse_output_segment(
+          ag99::runtime::parse_envelope(make_segment("m-after-finish", 2))));
+  assert(!after_finish.accepted);
+  assert(after_finish.reason == "segment_turn_finished");
+  assert(!assembler.start_turn("turn-1"));
+  assert(!assembler.clear_turn("unknown-turn"));
+  assert(assembler.start_turn("unknown-turn"));
+
+  ag99::runtime::SegmentAssembler full_pending;
+  assert(full_pending.start_turn("turn-full"));
+  for (std::int64_t sequence = 1; sequence <= 256; ++sequence) {
+    const auto pending = full_pending.ingest(
+        ag99::runtime::parse_output_segment(
+            ag99::runtime::parse_envelope(make_segment(
+                "m-full-" + std::to_string(sequence),
+                sequence,
+                "adapter",
+                "turn-full"))));
+    assert(pending.accepted);
+    assert(pending.ready.empty());
+  }
+  const auto drained = full_pending.ingest(
+      ag99::runtime::parse_output_segment(
+          ag99::runtime::parse_envelope(make_segment(
+              "m-full-0", 0, "adapter", "turn-full"))));
+  assert(drained.accepted);
+  assert(drained.ready.size() == 257);
 }
 
 void test_input_text_builder() {
@@ -225,6 +258,20 @@ void test_runtime_session_dispatch() {
   }.dump());
   assert((started_turns == std::vector<std::string>{"turn-1"}));
   session.ingest_text(ag99::runtime::Json{
+      {"type", "control.turn_started"},
+      {"version", "v2"},
+      {"message_id", "turn-start-duplicate"},
+      {"timestamp", "2026-10-01T00:00:00.000Z"},
+      {"turn_id", "turn-1"},
+      {"source", "adapter"},
+      {"payload", ag99::runtime::Json::object()},
+  }.dump());
+  assert((started_turns == std::vector<std::string>{"turn-1"}));
+  assert(errors.size() == 1);
+  session.ingest_text(make_segment("m-2", 1).dump());
+  session.ingest_text(make_segment("m-1", 0).dump());
+  assert((ready_messages == std::vector<std::string>{"m-1", "m-2"}));
+  session.ingest_text(ag99::runtime::Json{
       {"type", "control.turn_finished"},
       {"version", "v2"},
       {"message_id", "turn-finish-1"},
@@ -234,6 +281,9 @@ void test_runtime_session_dispatch() {
       {"payload", {{"success", true}}},
   }.dump());
   assert((finished_turns == std::vector<std::string>{"turn-1"}));
+  session.ingest_text(make_segment("m-late", 2).dump());
+  assert(ready_messages.size() == 2);
+  assert(errors.size() == 2);
   session.ingest_text(ag99::runtime::Json{
       {"type", "control.interrupt"},
       {"version", "v2"},
@@ -243,11 +293,34 @@ void test_runtime_session_dispatch() {
       {"source", "adapter"},
       {"payload", ag99::runtime::Json::object()},
   }.dump());
+  assert((finished_turns == std::vector<std::string>{"turn-1"}));
+  assert(errors.size() == 3);
+
+  session.ingest_text(ag99::runtime::Json{
+      {"type", "control.turn_started"},
+      {"version", "v2"},
+      {"message_id", "turn-start-2"},
+      {"timestamp", "2026-10-01T00:00:01.000Z"},
+      {"turn_id", "turn-2"},
+      {"source", "adapter"},
+      {"payload", ag99::runtime::Json::object()},
+  }.dump());
+  session.ingest_text(make_segment("m-turn-2", 0, "adapter", "turn-2").dump());
+  assert(ready_messages.size() == 3);
+
+  session.ingest_text(ag99::runtime::Json{
+      {"type", "control.interrupt"},
+      {"version", "v2"},
+      {"message_id", "turn-interrupt-active"},
+      {"timestamp", "2026-10-01T00:00:02.000Z"},
+      {"turn_id", "turn-2"},
+      {"source", "adapter"},
+      {"payload", ag99::runtime::Json::object()},
+  }.dump());
   assert((finished_turns == std::vector<std::string>{"turn-1", "turn-2"}));
-  session.ingest_text(make_segment("m-2", 1).dump());
-  session.ingest_text(make_segment("m-1", 0).dump());
-  assert((ready_messages == std::vector<std::string>{"m-1", "m-2"}));
-  assert(errors.empty());
+  session.ingest_text(make_segment("m-interrupted", 1, "adapter", "turn-2").dump());
+  assert(ready_messages.size() == 3);
+  assert(errors.size() == 4);
 
   session.ingest_text(ag99::runtime::Json{
       {"type", "control.turn_started"},
@@ -258,10 +331,10 @@ void test_runtime_session_dispatch() {
       {"source", "adapter"},
       {"payload", ag99::runtime::Json::object()},
   }.dump());
-  assert(errors.size() == 1);
+  assert(errors.size() == 5);
 
   session.ingest_text("{\"type\":\"output.segment\",\"version\":\"v1\"}");
-  assert(errors.size() == 2);
+  assert(errors.size() == 6);
 }
 
 void test_audio_control_builders() {

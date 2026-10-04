@@ -22,6 +22,9 @@ void RuntimeProtocolSession::ingest_text(std::string_view text_frame) {
       if (!envelope.payload.empty()) {
         throw ProtocolError("control.turn_started payload must be empty");
       }
+      if (!assembler_.start_turn(*envelope.turn_id)) {
+        throw ProtocolError("control.turn_started duplicate or retired turn");
+      }
       if (callbacks_.on_turn_started) {
         callbacks_.on_turn_started(*envelope.turn_id);
       }
@@ -51,6 +54,9 @@ void RuntimeProtocolSession::ingest_text(std::string_view text_frame) {
               "control.turn_finished payload." + key + " is not allowed");
         }
       }
+      if (!assembler_.clear_turn(*envelope.turn_id)) {
+        throw ProtocolError("control.turn_finished unknown or retired turn");
+      }
       if (callbacks_.on_turn_finished) {
         callbacks_.on_turn_finished(*envelope.turn_id);
       }
@@ -65,6 +71,9 @@ void RuntimeProtocolSession::ingest_text(std::string_view text_frame) {
       }
       if (!envelope.payload.empty()) {
         throw ProtocolError("control.interrupt payload must be empty");
+      }
+      if (!assembler_.clear_turn(*envelope.turn_id)) {
+        throw ProtocolError("control.interrupt unknown or retired turn");
       }
       if (callbacks_.on_turn_finished) {
         callbacks_.on_turn_finished(*envelope.turn_id);

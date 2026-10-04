@@ -26,11 +26,14 @@ class WinHttpWebSocketClient final {
   WinHttpWebSocketClient(const WinHttpWebSocketClient&) = delete;
   WinHttpWebSocketClient& operator=(const WinHttpWebSocketClient&) = delete;
 
+  // Receive callbacks run on the receive thread. close() disables new callback
+  // invocations and waits for bounded shutdown; callers must keep targets of
+  // reference or raw-pointer captures alive until any in-flight callback ends.
   bool connect(std::string_view url, WebSocketCallbacks callbacks);
   bool send_text(std::string_view text);
   bool send_binary(std::span<const std::uint8_t> payload);
   void close();
-  bool connected() const noexcept;
+  bool connected() const;
 
  private:
   struct Impl;

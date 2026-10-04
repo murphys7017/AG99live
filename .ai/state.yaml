@@ -1,18 +1,19 @@
 native_runtime_review_followups:
-  recorded_at: "2026-10-01"
+  recorded_at: "2026-10-04"
   class: bugfix
   risk: high
-  status: partially_addressed_async_receive_cancellation_required
+  status: source_complete_pending_live_acceptance
   scope:
-    - "Serialize WinHTTP WebSocket shutdown against sends, leave the receive active for the peer close response, run any remaining full close only after receive returns, and report shutdown/close/handle errors."
+    - "Protect WebSocket finalization against close/receive-exit races; disable new callbacks, attempt synchronous receive cancellation, wait at most 1.5 seconds for receive and in-flight callbacks, then detach while shared state retains handles until receive exits; run full close only after receive returns."
     - "Mark microphone stream end as dropped after queue loss or sender failure; finalize the previous stream before a retry replaces its identity, and account for in-flight and queued bytes lost on send failure."
     - "Retire output-segment turns on turn_finished/interrupt, reject segments for unstarted or recently retired turns, and bound active turns, pending segments, committed message IDs, and retired turn IDs."
     - "Validate complete finite PCM RIFF/WAVE chunk structure before playback, require a valid duration and successful PlaySoundW start, and report specific playback failure reasons."
     - "Keep Cubism asset paths wide through file access and decode SDK/model JSON path strings as UTF-8, including texture paths."
+    - "Serialize microphone Start/Stop transitions across user toggles, reconnect, transport-close cleanup, and runtime shutdown."
+    - "Preserve WinHTTP receive error codes in diagnostics and document callback capture lifetime requirements."
   non_actions:
     - "Do not launch the Native Host, connect to Adapter, or claim live microphone/audio/model-path verification."
     - "Do not modify unrelated frontend/control-panel work already present in the worktree."
-    - "Do not commit."
   review: >-
     Adapter speech ingress rejects a microphone stream marked dropped, so capture
     queue overflow and failed binary sends now invalidate that stream instead of
@@ -22,17 +23,27 @@ native_runtime_review_followups:
     parser matches the Adapter's finite RIFF PCM cache contract. Cubism's SDK
     callback accepts std::string paths; the host treats those resource names as
     UTF-8 and converts to native wide paths before Windows file access. The
-    WebSocket send/close race is removed and full close now waits until the
-    receive operation returns. A synchronous receive cannot be safely aborted
-    by closing its handle concurrently, so a silent peer can still delay close;
-    a bounded guarantee requires an asynchronous receive/cancellation design.
+    WebSocket finalization is synchronized with external close, and full close
+    runs only after Receive returns. Close disables new callbacks and waits a
+    bounded time for an in-flight callback; the RuntimeBridge owner separately
+    drains its callbacks, while generic callbacks that capture references must
+    keep those targets alive until in-flight callbacks finish. Receive errors
+    preserve the WinHTTP code.
+    Microphone Start/Stop transitions are serialized across UI and transport
+    lifecycle paths. A pending synchronous Receive is cancelled when possible; after
+    1.5 seconds the worker is detached and its shared state retains the WinHTTP
+    handles until Receive exits. A stalled callback can extend close while it
+    drains, and an uncancellable silent peer can retain connection resources.
   validation:
-    - "`cmake --build render-core/build --config Release --target ag99-render-host --parallel 4` passed after the final source changes."
+    - "`cmake --build render-core/build --config Release --target ag99-render-host --parallel 4` passed after microphone lifecycle serialization."
     - "`cmake --build runtime-core/build --config Release --target ag99-runtime-protocol-smoke --parallel 4` passed."
     - "`ctest --test-dir runtime-core/build -C Release --output-on-failure` passed (1/1)."
+    - "`ctest --test-dir render-core/build/runtime-core -C Release --output-on-failure` passed (1/1); replay sample emitted the expected ready segment."
+    - "`python -m pytest astrbot_plugin_ag99live_adapter/tests/unit/runtime/test_desktop_settings_broker.py -q` passed (1 passed)."
+    - "`npm run typecheck:renderer`, focused `desktopSettingsResponder.test.ts`, and `npm run build:astrbot-page` passed."
     - "`git diff --check` passed; only existing line-ending conversion warnings were emitted."
   evidence_gap:
-    - "A silent peer may keep the synchronous WebSocket receive pending; async receive cancellation has not been implemented. No live WebSocket shutdown failure, microphone queue overflow/send failure, Adapter audio download/playback, or non-ASCII model asset path was exercised."
+    - "No live WebSocket shutdown race, microphone toggle/disconnect race, microphone queue overflow/send failure, Adapter audio download/playback, non-ASCII model asset path, or layered-window click-through behavior was exercised."
 
 native_microphone_capture_thread_safety:
   recorded_at: "2026-10-02"

@@ -24,6 +24,6 @@ bool WinHttpWebSocketClient::send_binary(
   return false;
 }
 void WinHttpWebSocketClient::close() {}
-bool WinHttpWebSocketClient::connected() const noexcept { return false; }
+bool WinHttpWebSocketClient::connected() const { return false; }
 
 }  // namespace ag99::runtime

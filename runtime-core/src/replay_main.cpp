@@ -38,6 +38,19 @@ void process_line(
   }
   try {
     const auto envelope = ag99::runtime::parse_envelope_json(line);
+    if (envelope.type == "control.turn_started") {
+      if (!envelope.turn_id || !assembler.start_turn(*envelope.turn_id)) {
+        std::cerr << "rejected turn_started\n";
+      }
+      return;
+    }
+    if (envelope.type == "control.turn_finished"
+        || envelope.type == "control.interrupt") {
+      if (envelope.turn_id) {
+        assembler.clear_turn(*envelope.turn_id);
+      }
+      return;
+    }
     if (envelope.type != "output.segment") {
       std::cout << "ignored type=" << envelope.type << "\n";
       return;
@@ -61,6 +74,7 @@ void process_line(
 int main(int argc, char** argv) {
   ag99::runtime::SegmentAssembler assembler;
   if (argc == 1) {
+    assembler.start_turn("sample-turn-1");
     process_line(sample_segment().dump(), assembler);
     return 0;
   }

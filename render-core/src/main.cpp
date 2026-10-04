@@ -36,6 +36,7 @@
 #include "ag99/runtime/winhttp_websocket.hpp"
 #include "ag99/live2d/d3d11_composition_surface.hpp"
 #include "ag99/live2d/d3d11_renderer.hpp"
+#include "ag99/live2d/log.hpp"
 #include <CubismFramework.hpp>
 #include <CubismModelSettingJson.hpp>
 #include <Effect/CubismBreath.hpp>
@@ -59,6 +60,9 @@ constexpr UINT kTrayHide = 1002;
 constexpr UINT kTrayExit = 1003;
 constexpr UINT kTrayDemoText = 1004;
 constexpr UINT kTrayMicToggle = 1005;
+constexpr UINT kTrayInputWindow = 1006;
+constexpr UINT kTrayClickThrough = 1007;
+constexpr UINT kTrayOpenLog = 1008;
 
 NOTIFYICONDATAW g_tray_icon{};
 bool g_tray_icon_added = false;
@@ -81,9 +85,11 @@ std::mutex g_audio_file_mutex;
 std::mutex g_audio_signal_mutex;
 std::wstring g_audio_file;
 std::vector<float> g_audio_rms;
-std::function<void(std::string)> g_send_text;
+std::function<bool(std::string)> g_send_text;
 std::function<void()> g_toggle_microphone;
 std::function<bool()> g_microphone_running;
+HWND g_input_window = nullptr;
+bool g_click_through = false;
 
 constexpr float kSpeechHeadAttack = 10.0f;
 constexpr float kSpeechHeadRelease = 3.4f;
@@ -235,35 +241,121 @@ std::wstring WidenUtf8(std::string_view value) {
   return result;
 }
 
+std::optional<std::filesystem::path> PathFromUtf8(std::string_view value) {
+  const auto wide = WidenUtf8(value);
+  if (wide.empty()) {
+    return std::nullopt;
+  }
+  return std::filesystem::path(wide);
+}
+
+std::string PathToUtf8(const std::filesystem::path& value) {
+  const auto encoded = value.u8string();
+  return std::string(
+      reinterpret_cast<const char*>(encoded.data()), encoded.size());
+}
+
 // Bound the download so a bad response cannot exhaust memory. 64 MB is about
 // half an hour of 16 kHz mono PCM16, far beyond any single spoken reply.
 constexpr std::size_t kMaxAudioBytes = 64u * 1024u * 1024u;
+
+struct PcmWavInfo {
+  std::uint16_t channels = 0;
+  std::uint32_t sample_rate = 0;
+  std::uint32_t byte_rate = 0;
+  std::uint16_t block_align = 0;
+  std::uint16_t bits_per_sample = 0;
+  std::size_t data_offset = 0;
+  std::size_t data_size = 0;
+};
+
+std::uint16_t ReadLittleEndian16(const std::uint8_t* value) {
+  return static_cast<std::uint16_t>(value[0])
+      | static_cast<std::uint16_t>(value[1] << 8);
+}
+
+std::uint32_t ReadLittleEndian32(const std::uint8_t* value) {
+  return static_cast<std::uint32_t>(value[0])
+      | (static_cast<std::uint32_t>(value[1]) << 8)
+      | (static_cast<std::uint32_t>(value[2]) << 16)
+      | (static_cast<std::uint32_t>(value[3]) << 24);
+}
+
+std::optional<PcmWavInfo> ParsePcmWav(
+    const std::vector<std::uint8_t>& bytes) {
+  if (bytes.size() < 12 || std::memcmp(bytes.data(), "RIFF", 4) != 0
+      || std::memcmp(bytes.data() + 8, "WAVE", 4) != 0) {
+    return std::nullopt;
+  }
+
+  const std::uint32_t riff_size = ReadLittleEndian32(bytes.data() + 4);
+  if (riff_size < 4 || static_cast<std::size_t>(riff_size) != bytes.size() - 8) {
+    return std::nullopt;
+  }
+
+  const std::size_t riff_end = bytes.size();
+  PcmWavInfo info{};
+  bool have_format = false;
+  bool have_data = false;
+  std::uint16_t format_tag = 0;
+  for (std::size_t offset = 12; offset < riff_end;) {
+    if (riff_end - offset < 8) {
+      return std::nullopt;
+    }
+    const std::size_t chunk_size = ReadLittleEndian32(bytes.data() + offset + 4);
+    const std::size_t chunk_data = offset + 8;
+    const std::size_t remaining = riff_end - chunk_data;
+    const std::size_t padded_size = chunk_size + (chunk_size & 1u);
+    if (padded_size > remaining) {
+      return std::nullopt;
+    }
+
+    if (std::memcmp(bytes.data() + offset, "fmt ", 4) == 0) {
+      if (have_format || have_data || chunk_size < 16) {
+        return std::nullopt;
+      }
+      format_tag = ReadLittleEndian16(bytes.data() + chunk_data);
+      info.channels = ReadLittleEndian16(bytes.data() + chunk_data + 2);
+      info.sample_rate = ReadLittleEndian32(bytes.data() + chunk_data + 4);
+      info.byte_rate = ReadLittleEndian32(bytes.data() + chunk_data + 8);
+      info.block_align = ReadLittleEndian16(bytes.data() + chunk_data + 12);
+      info.bits_per_sample = ReadLittleEndian16(bytes.data() + chunk_data + 14);
+      have_format = true;
+    } else if (std::memcmp(bytes.data() + offset, "data", 4) == 0) {
+      if (!have_format || have_data || chunk_size == 0) {
+        return std::nullopt;
+      }
+      info.data_offset = chunk_data;
+      info.data_size = chunk_size;
+      have_data = true;
+    }
+
+    offset = chunk_data + padded_size;
+  }
+
+  if (!have_format || !have_data || format_tag != 1 || info.channels == 0
+      || info.sample_rate == 0 || info.bits_per_sample < 8
+      || info.bits_per_sample % 8 != 0) {
+    return std::nullopt;
+  }
+  const std::uint64_t bytes_per_sample = info.bits_per_sample / 8;
+  const std::uint64_t expected_block_align =
+      static_cast<std::uint64_t>(info.channels) * bytes_per_sample;
+  const std::uint64_t expected_byte_rate =
+      static_cast<std::uint64_t>(info.sample_rate) * expected_block_align;
+  if (expected_block_align != info.block_align
+      || expected_byte_rate != info.byte_rate
+      || info.data_size % info.block_align != 0) {
+    return std::nullopt;
+  }
+  return info;
+}
 
 // The Adapter serves cached audio as a finite PCM WAV. Anything else, including
 // an HTML error page from a proxy or a non-200 response, must never reach the
 // audio decoder or PlaySound.
 bool IsPlayableWav(const std::vector<std::uint8_t>& bytes) {
-  if (bytes.size() < 44) {
-    return false;
-  }
-  if (std::memcmp(bytes.data(), "RIFF", 4) != 0
-      || std::memcmp(bytes.data() + 8, "WAVE", 4) != 0) {
-    return false;
-  }
-  for (std::size_t offset = 12; offset + 8 <= bytes.size();) {
-    std::uint32_t chunk_size = 0;
-    std::memcpy(&chunk_size, bytes.data() + offset + 4, sizeof(chunk_size));
-    if (std::memcmp(bytes.data() + offset, "fmt ", 4) == 0
-        && chunk_size >= 16
-        && offset + 8 + chunk_size <= bytes.size()) {
-      return true;
-    }
-    if (std::memcmp(bytes.data() + offset, "data", 4) == 0) {
-      return chunk_size > 0;
-    }
-    offset += 8 + chunk_size + (chunk_size & 1u);
-  }
-  return false;
+  return ParsePcmWav(bytes).has_value();
 }
 
 bool DownloadHttp(const std::string& url, std::vector<std::uint8_t>& output) {
@@ -357,90 +449,30 @@ bool DownloadHttp(const std::string& url, std::vector<std::uint8_t>& output) {
 }
 
 std::optional<double> ReadWavDuration(const std::vector<std::uint8_t>& bytes) {
-  if (bytes.size() < 44 || std::memcmp(bytes.data(), "RIFF", 4) != 0 ||
-      std::memcmp(bytes.data() + 8, "WAVE", 4) != 0) {
+  const auto info = ParsePcmWav(bytes);
+  if (!info) {
     return std::nullopt;
   }
-  std::uint32_t byte_rate = 0;
-  std::uint32_t data_size = 0;
-  for (std::size_t offset = 12; offset + 8 <= bytes.size();) {
-    const std::uint32_t chunk_size =
-        *reinterpret_cast<const std::uint32_t*>(bytes.data() + offset + 4);
-    if (std::memcmp(bytes.data() + offset, "fmt ", 4) == 0 &&
-        chunk_size >= 12 && offset + 8 + chunk_size <= bytes.size()) {
-      byte_rate = *reinterpret_cast<const std::uint32_t*>(
-          bytes.data() + offset + 8 + 8);
-    } else if (std::memcmp(bytes.data() + offset, "data", 4) == 0) {
-      data_size = std::min<std::uint32_t>(
-          chunk_size, static_cast<std::uint32_t>(
-              bytes.size() - std::min(bytes.size(), offset + 8)));
-      break;
-    }
-    offset += 8 + chunk_size + (chunk_size & 1u);
-  }
-  if (byte_rate == 0 || data_size == 0) {
-    return std::nullopt;
-  }
-  return static_cast<double>(data_size) / byte_rate;
+  return static_cast<double>(info->data_size) / info->byte_rate;
 }
 
 std::vector<float> ReadWavRms(const std::vector<std::uint8_t>& bytes) {
-  if (bytes.size() < 44 || std::memcmp(bytes.data(), "RIFF", 4) != 0
-      || std::memcmp(bytes.data() + 8, "WAVE", 4) != 0) {
+  const auto info = ParsePcmWav(bytes);
+  if (!info || info->bits_per_sample != 16) {
     return {};
   }
-  std::uint16_t format = 0;
-  std::uint16_t channels = 0;
-  std::uint32_t sample_rate = 0;
-  std::uint16_t bits_per_sample = 0;
-  std::size_t data_offset = 0;
-  std::size_t data_size = 0;
-  auto read_u16 = [&bytes](std::size_t offset) {
-    std::uint16_t value = 0;
-    std::memcpy(&value, bytes.data() + offset, sizeof(value));
-    return value;
-  };
-  auto read_u32 = [&bytes](std::size_t offset) {
-    std::uint32_t value = 0;
-    std::memcpy(&value, bytes.data() + offset, sizeof(value));
-    return value;
-  };
-  for (std::size_t offset = 12; offset + 8 <= bytes.size();) {
-    const auto chunk_size = static_cast<std::size_t>(read_u32(offset + 4));
-    const auto chunk_start = offset + 8;
-    if (chunk_start > bytes.size()
-        || chunk_size > bytes.size() - chunk_start) {
-      break;
-    }
-    if (std::memcmp(bytes.data() + offset, "fmt ", 4) == 0
-        && chunk_size >= 16) {
-      format = read_u16(chunk_start);
-      channels = read_u16(chunk_start + 2);
-      sample_rate = read_u32(chunk_start + 4);
-      bits_per_sample = read_u16(chunk_start + 14);
-    } else if (std::memcmp(bytes.data() + offset, "data", 4) == 0) {
-      data_offset = chunk_start;
-      data_size = chunk_size;
-      break;
-    }
-    offset = chunk_start + chunk_size + (chunk_size & 1u);
-  }
-  if (format != 1 || channels == 0 || sample_rate == 0
-      || bits_per_sample != 16 || data_offset == 0 || data_size == 0) {
-    return {};
-  }
-  const std::size_t bytes_per_frame = static_cast<std::size_t>(channels) * 2;
-  const std::size_t frame_count = data_size / bytes_per_frame;
+  const std::size_t bytes_per_frame = info->block_align;
+  const std::size_t frame_count = info->data_size / bytes_per_frame;
   const std::size_t frames_per_bucket =
-      std::max<std::size_t>(1, sample_rate / 50);
+      std::max<std::size_t>(1, info->sample_rate / 50);
   std::vector<float> result;
   result.reserve((frame_count + frames_per_bucket - 1) / frames_per_bucket);
   for (std::size_t first = 0; first < frame_count; first += frames_per_bucket) {
     const std::size_t count = std::min(frames_per_bucket, frame_count - first);
     double square_sum = 0.0;
     for (std::size_t frame = 0; frame < count; ++frame) {
-      for (std::size_t channel = 0; channel < channels; ++channel) {
-        const auto offset = data_offset
+      for (std::size_t channel = 0; channel < info->channels; ++channel) {
+        const auto offset = info->data_offset
             + (first + frame) * bytes_per_frame + channel * 2;
         std::int16_t sample = 0;
         std::memcpy(&sample, bytes.data() + offset, sizeof(sample));
@@ -448,7 +480,7 @@ std::vector<float> ReadWavRms(const std::vector<std::uint8_t>& bytes) {
         square_sum += normalized * normalized;
       }
     }
-    const double sample_count = static_cast<double>(count) * channels;
+    const double sample_count = static_cast<double>(count) * info->channels;
     result.push_back(static_cast<float>(
         std::sqrt(square_sum / std::max(1.0, sample_count))));
   }
@@ -500,19 +532,29 @@ struct AudioPlayback {
   std::uint64_t serial = 0;
 };
 
-std::optional<AudioPlayback> PlayAudioUrl(const std::string& url) {
+std::optional<AudioPlayback> PlayAudioUrl(
+    const std::string& url, std::string& failure_reason) {
   std::vector<std::uint8_t> bytes;
   if (!DownloadHttp(url, bytes)) {
+    failure_reason = "audio_download_failed";
     std::cerr << "Failed to download audio: " << url << '\n';
+    return std::nullopt;
+  }
+  const auto duration = ReadWavDuration(bytes);
+  if (!duration) {
+    failure_reason = "audio_wav_invalid";
+    std::cerr << "Downloaded WAV has no valid playback duration: " << url
+              << '\n';
     return std::nullopt;
   }
   const auto path = WriteTempAudio(bytes);
   if (!path) {
+    failure_reason = "audio_cache_write_failed";
     return std::nullopt;
   }
-  const double duration = ReadWavDuration(bytes).value_or(1.0);
   const auto rms = ReadWavRms(bytes);
   const auto serial = g_audio_serial.fetch_add(1) + 1;
+  BOOL playback_started = FALSE;
   {
     std::scoped_lock lock(g_audio_file_mutex);
     PlaySoundW(nullptr, nullptr, 0);
@@ -520,15 +562,28 @@ std::optional<AudioPlayback> PlayAudioUrl(const std::string& url) {
       DeleteFileW(g_audio_file.c_str());
     }
     g_audio_file = *path;
-    PlaySoundW(g_audio_file.c_str(), nullptr, SND_FILENAME | SND_ASYNC | SND_NODEFAULT);
+    playback_started = PlaySoundW(
+        g_audio_file.c_str(), nullptr,
+        SND_FILENAME | SND_ASYNC | SND_NODEFAULT);
+    if (!playback_started) {
+      DeleteFileW(g_audio_file.c_str());
+      g_audio_file.clear();
+    }
   }
+  if (!playback_started) {
+    failure_reason = "audio_playback_failed";
+    std::cerr << "PlaySoundW failed to start downloaded WAV: " << url << '\n';
+    StopCurrentAudio();
+    return std::nullopt;
+  }
+  failure_reason.clear();
   {
     std::scoped_lock signal_lock(g_audio_signal_mutex);
     g_audio_rms = rms;
   }
   g_audio_start_seconds.store(NowSeconds());
-  g_audio_end_seconds.store(g_audio_start_seconds.load() + duration);
-  return AudioPlayback{duration, serial};
+  g_audio_end_seconds.store(g_audio_start_seconds.load() + *duration);
+  return AudioPlayback{*duration, serial};
 }
 
 class Allocator final : public ICubismAllocator {
@@ -599,11 +654,15 @@ public:
       if (!file_name || file_name[0] == '\0') {
         return false;
       }
+      const auto relative_path = PathFromUtf8(file_name);
+      if (!relative_path) {
+        return false;
+      }
       std::vector<csmByte> bytes;
-      const auto path = model_directory / file_name;
+      const auto path = model_directory / *relative_path;
       if (!ReadFile(path, bytes)) {
         std::cerr << "[cubism] failed to read " << label
-                  << ": " << path.string() << '\n';
+                  << ": " << PathToUtf8(path) << '\n';
         return false;
       }
       loader(bytes);
@@ -634,11 +693,15 @@ public:
       if (!name || !file_name || file_name[0] == '\0') {
         continue;
       }
+      const auto relative_path = PathFromUtf8(file_name);
+      if (!relative_path) {
+        continue;
+      }
       std::vector<csmByte> bytes;
-      const auto path = model_directory / file_name;
+      const auto path = model_directory / *relative_path;
       if (!ReadFile(path, bytes)) {
         std::cerr << "[cubism] failed to read expression "
-                  << name << ": " << path.string() << '\n';
+                  << name << ": " << PathToUtf8(path) << '\n';
         continue;
       }
       if (auto* expression = LoadExpression(
@@ -925,11 +988,15 @@ private:
     if (!file_name || file_name[0] == '\0') {
       return nullptr;
     }
-    const auto motion_path = model_directory / file_name;
+    const auto relative_path = PathFromUtf8(file_name);
+    if (!relative_path) {
+      return nullptr;
+    }
+    const auto motion_path = model_directory / *relative_path;
     std::vector<csmByte> motion_bytes;
     if (!ReadFile(motion_path, motion_bytes)) {
       std::cerr << "[cubism] failed to read " << label
-                << " motion: " << motion_path.string() << '\n';
+                << " motion: " << PathToUtf8(motion_path) << '\n';
       return nullptr;
     }
     return LoadMotion(
@@ -970,7 +1037,20 @@ public:
   }
 
   bool Start() {
-    if (running_.load() || !websocket_.connected()) {
+    if (running_.load()) {
+      return false;
+    }
+    bool previous_stream_active = false;
+    bool previous_send_failed = false;
+    {
+      std::scoped_lock lock(queue_mutex_);
+      previous_stream_active = running_stream_active_;
+      previous_send_failed = send_failed_;
+    }
+    if (previous_stream_active) {
+      Stop(previous_send_failed ? "audio_sender_failed" : "capture_restarted");
+    }
+    if (!websocket_.connected()) {
       return false;
     }
     if (audio_worker_.joinable()) {
@@ -984,6 +1064,8 @@ public:
       turn_id_ = stream_id_;
       sequence_ = 0;
       pending_frames_.clear();
+      dropped_bytes_ = 0;
+      send_failed_ = false;
     }
 
     WAVEFORMATEX format{};
@@ -1080,26 +1162,28 @@ public:
 
     std::string stream_id;
     std::optional<std::uint64_t> last_sequence;
-    std::uint64_t dropped = 0;
-    bool was_running = running_stream_active_;
+    std::uint64_t dropped_bytes = 0;
+    bool dropped = false;
     {
       std::scoped_lock queue_lock(queue_mutex_);
-      if (was_running) {
+      if (running_stream_active_) {
         stream_id = stream_id_;
         last_sequence = sequence_ == 0
             ? std::nullopt
             : std::optional<std::uint64_t>{sequence_ - 1};
       }
       running_stream_active_ = false;
-      dropped = dropped_frames_;
-      dropped_frames_ = 0;
+      dropped_bytes = dropped_bytes_;
+      dropped = dropped_bytes_ > 0 || send_failed_;
+      dropped_bytes_ = 0;
+      send_failed_ = false;
       stream_id_.clear();
       turn_id_.clear();
       sequence_ = 0;
       pending_frames_.clear();
     }
-    if (dropped > 0) {
-      std::cerr << "[microphone] dropped " << dropped
+    if (dropped_bytes > 0) {
+      std::cerr << "[microphone] dropped " << dropped_bytes
                 << " captured bytes while sending\n";
     }
     if (stream_id.empty() || !websocket_.connected()) {
@@ -1108,7 +1192,7 @@ public:
     const auto end_message = ag99::runtime::build_input_audio_stream_end(
         stream_id,
         reason,
-        false,
+        dropped,
         last_sequence,
         "manual");
     websocket_.send_text(end_message.dump());
@@ -1146,8 +1230,11 @@ private:
     }
     {
       std::scoped_lock lock(queue_mutex_);
+      if (!running_.load()) {
+        return;
+      }
       if (pending_frames_.size() >= kMaxQueuedFrames) {
-        dropped_frames_ += header->dwBytesRecorded;
+        dropped_bytes_ += header->dwBytesRecorded;
       } else {
         pending_frames_.emplace_back(
             reinterpret_cast<const std::uint8_t*>(header->lpData),
@@ -1203,6 +1290,16 @@ private:
         // device down here (safe, we are not the driver callback) and let the
         // main thread run the full stop when it next does.
         running_.store(false);
+        {
+          std::scoped_lock lock(queue_mutex_);
+          send_failed_ = true;
+          dropped_bytes_ += payload.size();
+          for (const auto& queued : pending_frames_) {
+            dropped_bytes_ += queued.size();
+          }
+          pending_frames_.clear();
+        }
+        queue_condition_.notify_all();
         CloseDevice();
         return;
       }
@@ -1249,11 +1346,12 @@ private:
   mutable std::mutex queue_mutex_;
   std::condition_variable queue_condition_;
   std::deque<std::vector<std::uint8_t>> pending_frames_;
-  std::uint64_t dropped_frames_ = 0;
+  std::uint64_t dropped_bytes_ = 0;
   // True between a successful stream start and its matching end, so Stop
   // still emits input.audio_stream_end after the sender already cleared
   // running_.
   bool running_stream_active_ = false;
+  bool send_failed_ = false;
   std::string stream_id_;
   std::string turn_id_;
   std::uint64_t sequence_ = 0;
@@ -1266,6 +1364,11 @@ private:
 };
 
 class RuntimeBridge final {
+  struct CallbackLifetime {
+    std::mutex mutex;
+    RuntimeBridge* owner = nullptr;
+  };
+
 public:
   RuntimeBridge(
       std::function<void(ag99::runtime::ModelSync)> on_model_sync,
@@ -1273,6 +1376,7 @@ public:
       std::function<void(const std::string&)> on_turn_started,
       std::function<void(const std::string&)> on_turn_finished)
       : microphone_(websocket_),
+        callback_lifetime_(std::make_shared<CallbackLifetime>()),
         on_model_sync_(std::move(on_model_sync)),
         on_motion_intent_(std::move(on_motion_intent)),
         on_turn_started_(std::move(on_turn_started)),
@@ -1307,6 +1411,7 @@ public:
               }
             },
         }) {
+    callback_lifetime_->owner = this;
     audio_worker_ = std::thread([this] {
       AudioWorkerLoop();
     });
@@ -1317,21 +1422,40 @@ public:
   }
 
   bool Connect(const std::string& url) {
+    std::scoped_lock transport_lock(transport_mutex_);
     if (closing_.load()) {
       return false;
     }
+    std::scoped_lock microphone_lock(microphone_operation_mutex_);
+    const auto generation = InvalidateConnection();
+
+    // Stop the previous capture before closing the transport so its stream
+    // end marker can still be delivered when the old connection is usable.
+    microphone_.Stop("runtime_reconnect");
+    websocket_.close();
+    ResetDisconnectedState();
+
+    const std::weak_ptr<CallbackLifetime> weak_lifetime = callback_lifetime_;
     return websocket_.connect(
         url,
         {
-            [this](std::string text) { session_.ingest_text(text); },
-            [this](std::vector<std::uint8_t> binary) {
-              session_.ingest_binary(binary);
+            [weak_lifetime, generation](std::string text) {
+              WithCallbackOwner(weak_lifetime, [&](RuntimeBridge& bridge) {
+                bridge.IngestText(generation, text);
+              });
+            },
+            [weak_lifetime, generation](std::vector<std::uint8_t> binary) {
+              WithCallbackOwner(weak_lifetime, [&](RuntimeBridge& bridge) {
+                bridge.IngestBinary(generation, binary);
+              });
             },
             [](std::string error) {
               std::cerr << "[runtime] websocket error: " << error << '\n';
             },
-            [] {
-              std::cerr << "[runtime] websocket closed\n";
+            [weak_lifetime, generation] {
+              WithCallbackOwner(weak_lifetime, [&](RuntimeBridge& bridge) {
+                bridge.HandleTransportClosed(generation);
+              });
             },
         });
   }
@@ -1347,6 +1471,10 @@ public:
   }
 
   bool ToggleMicrophone() {
+    std::scoped_lock microphone_lock(microphone_operation_mutex_);
+    if (closing_.load()) {
+      return false;
+    }
     if (microphone_.running()) {
       microphone_.Stop("manual_stop");
       return false;
@@ -1363,14 +1491,26 @@ public:
   }
 
   void Close() {
+    std::unique_lock transport_lock(transport_mutex_);
     const bool was_closing = closing_.exchange(true);
     if (!was_closing) {
+      {
+        std::scoped_lock lifetime_lock(callback_lifetime_->mutex);
+        callback_lifetime_->owner = nullptr;
+      }
+      InvalidateConnection();
+      std::scoped_lock microphone_lock(microphone_operation_mutex_);
       microphone_.Stop("runtime_shutdown");
       websocket_.close();
+      ResetDisconnectedState();
     }
     audio_queue_condition_.notify_all();
-    if (audio_worker_.joinable()) {
-      audio_worker_.join();
+    transport_lock.unlock();
+    {
+      std::scoped_lock join_lock(audio_join_mutex_);
+      if (audio_worker_.joinable()) {
+        audio_worker_.join();
+      }
     }
     if (!was_closing) {
       StopCurrentAudio();
@@ -1381,9 +1521,84 @@ private:
   struct AudioQueueItem {
     std::string url;
     std::string turn_id;
+    std::uint64_t generation = 0;
     bool has_motion = false;
     ag99::runtime::Json motion_payload = ag99::runtime::Json::object();
   };
+
+  template <typename Callback>
+  static void WithCallbackOwner(
+      const std::weak_ptr<CallbackLifetime>& weak_lifetime,
+      Callback&& callback) {
+    const auto lifetime = weak_lifetime.lock();
+    if (!lifetime) {
+      return;
+    }
+    std::scoped_lock lock(lifetime->mutex);
+    if (lifetime->owner) {
+      callback(*lifetime->owner);
+    }
+  }
+
+  void IngestText(std::uint64_t generation, std::string_view text) {
+    std::scoped_lock lock(session_mutex_);
+    if (generation == connection_generation_.load() && !closing_.load()) {
+      session_.ingest_text(text);
+    }
+  }
+
+  void IngestBinary(
+      std::uint64_t generation,
+      const std::vector<std::uint8_t>& binary) {
+    std::scoped_lock lock(session_mutex_);
+    if (generation == connection_generation_.load() && !closing_.load()) {
+      session_.ingest_binary(binary);
+    }
+  }
+
+  std::uint64_t InvalidateConnection() {
+    std::scoped_lock lock(session_mutex_);
+    const auto generation = connection_generation_.fetch_add(1) + 1;
+    session_.reset();
+    return generation;
+  }
+
+  void ResetDisconnectedState() {
+    if (on_turn_finished_) {
+      on_turn_finished_("");
+    }
+    {
+      std::scoped_lock lock(audio_queue_mutex_);
+      audio_queue_.clear();
+    }
+    StopCurrentAudio();
+  }
+
+  void HandleTransportClosed(std::uint64_t generation) {
+    if (closing_.load() || generation != connection_generation_.load()) {
+      return;
+    }
+    std::cerr << "[runtime] websocket closed\n";
+    pending_closed_generation_.store(generation);
+    StopCurrentAudio();
+    audio_queue_condition_.notify_all();
+  }
+
+  void ProcessPendingTransportClosed() {
+    const auto generation = pending_closed_generation_.exchange(0);
+    if (generation == 0) {
+      return;
+    }
+    std::scoped_lock transport_lock(transport_mutex_);
+    if (closing_.load() || generation != connection_generation_.load()) {
+      return;
+    }
+    InvalidateConnection();
+    std::scoped_lock microphone_lock(microphone_operation_mutex_);
+    microphone_.Stop("websocket_closed");
+    websocket_.close();
+    ResetDisconnectedState();
+  }
 
   void OnSegment(ag99::runtime::OutputSegment segment) {
     if (closing_.load()) {
@@ -1397,6 +1612,7 @@ private:
       AudioQueueItem item;
       item.url = std::move(segment.audio.url);
       item.turn_id = std::move(turn_id);
+      item.generation = connection_generation_.load();
       if (segment.motion.state == ag99::runtime::MotionSlot::State::Present) {
         item.has_motion = true;
         item.motion_payload = std::move(segment.motion.payload);
@@ -1429,49 +1645,80 @@ private:
       {
         std::unique_lock lock(audio_queue_mutex_);
         audio_queue_condition_.wait(lock, [this] {
-          return closing_.load() || !audio_queue_.empty();
+          return closing_.load() || pending_closed_generation_.load() != 0
+              || !audio_queue_.empty();
         });
         if (closing_.load()) {
           return;
+        }
+        if (pending_closed_generation_.load() != 0) {
+          lock.unlock();
+          ProcessPendingTransportClosed();
+          continue;
         }
         item = std::move(audio_queue_.front());
         audio_queue_.pop_front();
       }
 
-      const auto playback = PlayAudioUrl(item.url);
-      if (!playback) {
-        SendPlaybackFinished(
-            item.turn_id,
-            false,
-            std::string_view{"audio_download_failed"});
+      if (item.generation != connection_generation_.load()) {
         continue;
       }
 
-      if (closing_.load()) {
+      std::string playback_failure_reason;
+      const auto playback = PlayAudioUrl(item.url, playback_failure_reason);
+      if (item.generation != connection_generation_.load()
+          || pending_closed_generation_.load() == item.generation) {
+        StopCurrentAudio();
+        ProcessPendingTransportClosed();
         continue;
       }
-      if (item.has_motion && on_motion_intent_) {
-        on_motion_intent_(item.motion_payload, item.turn_id);
+      if (!playback) {
+        SendPlaybackFinished(
+            item.turn_id,
+            item.generation,
+            false,
+            playback_failure_reason);
+        continue;
+      }
+
+      {
+        std::scoped_lock transport_lock(transport_mutex_);
+        if (closing_.load()
+            || item.generation != connection_generation_.load()) {
+          StopCurrentAudio();
+          continue;
+        }
+        if (item.has_motion && on_motion_intent_) {
+          on_motion_intent_(item.motion_payload, item.turn_id);
+        }
       }
       const auto deadline = NowSeconds() + playback->duration_seconds;
       while (!closing_.load()
+             && pending_closed_generation_.load() != item.generation
              && g_audio_serial.load() == playback->serial
              && NowSeconds() < deadline) {
         std::this_thread::sleep_for(std::chrono::milliseconds(25));
+      }
+      if (pending_closed_generation_.load() == item.generation) {
+        ProcessPendingTransportClosed();
+        continue;
       }
       if (closing_.load()
           || g_audio_serial.load() != playback->serial) {
         continue;
       }
-      SendPlaybackFinished(item.turn_id);
+      SendPlaybackFinished(item.turn_id, item.generation);
     }
   }
 
   void SendPlaybackFinished(
       const std::string& turn_id,
+      std::uint64_t generation,
       bool success = true,
       std::optional<std::string_view> reason = std::nullopt) {
-    if (closing_.load() || turn_id.empty()) {
+    std::scoped_lock transport_lock(transport_mutex_);
+    if (closing_.load() || turn_id.empty()
+        || generation != connection_generation_.load()) {
       return;
     }
     const auto finished = ag99::runtime::build_control_playback_finished(
@@ -1483,17 +1730,24 @@ private:
 
   ag99::runtime::WinHttpWebSocketClient websocket_;
   MicrophoneCapture microphone_;
+  std::mutex microphone_operation_mutex_;
+  std::shared_ptr<CallbackLifetime> callback_lifetime_;
   std::function<void(ag99::runtime::ModelSync)> on_model_sync_;
   std::function<void(const ag99::runtime::Json&, const std::string&)> on_motion_intent_;
   std::function<void(const std::string&)> on_turn_started_;
   std::function<void(const std::string&)> on_turn_finished_;
   ag99::runtime::RuntimeProtocolSession session_;
+  std::mutex session_mutex_;
+  std::mutex transport_mutex_;
   std::mutex audio_queue_mutex_;
+  std::mutex audio_join_mutex_;
   std::condition_variable audio_queue_condition_;
   std::deque<AudioQueueItem> audio_queue_;
   std::atomic<bool> closing_{false};
   std::thread audio_worker_;
   std::atomic<std::uint64_t> next_turn_id_{1};
+  std::atomic<std::uint64_t> connection_generation_{0};
+  std::atomic<std::uint64_t> pending_closed_generation_{0};
 };
 
 const std::filesystem::path& ExecutableDirectory() {
@@ -1511,78 +1765,74 @@ const std::filesystem::path& ExecutableDirectory() {
   return directory;
 }
 
-csmByte* LoadFile(const std::string path, csmSizeInt* size) {
+csmByte* LoadFileFromPath(
+    const std::filesystem::path& path, csmSizeInt* size) {
   if (path.empty() || !size) {
     return nullptr;
   }
 
-  constexpr std::string_view shader_prefix = "FrameworkShaders/";
-  const bool is_shader = path.rfind(shader_prefix.data(), 0) == 0;
-  const std::filesystem::path relative_shader =
-      is_shader
-      ? std::filesystem::path(path.substr(shader_prefix.size()))
-      : std::filesystem::path{};
+  FILE* file = nullptr;
+  if (_wfopen_s(&file, path.c_str(), L"rb") != 0 || !file) {
+    *size = 0;
+    return nullptr;
+  }
 
-  // Prefer assets shipped next to the executable so a packaged build does not
-  // depend on the SDK location that happened to be configured at compile time.
-  const std::filesystem::path local_shader =
-      is_shader ? ExecutableDirectory() / relative_shader
-                : std::filesystem::path{};
-  if (is_shader && !local_shader.empty()) {
+  std::fseek(file, 0, SEEK_END);
+  const long length = std::ftell(file);
+  std::fseek(file, 0, SEEK_SET);
+  if (length <= 0) {
+    std::fclose(file);
+    *size = 0;
+    return nullptr;
+  }
+
+  auto* buffer = static_cast<csmByte*>(
+      std::malloc(static_cast<std::size_t>(length)));
+  if (!buffer || std::fread(
+          buffer, 1, static_cast<std::size_t>(length), file)
+          != static_cast<std::size_t>(length)) {
+    std::free(buffer);
+    std::fclose(file);
+    *size = 0;
+    return nullptr;
+  }
+
+  std::fclose(file);
+  *size = static_cast<csmSizeInt>(length);
+  return buffer;
+}
+
+csmByte* LoadFile(const std::string path, csmSizeInt* size) {
+  if (size) {
+    *size = 0;
+  }
+  const auto sdk_path = PathFromUtf8(path);
+  if (!sdk_path || !size) {
+    return nullptr;
+  }
+
+  constexpr std::string_view shader_prefix = "FrameworkShaders/";
+  if (path.starts_with(shader_prefix)) {
+    const auto relative_shader = PathFromUtf8(path.substr(shader_prefix.size()));
+    if (!relative_shader) {
+      return nullptr;
+    }
+
+    // Prefer assets shipped next to the executable so a packaged build does
+    // not depend on the SDK location used at compile time.
+    const auto local_shader = ExecutableDirectory() / *relative_shader;
     std::error_code error;
     if (std::filesystem::is_regular_file(local_shader, error)) {
-      if (FILE* file = std::fopen(local_shader.string().c_str(), "rb")) {
-        std::fseek(file, 0, SEEK_END);
-        const long length = std::ftell(file);
-        std::fseek(file, 0, SEEK_SET);
-        if (length > 0) {
-          auto* buffer = static_cast<csmByte*>(
-              std::malloc(static_cast<std::size_t>(length)));
-          if (buffer && std::fread(
-                  buffer, 1, static_cast<std::size_t>(length), file)
-                  == static_cast<std::size_t>(length)) {
-            std::fclose(file);
-            *size = static_cast<csmSizeInt>(length);
-            return buffer;
-          }
-          std::free(buffer);
-        }
-        std::fclose(file);
+      if (auto* buffer = LoadFileFromPath(local_shader, size)) {
+        return buffer;
       }
+    }
+    if (!g_shader_directory.empty()) {
+      return LoadFileFromPath(g_shader_directory / *relative_shader, size);
     }
   }
 
-  std::filesystem::path resolved_path = path;
-  if (is_shader && !g_shader_directory.empty()) {
-    resolved_path = g_shader_directory / relative_shader;
-  }
-
-  FILE* file = nullptr;
-  if (fopen_s(&file, resolved_path.string().c_str(), "rb") != 0 || !file) {
-    *size = 0;
-    return nullptr;
-  }
-
-  fseek(file, 0, SEEK_END);
-  const long length = ftell(file);
-  fseek(file, 0, SEEK_SET);
-  if (length <= 0) {
-    fclose(file);
-    *size = 0;
-    return nullptr;
-  }
-
-  auto* buffer = static_cast<csmByte*>(std::malloc(static_cast<size_t>(length)));
-  if (!buffer || fread(buffer, 1, static_cast<size_t>(length), file) != static_cast<size_t>(length)) {
-    std::free(buffer);
-    fclose(file);
-    *size = 0;
-    return nullptr;
-  }
-
-  fclose(file);
-  *size = static_cast<csmSizeInt>(length);
-  return buffer;
+  return LoadFileFromPath(*sdk_path, size);
 }
 
 void ReleaseFile(csmByte* buffer) {
@@ -1591,7 +1841,7 @@ void ReleaseFile(csmByte* buffer) {
 
 bool ReadFile(const std::filesystem::path& path, std::vector<csmByte>& output) {
   csmSizeInt size = 0;
-  csmByte* buffer = LoadFile(path.string(), &size);
+  csmByte* buffer = LoadFileFromPath(path, &size);
   if (!buffer || size <= 0) {
     return false;
   }
@@ -1624,7 +1874,8 @@ public:
     _height = height;
     std::vector<csmByte> setting_bytes;
     if (!ReadFile(model_json, setting_bytes)) {
-      std::cerr << "Failed to read model setting: " << model_json.string() << '\n';
+      std::cerr << "Failed to read model setting: "
+                << PathToUtf8(model_json) << '\n';
       return false;
     }
 
@@ -1632,11 +1883,19 @@ public:
         setting_bytes.data(), static_cast<csmSizeInt>(setting_bytes.size()));
     const std::filesystem::path model_dir = model_json.parent_path();
 
-    const std::filesystem::path moc_path =
-        model_dir / _setting->GetModelFileName();
+    const char* model_file_name = _setting->GetModelFileName();
+    std::optional<std::filesystem::path> relative_moc_path;
+    if (model_file_name) {
+      relative_moc_path = PathFromUtf8(model_file_name);
+    }
+    if (!relative_moc_path) {
+      std::cerr << "Model setting has an invalid UTF-8 moc path\n";
+      return false;
+    }
+    const std::filesystem::path moc_path = model_dir / *relative_moc_path;
     std::vector<csmByte> moc_bytes;
     if (!ReadFile(moc_path, moc_bytes)) {
-      std::cerr << "Failed to read model moc: " << moc_path.string() << '\n';
+      std::cerr << "Failed to read model moc: " << PathToUtf8(moc_path) << '\n';
       return false;
     }
 
@@ -1668,7 +1927,7 @@ public:
                    "rendering will continue without motion playback\n";
     }
 
-    std::cout << "Loaded Live2D model: " << model_json.string() << '\n';
+    std::cout << "Loaded Live2D model: " << PathToUtf8(model_json) << '\n';
     return true;
   }
 
@@ -1759,9 +2018,8 @@ public:
         }
       }
     }
-    if (_model) {
-      _model->SetPhysicsResponseProtectedParameterIds(protected_parameter_ids);
-    }
+    _pending_physics_response_protected_parameter_ids =
+        std::move(protected_parameter_ids);
     std::cerr << "[motion] model sync received\n";
   }
 
@@ -2706,6 +2964,11 @@ private:
     std::scoped_lock lock(_motion_mutex);
     if (!_model || !_model->GetModel()) {
       return false;
+    }
+    if (_pending_physics_response_protected_parameter_ids) {
+      _model->SetPhysicsResponseProtectedParameterIds(
+          *_pending_physics_response_protected_parameter_ids);
+      _pending_physics_response_protected_parameter_ids.reset();
     }
     if (_pending_parameter_plan) {
       const auto parsed = ParseParameterPlan(*_pending_parameter_plan);
@@ -3898,6 +4161,8 @@ private:
   std::optional<ag99::runtime::Json> _pending_motion_intent;
   std::optional<ParameterPlan> _active_parameter_plan;
   std::optional<ag99::runtime::Json> _pending_parameter_plan;
+  std::optional<std::unordered_set<std::string>>
+      _pending_physics_response_protected_parameter_ids;
   std::optional<std::string> _pending_parameter_plan_turn_id;
   std::optional<std::string> _pending_motion_intent_turn_id;
   std::optional<std::string> _pending_thinking_turn_id;
@@ -3930,6 +4195,27 @@ void RemoveTrayIcon() {
   }
 }
 
+void SetClickThrough(HWND window, bool enabled);
+void ShowInputWindow(HINSTANCE instance);
+
+std::string LogPathForMessage() {
+  const std::wstring& wide = ag99::live2d::LogFilePath();
+  if (wide.empty()) {
+    return "unavailable";
+  }
+  const int length = WideCharToMultiByte(
+      CP_UTF8, 0, wide.c_str(), static_cast<int>(wide.size()), nullptr, 0,
+      nullptr, nullptr);
+  if (length <= 0) {
+    return "unavailable";
+  }
+  std::string result(static_cast<std::size_t>(length), '\0');
+  WideCharToMultiByte(
+      CP_UTF8, 0, wide.c_str(), static_cast<int>(wide.size()), result.data(),
+      length, nullptr, nullptr);
+  return result;
+}
+
 void ShowTrayMenu(HWND window) {
   POINT cursor{};
   GetCursorPos(&cursor);
@@ -3940,6 +4226,7 @@ void ShowTrayMenu(HWND window) {
   const bool visible = IsWindowVisible(window) != FALSE;
   AppendMenuW(menu, MF_STRING, kTrayShow, L"显示模型");
   AppendMenuW(menu, MF_STRING, kTrayHide, L"隐藏模型");
+  AppendMenuW(menu, MF_STRING, kTrayInputWindow, L"打开输入框");
   AppendMenuW(menu, MF_STRING, kTrayDemoText, L"发送演示文本");
   AppendMenuW(
       menu,
@@ -3948,7 +4235,11 @@ void ShowTrayMenu(HWND window) {
       g_microphone_running && g_microphone_running()
           ? L"停止麦克风"
           : L"开始麦克风");
+  AppendMenuW(
+      menu, MF_STRING, kTrayClickThrough,
+      g_click_through ? L"关闭点击穿透" : L"开启点击穿透");
   AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+  AppendMenuW(menu, MF_STRING, kTrayOpenLog, L"打开日志目录");
   AppendMenuW(menu, MF_STRING, kTrayExit, L"退出 AG99live");
   EnableMenuItem(menu, kTrayShow, visible ? MF_GRAYED : MF_ENABLED);
   EnableMenuItem(menu, kTrayHide, visible ? MF_ENABLED : MF_GRAYED);
@@ -3962,6 +4253,14 @@ void ShowTrayMenu(HWND window) {
 
 LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
   switch (message) {
+    case WM_NCHITTEST:
+      // WS_EX_TRANSPARENT changes paint ordering, not hit testing. Return
+      // HTTRANSPARENT as well so the overlay does not consume mouse input
+      // while click-through mode is enabled.
+      if (g_click_through) {
+        return HTTRANSPARENT;
+      }
+      return DefWindowProcW(window, message, wparam, lparam);
     case WM_ERASEBKGND:
       return 1;
     case WM_LBUTTONDOWN: {
@@ -4027,6 +4326,26 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lpa
             g_send_text("你好，这是原生 Live2D 核心演示。");
           }
           return 0;
+        case kTrayInputWindow:
+          ShowInputWindow(
+              reinterpret_cast<HINSTANCE>(
+                  GetWindowLongPtrW(window, GWLP_HINSTANCE)));
+          return 0;
+        case kTrayClickThrough:
+          SetClickThrough(window, !g_click_through);
+          return 0;
+        case kTrayOpenLog: {
+          const std::wstring& directory = ag99::live2d::LogDirectory();
+          if (directory.empty()) {
+            MessageBoxW(
+                window, L"日志目录不可用。", kWindowTitle, MB_OK | MB_ICONWARNING);
+          } else {
+            ShellExecuteW(
+                nullptr, L"open", directory.c_str(), nullptr, nullptr,
+                SW_SHOWNORMAL);
+          }
+          return 0;
+        }
         case kTrayMicToggle:
           if (g_toggle_microphone) {
             g_toggle_microphone();
@@ -4050,6 +4369,218 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lpa
   return DefWindowProcW(window, message, wparam, lparam);
 }
 
+// --- Click-through -------------------------------------------------------
+//
+// WS_EX_TRANSPARENT makes the whole window forward its mouse input to the
+// window underneath. It is the practical choice for a transparent Live2D
+// overlay: nothing else can receive clicks while it is on, so it is a tray
+// toggle rather than a permanent mode.
+
+void SetClickThrough(HWND window, bool enabled) {
+  if (!window) {
+    return;
+  }
+  const LONG_PTR previous = GetWindowLongPtrW(window, GWL_EXSTYLE);
+  LONG_PTR style = previous;
+  if (enabled) {
+    style |= WS_EX_TRANSPARENT;
+  } else {
+    style &= ~static_cast<LONG_PTR>(WS_EX_TRANSPARENT);
+  }
+  if (style != previous) {
+    SetWindowLongPtrW(window, GWL_EXSTYLE, style);
+  }
+  // Extended styles only take effect after the window is re-applied.
+  if (!SetWindowPos(
+      window, HWND_TOPMOST, 0, 0, 0, 0,
+      SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED)) {
+    if (style != previous) {
+      SetWindowLongPtrW(window, GWL_EXSTYLE, previous);
+    }
+    AG99_ERROR("clickthrough", "failed to apply the window input style");
+    return;
+  }
+  g_click_through = enabled;
+  AG99_INFO(
+      "clickthrough", enabled ? "enabled" : "disabled");
+}
+
+// --- Text input window ---------------------------------------------------
+
+constexpr wchar_t kInputClassName[] = L"AG99liveTextInputWindow";
+constexpr wchar_t kInputTitle[] = L"AG99live 输入";
+constexpr UINT kInputSend = 2001;
+constexpr int kInputControlId = 100;
+
+std::wstring WidenUtf8ForInput(std::string_view value) {
+  if (value.empty()) {
+    return {};
+  }
+  const int length = MultiByteToWideChar(
+      CP_UTF8, 0, value.data(), static_cast<int>(value.size()), nullptr, 0);
+  if (length <= 0) {
+    return {};
+  }
+  std::wstring result(static_cast<std::size_t>(length), L'\0');
+  MultiByteToWideChar(
+      CP_UTF8, 0, value.data(), static_cast<int>(value.size()), result.data(),
+      length);
+  return result;
+}
+
+std::string NarrowUtf8ForInput(std::wstring_view value) {
+  if (value.empty()) {
+    return {};
+  }
+  const int length = WideCharToMultiByte(
+      CP_UTF8, 0, value.data(), static_cast<int>(value.size()), nullptr, 0,
+      nullptr, nullptr);
+  if (length <= 0) {
+    return {};
+  }
+  std::string result(static_cast<std::size_t>(length), '\0');
+  WideCharToMultiByte(
+      CP_UTF8, 0, value.data(), static_cast<int>(value.size()), result.data(),
+      length, nullptr, nullptr);
+  return result;
+}
+
+void SetInputStatus(HWND window, std::wstring_view text) {
+  if (const HWND status = GetDlgItem(window, kInputControlId + 1)) {
+    SetWindowTextW(status, std::wstring(text).c_str());
+  }
+}
+
+void SubmitInputText(HWND window) {
+  const HWND edit = GetDlgItem(window, kInputControlId);
+  if (!edit) {
+    return;
+  }
+  const int length = GetWindowTextLengthW(edit);
+  if (length <= 0) {
+    SetInputStatus(window, L"请输入文本");
+    return;
+  }
+  std::wstring buffer(static_cast<std::size_t>(length) + 1, L'\0');
+  const int copied = GetWindowTextW(
+      edit, buffer.data(), static_cast<int>(buffer.size()));
+  buffer.resize(copied > 0 ? static_cast<std::size_t>(copied) : 0);
+  const std::string text = NarrowUtf8ForInput(buffer);
+  if (text.empty()) {
+    SetInputStatus(window, L"请输入文本");
+    return;
+  }
+  if (!g_send_text || !g_send_text(text)) {
+    SetInputStatus(window, L"发送失败：未连接到 Adapter");
+    AG99_ERROR("input", "send failed for user text");
+    return;
+  }
+  AG99_INFO("input", std::string("sent user text, ")
+      + std::to_string(text.size()) + " bytes");
+  SetWindowTextW(edit, L"");
+  SetInputStatus(window, L"已发送");
+}
+
+LRESULT CALLBACK InputWindowProc(
+    HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
+  switch (message) {
+    case WM_COMMAND:
+      if (LOWORD(wparam) == kInputSend) {
+        SubmitInputText(window);
+        return 0;
+      }
+      break;
+    case WM_DESTROY:
+      g_input_window = nullptr;
+      return 0;
+    default:
+      break;
+  }
+  return DefWindowProcW(window, message, wparam, lparam);
+}
+
+void ShowInputWindow(HINSTANCE instance) {
+  if (g_input_window) {
+    SetForegroundWindow(g_input_window);
+    SetWindowPos(
+        g_input_window, HWND_TOPMOST, 0, 0, 0, 0,
+        SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+    return;
+  }
+
+  WNDCLASSEXW window_class{};
+  window_class.cbSize = sizeof(window_class);
+  window_class.lpfnWndProc = InputWindowProc;
+  window_class.hInstance = instance;
+  window_class.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+  window_class.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_BTNFACE + 1);
+  window_class.lpszClassName = kInputClassName;
+  RegisterClassExW(&window_class);
+
+  const int width = 460;
+  const int height = 168;
+  const int x = GetSystemMetrics(SM_CXSCREEN) - width - 48;
+  const int y = 96;
+  HWND window = CreateWindowExW(
+      WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
+      kInputClassName,
+      kInputTitle,
+      WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_BORDER,
+      x, y, width, height, nullptr, nullptr, instance, nullptr);
+  if (!window) {
+    AG99_ERROR("input", "failed to create the input window");
+    return;
+  }
+  g_input_window = window;
+
+  const HFONT font = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+  RECT client{};
+  GetClientRect(window, &client);
+
+  const HWND label = CreateWindowExW(
+      0, L"STATIC", L"发送文本到 Adapter", WS_CHILD | WS_VISIBLE,
+      14, 12, client.right - 28, 20, window, nullptr, instance, nullptr);
+  if (label) {
+    SendMessageW(label, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+  }
+
+  const HWND edit = CreateWindowExW(
+      WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP |
+      ES_AUTOHSCROLL,
+      14, 38, client.right - 28, 26, window,
+      reinterpret_cast<HMENU>(static_cast<UINT_PTR>(kInputControlId)), instance,
+      nullptr);
+  if (edit) {
+    SendMessageW(edit, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+    SendMessageW(edit, EM_SETLIMITTEXT, 2000, 0);
+  }
+
+  const HWND button = CreateWindowExW(
+      0, L"BUTTON", L"发送", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON,
+      client.right - 108, 74, 92, 30, window,
+      reinterpret_cast<HMENU>(static_cast<UINT_PTR>(kInputSend)), instance,
+      nullptr);
+  if (button) {
+    SendMessageW(button, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+  }
+
+  const HWND status = CreateWindowExW(
+      0, L"STATIC", L"点击“发送”提交文本", WS_CHILD | WS_VISIBLE,
+      14, 80, client.right - 130, 20, window,
+      reinterpret_cast<HMENU>(static_cast<UINT_PTR>(kInputControlId + 1)),
+      instance, nullptr);
+  if (status) {
+    SendMessageW(status, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+  }
+
+  ShowWindow(window, SW_SHOW);
+  UpdateWindow(window);
+  if (edit) {
+    SetFocus(edit);
+  }
+  AG99_INFO("input", "text input window opened");
+}
+
 HWND CreateWindowHandle(HINSTANCE instance, UINT width, UINT height) {
   WNDCLASSEXW window_class{
       sizeof(WNDCLASSEXW),
@@ -4070,7 +4601,8 @@ HWND CreateWindowHandle(HINSTANCE instance, UINT width, UINT height) {
   }
 
   HWND window = CreateWindowExW(
-      WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_NOREDIRECTIONBITMAP,
+      WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_NOREDIRECTIONBITMAP
+          | WS_EX_LAYERED,
       kWindowClassName,
       kWindowTitle,
       WS_POPUP,
@@ -4083,6 +4615,10 @@ HWND CreateWindowHandle(HINSTANCE instance, UINT width, UINT height) {
       instance,
       nullptr);
   if (!window) {
+    return nullptr;
+  }
+  if (!SetLayeredWindowAttributes(window, 0, 255, LWA_ALPHA)) {
+    DestroyWindow(window);
     return nullptr;
   }
 
@@ -4164,8 +4700,10 @@ int Run(
         });
     g_send_text = [&runtime](std::string text) {
       if (!runtime.SendText(text)) {
-        std::cerr << "[runtime] failed to send demo text\n";
+        std::cerr << "[runtime] failed to send text\n";
+        return false;
       }
+      return true;
     };
     g_toggle_microphone = [&runtime] {
       runtime.ToggleMicrophone();
@@ -4252,8 +4790,15 @@ int Run(
   StopCurrentAudio();
   StopCubism();
   surface.Shutdown();
+  if (g_input_window) {
+    DestroyWindow(g_input_window);
+    g_input_window = nullptr;
+  }
   DestroyWindow(window);
+  UnregisterClassW(kInputClassName, instance);
   UnregisterClassW(kWindowClassName, instance);
+  AG99_INFO("host", std::string("render host stopped, exit=")
+      + std::to_string(result_code));
   return result_code;
 }
 
@@ -4290,8 +4835,14 @@ std::filesystem::path FindDefaultModelPath() {
 }  // namespace
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
+  ag99::live2d::LogInitialize();
+  ag99::live2d::LogCaptureStderr();
+  AG99_INFO("host", "render host starting");
+  AG99_INFO("host", "log file: " + LogPathForMessage());
+
   const HRESULT com_result = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
   if (FAILED(com_result) && com_result != RPC_E_CHANGED_MODE) {
+    AG99_ERROR("host", "CoInitializeEx failed");
     return 1;
   }
 

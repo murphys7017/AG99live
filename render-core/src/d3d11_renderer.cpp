@@ -101,7 +101,8 @@ bool D3D11Renderer::Initialize(
       continue;
     }
 
-    const auto texture_path = model_directory / texture_name;
+    const auto texture_path =
+        model_directory / std::filesystem::u8path(texture_name);
     TextureResource texture;
     const HRESULT result = DirectX::CreateWICTextureFromFile(
         device, context, texture_path.wstring().c_str(),
@@ -113,7 +114,9 @@ bool D3D11Renderer::Initialize(
       if (texture.resource) {
         texture.resource->Release();
       }
-      std::cerr << "Failed to load texture: " << texture_path.string()
+      const auto texture_path_utf8 = texture_path.u8string();
+      std::cerr << "Failed to load texture: "
+                << reinterpret_cast<const char*>(texture_path_utf8.c_str())
                 << " (0x" << std::hex
                 << static_cast<unsigned long>(result) << std::dec << ")\n";
       Shutdown();
