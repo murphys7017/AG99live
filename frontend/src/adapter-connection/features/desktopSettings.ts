@@ -23,6 +23,19 @@ import {
 } from "../../esp32-display/types.js";
 import { listMicrophoneInputDevices } from "../runtime/microphoneDevices.js";
 import {
+  normalizePttKeyBinding,
+} from "../core/pttKeyBinding.js";
+import type { DesktopPttKeyBinding } from "../../types/desktop.js";
+import {
+  MAX_MODEL_VIEW_SCALE,
+  MIN_MODEL_VIEW_SCALE,
+} from "../../app/petPreferences.js";
+import {
+  normalizeBilibiliLiveSettings,
+} from "../../bilibili-live/settings.js";
+import type { BilibiliLiveSettings } from "../../types/bilibili-live.js";
+import { normalizeAdapterAddressSetting } from "../core/preferences.js";
+import {
   MAX_LIVE2D_RENDER_DPR_CAP,
   MAX_PHYSICS_RESPONSE_SCALE,
   MIN_LIVE2D_RENDER_DPR_CAP,
@@ -57,10 +70,20 @@ export interface DesktopRuntimeSettingsAccess {
 
 /** Desktop-local state this responder reads and mutates. */
 export interface DesktopSettingAccess {
+  currentAdapterAddress: () => string;
+  applyAdapterAddress: (address: string) => void;
   currentDesktopScreenshotOnSendEnabled: () => boolean;
   applyDesktopScreenshotOnSendEnabled: (enabled: boolean) => void;
   currentPttModeEnabled: () => boolean;
   applyPttModeEnabled: (enabled: boolean) => void;
+  currentPttKeyBinding: () => DesktopPttKeyBinding;
+  applyPttKeyBinding: (binding: DesktopPttKeyBinding) => void;
+  currentSpeechVolume: () => number;
+  applySpeechVolume: (volume: number) => void;
+  currentModelViewScale: () => number;
+  applyModelViewScale: (scale: number) => void;
+  currentBilibiliLiveSettings: () => BilibiliLiveSettings;
+  applyBilibiliLiveSettings: (settings: BilibiliLiveSettings) => void;
   runtimeSettings: DesktopRuntimeSettingsAccess;
   currentMicrophoneDeviceId: () => string;
   applyMicrophoneDevice: (deviceId: string) => void;
@@ -76,7 +99,7 @@ interface DesktopSettingHandler {
 }
 
 async function microphoneDeviceOptions(): Promise<SystemDesktopSettingOption[]> {
-  const devices = await listMicrophoneInputDevices({ requestPermission: true });
+  const devices = await listMicrophoneInputDevices({ requestPermission: false });
   return devices.map((device) => ({ id: device.deviceId, label: device.label }));
 }
 
@@ -142,6 +165,115 @@ function boundedNumberSettingHandler(
         maximum,
         step,
       };
+    },
+  };
+}
+
+function textSettingHandler(
+  current: () => string,
+  apply: (value: string) => void,
+  normalize: (value: string) => string = (value) => value.trim(),
+  allowEmpty = false,
+): DesktopSettingHandler {
+  return {
+    list: async () => ({ value: current(), options: [] }),
+    set: async (value) => {
+      const normalized = normalize(value);
+      if ((!allowEmpty && !normalized) || normalized.length > 255) {
+        throw new Error("desktop_setting_value_invalid");
+      }
+      apply(normalized);
+      return { value: current(), options: [] };
+    },
+  };
+}
+
+function pttKeyBindingHandler(access: DesktopSettingAccess): DesktopSettingHandler {
+  return {
+    list: async () => ({
+      value: JSON.stringify(normalizePttKeyBinding(access.currentPttKeyBinding())),
+      options: [],
+    }),
+    set: async (value) => {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(value);
+      } catch {
+        throw new Error("desktop_setting_value_invalid");
+      }
+      if (
+        !parsed
+        || typeof parsed !== "object"
+        || Array.isArray(parsed)
+        || typeof (parsed as { code?: unknown }).code !== "string"
+        || !(parsed as { code: string }).code.trim()
+      ) {
+        throw new Error("desktop_setting_value_invalid");
+      }
+      const binding = normalizePttKeyBinding({
+        code: (parsed as { code: string }).code.trim(),
+      });
+      if (!binding.code || binding.uiohookKeycode === null) {
+        throw new Error("desktop_setting_value_invalid");
+      }
+      access.applyPttKeyBinding(binding);
+      return {
+        value: JSON.stringify(normalizePttKeyBinding(access.currentPttKeyBinding())),
+        options: [],
+      };
+    },
+  };
+}
+
+const BILIBILI_COOKIE_MASK = "••••••";
+
+function bilibiliSettingHandler(
+  access: DesktopSettingAccess,
+  key: string,
+): DesktopSettingHandler {
+  const read = (settings: BilibiliLiveSettings): string => {
+    switch (key) {
+      case "bilibili_live_enabled": return String(settings.enabled);
+      case "bilibili_live_room_id": return settings.roomId;
+      case "bilibili_live_cookie": return settings.cookie ? BILIBILI_COOKIE_MASK : "";
+      case "bilibili_live_response_interval": return String(settings.responseIntervalSeconds);
+      default: throw new Error("desktop_setting_unsupported");
+    }
+  };
+  const options: SystemDesktopSettingOption[] = [];
+  const bounds = key === "bilibili_live_response_interval"
+    ? { minimum: 5, maximum: 600, step: 1 }
+    : {};
+  return {
+    list: async () => ({ value: read(access.currentBilibiliLiveSettings()), options, ...bounds }),
+    set: async (value) => {
+      const settings = normalizeBilibiliLiveSettings(access.currentBilibiliLiveSettings());
+      switch (key) {
+        case "bilibili_live_enabled":
+          if (value !== "true" && value !== "false") throw new Error("desktop_setting_value_invalid");
+          settings.enabled = value === "true";
+          break;
+        case "bilibili_live_room_id":
+          if (!value.trim()) {
+            settings.roomId = "";
+          } else {
+            settings.roomId = normalizeBilibiliLiveSettings({ roomId: value }).roomId;
+            if (!settings.roomId) throw new Error("desktop_setting_value_invalid");
+          }
+          break;
+        case "bilibili_live_cookie":
+          if (value !== BILIBILI_COOKIE_MASK) settings.cookie = value.trim();
+          break;
+        case "bilibili_live_response_interval": {
+          const interval = parseInteger(value);
+          if (interval < 5 || interval > 600) throw new Error("desktop_setting_value_out_of_range");
+          settings.responseIntervalSeconds = interval;
+          break;
+        }
+        default: throw new Error("desktop_setting_unsupported");
+      }
+      access.applyBilibiliLiveSettings(settings);
+      return { value: read(access.currentBilibiliLiveSettings()), options, ...bounds };
     },
   };
 }
@@ -338,6 +470,12 @@ const DESKTOP_SETTING_HANDLERS: Record<
   string,
   (access: DesktopSettingAccess) => DesktopSettingHandler
 > = {
+  adapter_address: (access) => textSettingHandler(
+    access.currentAdapterAddress,
+    (value) => access.applyAdapterAddress(normalizeAdapterAddressSetting(value)),
+    normalizeAdapterAddressSetting,
+    true,
+  ),
   desktop_screenshot_on_send: (access) => booleanSettingHandler(
     access.currentDesktopScreenshotOnSendEnabled,
     access.applyDesktopScreenshotOnSendEnabled,
@@ -345,6 +483,21 @@ const DESKTOP_SETTING_HANDLERS: Record<
   ptt_mode_enabled: (access) => booleanSettingHandler(
     access.currentPttModeEnabled,
     access.applyPttModeEnabled,
+  ),
+  ptt_key_binding: pttKeyBindingHandler,
+  speech_volume: (access) => boundedNumberSettingHandler(
+    access.currentSpeechVolume,
+    access.applySpeechVolume,
+    0,
+    1,
+    0.01,
+  ),
+  model_view_scale: (access) => boundedNumberSettingHandler(
+    access.currentModelViewScale,
+    access.applyModelViewScale,
+    MIN_MODEL_VIEW_SCALE,
+    MAX_MODEL_VIEW_SCALE,
+    0.05,
   ),
   live2d_ambient_motion_enabled: (access) => booleanSettingHandler(
     access.runtimeSettings.currentAmbientMotionEnabled,
@@ -377,6 +530,15 @@ const DESKTOP_SETTING_HANDLERS: Record<
     access.applySpoutEnabled,
   ),
 };
+
+for (const key of [
+  "bilibili_live_enabled",
+  "bilibili_live_room_id",
+  "bilibili_live_cookie",
+  "bilibili_live_response_interval",
+]) {
+  DESKTOP_SETTING_HANDLERS[key] = (access) => bilibiliSettingHandler(access, key);
+}
 
 for (const key of ESP32_SETTING_KEYS) {
   DESKTOP_SETTING_HANDLERS[key] = (access) => esp32DisplaySettingHandler(access, key);

@@ -55,6 +55,18 @@ import {
   saveStoredAdapterAddress,
 } from "./core/preferences.js";
 import {
+  loadModelViewScale,
+  loadSpeechVolume,
+  saveModelViewScale,
+  saveSpeechVolume,
+} from "../app/petPreferences.js";
+import {
+  loadBilibiliLiveSettings,
+  notifyBilibiliLiveSettingsChanged,
+  saveBilibiliLiveSettings,
+} from "../bilibili-live/settings.js";
+import type { BilibiliLiveSettings } from "../types/bilibili-live.js";
+import {
   createTextSegmentSink,
 } from "../playback-timeline/segmentReleaseSinks.js";
 import type { MotionPayloadNormalizer } from "../types/motion.js";
@@ -339,10 +351,23 @@ export function createAdapterConnection(
 
   const desktopSettingsResponder = createDesktopSettingsResponder(
     {
+      currentAdapterAddress: () => state.address,
+      applyAdapterAddress: persistAddress,
       currentDesktopScreenshotOnSendEnabled: () => state.desktopScreenshotOnSendEnabled,
       applyDesktopScreenshotOnSendEnabled: setDesktopScreenshotOnSendEnabled,
       currentPttModeEnabled: () => state.pttModeEnabled,
       applyPttModeEnabled: setPttMode,
+      currentPttKeyBinding: () => ({ ...state.pttKeyBinding }),
+      applyPttKeyBinding: (binding) => setPttKeyBinding(binding),
+      currentSpeechVolume: loadSpeechVolume,
+      applySpeechVolume: saveSpeechVolume,
+      currentModelViewScale: loadModelViewScale,
+      applyModelViewScale: saveModelViewScale,
+      currentBilibiliLiveSettings: () => loadBilibiliLiveSettings(),
+      applyBilibiliLiveSettings: (settings: BilibiliLiveSettings) => {
+        saveBilibiliLiveSettings(settings);
+        notifyBilibiliLiveSettingsChanged(settings);
+      },
       runtimeSettings: options.desktopRuntimeSettings,
       currentMicrophoneDeviceId: () => state.microphoneDeviceId,
       applyMicrophoneDevice: (deviceId) => microphoneRuntime.setMicrophoneDevice(deviceId),

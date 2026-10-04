@@ -260,6 +260,12 @@ class DesktopSetting:
 
 DESKTOP_SETTINGS_SPEC: tuple[DesktopSetting, ...] = (
     DesktopSetting(
+        key="adapter_address",
+        label="Adapter 地址",
+        description="保存到桌面端；不会自动中断当前连接或切换地址，需由桌面端手动重连后生效。",
+        kind="text",
+    ),
+    DesktopSetting(
         key="microphone_device",
         label="麦克风设备",
         description="桌宠从这台电脑上的哪个麦克风收音。设备由桌面端枚举，选项以桌面端实际可用为准。",
@@ -275,6 +281,30 @@ DESKTOP_SETTINGS_SPEC: tuple[DesktopSetting, ...] = (
         label="按键说话模式",
         description="启用后由已绑定的按键控制麦克风采集。",
         kind="toggle",
+    ),
+    DesktopSetting(
+        key="ptt_key_binding",
+        label="按键说话快捷键",
+        description="设置按键说话模式使用的单个键；桌面端会按物理按键代码捕获，不受键盘布局影响。",
+        kind="key",
+    ),
+    DesktopSetting(
+        key="speech_volume",
+        label="语音播放音量",
+        description="调整桌面端播放模型语音时的音量；修改会同步到当前及后续播放。",
+        kind="range",
+        minimum=0,
+        maximum=1,
+        step=0.01,
+    ),
+    DesktopSetting(
+        key="model_view_scale",
+        label="模型显示缩放",
+        description="调整 Live2D 模型在桌面画布中的显示比例。",
+        kind="range",
+        minimum=0.8,
+        maximum=2,
+        step=0.05,
     ),
     DesktopSetting(
         key="live2d_ambient_motion_enabled",
@@ -314,6 +344,33 @@ DESKTOP_SETTINGS_SPEC: tuple[DesktopSetting, ...] = (
         label="Spout 输出",
         description="将 Live2D 画面发布给本机支持 Spout2 的应用。",
         kind="toggle",
+    ),
+    DesktopSetting(
+        key="bilibili_live_enabled",
+        label="B 站直播弹幕",
+        description="启用后连接指定直播间并接收弹幕；这是桌面端本机功能，不会改变 Adapter 连接。",
+        kind="toggle",
+    ),
+    DesktopSetting(
+        key="bilibili_live_room_id",
+        label="B 站直播间号",
+        description="要监听的 B 站直播间号，只接受数字房间号。",
+        kind="text",
+    ),
+    DesktopSetting(
+        key="bilibili_live_cookie",
+        label="B 站 Cookie",
+        description="用于直播间鉴权的 Cookie。页面只显示是否已配置，不会回显 Cookie 原文。留空可清除。",
+        kind="password",
+    ),
+    DesktopSetting(
+        key="bilibili_live_response_interval",
+        label="B 站弹幕响应间隔",
+        description="桌宠自动响应 B 站弹幕的最短间隔；Cookie 等敏感认证信息不在此页面回显。",
+        kind="number",
+        minimum=5,
+        maximum=600,
+        step=1,
     ),
     DesktopSetting(
         key="esp32_display_enabled",
@@ -672,9 +729,14 @@ class WebControlPageApi:
         value: str | None = None
         if action == DESKTOP_SETTINGS_ACTION_SET:
             raw = body.get("value")
-            if not isinstance(raw, str) or not raw.strip():
+            allow_empty = key in {
+                "adapter_address",
+                "bilibili_live_room_id",
+                "bilibili_live_cookie",
+            }
+            if not isinstance(raw, str) or (not allow_empty and not raw.strip()):
                 return _error("desktop_setting_value_required", 400)
-            value = raw.strip()
+            value = raw.strip() if isinstance(raw, str) else raw
 
         try:
             entry = await platform.desktop_settings_broker.query(

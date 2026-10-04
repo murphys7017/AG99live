@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import { onBeforeUnmount, onMounted, ref } from "vue";
 import type { DesktopSettingEntry } from "./desktopSettings";
 import { formatReportedAt } from "./desktopSettings";
+import { createPttKeyBindingFromKeyboardEvent } from "../adapter-connection/core/pttKeyBinding";
 
 const props = defineProps<{
   settings: DesktopSettingEntry[];
@@ -8,8 +10,10 @@ const props = defineProps<{
   busy: boolean;
   error: string;
   onRefresh: () => void;
-  onApply: (key: string, value: string) => void;
+  onApply: (key: string, value: string) => void | Promise<void>;
 }>();
+
+const capturingKey = ref<string | null>(null);
 
 function isDisabled(entry: DesktopSettingEntry): boolean {
   return props.busy || !props.connected || !entry.reportedAt;
@@ -17,7 +21,7 @@ function isDisabled(entry: DesktopSettingEntry): boolean {
 
 function applyValue(entry: DesktopSettingEntry, value: string): void {
   if (value !== entry.value) {
-    props.onApply(entry.key, value);
+    void props.onApply(entry.key, value);
   }
 }
 
@@ -31,14 +35,70 @@ function onInput(entry: DesktopSettingEntry, event: Event): void {
   applyValue(entry, target.value);
 }
 
+function onPasswordInput(entry: DesktopSettingEntry, event: Event): void {
+  const target = event.target as HTMLInputElement;
+  if (!target.value) return;
+  void props.onApply(entry.key, target.value);
+  target.value = "";
+}
+
+function clearPassword(entry: DesktopSettingEntry): void {
+  if (entry.value) {
+    void props.onApply(entry.key, "");
+  }
+}
+
+function beginKeyCapture(entry: DesktopSettingEntry): void {
+  if (isDisabled(entry)) return;
+  capturingKey.value = entry.key;
+}
+
+function keyBindingLabel(entry: DesktopSettingEntry): string {
+  try {
+    const parsed = JSON.parse(entry.value) as { label?: unknown; code?: unknown };
+    if (typeof parsed.label === "string" && parsed.label.trim()) return parsed.label;
+    if (typeof parsed.code === "string" && parsed.code.trim()) return parsed.code;
+  } catch {
+    // A malformed value is still shown as text below so the user can recover.
+  }
+  return entry.value || "未设置";
+}
+
+function captureKey(event: KeyboardEvent): void {
+  const key = capturingKey.value;
+  if (!key) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const entry = props.settings.find((candidate) => candidate.key === key);
+  capturingKey.value = null;
+  if (!entry || isDisabled(entry)) return;
+  // Some browser/webview-generated keyboard events have no physical code
+  // (for example an unidentified key). Do not let normalization turn that
+  // empty value into the default Ctrl binding.
+  if (!event.code.trim()) return;
+  const binding = createPttKeyBindingFromKeyboardEvent(event);
+  if (binding.code) {
+    applyValue(entry, JSON.stringify(binding));
+  }
+}
+
+function cancelKeyCapture(): void {
+  capturingKey.value = null;
+}
+
 function formatRangeValue(entry: DesktopSettingEntry): string {
   if (!entry.value) return "—";
   const value = Number(entry.value);
   if (!Number.isFinite(value)) return entry.value;
+  if (entry.key === "speech_volume") return `${Math.round(value * 100)}%`;
+  if (entry.key === "model_view_scale") return `×${value.toFixed(2)}`;
   return entry.key.includes("crop_") || entry.key.endsWith("jpeg_quality")
     ? `${Math.round(value * 100)}%`
     : entry.value;
 }
+
+onMounted(() => window.addEventListener("keydown", captureKey, true));
+onBeforeUnmount(() => window.removeEventListener("keydown", captureKey, true));
 </script>
 
 <template>
@@ -71,19 +131,39 @@ function formatRangeValue(entry: DesktopSettingEntry): string {
           </span>
         </label>
 
-        <label v-else class="web-control-field">
-          <span class="web-control-field__label">{{ entry.label }}</span>
+        <div v-else class="web-control-field">
+          <label class="web-control-field__label" :for="`desktop-setting-${entry.key}`">{{ entry.label }}</label>
 
           <input
             v-if="entry.kind === 'text'"
+            :id="`desktop-setting-${entry.key}`"
             type="text"
             :value="entry.value"
             :maxlength="255"
             :disabled="isDisabled(entry)"
             @change="onInput(entry, $event)"
           />
+          <div v-else-if="entry.kind === 'password'" class="web-control-password-input">
+            <input
+              :id="`desktop-setting-${entry.key}`"
+              type="password"
+              value=""
+              :placeholder="entry.value ? '已配置，输入新值以替换' : '未配置'"
+              autocomplete="new-password"
+              :disabled="isDisabled(entry)"
+              @change="onPasswordInput(entry, $event)"
+            />
+            <button
+              v-if="entry.value"
+              type="button"
+              class="web-control-refresh"
+              :disabled="isDisabled(entry)"
+              @click="clearPassword(entry)"
+            >清除</button>
+          </div>
           <input
             v-else-if="entry.kind === 'number'"
+            :id="`desktop-setting-${entry.key}`"
             type="number"
             :value="entry.value"
             :min="entry.minimum"
@@ -94,6 +174,7 @@ function formatRangeValue(entry: DesktopSettingEntry): string {
           />
           <div v-else-if="entry.kind === 'range'" class="web-control-range">
             <input
+              :id="`desktop-setting-${entry.key}`"
               type="range"
               :value="entry.value"
               :min="entry.minimum"
@@ -104,8 +185,24 @@ function formatRangeValue(entry: DesktopSettingEntry): string {
             />
             <output>{{ formatRangeValue(entry) }}</output>
           </div>
+          <div v-else-if="entry.kind === 'key'" class="web-control-key-capture">
+            <button
+              type="button"
+              class="web-control-key-capture__button"
+              :id="`desktop-setting-${entry.key}`"
+              :disabled="isDisabled(entry)"
+              @click="beginKeyCapture(entry)"
+              @blur="cancelKeyCapture"
+            >
+              {{ capturingKey === entry.key ? "请按下一个按键" : `当前按键：${keyBindingLabel(entry)}` }}
+            </button>
+            <span v-if="capturingKey === entry.key" class="web-control-field__hint">
+              按下后立即保存；Esc 也会作为有效按键绑定。
+            </span>
+          </div>
           <select
             v-else
+            :id="`desktop-setting-${entry.key}`"
             :value="entry.value"
             :disabled="isDisabled(entry) || !entry.options.length"
             @change="onInput(entry, $event)"
@@ -119,7 +216,7 @@ function formatRangeValue(entry: DesktopSettingEntry): string {
           </select>
 
           <span class="web-control-field__hint">{{ entry.description }}</span>
-        </label>
+        </div>
 
         <span v-if="entry.reportedAt" class="web-control-field__hint">
           {{ entry.label }}：桌面端上报于 {{ formatReportedAt(entry.reportedAt) }}

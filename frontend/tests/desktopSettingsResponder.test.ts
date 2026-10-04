@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createDesktopSettingsResponder } from "../src/adapter-connection/features/desktopSettings.js";
+import { DEFAULT_ADAPTER_ADDRESS } from "../src/adapter-connection/core/address.js";
 import {
   ESP32_DISPLAY_DEFAULT_CONFIG,
   cloneConfig,
@@ -10,6 +11,7 @@ import type {
   SystemDesktopSettingsQueryPayload,
   SystemDesktopSettingsResultPayload,
 } from "../src/types/protocol.js";
+import type { DesktopPttKeyBinding } from "../src/types/desktop.js";
 
 function queryEnvelope(
   key: string,
@@ -34,14 +36,32 @@ function queryEnvelope(
 
 async function run(): Promise<void> {
   const scalarSettings = {
+    adapterAddress: "http://127.0.0.1:9527",
     screenshotOnSend: true,
     pttModeEnabled: false,
+    pttKeyBinding: {
+      code: "ControlLeft",
+      label: "Left Ctrl",
+      uiohookKeycode: 29 as number | null,
+    },
+    speechVolume: 1,
+    modelViewScale: 1,
+    bilibiliSettings: {
+      enabled: false,
+      roomId: "",
+      cookie: "",
+      responseIntervalSeconds: 30,
+    },
     ambientMotionEnabled: true,
     physicsResponseScale: 1,
     renderDprCap: 1.25,
     motionIntensityScale: 1.35,
   };
   const scalarAccess = {
+    currentAdapterAddress: () => scalarSettings.adapterAddress,
+    applyAdapterAddress: (address: string) => {
+      scalarSettings.adapterAddress = address;
+    },
     currentDesktopScreenshotOnSendEnabled: () => scalarSettings.screenshotOnSend,
     applyDesktopScreenshotOnSendEnabled: (enabled: boolean) => {
       scalarSettings.screenshotOnSend = enabled;
@@ -49,6 +69,22 @@ async function run(): Promise<void> {
     currentPttModeEnabled: () => scalarSettings.pttModeEnabled,
     applyPttModeEnabled: (enabled: boolean) => {
       scalarSettings.pttModeEnabled = enabled;
+    },
+    currentPttKeyBinding: () => ({ ...scalarSettings.pttKeyBinding }),
+    applyPttKeyBinding: (binding: DesktopPttKeyBinding) => {
+      scalarSettings.pttKeyBinding = binding;
+    },
+    currentSpeechVolume: () => scalarSettings.speechVolume,
+    applySpeechVolume: (volume: number) => {
+      scalarSettings.speechVolume = volume;
+    },
+    currentModelViewScale: () => scalarSettings.modelViewScale,
+    applyModelViewScale: (scale: number) => {
+      scalarSettings.modelViewScale = scale;
+    },
+    currentBilibiliLiveSettings: () => ({ ...scalarSettings.bilibiliSettings }),
+    applyBilibiliLiveSettings: (settings: typeof scalarSettings.bilibiliSettings) => {
+      scalarSettings.bilibiliSettings = settings;
     },
     runtimeSettings: {
       currentAmbientMotionEnabled: () => scalarSettings.ambientMotionEnabled,
@@ -91,8 +127,36 @@ async function run(): Promise<void> {
   await responder(queryEnvelope("desktop_screenshot_on_send", "set", "false"));
   assert.equal(scalarSettings.screenshotOnSend, false);
   assert.equal(replies.at(-1)?.value, "false");
+  await responder(queryEnvelope("adapter_connected", "set", "false"));
+  assert.equal(replies.at(-1)?.ok, false);
+  assert.equal(replies.at(-1)?.error, "desktop_setting_unsupported");
+  await responder(queryEnvelope("adapter_address", "set", ""));
+  assert.equal(scalarSettings.adapterAddress, DEFAULT_ADAPTER_ADDRESS);
+  assert.equal(replies.at(-1)?.value, DEFAULT_ADAPTER_ADDRESS);
   await responder(queryEnvelope("ptt_mode_enabled", "set", "true"));
   assert.equal(scalarSettings.pttModeEnabled, true);
+  await responder(queryEnvelope("ptt_key_binding", "set", JSON.stringify({ code: "KeyA" })));
+  assert.equal(scalarSettings.pttKeyBinding.code, "KeyA");
+  await responder(queryEnvelope("ptt_key_binding", "set", "[]"));
+  assert.equal(replies.at(-1)?.ok, false);
+  await responder(queryEnvelope("ptt_key_binding", "set", JSON.stringify({ code: "UnknownCode" })));
+  assert.equal(replies.at(-1)?.ok, false);
+  assert.equal(scalarSettings.pttKeyBinding.code, "KeyA");
+  await responder(queryEnvelope("speech_volume", "set", "0.35"));
+  assert.equal(scalarSettings.speechVolume, 0.35);
+  await responder(queryEnvelope("model_view_scale", "set", "1.5"));
+  assert.equal(scalarSettings.modelViewScale, 1.5);
+  await responder(queryEnvelope("bilibili_live_cookie", "set", "test-cookie-secret"));
+  assert.equal(scalarSettings.bilibiliSettings.cookie, "test-cookie-secret");
+  assert.equal(replies.at(-1)?.value, "••••••");
+  assert.notEqual(replies.at(-1)?.value, scalarSettings.bilibiliSettings.cookie);
+  await responder(queryEnvelope("bilibili_live_cookie", "set", ""));
+  assert.equal(scalarSettings.bilibiliSettings.cookie, "");
+  assert.equal(replies.at(-1)?.value, "");
+  await responder(queryEnvelope("bilibili_live_room_id", "set", "123456"));
+  assert.equal(scalarSettings.bilibiliSettings.roomId, "123456");
+  await responder(queryEnvelope("bilibili_live_room_id", "set", ""));
+  assert.equal(scalarSettings.bilibiliSettings.roomId, "");
   await responder(queryEnvelope("live2d_ambient_motion_enabled", "set", "false"));
   assert.equal(scalarSettings.ambientMotionEnabled, false);
   await responder(queryEnvelope("live2d_physics_response_scale", "set", "1.5"));

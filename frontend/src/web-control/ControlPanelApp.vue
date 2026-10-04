@@ -4,6 +4,7 @@ import MotionTuningPanel from "../components/MotionTuningPanel.vue";
 import SemanticAxisProfileEditor from "../components/SemanticAxisProfileEditor.vue";
 import SettingsForm from "./SettingsForm.vue";
 import DesktopSettingsPanel from "./DesktopSettingsPanel.vue";
+import { useParameterExcludeKeywords } from "../action-lab/parameterExcludeKeywords";
 import {
   desktopErrorMessage,
   type DesktopSettingsQueryResponse,
@@ -83,6 +84,11 @@ const desktopSettings = ref<DesktopSettingsState>({
 const desktopBusyCount = ref(0);
 const desktopBusy = computed(() => desktopBusyCount.value > 0);
 const desktopError = ref("");
+const {
+  excludedParameterKeywordsText,
+  persistParameterExcludeKeywords,
+  resetParameterExcludeKeywords,
+} = useParameterExcludeKeywords();
 
 const activePlatform = computed(() =>
   overview.value.platforms.find((item) => item.platform_id === selectedPlatformId.value) ?? null,
@@ -145,7 +151,6 @@ async function loadOverview(): Promise<void> {
     isLoading.value = false;
   }
 }
-
 async function loadConfigSchema(): Promise<void> {
   const response = await apiGet<ConfigSchemaResponse>("control/config/schema");
   configSections.value = response.sections;
@@ -544,7 +549,6 @@ watch(selectedPlatformId, async (next, previous) => {
 watch(selectedModelName, (next, previous) => {
   if (next && next !== previous && section.value === "profile") void loadProfile();
 });
-
 onMounted(() => void loadOverview());
 </script>
 
@@ -671,6 +675,29 @@ onMounted(() => void loadOverview());
 
       <section v-else class="web-control-content">
         <div class="web-control-section-heading"><div><p>MOTION / REFERENCES</p><h2>动作样例与 Prompt 参考</h2></div></div>
+        <section class="web-control-settings-group web-control-action-preferences">
+          <header>
+            <h2>动作参数过滤</h2>
+            <span>LOCAL</span>
+          </header>
+          <p class="web-control-settings-group__description">
+            仅影响此 Web 控制页与动作实验室的参数筛选，不会修改模型 Profile 或桌面运行时。
+          </p>
+          <label class="web-control-field">
+            <span class="web-control-field__label">排除关键词</span>
+            <textarea
+              v-model="excludedParameterKeywordsText"
+              class="web-control-action-preferences__textarea"
+              placeholder="hair&#10;bind&#10;physics"
+              @change="persistParameterExcludeKeywords"
+            />
+            <span class="web-control-field__hint">每行一个关键词，也支持逗号分隔；匹配到的参数轴会从实验室筛选结果中隐藏。</span>
+          </label>
+          <div class="web-control-form-actions">
+            <button type="button" class="web-control-refresh" @click="persistParameterExcludeKeywords">应用过滤</button>
+            <button type="button" class="web-control-refresh" @click="resetParameterExcludeKeywords">恢复默认</button>
+          </div>
+        </section>
         <p v-if="motionTuningStatus.rootError || motionTuningStatus.loadError" class="web-control-inline-error">{{ motionTuningStatus.rootError || motionTuningStatus.loadError }}</p>
         <MotionTuningPanel
           :semantic-profile="profile"

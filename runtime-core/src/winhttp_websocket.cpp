@@ -57,6 +57,7 @@ struct WinHttpWebSocketClient::Impl {
     std::atomic<bool> receive_exited = true;
     std::atomic<bool> running = false;
     std::atomic<bool> close_requested = false;
+    std::atomic<bool> close_frame_sent = false;
     std::atomic<bool> close_handshake_started = false;
     std::atomic<bool> peer_close_received = false;
     std::mutex callback_mutex;
@@ -140,12 +141,24 @@ struct WinHttpWebSocketClient::Impl {
 
     const bool called_from_receiver =
         state->receive_thread_id.load() == GetCurrentThreadId();
+    state->disable_callbacks();
     {
       std::scoped_lock lock(state->finalization_mutex);
       state->running = false;
       state->close_requested = true;
+      if (!state->peer_close_received && !state->close_handshake_started) {
+        std::scoped_lock send_lock(state->send_mutex);
+        if (state->websocket
+            && WinHttpWebSocketShutdown(
+                   state->websocket,
+                   WINHTTP_WEB_SOCKET_SUCCESS_CLOSE_STATUS,
+                   nullptr,
+                   0)
+                == ERROR_SUCCESS) {
+          state->close_frame_sent = true;
+        }
+      }
     }
-    state->disable_callbacks();
 
     bool thread_joinable = false;
     HANDLE receive_handle = nullptr;
@@ -169,17 +182,26 @@ struct WinHttpWebSocketClient::Impl {
       return;
     }
 
-    if (receive_handle) {
-      CancelSynchronousIo(receive_handle);
-    }
-
     constexpr auto kReceiveDrainTimeout = std::chrono::milliseconds(1500);
-    {
+    const auto wait_for_receive_exit = [&] {
       std::unique_lock lock(state->exit_mutex);
-      state->exit_condition.wait_for(
+      return state->exit_condition.wait_for(
           lock,
           kReceiveDrainTimeout,
           [&] { return state->receive_exited.load(); });
+    };
+    const auto callbacks_are_running = [&] {
+      std::scoped_lock lock(state->callback_mutex);
+      return state->callbacks_in_flight != 0;
+    };
+
+    bool receive_exited = wait_for_receive_exit();
+    if (!receive_exited && receive_handle && !callbacks_are_running()) {
+      // The close frame gives a cooperative peer time to finish the handshake.
+      // Cancellation is only a fallback; it can fail if the receiver is no
+      // longer in a cancellable synchronous operation.
+      CancelSynchronousIo(receive_handle);
+      receive_exited = wait_for_receive_exit();
     }
 
     // Callback execution is owned by the application. Do not wait forever
@@ -194,9 +216,14 @@ struct WinHttpWebSocketClient::Impl {
           [&] { return state->callbacks_in_flight == 0; });
     }
 
-    // Detaching is safe because the receive lambda owns `state`; it never
-    // refers to this client or its Impl. On timeout it will close the
-    // connection handles itself after Receive exits.
+    if (!receive_exited && receive_handle && !callbacks_are_running()) {
+      CancelSynchronousIo(receive_handle);
+      receive_exited = wait_for_receive_exit();
+    }
+
+    // Never close a handle while its synchronous Receive is still running.
+    // If cancellation failed, the detached worker retains the connection
+    // state and closes its handles once the operation eventually returns.
     std::scoped_lock lock(state->thread_mutex);
     if (state->receive_thread.joinable()) {
       state->receive_thread.detach();
@@ -344,7 +371,8 @@ bool WinHttpWebSocketClient::connect(
         std::vector<std::uint8_t> message;
         WINHTTP_WEB_SOCKET_BUFFER_TYPE buffer_type =
             WINHTTP_WEB_SOCKET_UTF8_MESSAGE_BUFFER_TYPE;
-        while (state->running) {
+        while (state->running
+               || (state->close_requested && !state->peer_close_received)) {
           DWORD bytes_read = 0;
           const auto result = WinHttpWebSocketReceive(
               state->websocket,
@@ -364,6 +392,10 @@ bool WinHttpWebSocketClient::connect(
           if (buffer_type == WINHTTP_WEB_SOCKET_CLOSE_BUFFER_TYPE) {
             state->peer_close_received = true;
             break;
+          }
+          if (state->close_requested) {
+            message.clear();
+            continue;
           }
           bool binary = false;
           bool final = false;
@@ -426,6 +458,10 @@ bool WinHttpWebSocketClient::connect(
       state->running = false;
       const auto close_protocol_locked = [&]() -> std::optional<DWORD> {
         if (!state->peer_close_received && !state->close_requested) {
+          return std::nullopt;
+        }
+        if (state->close_frame_sent) {
+          state->close_handshake_started = true;
           return std::nullopt;
         }
         bool expected = false;

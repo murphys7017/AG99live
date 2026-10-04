@@ -14,7 +14,14 @@ export type DesktopSettingOption = {
   label: string;
 };
 
-export type DesktopSettingKind = "toggle" | "text" | "number" | "range" | "select";
+export type DesktopSettingKind =
+  | "toggle"
+  | "text"
+  | "password"
+  | "number"
+  | "range"
+  | "select"
+  | "key";
 
 export type DesktopSettingEntry = {
   key: string;
@@ -65,6 +72,8 @@ export const DESKTOP_ERROR_FALLBACKS: Record<string, string> = {
   desktop_setting_value_out_of_range: "取值超出允许范围。",
   desktop_setting_value_not_available: "桌面端当前没有这个选项或设备，可能已变化。",
   desktop_setting_failed: "桌面端处理该配置时出错。",
+  adapter_address_invalid: "适配器地址格式不正确。",
+  adapter_connect_failed: "适配器连接失败，请检查地址和 AstrBot 插件状态。",
   platform_not_found: "没有找到对应的 Adapter 实例。",
 };
 

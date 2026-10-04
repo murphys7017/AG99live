@@ -7,6 +7,7 @@ import {
   type BilibiliLiveStatus,
 } from "../types/bilibili-live.js";
 import {
+  BILIBILI_LIVE_SETTINGS_CHANGED_EVENT,
   loadBilibiliLiveSettings,
   normalizeBilibiliLiveSettings,
   saveBilibiliLiveSettings,
@@ -39,22 +40,32 @@ export function useBilibiliLiveRuntime(options: BilibiliLiveRuntimeOptions) {
   let sending = false;
   let generation = 0;
 
+  function handleExternalSettingsChanged(event: Event): void {
+    const detail = (event as CustomEvent<unknown>).detail;
+    if (!detail || typeof detail !== "object") return;
+    applySettings(normalizeBilibiliLiveSettings(detail), false);
+  }
+
   function start(): void {
+    window.addEventListener(BILIBILI_LIVE_SETTINGS_CHANGED_EVENT, handleExternalSettingsChanged);
     ensureTickTimer();
     applySettings(settings);
   }
 
   function dispose(): void {
+    window.removeEventListener(BILIBILI_LIVE_SETTINGS_CHANGED_EVENT, handleExternalSettingsChanged);
     generation += 1;
     stopClient();
     clearTickTimer();
     buffer.splice(0);
   }
 
-  function applySettings(nextSettings: BilibiliLiveSettings): void {
+  function applySettings(nextSettings: BilibiliLiveSettings, persist = true): void {
     const normalized = normalizeBilibiliLiveSettings(nextSettings);
     Object.assign(settings, normalized);
-    saveBilibiliLiveSettings(normalized);
+    if (persist) {
+      saveBilibiliLiveSettings(normalized);
+    }
     syncStatusFromSettings();
     buffer.splice(0);
     lastFlushAt = Date.now();

@@ -4,6 +4,7 @@ import {
 } from "../types/bilibili-live.js";
 
 const STORAGE_KEY = "ag99live.bilibili_live.settings.v1";
+export const BILIBILI_LIVE_SETTINGS_CHANGED_EVENT = "ag99live:bilibili-live-settings-changed";
 const MIN_INTERVAL_SECONDS = 5;
 const MAX_INTERVAL_SECONDS = 600;
 const DEFAULT_INTERVAL_SECONDS = DEFAULT_BILIBILI_LIVE_SETTINGS.responseIntervalSeconds;
@@ -52,6 +53,14 @@ export function saveBilibiliLiveSettings(settings: BilibiliLiveSettings): void {
   } catch (error) {
     console.warn("[BilibiliLive] Failed to persist settings.", error);
   }
+}
+
+/** Notify the already-running desktop runtime when another control surface changes settings. */
+export function notifyBilibiliLiveSettingsChanged(settings: BilibiliLiveSettings): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(BILIBILI_LIVE_SETTINGS_CHANGED_EVENT, {
+    detail: normalizeBilibiliLiveSettings(settings),
+  }));
 }
 
 export function normalizeRoomId(value: unknown): string {

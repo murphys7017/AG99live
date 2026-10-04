@@ -923,3 +923,57 @@ web_control_desktop_output_settings:
   evidence_gap:
     - "Live authenticated requests against a reloaded AstrBot plugin and a connected desktop client have not been exercised."
     - "A real ESP32 must verify manual start/stop, host/port reconnection, frame settings, crop behavior, and delivery; a Spout consumer must verify enable/disable and image output."
+
+web_control_existing_desktop_preferences:
+  recorded_at: "2026-10-04"
+  class: feature
+  risk: medium
+  status: source_complete_pending_live_acceptance
+  scope:
+    - "Use the Adapter overview model list for the Web Profile model selector instead of coupling it to a successful current-profile request."
+    - "Expose existing screenshot-on-send, PTT mode, Live2D idle motion, Physics response, render DPR cap, and ModelEngine intensity settings in the AstrBot control page."
+    - "Apply machine-owned settings through the existing desktop settings broker and update their original runtime state owners."
+  non_actions:
+    - "Do not add giveaway, gift-event, drawing, or other new product functionality."
+    - "Do not add new product capabilities; migrate only existing desktop preferences and controls."
+    - "Do not modify concurrent ESP32 broker work or native runtime changes, and do not commit."
+  findings:
+    - "The Web Profile model selector now uses the same per-Adapter available_models list as the plugin model field."
+    - "Screenshot and PTT settings reuse the Adapter state setters; Live2D and ModelEngine values mutate the existing reactive settings objects that are snapshotted by DesktopBridge."
+    - "Desktop metadata advertises the existing ranges, and the desktop responder rejects numeric values outside those ranges."
+    - "The Web page now also exposes Adapter address, PTT key capture, speech volume, model scale, Bilibili live settings, and the existing Spout/ESP32 controls. Adapter address is persisted for a later manual desktop reconnect; the Web page does not expose a destructive adapter disconnect switch."
+    - "Bilibili Cookie values are masked in broker responses and can be replaced or cleared without returning the secret. Empty room IDs are accepted for configuration reset; enabling live intake still requires a valid room ID at runtime."
+    - "Keyboard capture ignores events without a physical DOM code, avoiding normalization of unidentified events into the default Ctrl binding."
+  validation:
+    - "`npm run typecheck:renderer` passed."
+    - "`npm run build:astrbot-page` passed and regenerated the embedded control page bundle."
+    - "Focused responder compilation remains blocked by the repository's existing bundled Cubism Framework type errors; the new test's own type mismatch was corrected, but the compiler cannot reach runtime execution under the shared test tsconfig."
+    - "`git diff --check` passed."
+    - "`python -m py_compile astrbot_plugin_ag99live_adapter/web_control.py astrbot_plugin_ag99live_adapter/runtime/desktop_settings_broker.py` passed."
+    - "`python -m pytest astrbot_plugin_ag99live_adapter/tests/unit/runtime/test_desktop_settings_broker.py -q` passed (2 passed)."
+  evidence_gap:
+    - "The control page has not yet been exercised live in AstrBot with a connected desktop runtime."
+    - "The repository-wide test TypeScript config still pulls in bundled Cubism Framework sources and reports unrelated type errors; the focused responder test was compiled separately."
+
+web_control_full_configuration_audit:
+  recorded_at: "2026-10-04"
+  class: review
+  risk: medium
+  status: source_reviewed_pending_live_acceptance
+  scope:
+    - "Audit the remaining desktop settings against the AstrBot Web control page."
+    - "Expose the existing action-parameter exclusion keywords in the Web Action Lab as a local page preference."
+  non_actions:
+    - "Do not invent a control/action-preview API that is not implemented by the backend."
+    - "Do not migrate runtime snapshots, history queues, or status/tool shortcuts as user settings."
+    - "Do not commit without a separate explicit request."
+  findings:
+    - "Plugin config schema and desktop broker settings cover all existing functional settings discovered in the desktop settings window."
+    - "The only remaining user preference is parameterExcludeKeywords, shared through localStorage by BaseActionPreviewPanel and SemanticAxisProfileEditor; the Web Action Lab now exposes the same preference without widening the desktop protocol."
+  validation:
+    - "`npm run typecheck:renderer` passed from `frontend`."
+    - "`npm run build:astrbot-page` passed and regenerated the embedded control page bundle."
+    - "`python -m py_compile astrbot_plugin_ag99live_adapter/web_control.py astrbot_plugin_ag99live_adapter/runtime/desktop_settings_broker.py` passed."
+    - "`git diff --check` passed."
+  evidence_gap:
+    - "Live authenticated AstrBot page behavior and connected desktop synchronization still need user acceptance testing."
