@@ -20,7 +20,7 @@ AstrBot 插件 `astrbot_plugin_ag99live_adapter` 将 AstrBot 的对话、TTS 和
 | WebSocket | `12396` | 输入、输出、控制、模型与系统消息。 |
 | HTTP | `12397` | 已扫描模型、缓存音频、图片和允许的静态资源。 |
 
-端口由插件根配置的 `port` 和 `http_port` 设置。其他常用根配置包括 `speaker_name` 和 `auto_start_mic`；运行资料归入 `general`、`live2d_input`、`performance_curve` 与 `vad`。请使用 AstrBot 当前插件 Schema 生成或编辑配置，旧平级路径不再读取。
+端口由插件根配置的 `port` 和 `http_port` 设置。其他常用根配置包括 `speaker_name` 和 `auto_start_mic`；运行资料归入 `general`、`live2d_input`、`performance_curve`、`independent_motion` 与 `vad`。请使用 AstrBot 当前插件 Schema 生成或编辑配置，旧平级路径不再读取。
 
 ## 动作路径
 
@@ -38,6 +38,12 @@ AstrBot Persona
 
 动作输入选择 `axis_levels`、稀疏 `motion_steps` 或 `motion_resource_id` 之一。未知轴、非法等级、空 step、形态冲突和无效资源会明确失败；Adapter 不补轴、不改名、不生成 neutral pose。
 
+### 实验性独立动作生成
+
+`independent_motion.enabled` 默认关闭。启用后，Adapter 使用单独选择的聊天 Provider 生成动作意图，主对话模型不再生成这份动作参数；关闭后继续走 Persona Effect 主路径。`history_turns` 控制附带的最近文本对话轮数（默认 6，范围 0–20），当前轮实际收到的图片会单独传给动作 Provider；要让模型理解照片，请选择支持视觉输入的 Provider。不会把缓存复用的旧桌面截图或历史图片当成本轮图片发送。
+
+`parallel` 开启时，动作请求与当前可见回复的 Persona 表达生成并行启动，等两路结果都可用后再进入动作调度；此时动作模型看不到尚未生成的回复文本。关闭时则等回复文本生成后才调用动作 Provider，并把该回复作为动作判断上下文。即时回复和最终回复分别匹配各自的动作结果；两种模式都会在动作结果就绪后再进入当前输出调度。
+
 ## 音频输入和取消
 
 麦克风采集由 `input.audio_stream_start`、二进制 PCM16LE chunk 和 `input.audio_stream_end` 组成。后端用 `stream_id` 汇总、严格检查顺序，并根据 PTT 或 VAD 建立正式 Turn。持续收音的 `capture_turn_id` 只标识采集根，每段 VAD 语音使用 `<capture_turn_id>:vad:<n>` 子 Turn。
@@ -48,7 +54,9 @@ AstrBot Persona
 
 启用插件后，在 AstrBot WebUI 的插件详情页打开 **AG99live 控制台**，可以编辑 Adapter 配置、Live2D 语义轴 Profile 和动作调参样例。页面通过 AstrBot 插件视图 bridge 访问受认证的插件 API，不单独启动 Web 服务。
 
-麦克风、全局快捷键、Spout/ESP32 和桌面实时动作预览仍由 AG99live 桌面运行时持有；这些本机控制尚未迁入 AstrBot 页面，现有桌面界面也暂时保留。
+麦克风、全局快捷键和 Spout/ESP32 等本机功能仍由 AG99live 桌面运行时持有，Web 页面经桌面设置 broker 读写，不把本机配置存入 Adapter。Electron 还支持从 Web 修改鼠标凝视参数与托盘使用的 WebUI 基址；native runtime 以实际支持的设置项为准。实时动作预览和对话历史暂时保留本机入口。
+
+Electron 托盘和桌宠右键的 **打开 Web 控制面板** 会在默认浏览器打开本插件页面。默认 WebUI 基址为 `http://127.0.0.1:6185/`；使用其他地址或反向代理时，在桌面 **本机工具 > 本机设置** 或已连接的 Web 本机配置中设置。登录继续由 AstrBot 管理。
 
 ## 开发
 

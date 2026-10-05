@@ -1,6 +1,7 @@
 import { app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, screen, session } from "electron";
 import { MenuManager } from "./menu-manager";
 import { WindowManager } from "./window-manager";
+import { WebControlLauncher } from "./web-control-launcher";
 import { setupNativeMicrophoneIpc } from "./native-microphone";
 import { registerEsp32DisplayIpc, shutdownEsp32DisplayBridge } from "./esp32-display-bridge";
 import { registerBilibiliLiveIpc } from "./bilibili-live-bridge";
@@ -16,6 +17,7 @@ import type {
 
 let windowManager: WindowManager;
 let menuManager: MenuManager;
+let webControl: WebControlLauncher;
 let spoutSender: SpoutSender | null = null;
 const WM_DWMCOMPOSITIONCHANGED = 0x031e;
 const WINDOW_RECOVERY_DEBOUNCE_MS = 5000;
@@ -427,6 +429,23 @@ function watchWindowShortcuts(window: BrowserWindow): void {
 }
 
 function setupIpc(): void {
+  const requireSettingsSender = (sender: Electron.WebContents): void => {
+    if (!(["pet", "settings"] as const).some((role) =>
+      windowManager.getWindow(role)?.webContents === sender,
+    )) {
+      throw new Error("desktop_setting_unsupported");
+    }
+  };
+  ipcMain.handle("desktop:get-web-control-url", (event) => {
+    requireSettingsSender(event.sender);
+    return webControl.getUrl();
+  });
+  ipcMain.handle("desktop:set-web-control-url", (event, value: unknown) => {
+    requireSettingsSender(event.sender);
+    return webControl.setUrl(value);
+  });
+  ipcMain.handle("desktop:open-web-control", () => webControl.open());
+
   ipcMain.handle("desktop:get-spout-sender-status", (event) => {
     const petWindow = windowManager.getWindow("pet");
     if (!petWindow || petWindow.isDestroyed() || petWindow.webContents !== event.sender) {
@@ -485,7 +504,6 @@ function setupIpc(): void {
       target === "settings"
       || target === "history"
       || target === "action_lab"
-      || target === "profile_editor"
     ) {
       windowManager.toggleAuxWindow(target);
     }
@@ -691,7 +709,7 @@ function setupTransparentWindowRecovery(): (window: BrowserWindow) => void {
   };
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   if (process.platform === "win32") {
     app.setAppUserModelId("ag99live.desktop");
   }
@@ -704,7 +722,9 @@ app.whenReady().then(() => {
   });
 
   windowManager = new WindowManager();
-  menuManager = new MenuManager(windowManager);
+  webControl = new WebControlLauncher(app.getPath("userData"));
+  await webControl.initialize();
+  menuManager = new MenuManager(windowManager, webControl);
   void menuManager;
   spoutSender = new SpoutSender(sendSpoutSenderStatus);
   spoutSender.start();
@@ -741,6 +761,7 @@ app.whenReady().then(() => {
 
 app.on("before-quit", () => {
   windowManager?.markAppQuitting();
+  menuManager?.dispose();
   spoutSender?.stop();
   void shutdownEsp32DisplayBridge();
 });

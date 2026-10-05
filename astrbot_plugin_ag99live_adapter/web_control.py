@@ -179,6 +179,47 @@ CONFIG_SCHEMA: tuple[ConfigSection, ...] = (
         ),
     ),
     ConfigSection(
+        key="independent_motion",
+        label="独立 Live2D 动作生成（实验）",
+        description="切换为独立 Provider 生成动作参数，并选择历史上下文长度和执行时序。",
+        fields=(
+            ConfigField(
+                key="enabled",
+                kind="bool",
+                label="启用独立动作生成",
+                description="启用后完全使用独立 Provider 的动作结果；关闭时沿用主模型动作生成。",
+                default=False,
+            ),
+            ConfigField(
+                key="provider_id",
+                kind="provider",
+                label="动作生成 Provider",
+                description="独立生成 Live2D 动作参数的聊天 Provider。启用后必须选择；需要读取图片时请使用支持视觉输入的模型。",
+                default="",
+                max_length=255,
+                required=False,
+                options_from="providers",
+            ),
+            ConfigField(
+                key="history_turns",
+                kind="int",
+                label="历史上下文轮数",
+                description="传给独立模型的最近历史对话轮数；当前轮照片单独附加。",
+                default=6,
+                minimum=0,
+                maximum=20,
+                step=1,
+            ),
+            ConfigField(
+                key="parallel",
+                kind="bool",
+                label="与主回复并行生成",
+                description="启用时在主模型生成回复文本前启动；关闭时在回复文本生成后启动。",
+                default=False,
+            ),
+        ),
+    ),
+    ConfigSection(
         key="vad",
         label="语音断句",
         description="Silero VAD 判定当前音频帧为语音的阈值，以及开始/结束所需的连续帧数。",
@@ -260,6 +301,12 @@ class DesktopSetting:
 
 DESKTOP_SETTINGS_SPEC: tuple[DesktopSetting, ...] = (
     DesktopSetting(
+        key="astrbot_webui_url",
+        label="AstrBot WebUI 地址",
+        description="托盘打开控制面板时使用的 HTTP/HTTPS 基址，可包含反向代理子路径；不含登录信息、查询参数或 #。",
+        kind="text",
+    ),
+    DesktopSetting(
         key="adapter_address",
         label="Adapter 地址",
         description="保存到桌面端；不会自动中断当前连接或切换地址，需由桌面端手动重连后生效。",
@@ -311,6 +358,39 @@ DESKTOP_SETTINGS_SPEC: tuple[DesktopSetting, ...] = (
         label="Live2D 默认待机动作",
         description="控制模型没有播放对话动作时是否持续播放默认待机动作。",
         kind="toggle",
+    ),
+    DesktopSetting(
+        key="cursor_gaze_enabled",
+        label="鼠标停留凝视",
+        description="鼠标停留时让桌宠转向光标；关闭后停止光标轮询。",
+        kind="toggle",
+    ),
+    DesktopSetting(
+        key="cursor_gaze_poll_interval_ms",
+        label="光标检测间隔（毫秒）",
+        description="两次光标检测之间的等待时间；增大可降低检测频率。",
+        kind="number",
+        minimum=50,
+        maximum=1000,
+        step=10,
+    ),
+    DesktopSetting(
+        key="cursor_gaze_dwell_ms",
+        label="凝视等待时间（毫秒）",
+        description="光标保持在附近多久后开始凝视。",
+        kind="number",
+        minimum=100,
+        maximum=2000,
+        step=50,
+    ),
+    DesktopSetting(
+        key="cursor_gaze_stationary_distance_px",
+        label="光标移动阈值（像素）",
+        description="两次检测间的移动距离超过此值时，重新计算停留时间。",
+        kind="number",
+        minimum=1,
+        maximum=100,
+        step=1,
     ),
     DesktopSetting(
         key="live2d_physics_response_scale",
@@ -559,6 +639,16 @@ def _normalize_cross_field(normalized: dict[str, dict[str, Any]]) -> None:
     if curve and curve.get("enabled") and not str(curve.get("provider_id") or "").strip():
         raise ConfigValidationError(
             "performance_curve_provider_required", "performance_curve.provider_id"
+        )
+    independent_motion = normalized.get("independent_motion")
+    if (
+        independent_motion
+        and independent_motion.get("enabled")
+        and not str(independent_motion.get("provider_id") or "").strip()
+    ):
+        raise ConfigValidationError(
+            "independent_motion_provider_required",
+            "independent_motion.provider_id",
         )
 
 

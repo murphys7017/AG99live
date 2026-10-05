@@ -40,6 +40,9 @@ function listLocalAdapterHosts(): string[] {
 }
 
 const api = {
+  getWebControlUrl: () => ipcRenderer.invoke("desktop:get-web-control-url") as Promise<string>,
+  setWebControlUrl: (value: string) => ipcRenderer.invoke("desktop:set-web-control-url", value) as Promise<string>,
+  openWebControlPanel: () => ipcRenderer.invoke("desktop:open-web-control") as Promise<boolean>,
   getPetCursorTarget: () => ipcRenderer.invoke("desktop:get-pet-cursor-target"),
   showContextMenu: (position?: {
     x?: number;

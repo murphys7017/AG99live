@@ -1,10 +1,7 @@
 import { onBeforeUnmount, onMounted, watch, type Ref } from "vue";
 import { buildCursorGazeInput } from "../model-engine/runtime/interactionSway";
 import type { ModelSummary } from "../types/protocol";
-
-const POLL_INTERVAL_MS = 100;
-const DWELL_THRESHOLD_MS = 450;
-const STATIONARY_DISTANCE_PX = 14;
+import { useCursorGazeSettings } from "./cursorGazeSettings";
 
 interface CursorTarget {
   x: number;
@@ -13,6 +10,7 @@ interface CursorTarget {
 }
 
 export function useCursorGaze(selectedModel: Ref<ModelSummary | null>): void {
+  const settings = useCursorGazeSettings();
   let timer: number | null = null;
   let candidate: CursorTarget | null = null;
   let candidateSinceMs = 0;
@@ -20,6 +18,14 @@ export function useCursorGaze(selectedModel: Ref<ModelSummary | null>): void {
   let mounted = false;
   let pollInFlight = false;
   let pollRevision = 0;
+
+  function canPoll(): boolean {
+    return mounted
+      && settings.enabled
+      && !document.hidden
+      && selectedModel.value !== null
+      && !!window.ag99desktop?.getPetCursorTarget;
+  }
 
   function stop(): void {
     pollRevision += 1;
@@ -36,7 +42,7 @@ export function useCursorGaze(selectedModel: Ref<ModelSummary | null>): void {
   }
 
   async function poll(): Promise<void> {
-    if (pollInFlight || document.hidden) {
+    if (pollInFlight || !canPoll()) {
       return;
     }
     const model = selectedModel.value;
@@ -50,9 +56,11 @@ export function useCursorGaze(selectedModel: Ref<ModelSummary | null>): void {
       const target = await getCursorTarget();
       if (
         revision !== pollRevision
-        || document.hidden
+        || !canPoll()
         || selectedModel.value !== model
         || !target
+        || !Number.isFinite(target.x)
+        || !Number.isFinite(target.y)
         || !Number.isFinite(target.horizontalRatio)
       ) {
         return;
@@ -60,7 +68,7 @@ export function useCursorGaze(selectedModel: Ref<ModelSummary | null>): void {
 
       const now = performance.now();
       const moved = !candidate
-        || Math.hypot(target.x - candidate.x, target.y - candidate.y) > STATIONARY_DISTANCE_PX;
+        || Math.hypot(target.x - candidate.x, target.y - candidate.y) > settings.stationaryDistancePx;
       if (moved) {
         candidate = target;
         candidateSinceMs = now;
@@ -69,7 +77,7 @@ export function useCursorGaze(selectedModel: Ref<ModelSummary | null>): void {
         return;
       }
       candidate = target;
-      if (now - candidateSinceMs < DWELL_THRESHOLD_MS) {
+      if (now - candidateSinceMs < settings.dwellMs) {
         return;
       }
       if (!active) {
@@ -99,26 +107,19 @@ export function useCursorGaze(selectedModel: Ref<ModelSummary | null>): void {
   function schedulePoll(): void {
     if (
       timer !== null
-      || !mounted
-      || document.hidden
-      || !selectedModel.value
-      || !window.ag99desktop?.getPetCursorTarget
+      || pollInFlight
+      || !canPoll()
     ) {
       return;
     }
     timer = window.setTimeout(() => {
       timer = null;
       void poll();
-    }, POLL_INTERVAL_MS);
+    }, settings.pollIntervalMs);
   }
 
   function start(): void {
-    if (
-      !mounted
-      || document.hidden
-      || !selectedModel.value
-      || !window.ag99desktop?.getPetCursorTarget
-    ) {
+    if (!canPoll()) {
       return;
     }
     void poll();
@@ -132,10 +133,15 @@ export function useCursorGaze(selectedModel: Ref<ModelSummary | null>): void {
     }
   }
 
-  watch(selectedModel, (model) => {
+  watch(selectedModel, () => {
     stop();
-    if (model) start();
-  });
+    start();
+  }, { flush: "sync" });
+
+  watch(settings, () => {
+    stop();
+    start();
+  }, { flush: "sync" });
 
   onMounted(() => {
     mounted = true;

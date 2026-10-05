@@ -91,10 +91,6 @@ export class WindowManager {
   createWindows(): void {
     this.windows.pet = this.createPetWindow();
     this.windows.overlay = this.createOverlayWindow();
-    this.windows.settings = this.ensureAuxWindow("settings");
-    this.windows.history = this.ensureAuxWindow("history");
-    this.windows.action_lab = this.ensureAuxWindow("action_lab");
-    this.windows.profile_editor = this.ensureAuxWindow("profile_editor");
     this.showWindowWhenReady(this.windows.pet, () => {
       this.windows.pet?.show();
     });
@@ -193,8 +189,11 @@ export class WindowManager {
     if (target.isVisible()) {
       target.hide();
     } else {
-      target.show();
-      target.focus();
+      this.showWindowWhenReady(target, () => {
+        if (target.isDestroyed()) return;
+        target.show();
+        target.focus();
+      });
     }
 
     this.broadcastWindowState();

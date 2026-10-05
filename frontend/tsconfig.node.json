@@ -17,6 +17,7 @@
     "electron.vite.config.ts",
     "src/types/**/*.ts",
     "src/types/**/*.d.ts",
+    "src/app/webControlUrl.ts",
     "src/model-engine/compiler/contracts.ts",
     "src/model-engine/settings.ts"
   ]

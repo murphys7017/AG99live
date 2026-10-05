@@ -35,6 +35,11 @@ import {
 } from "../../bilibili-live/settings.js";
 import type { BilibiliLiveSettings } from "../../types/bilibili-live.js";
 import { normalizeAdapterAddressSetting } from "../core/preferences.js";
+import { normalizeAstrbotWebUiUrl } from "../../app/webControlUrl.js";
+import {
+  loadCursorGazeSettings,
+  saveCursorGazeSetting,
+} from "../../app/cursorGazeSettings.js";
 import {
   MAX_LIVE2D_RENDER_DPR_CAP,
   MAX_PHYSICS_RESPONSE_SCALE,
@@ -98,15 +103,37 @@ interface DesktopSettingHandler {
   set: (value: string) => Promise<DesktopSettingEntry>;
 }
 
+const DEFAULT_MICROPHONE_OPTION_ID = "system-default";
+
 async function microphoneDeviceOptions(): Promise<SystemDesktopSettingOption[]> {
   const devices = await listMicrophoneInputDevices({ requestPermission: false });
-  return devices.map((device) => ({ id: device.deviceId, label: device.label }));
+  return [
+    { id: DEFAULT_MICROPHONE_OPTION_ID, label: "系统默认麦克风" },
+    ...devices.map((device) => ({ id: device.deviceId, label: device.label })),
+  ];
+}
+
+function webControlUrlHandler(): DesktopSettingHandler {
+  const desktop = window.ag99desktop;
+  if (!desktop) throw new Error("desktop_setting_unsupported");
+  return {
+    list: async () => ({ value: await desktop.getWebControlUrl(), options: [] }),
+    set: async (value) => {
+      const normalized = normalizeAstrbotWebUiUrl(value);
+      try {
+        return { value: await desktop.setWebControlUrl(normalized), options: [] };
+      } catch {
+        throw new Error("astrbot_webui_url_save_failed");
+      }
+    },
+  };
 }
 
 function microphoneDeviceHandler(access: DesktopSettingAccess): DesktopSettingHandler {
+  const currentValue = () => access.currentMicrophoneDeviceId() || DEFAULT_MICROPHONE_OPTION_ID;
   return {
     list: async () => ({
-      value: access.currentMicrophoneDeviceId(),
+      value: currentValue(),
       options: await microphoneDeviceOptions(),
     }),
     set: async (value) => {
@@ -114,8 +141,8 @@ function microphoneDeviceHandler(access: DesktopSettingAccess): DesktopSettingHa
       if (!options.some((option) => option.id === value)) {
         throw new Error("desktop_setting_value_not_available");
       }
-      access.applyMicrophoneDevice(value);
-      return { value, options };
+      access.applyMicrophoneDevice(value === DEFAULT_MICROPHONE_OPTION_ID ? "" : value);
+      return { value: currentValue(), options };
     },
   };
 }
@@ -470,6 +497,32 @@ const DESKTOP_SETTING_HANDLERS: Record<
   string,
   (access: DesktopSettingAccess) => DesktopSettingHandler
 > = {
+  astrbot_webui_url: webControlUrlHandler,
+  cursor_gaze_enabled: () => booleanSettingHandler(
+    () => loadCursorGazeSettings().enabled,
+    (enabled) => { saveCursorGazeSetting("enabled", enabled); },
+  ),
+  cursor_gaze_poll_interval_ms: () => boundedNumberSettingHandler(
+    () => loadCursorGazeSettings().pollIntervalMs,
+    (value) => { saveCursorGazeSetting("pollIntervalMs", value); },
+    50,
+    1000,
+    10,
+  ),
+  cursor_gaze_dwell_ms: () => boundedNumberSettingHandler(
+    () => loadCursorGazeSettings().dwellMs,
+    (value) => { saveCursorGazeSetting("dwellMs", value); },
+    100,
+    2000,
+    50,
+  ),
+  cursor_gaze_stationary_distance_px: () => boundedNumberSettingHandler(
+    () => loadCursorGazeSettings().stationaryDistancePx,
+    (value) => { saveCursorGazeSetting("stationaryDistancePx", value); },
+    1,
+    100,
+    1,
+  ),
   adapter_address: (access) => textSettingHandler(
     access.currentAdapterAddress,
     (value) => access.applyAdapterAddress(normalizeAdapterAddressSetting(value)),

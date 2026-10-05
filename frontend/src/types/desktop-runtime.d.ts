@@ -14,6 +14,9 @@ import type {
 } from "./desktop";
 
 export interface Ag99DesktopApi {
+  getWebControlUrl: () => Promise<string>;
+  setWebControlUrl: (value: string) => Promise<string>;
+  openWebControlPanel: () => Promise<boolean>;
   getPetCursorTarget: () => Promise<{
     x: number;
     y: number;

@@ -8,6 +8,11 @@ import SpoutSettingsCard from "../spout/SpoutSettingsCard.vue";
 const {
   bridgeState,
   draftAddress,
+  webControlUrl,
+  webControlStatus,
+  webControlBusy,
+  saveWebControlUrl,
+  openWebControlPanel,
   desktopScreenshotOnSendEnabled,
   microphoneDeviceId,
   microphoneDeviceStatus,
@@ -23,7 +28,6 @@ const {
   live2dPresentationSettings,
   bilibiliLiveSettings,
   statusLabel,
-  profileEditorButtonLabel,
   defaultAdapterAddress,
   motionIntensityMin,
   motionIntensityMax,
@@ -39,7 +43,6 @@ const {
   disconnectAdapter,
   toggleHistoryWindow,
   toggleActionLabWindow,
-  toggleProfileEditorWindow,
   applyDesktopScreenshotOnSend,
   applyMicrophoneDevice,
   applySpeechVolume,
@@ -74,6 +77,23 @@ onMounted(() => {
           </div>
         </header>
         <div class="settings-grid">
+      <article class="settings-card">
+        <div class="settings-card__header"><h2>Web 控制面板</h2></div>
+        <label for="astrbot-webui-url">AstrBot WebUI 地址</label>
+        <input
+          id="astrbot-webui-url"
+          v-model="webControlUrl"
+          type="url"
+          class="settings-card__input"
+          maxlength="255"
+          :disabled="webControlBusy"
+        />
+        <div class="settings-card__actions">
+          <button type="button" class="settings-card__button" :disabled="webControlBusy" @click="openWebControlPanel">打开控制面板</button>
+          <button type="button" class="settings-card__button settings-card__button--ghost" :disabled="webControlBusy" @click="saveWebControlUrl">保存地址</button>
+        </div>
+        <p v-if="webControlStatus" class="settings-card__hint" role="status">{{ webControlStatus }}</p>
+      </article>
       <article class="settings-card">
         <div class="settings-card__header">
           <div>
@@ -605,9 +625,9 @@ onMounted(() => {
         <button
           type="button"
           class="settings-card__button settings-card__button--ghost"
-          @click="toggleProfileEditorWindow"
+          @click="openWebControlPanel"
         >
-          {{ profileEditorButtonLabel }}
+          打开 Web 控制面板
         </button>
       </article>
         </div>

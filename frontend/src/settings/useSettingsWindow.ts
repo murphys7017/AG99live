@@ -32,10 +32,15 @@ import {
   loadBilibiliLiveSettings,
   normalizeBilibiliLiveSettings,
 } from "../bilibili-live/settings";
+import { DEFAULT_ASTRBOT_WEBUI_URL } from "../app/webControlUrl";
 
 export function useSettingsWindow() {
   const bridge = useDesktopBridge();
   const draftAddress = ref(bridge.state.snapshot.adapterAddress);
+  const webControlUrl = ref(DEFAULT_ASTRBOT_WEBUI_URL);
+  const webControlStatus = ref("");
+  const webControlBusy = ref(true);
+  let savedWebControlUrl = DEFAULT_ASTRBOT_WEBUI_URL;
   const desktopScreenshotOnSendEnabled = ref(
     bridge.state.snapshot.desktopScreenshotOnSendEnabled,
   );
@@ -151,19 +156,52 @@ export function useSettingsWindow() {
     window.ag99desktop?.toggleAuxWindow("action_lab");
   }
 
-  function toggleProfileEditorWindow(): void {
-    window.ag99desktop?.toggleAuxWindow("profile_editor");
-  }
-
   function requestModelProjectionSync(): void {
     bridge.sendCommand({ type: "request_model_projection_sync" });
   }
 
-  const profileEditorButtonLabel = computed(() =>
-    bridge.state.windowState.profileEditorVisible
-      ? "关闭 Profile Editor"
-      : "打开 Profile Editor",
-  );
+  async function saveWebControlUrl(): Promise<boolean> {
+    const desktop = window.ag99desktop;
+    if (!desktop || webControlBusy.value) return false;
+    webControlBusy.value = true;
+    webControlStatus.value = "";
+    try {
+      webControlUrl.value = await desktop.setWebControlUrl(webControlUrl.value);
+      savedWebControlUrl = webControlUrl.value;
+      webControlStatus.value = "Web 控制面板地址已保存。";
+      return true;
+    } catch {
+      webControlStatus.value = "保存失败，请检查 HTTP/HTTPS 基址和本机配置目录是否可写。";
+      return false;
+    } finally {
+      webControlBusy.value = false;
+    }
+  }
+
+  async function openWebControlPanel(): Promise<void> {
+    if (webControlBusy.value) return;
+    if (webControlUrl.value !== savedWebControlUrl && !await saveWebControlUrl()) return;
+    try {
+      if (await window.ag99desktop?.openWebControlPanel()) return;
+    } catch {
+      // The native entry reports browser-launch failures; keep the local status useful too.
+    }
+    webControlStatus.value = "无法打开默认浏览器。";
+  }
+
+  onMounted(async () => {
+    try {
+      const currentUrl = await window.ag99desktop?.getWebControlUrl();
+      if (currentUrl) {
+        webControlUrl.value = currentUrl;
+        savedWebControlUrl = currentUrl;
+      }
+    } catch {
+      webControlStatus.value = "无法读取 Web 控制面板地址。";
+    } finally {
+      webControlBusy.value = false;
+    }
+  });
 
   function applyDesktopScreenshotOnSend(): void {
     bridge.sendCommand({
@@ -304,6 +342,11 @@ export function useSettingsWindow() {
   return {
     bridgeState: bridge.state,
     draftAddress,
+    webControlUrl,
+    webControlStatus,
+    webControlBusy,
+    saveWebControlUrl,
+    openWebControlPanel,
     desktopScreenshotOnSendEnabled,
     microphoneDeviceId,
     microphoneDeviceStatus,
@@ -319,7 +362,6 @@ export function useSettingsWindow() {
     live2dPresentationSettings,
     bilibiliLiveSettings,
     statusLabel,
-    profileEditorButtonLabel,
     defaultAdapterAddress: DEFAULT_ADAPTER_ADDRESS,
     motionIntensityMin: MIN_MOTION_INTENSITY_SCALE,
     motionIntensityMax: MAX_MOTION_INTENSITY_SCALE,
@@ -335,7 +377,6 @@ export function useSettingsWindow() {
     disconnectAdapter,
     toggleHistoryWindow,
     toggleActionLabWindow,
-    toggleProfileEditorWindow,
     applyDesktopScreenshotOnSend,
     applyMicrophoneDevice,
     applySpeechVolume,

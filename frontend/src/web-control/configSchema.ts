@@ -65,6 +65,7 @@ export const CONFIG_ERROR_FALLBACKS: Record<string, string> = {
   settings_value_out_of_range: "取值超出允许范围。",
   settings_provider_unknown: "所选 Provider 在 AstrBot 中已不存在，请重新选择。",
   performance_curve_provider_required: "启用表演曲线后必须选择一个 Provider。",
+  independent_motion_provider_required: "启用独立动作生成后必须选择一个 Provider。",
   plugin_config_persistence_unavailable: "当前无法写入插件配置，请在 AstrBot 中检查插件状态。",
   settings_save_failed: "保存失败，配置已回滚到修改前的状态。",
 };
