@@ -30,6 +30,25 @@ void RuntimeProtocolSession::ingest_text(std::string_view text_frame) {
       }
       return;
     }
+    if (envelope.type == "control.synth_finished") {
+      if (envelope.source != "adapter") {
+        throw ProtocolError("control.synth_finished.source must be adapter");
+      }
+      if (!envelope.turn_id.has_value()) {
+        throw ProtocolError("control.synth_finished requires turn_id");
+      }
+      if (!envelope.payload.empty()) {
+        throw ProtocolError("control.synth_finished payload must be empty");
+      }
+      if (!assembler_.mark_synthesis_finished(*envelope.turn_id)) {
+        throw ProtocolError(
+            "control.synth_finished unknown, duplicate, or has pending output");
+      }
+      if (callbacks_.on_synth_finished) {
+        callbacks_.on_synth_finished(*envelope.turn_id);
+      }
+      return;
+    }
     if (envelope.type == "control.turn_finished") {
       if (envelope.source != "adapter") {
         throw ProtocolError("control.turn_finished.source must be adapter");
@@ -58,7 +77,11 @@ void RuntimeProtocolSession::ingest_text(std::string_view text_frame) {
         throw ProtocolError("control.turn_finished unknown or retired turn");
       }
       if (callbacks_.on_turn_finished) {
-        callbacks_.on_turn_finished(*envelope.turn_id);
+        callbacks_.on_turn_finished(
+            *envelope.turn_id,
+            success->get<bool>(),
+            reason == envelope.payload.end() ? std::string{}
+                                             : reason->get<std::string>());
       }
       return;
     }
@@ -72,11 +95,11 @@ void RuntimeProtocolSession::ingest_text(std::string_view text_frame) {
       if (!envelope.payload.empty()) {
         throw ProtocolError("control.interrupt payload must be empty");
       }
-      if (!assembler_.clear_turn(*envelope.turn_id)) {
-        throw ProtocolError("control.interrupt unknown or retired turn");
+      if (!assembler_.interrupt_turn(*envelope.turn_id)) {
+        throw ProtocolError("control.interrupt unknown, duplicate, or retired turn");
       }
-      if (callbacks_.on_turn_finished) {
-        callbacks_.on_turn_finished(*envelope.turn_id);
+      if (callbacks_.on_turn_interrupted) {
+        callbacks_.on_turn_interrupted(*envelope.turn_id);
       }
       return;
     }

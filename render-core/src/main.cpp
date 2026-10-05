@@ -509,8 +509,12 @@ std::optional<std::wstring> WriteTempAudio(
   return std::wstring(temp_file);
 }
 
-void StopCurrentAudio() {
+void StopCurrentAudio(
+    std::optional<std::uint64_t> expected_serial = std::nullopt) {
   std::scoped_lock lock(g_audio_file_mutex);
+  if (expected_serial && g_audio_serial.load() != *expected_serial) {
+    return;
+  }
   g_audio_serial.fetch_add(1);
   PlaySoundW(nullptr, nullptr, 0);
   if (!g_audio_file.empty()) {
@@ -545,6 +549,12 @@ struct NativeSegmentClock {
   std::uint64_t generation = 0;
 };
 
+struct NativeSegmentTerminal {
+  NativeSegmentClock clock;
+  bool success = false;
+  std::string reason;
+};
+
 std::optional<AudioPlayback> PlayAudioUrl(
     const std::string& url, std::string& failure_reason) {
   std::vector<std::uint8_t> bytes;
@@ -566,10 +576,12 @@ std::optional<AudioPlayback> PlayAudioUrl(
     return std::nullopt;
   }
   const auto rms = ReadWavRms(bytes);
-  const auto serial = g_audio_serial.fetch_add(1) + 1;
+  std::uint64_t serial = 0;
+  double started_at_seconds = 0.0;
   BOOL playback_started = FALSE;
   {
     std::scoped_lock lock(g_audio_file_mutex);
+    serial = g_audio_serial.fetch_add(1) + 1;
     PlaySoundW(nullptr, nullptr, 0);
     if (!g_audio_file.empty()) {
       DeleteFileW(g_audio_file.c_str());
@@ -581,22 +593,23 @@ std::optional<AudioPlayback> PlayAudioUrl(
     if (!playback_started) {
       DeleteFileW(g_audio_file.c_str());
       g_audio_file.clear();
+    } else {
+      started_at_seconds = NowSeconds();
+      {
+        std::scoped_lock signal_lock(g_audio_signal_mutex);
+        g_audio_rms = rms;
+      }
+      g_audio_start_seconds.store(started_at_seconds);
+      g_audio_end_seconds.store(started_at_seconds + *duration);
     }
   }
   if (!playback_started) {
     failure_reason = "audio_playback_failed";
     std::cerr << "PlaySoundW failed to start downloaded WAV: " << url << '\n';
-    StopCurrentAudio();
+    StopCurrentAudio(serial);
     return std::nullopt;
   }
   failure_reason.clear();
-  {
-    std::scoped_lock signal_lock(g_audio_signal_mutex);
-    g_audio_rms = rms;
-  }
-  const auto started_at_seconds = NowSeconds();
-  g_audio_start_seconds.store(started_at_seconds);
-  g_audio_end_seconds.store(started_at_seconds + *duration);
   return AudioPlayback{*duration, serial, started_at_seconds};
 }
 
@@ -1391,7 +1404,9 @@ public:
           std::optional<NativeSegmentClock>)> on_output_segment,
       std::function<void(std::uint64_t)> on_output_segment_reset,
       std::function<void(const std::string&)> on_turn_started,
-      std::function<void(const std::string&)> on_turn_finished)
+      std::function<void(const std::string&, bool, const std::string&)>
+          on_turn_finished,
+      std::function<void(const std::string&)> on_turn_interrupted)
       : microphone_(websocket_),
         callback_lifetime_(std::make_shared<CallbackLifetime>()),
         on_model_sync_(std::move(on_model_sync)),
@@ -1399,6 +1414,7 @@ public:
         on_output_segment_reset_(std::move(on_output_segment_reset)),
         on_turn_started_(std::move(on_turn_started)),
         on_turn_finished_(std::move(on_turn_finished)),
+        on_turn_interrupted_(std::move(on_turn_interrupted)),
         session_({
             [this](ag99::runtime::OutputSegment segment) {
               OnSegment(std::move(segment));
@@ -1419,13 +1435,24 @@ public:
               }
             },
             [this](std::string turn_id) {
+              BeginTurn(turn_id);
               if (on_turn_started_) {
                 on_turn_started_(turn_id);
               }
             },
             [this](std::string turn_id) {
+              MarkSynthesisFinished(turn_id);
+            },
+            [this](std::string turn_id, bool success, std::string reason) {
+              RetireTurn(turn_id, !success);
               if (on_turn_finished_) {
-                on_turn_finished_(turn_id);
+                on_turn_finished_(turn_id, success, reason);
+              }
+            },
+            [this](std::string turn_id) {
+              RetireTurn(turn_id, true);
+              if (on_turn_interrupted_) {
+                on_turn_interrupted_(turn_id);
               }
             },
         }) {
@@ -1508,6 +1535,10 @@ public:
     return microphone_.running();
   }
 
+  void NotifyMotionTerminal(NativeSegmentTerminal terminal) {
+    CompleteMotionSegment(std::move(terminal));
+  }
+
   void Close() {
     std::unique_lock transport_lock(transport_mutex_);
     const bool was_closing = closing_.exchange(true);
@@ -1544,6 +1575,34 @@ private:
     std::uint64_t generation = 0;
   };
 
+  struct PlaybackAcknowledgementItem {
+    std::string turn_id;
+    std::uint64_t generation = 0;
+  };
+
+  struct SegmentPlaybackState {
+    std::int64_t sequence = 0;
+    bool audio_terminal = true;
+    bool motion_terminal = true;
+    std::string text_failure_reason;
+    std::string audio_failure_reason;
+    std::string motion_failure_reason;
+  };
+
+  struct TurnPlaybackState {
+    std::uint64_t generation = 0;
+    bool synth_finished = false;
+    bool acknowledgement_queued = false;
+    bool acknowledgement_claimed = false;
+    std::unordered_map<std::string, SegmentPlaybackState> segments;
+  };
+
+  enum class PlaybackAckSendResult {
+    Sent,
+    Canceled,
+    Failed,
+  };
+
   template <typename Callback>
   static void WithCallbackOwner(
       const std::weak_ptr<CallbackLifetime>& weak_lifetime,
@@ -1559,9 +1618,304 @@ private:
   }
 
   void IngestText(std::uint64_t generation, std::string_view text) {
-    std::scoped_lock lock(session_mutex_);
-    if (generation == connection_generation_.load() && !closing_.load()) {
-      session_.ingest_text(text);
+    {
+      std::scoped_lock lock(session_mutex_);
+      if (generation == connection_generation_.load() && !closing_.load()) {
+        session_.ingest_text(text);
+      }
+    }
+    FlushReadyPlaybackAcknowledgements();
+  }
+
+  void BeginTurn(const std::string& turn_id) {
+    std::scoped_lock lock(playback_mutex_);
+    playback_turns_[turn_id] = TurnPlaybackState{
+        .generation = connection_generation_.load()};
+  }
+
+  void MarkSynthesisFinished(const std::string& turn_id) {
+    std::scoped_lock lock(playback_mutex_);
+    const auto it = playback_turns_.find(turn_id);
+    if (it == playback_turns_.end()
+        || it->second.generation != connection_generation_.load()) {
+      std::cerr << "[runtime] synth_finished for unknown turn: "
+                << turn_id << '\n';
+      return;
+    }
+    it->second.synth_finished = true;
+  }
+
+  static std::string ResolveFailureReason(
+      std::string_view reason,
+      std::string_view fallback) {
+    return reason.empty() ? std::string(fallback) : std::string(reason);
+  }
+
+  static std::string SegmentFailureReason(
+      const SegmentPlaybackState& segment) {
+    if (!segment.text_failure_reason.empty()) {
+      return segment.text_failure_reason;
+    }
+    if (!segment.audio_failure_reason.empty()) {
+      return segment.audio_failure_reason;
+    }
+    return segment.motion_failure_reason;
+  }
+
+  bool RegisterSegment(
+      const ag99::runtime::OutputSegment& output,
+      std::uint64_t generation) {
+    const auto turn_id = output.envelope.turn_id.value_or("");
+    std::scoped_lock lock(playback_mutex_);
+    const auto turn = playback_turns_.find(turn_id);
+    if (turn == playback_turns_.end()
+        || turn->second.generation != generation
+        || turn->second.synth_finished) {
+      std::cerr << "[runtime] output segment has no open playback turn: "
+                << turn_id << '\n';
+      return false;
+    }
+    SegmentPlaybackState segment;
+    segment.sequence = output.sequence;
+    segment.audio_terminal =
+        output.audio.state != ag99::runtime::AudioSlot::State::Present;
+    segment.motion_terminal =
+        output.motion.state != ag99::runtime::MotionSlot::State::Present;
+    if (output.text.state == ag99::runtime::TextSlot::State::Failed) {
+      segment.text_failure_reason = ResolveFailureReason(
+          output.text.reason,
+          "text_playback_failed:" + output.envelope.message_id);
+    }
+    if (output.audio.state == ag99::runtime::AudioSlot::State::Failed) {
+      segment.audio_failure_reason = ResolveFailureReason(
+          output.audio.reason,
+          "audio_playback_failed:" + output.envelope.message_id);
+    }
+    if (output.motion.state == ag99::runtime::MotionSlot::State::Failed) {
+      segment.motion_failure_reason = ResolveFailureReason(
+          output.motion.reason,
+          "motion_playback_failed:" + output.envelope.message_id);
+    }
+    const auto [_, inserted] = turn->second.segments.emplace(
+        output.envelope.message_id, std::move(segment));
+    if (!inserted) {
+      std::cerr << "[runtime] duplicate playback segment state: "
+                << output.envelope.message_id << '\n';
+      return false;
+    }
+    return true;
+  }
+
+  bool IsSegmentPlaybackOpen(const AudioQueueItem& item) {
+    std::scoped_lock lock(playback_mutex_);
+    const auto turn = playback_turns_.find(item.turn_id);
+    return turn != playback_turns_.end()
+        && turn->second.generation == item.generation
+        && turn->second.segments.contains(item.message_id);
+  }
+
+  void CompleteAudioSegment(
+      const AudioQueueItem& item,
+      bool success,
+      std::string_view reason = {}) {
+    {
+      std::scoped_lock lock(playback_mutex_);
+      const auto turn = playback_turns_.find(item.turn_id);
+      if (turn == playback_turns_.end()
+          || turn->second.generation != item.generation) {
+        return;
+      }
+      const auto segment = turn->second.segments.find(item.message_id);
+      if (segment == turn->second.segments.end()
+          || segment->second.audio_terminal) {
+        return;
+      }
+      segment->second.audio_terminal = true;
+      if (!success) {
+        segment->second.audio_failure_reason = ResolveFailureReason(
+            reason,
+            "audio_playback_failed:" + item.message_id);
+        if (!segment->second.motion_terminal) {
+          segment->second.motion_terminal = true;
+          segment->second.motion_failure_reason =
+              "motion_not_started_after_audio_failure";
+        }
+      }
+    }
+    QueuePlaybackAcknowledgement(item.turn_id);
+  }
+
+  void CompleteMotionSegment(NativeSegmentTerminal terminal) {
+    {
+      std::scoped_lock lock(playback_mutex_);
+      const auto turn = playback_turns_.find(terminal.clock.turn_id);
+      if (turn == playback_turns_.end()
+          || turn->second.generation != terminal.clock.generation) {
+        return;
+      }
+      const auto segment = turn->second.segments.find(
+          terminal.clock.message_id);
+      if (segment == turn->second.segments.end()
+          || segment->second.motion_terminal) {
+        return;
+      }
+      segment->second.motion_terminal = true;
+      if (!terminal.success) {
+        segment->second.motion_failure_reason = ResolveFailureReason(
+            terminal.reason,
+            "motion_playback_failed:" + terminal.clock.message_id);
+      }
+    }
+    QueuePlaybackAcknowledgement(terminal.clock.turn_id);
+  }
+
+  void RetireTurn(const std::string& turn_id, bool cancel_playback) {
+    {
+      std::scoped_lock lock(playback_mutex_);
+      playback_turns_.erase(turn_id);
+    }
+    if (cancel_playback) {
+      std::optional<std::uint64_t> audio_serial_to_stop;
+      {
+        std::scoped_lock lock(audio_queue_mutex_);
+        for (auto it = audio_queue_.begin(); it != audio_queue_.end();) {
+          if (it->turn_id == turn_id) {
+            it = audio_queue_.erase(it);
+          } else {
+            ++it;
+          }
+        }
+        playback_ack_queue_.erase(
+            std::remove_if(
+                playback_ack_queue_.begin(),
+                playback_ack_queue_.end(),
+                [&turn_id](const PlaybackAcknowledgementItem& item) {
+                  return item.turn_id == turn_id;
+                }),
+            playback_ack_queue_.end());
+        if (current_audio_turn_id_ == turn_id) {
+          audio_serial_to_stop = current_audio_serial_;
+          current_audio_turn_id_.clear();
+          current_audio_message_id_.clear();
+          current_audio_generation_ = 0;
+          current_audio_serial_ = 0;
+        }
+      }
+      if (audio_serial_to_stop) {
+        StopCurrentAudio(*audio_serial_to_stop);
+      }
+      audio_queue_condition_.notify_one();
+    }
+  }
+
+  void ClearCurrentAudio(
+      const AudioQueueItem& item,
+      std::uint64_t audio_serial) {
+    std::scoped_lock lock(audio_queue_mutex_);
+    if (current_audio_turn_id_ == item.turn_id
+        && current_audio_message_id_ == item.message_id
+        && current_audio_generation_ == item.generation
+        && current_audio_serial_ == audio_serial) {
+      current_audio_turn_id_.clear();
+      current_audio_message_id_.clear();
+      current_audio_generation_ = 0;
+      current_audio_serial_ = 0;
+    }
+  }
+
+  void QueuePlaybackAcknowledgement(const std::string& turn_id) {
+    std::uint64_t generation = 0;
+    {
+      std::scoped_lock lock(playback_mutex_);
+      const auto turn = playback_turns_.find(turn_id);
+      if (turn == playback_turns_.end()
+          || !turn->second.synth_finished
+          || turn->second.acknowledgement_queued
+          || turn->second.acknowledgement_claimed) {
+        return;
+      }
+      turn->second.acknowledgement_queued = true;
+      generation = turn->second.generation;
+    }
+    {
+      std::scoped_lock lock(audio_queue_mutex_);
+      playback_ack_queue_.push_back(
+          PlaybackAcknowledgementItem{turn_id, generation});
+    }
+    audio_queue_condition_.notify_one();
+  }
+
+  void FlushReadyPlaybackAcknowledgements() {
+    std::vector<std::string> candidates;
+    {
+      std::scoped_lock lock(playback_mutex_);
+      for (const auto& [turn_id, turn] : playback_turns_) {
+        if (turn.synth_finished
+            && turn.generation == connection_generation_.load()) {
+          candidates.push_back(turn_id);
+        }
+      }
+    }
+    for (const auto& turn_id : candidates) {
+      QueuePlaybackAcknowledgement(turn_id);
+    }
+  }
+
+  void TrySendPlaybackAcknowledgement(
+      const std::string& turn_id,
+      std::uint64_t queued_generation) {
+    bool success = true;
+    std::string failure_reason;
+    std::uint64_t generation = 0;
+    {
+      std::scoped_lock lock(playback_mutex_);
+      const auto turn = playback_turns_.find(turn_id);
+      if (turn != playback_turns_.end()
+          && turn->second.generation == queued_generation) {
+        turn->second.acknowledgement_queued = false;
+      }
+      if (turn == playback_turns_.end()
+          || turn->second.generation != queued_generation
+          || !turn->second.synth_finished
+          || turn->second.acknowledgement_claimed
+          || turn->second.segments.empty()) {
+        return;
+      }
+      std::vector<const SegmentPlaybackState*> ordered_segments;
+      ordered_segments.reserve(turn->second.segments.size());
+      for (const auto& [_, segment] : turn->second.segments) {
+        if (!segment.audio_terminal || !segment.motion_terminal) {
+          return;
+        }
+        ordered_segments.push_back(&segment);
+      }
+      std::sort(
+          ordered_segments.begin(), ordered_segments.end(),
+          [](const auto* left, const auto* right) {
+            return left->sequence < right->sequence;
+          });
+      for (const auto* segment : ordered_segments) {
+        const auto segment_failure_reason = SegmentFailureReason(*segment);
+        if (!segment_failure_reason.empty()) {
+          success = false;
+          failure_reason = segment_failure_reason;
+          break;
+        }
+      }
+      generation = turn->second.generation;
+      turn->second.acknowledgement_claimed = true;
+    }
+
+    const auto send_result = SendPlaybackFinished(
+        turn_id,
+        generation,
+        success,
+        failure_reason.empty()
+            ? std::nullopt
+            : std::optional<std::string_view>(failure_reason));
+    if (send_result == PlaybackAckSendResult::Failed) {
+      std::cerr << "[runtime] failed to send playback completion for turn: "
+                << turn_id << '\n';
     }
   }
 
@@ -1583,11 +1937,20 @@ private:
 
   void ResetDisconnectedState() {
     if (on_turn_finished_) {
-      on_turn_finished_("");
+      on_turn_finished_("", true, "");
+    }
+    {
+      std::scoped_lock lock(playback_mutex_);
+      playback_turns_.clear();
     }
     {
       std::scoped_lock lock(audio_queue_mutex_);
       audio_queue_.clear();
+      playback_ack_queue_.clear();
+      current_audio_turn_id_.clear();
+      current_audio_message_id_.clear();
+      current_audio_generation_ = 0;
+      current_audio_serial_ = 0;
     }
     StopCurrentAudio();
     if (on_output_segment_reset_) {
@@ -1629,13 +1992,24 @@ private:
       std::cout << "[assistant] " << segment.text.content << '\n';
     }
     auto turn_id = segment.envelope.turn_id.value_or("");
+    const auto generation = connection_generation_.load();
+    NativeSegmentClock clock;
+    clock.turn_id = turn_id;
+    clock.message_id = segment.envelope.message_id;
+    clock.sequence = segment.sequence;
+    clock.started_at_seconds = NowSeconds();
+    clock.generation = generation;
+    if (!RegisterSegment(segment, generation)) {
+      return;
+    }
+
     if (segment.audio.state == ag99::runtime::AudioSlot::State::Present) {
       AudioQueueItem item;
       item.segment = std::move(segment);
       item.turn_id = turn_id;
       item.message_id = item.segment.envelope.message_id;
       item.sequence = item.segment.sequence;
-      item.generation = connection_generation_.load();
+      item.generation = generation;
       {
         std::scoped_lock lock(audio_queue_mutex_);
         if (closing_.load()) {
@@ -1648,30 +2022,37 @@ private:
     }
 
     if (segment.motion.state == ag99::runtime::MotionSlot::State::Present
-        && on_output_segment_) {
-      NativeSegmentClock clock;
-      clock.turn_id = turn_id;
-      clock.message_id = segment.envelope.message_id;
-      clock.sequence = segment.sequence;
-      clock.started_at_seconds = NowSeconds();
-      clock.generation = connection_generation_.load();
-      on_output_segment_(std::move(segment), std::move(clock));
-    }
-    if (!turn_id.empty() && websocket_.connected()) {
-      const auto finished =
-          ag99::runtime::build_control_playback_finished(turn_id);
-      websocket_.send_text(finished.dump());
+        && segment.audio.state == ag99::runtime::AudioSlot::State::Absent) {
+      if (on_output_segment_) {
+        on_output_segment_(std::move(segment), clock);
+      } else {
+        CompleteMotionSegment(NativeSegmentTerminal{
+            std::move(clock), false, "motion_sink_unavailable"});
+      }
+    } else if (segment.motion.state
+                   == ag99::runtime::MotionSlot::State::Present
+               && segment.audio.state
+                   == ag99::runtime::AudioSlot::State::Failed) {
+      CompleteMotionSegment(NativeSegmentTerminal{
+          std::move(clock),
+          false,
+          segment.audio.reason.empty()
+              ? "audio_payload_failed"
+              : segment.audio.reason});
     }
   }
 
   void AudioWorkerLoop() {
     while (true) {
       AudioQueueItem item;
+      std::string acknowledgement_turn_id;
+      std::uint64_t acknowledgement_generation = 0;
+      bool send_acknowledgement = false;
       {
         std::unique_lock lock(audio_queue_mutex_);
         audio_queue_condition_.wait(lock, [this] {
           return closing_.load() || pending_closed_generation_.load() != 0
-              || !audio_queue_.empty();
+              || !playback_ack_queue_.empty() || !audio_queue_.empty();
         });
         if (closing_.load()) {
           return;
@@ -1681,42 +2062,80 @@ private:
           ProcessPendingTransportClosed();
           continue;
         }
-        item = std::move(audio_queue_.front());
-        audio_queue_.pop_front();
+        if (!playback_ack_queue_.empty()) {
+          auto acknowledgement = std::move(playback_ack_queue_.front());
+          playback_ack_queue_.pop_front();
+          acknowledgement_turn_id = std::move(acknowledgement.turn_id);
+          acknowledgement_generation = acknowledgement.generation;
+          send_acknowledgement = true;
+        } else {
+          item = std::move(audio_queue_.front());
+          audio_queue_.pop_front();
+        }
+      }
+      if (send_acknowledgement) {
+        TrySendPlaybackAcknowledgement(
+            acknowledgement_turn_id, acknowledgement_generation);
+        continue;
       }
 
       if (item.generation != connection_generation_.load()) {
+        continue;
+      }
+      if (!IsSegmentPlaybackOpen(item)) {
         continue;
       }
 
       std::string playback_failure_reason;
       const auto playback = PlayAudioUrl(
           item.segment.audio.url, playback_failure_reason);
+      if (playback) {
+        std::scoped_lock lock(audio_queue_mutex_);
+        current_audio_turn_id_ = item.turn_id;
+        current_audio_message_id_ = item.message_id;
+        current_audio_generation_ = item.generation;
+        current_audio_serial_ = playback->serial;
+      }
       if (item.generation != connection_generation_.load()
           || pending_closed_generation_.load() == item.generation) {
-        StopCurrentAudio();
+        if (playback) {
+          StopCurrentAudio(playback->serial);
+          ClearCurrentAudio(item, playback->serial);
+        }
         ProcessPendingTransportClosed();
         continue;
       }
       if (!playback) {
-        SendPlaybackFinished(
-            item.turn_id,
-            item.generation,
-            false,
-            playback_failure_reason);
+        CompleteAudioSegment(item, false, playback_failure_reason);
+        continue;
+      }
+      if (!IsSegmentPlaybackOpen(item)) {
+        StopCurrentAudio(playback->serial);
+        ClearCurrentAudio(item, playback->serial);
         continue;
       }
 
+      bool motion_dispatch_failed = false;
       {
         std::scoped_lock transport_lock(transport_mutex_);
         if (closing_.load()
             || item.generation != connection_generation_.load()) {
-          StopCurrentAudio();
+          StopCurrentAudio(playback->serial);
+          ClearCurrentAudio(item, playback->serial);
+          continue;
+        }
+        // Keep the final dispatch ordered before or after turn retirement.
+        std::scoped_lock playback_lock(playback_mutex_);
+        const auto turn = playback_turns_.find(item.turn_id);
+        if (turn == playback_turns_.end()
+            || turn->second.generation != item.generation
+            || !turn->second.segments.contains(item.message_id)) {
+          StopCurrentAudio(playback->serial);
+          ClearCurrentAudio(item, playback->serial);
           continue;
         }
         if (item.segment.motion.state
-                == ag99::runtime::MotionSlot::State::Present
-            && on_output_segment_) {
+                == ag99::runtime::MotionSlot::State::Present) {
           NativeSegmentClock clock;
           clock.turn_id = item.turn_id;
           clock.message_id = item.message_id;
@@ -1725,8 +2144,25 @@ private:
           clock.duration_seconds = playback->duration_seconds;
           clock.audio_serial = playback->serial;
           clock.generation = item.generation;
-          on_output_segment_(std::move(item.segment), std::move(clock));
+          if (on_output_segment_) {
+            on_output_segment_(std::move(item.segment), std::move(clock));
+          } else {
+            motion_dispatch_failed = true;
+          }
         }
+      }
+      if (motion_dispatch_failed) {
+        CompleteMotionSegment(NativeSegmentTerminal{
+            NativeSegmentClock{
+                .turn_id = item.turn_id,
+                .message_id = item.message_id,
+                .sequence = item.sequence,
+                .started_at_seconds = playback->started_at_seconds,
+                .duration_seconds = playback->duration_seconds,
+                .audio_serial = playback->serial,
+                .generation = item.generation},
+            false,
+            "motion_sink_unavailable"});
       }
       const auto deadline = playback->started_at_seconds
           + playback->duration_seconds;
@@ -1742,13 +2178,15 @@ private:
       }
       if (closing_.load()
           || g_audio_serial.load() != playback->serial) {
+        ClearCurrentAudio(item, playback->serial);
         continue;
       }
-      SendPlaybackFinished(item.turn_id, item.generation);
+      ClearCurrentAudio(item, playback->serial);
+      CompleteAudioSegment(item, true);
     }
   }
 
-  void SendPlaybackFinished(
+  PlaybackAckSendResult SendPlaybackFinished(
       const std::string& turn_id,
       std::uint64_t generation,
       bool success = true,
@@ -1756,13 +2194,23 @@ private:
     std::scoped_lock transport_lock(transport_mutex_);
     if (closing_.load() || turn_id.empty()
         || generation != connection_generation_.load()) {
-      return;
+      return PlaybackAckSendResult::Canceled;
+    }
+    // Serialize the final active-turn check with interruption and failure.
+    std::scoped_lock playback_lock(playback_mutex_);
+    const auto turn = playback_turns_.find(turn_id);
+    if (turn == playback_turns_.end()
+        || turn->second.generation != generation
+        || !turn->second.acknowledgement_claimed) {
+      return PlaybackAckSendResult::Canceled;
     }
     const auto finished = ag99::runtime::build_control_playback_finished(
         turn_id,
         success,
         reason);
-    websocket_.send_text(finished.dump());
+    return websocket_.send_text(finished.dump())
+        ? PlaybackAckSendResult::Sent
+        : PlaybackAckSendResult::Failed;
   }
 
   ag99::runtime::WinHttpWebSocketClient websocket_;
@@ -1775,14 +2223,23 @@ private:
       std::optional<NativeSegmentClock>)> on_output_segment_;
   std::function<void(std::uint64_t)> on_output_segment_reset_;
   std::function<void(const std::string&)> on_turn_started_;
-  std::function<void(const std::string&)> on_turn_finished_;
+  std::function<void(const std::string&, bool, const std::string&)>
+      on_turn_finished_;
+  std::function<void(const std::string&)> on_turn_interrupted_;
   ag99::runtime::RuntimeProtocolSession session_;
   std::mutex session_mutex_;
   std::mutex transport_mutex_;
+  std::mutex playback_mutex_;
+  std::unordered_map<std::string, TurnPlaybackState> playback_turns_;
   std::mutex audio_queue_mutex_;
   std::mutex audio_join_mutex_;
   std::condition_variable audio_queue_condition_;
   std::deque<AudioQueueItem> audio_queue_;
+  std::deque<PlaybackAcknowledgementItem> playback_ack_queue_;
+  std::string current_audio_turn_id_;
+  std::string current_audio_message_id_;
+  std::uint64_t current_audio_generation_ = 0;
+  std::uint64_t current_audio_serial_ = 0;
   std::atomic<bool> closing_{false};
   std::thread audio_worker_;
   std::atomic<std::uint64_t> next_turn_id_{1};
@@ -2067,6 +2524,14 @@ public:
       ag99::runtime::OutputSegment segment,
       std::optional<NativeSegmentClock> clock = std::nullopt) {
     std::scoped_lock lock(_motion_mutex);
+    if (!clock) {
+      clock = NativeSegmentClock{
+          .turn_id = segment.envelope.turn_id.value_or(""),
+          .message_id = segment.envelope.message_id,
+          .sequence = segment.sequence,
+          .started_at_seconds = NowSeconds(),
+          .generation = _connection_generation};
+    }
     if (clock && clock->generation != 0
         && clock->generation != _connection_generation) {
       return;
@@ -2074,23 +2539,55 @@ public:
     if (segment.motion.state != ag99::runtime::MotionSlot::State::Present) {
       return;
     }
+    if (!_model || !_model->GetModel()) {
+      QueueMotionTerminalLocked(
+          *clock, false, "native_model_unavailable");
+      return;
+    }
+    InterruptMotionPlansLocked("motion_plan_replaced");
     const auto& payload = segment.motion.payload;
     const auto schema = ReadString(payload, "schema_version");
     if (schema == std::string(ag99::runtime::kParameterPlanSchema)) {
       _pending_parameter_plan = std::move(segment);
       _pending_parameter_clock = std::move(clock);
-      _pending_motion_segment.reset();
-      _pending_motion_clock.reset();
-      _active_motion.reset();
       std::cerr << "[motion] parameter plan queued\n";
       return;
     }
     _pending_motion_segment = std::move(segment);
     _pending_motion_clock = std::move(clock);
-    _pending_parameter_plan.reset();
-    _pending_parameter_clock.reset();
-    _active_parameter_plan.reset();
     std::cerr << "[motion] intent queued\n";
+  }
+
+  std::vector<NativeSegmentTerminal> TakeMotionTerminals() {
+    std::scoped_lock lock(_motion_mutex);
+    std::vector<NativeSegmentTerminal> terminals;
+    terminals.reserve(_segment_terminals.size());
+    for (auto& terminal : _segment_terminals) {
+      terminals.push_back(std::move(terminal));
+    }
+    _segment_terminals.clear();
+    return terminals;
+  }
+
+  void CancelTurn(const std::string& turn_id) {
+    std::scoped_lock lock(_motion_mutex);
+    if (_pending_motion_clock
+        && _pending_motion_clock->turn_id == turn_id) {
+      _pending_motion_segment.reset();
+      _pending_motion_clock.reset();
+    }
+    if (_active_motion && _active_motion->clock.turn_id == turn_id) {
+      _active_motion.reset();
+    }
+    if (_pending_parameter_clock
+        && _pending_parameter_clock->turn_id == turn_id) {
+      _pending_parameter_plan.reset();
+      _pending_parameter_clock.reset();
+    }
+    if (_active_parameter_plan
+        && _active_parameter_plan->clock.turn_id == turn_id) {
+      _active_parameter_plan.reset();
+    }
   }
 
   void ResetRuntimeSegments(std::uint64_t generation) {
@@ -2102,6 +2599,7 @@ public:
     _pending_parameter_plan.reset();
     _pending_parameter_clock.reset();
     _active_parameter_plan.reset();
+    _segment_terminals.clear();
   }
 
   void StartThinkingSway(const std::string& turn_id) {
@@ -2179,6 +2677,39 @@ public:
   }
 
 private:
+  void QueueMotionTerminalLocked(
+      const NativeSegmentClock& clock,
+      bool success,
+      std::string reason = {}) {
+    if (clock.turn_id.empty() || clock.message_id.empty()) {
+      return;
+    }
+    _segment_terminals.push_back(NativeSegmentTerminal{
+        clock, success, std::move(reason)});
+  }
+
+  void InterruptMotionPlansLocked(const std::string& reason) {
+    if (_pending_motion_clock) {
+      QueueMotionTerminalLocked(*_pending_motion_clock, false, reason);
+    }
+    if (_active_motion) {
+      QueueMotionTerminalLocked(_active_motion->clock, false, reason);
+    }
+    if (_pending_parameter_clock) {
+      QueueMotionTerminalLocked(*_pending_parameter_clock, false, reason);
+    }
+    if (_active_parameter_plan) {
+      QueueMotionTerminalLocked(
+          _active_parameter_plan->clock, false, reason);
+    }
+    _pending_motion_segment.reset();
+    _pending_motion_clock.reset();
+    _active_motion.reset();
+    _pending_parameter_plan.reset();
+    _pending_parameter_clock.reset();
+    _active_parameter_plan.reset();
+  }
+
   struct MotionTrack {
     struct Keyframe {
       int at_ms = 0;
@@ -2197,6 +2728,7 @@ private:
     int blend_in_ms = 120;
     int blend_out_ms = 180;
     std::vector<MotionTrack> tracks;
+    NativeSegmentClock clock;
   };
 
   struct ParameterPlanTrackPoint {
@@ -2270,6 +2802,7 @@ private:
     int blend_out_ms = 0;
     std::string curve_preset = "smooth_hold";
     std::string expression_id;
+    NativeSegmentClock clock;
     double release_started_at_ms = -1.0;
     std::vector<ParameterPlanBinding> bindings;
   };
@@ -2416,7 +2949,7 @@ private:
 
   std::optional<ParameterPlan> ParseParameterPlan(
       const ag99::runtime::OutputSegment& segment,
-      double started_at_seconds) const {
+      const NativeSegmentClock& clock) const {
     if (segment.motion.state != ag99::runtime::MotionSlot::State::Present) {
       std::cerr << "[motion] output segment has no parameter plan\n";
       return std::nullopt;
@@ -2485,12 +3018,13 @@ private:
       return std::nullopt;
     }
     ParameterPlan plan{
-        .started_at = started_at_seconds,
+        .started_at = clock.started_at_seconds,
         .duration_ms = duration_ms,
         .blend_in_ms = blend_in_ms,
         .hold_ms = hold_ms,
         .blend_out_ms = blend_out_ms,
         .curve_preset = ReadString(*timing, "curve_preset"),
+        .clock = clock,
     };
     if (plan.curve_preset.empty()) {
       plan.curve_preset = "smooth_hold";
@@ -3036,11 +3570,15 @@ private:
       _pending_physics_response_protected_parameter_ids.reset();
     }
     if (_pending_parameter_plan) {
+      const auto clock = _pending_parameter_clock.value_or(
+          NativeSegmentClock{
+              .turn_id = _pending_parameter_plan->envelope.turn_id.value_or(""),
+              .message_id = _pending_parameter_plan->envelope.message_id,
+              .sequence = _pending_parameter_plan->sequence,
+              .started_at_seconds = NowSeconds(),
+              .generation = _connection_generation});
       const auto parsed = ParseParameterPlan(
-          *_pending_parameter_plan,
-          _pending_parameter_clock
-              ? _pending_parameter_clock->started_at_seconds
-              : NowSeconds());
+          *_pending_parameter_plan, clock);
       const auto turn_id =
           _pending_parameter_plan->envelope.turn_id.value_or("");
       _pending_parameter_plan.reset();
@@ -3050,7 +3588,10 @@ private:
             && !_model->StartExpressionById(parsed->expression_id)) {
           std::cerr << "[motion] expression resource not found: "
                     << parsed->expression_id << '\n';
-          _active_parameter_plan.reset();
+          QueueMotionTerminalLocked(
+              parsed->clock,
+              false,
+              "expression_resource_not_found:" + parsed->expression_id);
         } else {
           _active_parameter_plan = *parsed;
           ReleaseThinkingSwayLocked(turn_id);
@@ -3061,8 +3602,17 @@ private:
         }
       } else {
         std::cerr << "[motion] parameter plan rejected\n";
+        QueueMotionTerminalLocked(
+            clock, false, "parameter_plan_rejected");
       }
     }
+    const auto fail_active_parameter_plan = [this](std::string reason) {
+      if (_active_parameter_plan) {
+        QueueMotionTerminalLocked(
+            _active_parameter_plan->clock, false, std::move(reason));
+        _active_parameter_plan.reset();
+      }
+    };
     auto* cubism_model = _model->GetModel();
     std::vector<ParameterFrameContribution> contributions;
     CollectInteractionContributions(delta_seconds, contributions);
@@ -3129,6 +3679,7 @@ private:
     if (!std::isfinite(lip_sync_intensity)
         || lip_sync_intensity < 0.0f || lip_sync_intensity > 1.0f) {
       std::cerr << "[parameter_mixer] lip sync intensity invalid\n";
+      fail_active_parameter_plan("lip_sync_intensity_invalid");
       return false;
     }
     if (lip_sync_active) {
@@ -3136,6 +3687,7 @@ private:
         if (parameter_index < 0
             || parameter_index >= cubism_model->GetParameterCount()) {
           std::cerr << "[parameter_mixer] lip sync parameter is not writable\n";
+          fail_active_parameter_plan("lip_sync_parameter_not_writable");
           return false;
         }
         const auto minimum = cubism_model->GetParameterMinimumValue(
@@ -3149,6 +3701,7 @@ private:
             || default_value >= maximum) {
           std::cerr << "[parameter_mixer] lip sync parameter range invalid: "
                     << ParameterIdRaw(cubism_model, parameter_index) << '\n';
+          fail_active_parameter_plan("lip_sync_parameter_range_invalid");
           return false;
         }
         contributions.push_back(ParameterFrameContribution{
@@ -3168,9 +3721,12 @@ private:
     bool direct_presentation_settled = true;
     if (!ResolveAndWriteParameterFrame(
             contributions, direct_presentation_settled)) {
+      fail_active_parameter_plan("parameter_frame_rejected");
       return false;
     }
     if (clear_active_plan && direct_presentation_settled) {
+      QueueMotionTerminalLocked(
+          _active_parameter_plan->clock, true);
       _active_parameter_plan.reset();
     }
     return true;
@@ -3709,7 +4265,7 @@ private:
 
   std::optional<MotionPlan> CompileMotionPlan(
       const ag99::runtime::OutputSegment& segment,
-      double started_at_seconds) const {
+      const NativeSegmentClock& clock) const {
     if (segment.motion.state != ag99::runtime::MotionSlot::State::Present) {
       std::cerr << "[motion] output segment has no motion payload\n";
       return std::nullopt;
@@ -4112,7 +4668,8 @@ private:
     if (plan.tracks.empty()) {
       return std::nullopt;
     }
-    plan.started_at = started_at_seconds;
+    plan.started_at = clock.started_at_seconds;
+    plan.clock = clock;
     return plan;
   }
 
@@ -4122,13 +4679,16 @@ private:
       return;
     }
     if (_pending_motion_segment) {
+      const auto clock = _pending_motion_clock.value_or(
+          NativeSegmentClock{
+              .turn_id = _pending_motion_segment->envelope.turn_id.value_or(""),
+              .message_id = _pending_motion_segment->envelope.message_id,
+              .sequence = _pending_motion_segment->sequence,
+              .started_at_seconds = NowSeconds(),
+              .generation = _connection_generation});
       std::optional<MotionPlan> plan;
       try {
-        plan = CompileMotionPlan(
-            *_pending_motion_segment,
-            _pending_motion_clock
-                ? _pending_motion_clock->started_at_seconds
-                : NowSeconds());
+        plan = CompileMotionPlan(*_pending_motion_segment, clock);
       } catch (const std::exception& error) {
         std::cerr << "[motion] compile threw " << typeid(error).name()
                   << ": " << error.what() << '\n';
@@ -4145,6 +4705,8 @@ private:
         std::cerr << "[motion] compiled " << _active_motion->tracks.size()
                   << " parameter tracks for "
                   << _active_motion->duration_ms << " ms\n";
+      } else {
+        QueueMotionTerminalLocked(clock, false, "motion_plan_rejected");
       }
     }
     if (!_active_motion) {
@@ -4227,6 +4789,7 @@ private:
           static_cast<csmFloat32>(Clamp(value, minimum, maximum)));
     }
     if (elapsed_ms >= _active_motion->duration_ms) {
+      QueueMotionTerminalLocked(_active_motion->clock, true);
       _active_motion.reset();
     }
   }
@@ -4244,6 +4807,7 @@ private:
   std::optional<ParameterPlan> _active_parameter_plan;
   std::optional<ag99::runtime::OutputSegment> _pending_parameter_plan;
   std::optional<NativeSegmentClock> _pending_parameter_clock;
+  std::deque<NativeSegmentTerminal> _segment_terminals;
   std::uint64_t _connection_generation = 0;
   std::optional<std::unordered_set<std::string>>
       _pending_physics_response_protected_parameter_ids;
@@ -4780,7 +5344,19 @@ int Run(
         [&model](const std::string& turn_id) {
           model.StartThinkingSway(turn_id);
         },
+        [&model](
+            const std::string& turn_id,
+            bool success,
+            const std::string& reason) {
+          if (!turn_id.empty() && !success) {
+            std::cerr << "[runtime] backend turn failed: "
+                      << (reason.empty() ? "unspecified" : reason) << '\n';
+            model.CancelTurn(turn_id);
+          }
+          model.ReleaseThinkingSway(turn_id);
+        },
         [&model](const std::string& turn_id) {
+          model.CancelTurn(turn_id);
           model.ReleaseThinkingSway(turn_id);
         });
     g_send_text = [&runtime](std::string text) {
@@ -4846,6 +5422,9 @@ int Run(
             continue;
           }
           model.UpdateAndDraw();
+          for (auto& terminal : model.TakeMotionTerminals()) {
+            runtime.NotifyMotionTerminal(std::move(terminal));
+          }
           const HRESULT present_result = surface.Present(1, 0);
           if (FAILED(present_result)) {
             std::cerr << "D3D11 Present failed: 0x" << std::hex

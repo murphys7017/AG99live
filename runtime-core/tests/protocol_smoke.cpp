@@ -228,7 +228,11 @@ void test_runtime_session_dispatch() {
   std::vector<std::string> ready_messages;
   std::vector<std::string> synced_models;
   std::vector<std::string> started_turns;
+  std::vector<std::string> synthesized_turns;
   std::vector<std::string> finished_turns;
+  std::vector<bool> finished_successes;
+  std::vector<std::string> finished_reasons;
+  std::vector<std::string> interrupted_turns;
   std::vector<std::string> errors;
   ag99::runtime::RuntimeProtocolSession session({
       [&](ag99::runtime::OutputSegment segment) {
@@ -242,7 +246,13 @@ void test_runtime_session_dispatch() {
             sync.payload.at("model_info").at("selected_model").get<std::string>());
       },
       [&](std::string turn_id) { started_turns.push_back(std::move(turn_id)); },
-      [&](std::string turn_id) { finished_turns.push_back(std::move(turn_id)); },
+      [&](std::string turn_id) { synthesized_turns.push_back(std::move(turn_id)); },
+      [&](std::string turn_id, bool success, std::string reason) {
+        finished_turns.push_back(std::move(turn_id));
+        finished_successes.push_back(success);
+        finished_reasons.push_back(std::move(reason));
+      },
+      [&](std::string turn_id) { interrupted_turns.push_back(std::move(turn_id)); },
   });
 
   session.ingest_text(make_model_sync().dump());
@@ -272,6 +282,19 @@ void test_runtime_session_dispatch() {
   session.ingest_text(make_segment("m-1", 0).dump());
   assert((ready_messages == std::vector<std::string>{"m-1", "m-2"}));
   session.ingest_text(ag99::runtime::Json{
+      {"type", "control.synth_finished"},
+      {"version", "v2"},
+      {"message_id", "synth-finish-1"},
+      {"timestamp", "2026-10-01T00:00:00.000Z"},
+      {"turn_id", "turn-1"},
+      {"source", "adapter"},
+      {"payload", ag99::runtime::Json::object()},
+  }.dump());
+  assert((synthesized_turns == std::vector<std::string>{"turn-1"}));
+  session.ingest_text(make_segment("m-after-synth", 2).dump());
+  assert(ready_messages.size() == 2);
+  assert(errors.size() == 2);
+  session.ingest_text(ag99::runtime::Json{
       {"type", "control.turn_finished"},
       {"version", "v2"},
       {"message_id", "turn-finish-1"},
@@ -281,9 +304,11 @@ void test_runtime_session_dispatch() {
       {"payload", {{"success", true}}},
   }.dump());
   assert((finished_turns == std::vector<std::string>{"turn-1"}));
+  assert((finished_successes == std::vector<bool>{true}));
+  assert((finished_reasons == std::vector<std::string>{""}));
   session.ingest_text(make_segment("m-late", 2).dump());
   assert(ready_messages.size() == 2);
-  assert(errors.size() == 2);
+  assert(errors.size() == 3);
   session.ingest_text(ag99::runtime::Json{
       {"type", "control.interrupt"},
       {"version", "v2"},
@@ -294,7 +319,7 @@ void test_runtime_session_dispatch() {
       {"payload", ag99::runtime::Json::object()},
   }.dump());
   assert((finished_turns == std::vector<std::string>{"turn-1"}));
-  assert(errors.size() == 3);
+  assert(errors.size() == 4);
 
   session.ingest_text(ag99::runtime::Json{
       {"type", "control.turn_started"},
@@ -317,10 +342,50 @@ void test_runtime_session_dispatch() {
       {"source", "adapter"},
       {"payload", ag99::runtime::Json::object()},
   }.dump());
-  assert((finished_turns == std::vector<std::string>{"turn-1", "turn-2"}));
+  assert((finished_turns == std::vector<std::string>{"turn-1"}));
+  assert((interrupted_turns == std::vector<std::string>{"turn-2"}));
   session.ingest_text(make_segment("m-interrupted", 1, "adapter", "turn-2").dump());
   assert(ready_messages.size() == 3);
-  assert(errors.size() == 4);
+  assert(errors.size() == 5);
+  assert(errors.back() == "segment rejected: segment_turn_interrupted");
+  session.ingest_text(ag99::runtime::Json{
+      {"type", "control.turn_finished"},
+      {"version", "v2"},
+      {"message_id", "turn-finish-interrupted"},
+      {"timestamp", "2026-10-01T00:00:02.000Z"},
+      {"turn_id", "turn-2"},
+      {"source", "adapter"},
+      {"payload", {{"success", false}, {"reason", "superseded_by_new_user_input"}}},
+  }.dump());
+  assert(errors.size() == 5);
+  assert((finished_turns == std::vector<std::string>{"turn-1", "turn-2"}));
+  assert((finished_successes == std::vector<bool>{true, false}));
+  assert((finished_reasons
+      == std::vector<std::string>{"", "superseded_by_new_user_input"}));
+
+  session.ingest_text(ag99::runtime::Json{
+      {"type", "control.turn_started"},
+      {"version", "v2"},
+      {"message_id", "turn-start-failed"},
+      {"timestamp", "2026-10-01T00:00:03.000Z"},
+      {"turn_id", "turn-failed"},
+      {"source", "adapter"},
+      {"payload", ag99::runtime::Json::object()},
+  }.dump());
+  session.ingest_text(ag99::runtime::Json{
+      {"type", "control.turn_finished"},
+      {"version", "v2"},
+      {"message_id", "turn-finish-failed"},
+      {"timestamp", "2026-10-01T00:00:03.000Z"},
+      {"turn_id", "turn-failed"},
+      {"source", "adapter"},
+      {"payload", {{"success", false}, {"reason", "output_failed"}}},
+  }.dump());
+  assert((finished_turns
+      == std::vector<std::string>{"turn-1", "turn-2", "turn-failed"}));
+  assert((finished_successes == std::vector<bool>{true, false, false}));
+  assert((finished_reasons == std::vector<std::string>{
+      "", "superseded_by_new_user_input", "output_failed"}));
 
   session.ingest_text(ag99::runtime::Json{
       {"type", "control.turn_started"},
@@ -331,10 +396,10 @@ void test_runtime_session_dispatch() {
       {"source", "adapter"},
       {"payload", ag99::runtime::Json::object()},
   }.dump());
-  assert(errors.size() == 5);
+  assert(errors.size() == 6);
 
   session.ingest_text("{\"type\":\"output.segment\",\"version\":\"v1\"}");
-  assert(errors.size() == 6);
+  assert(errors.size() == 7);
 }
 
 void test_audio_control_builders() {

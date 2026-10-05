@@ -1,3 +1,33 @@
+native_runtime_turn_playback_ack:
+  recorded_at: "2026-10-04"
+  reviewed_at: "2026-10-05"
+  class: feature
+  risk: high
+  status: source_complete_pending_live_acceptance
+  scope:
+    - "Translate the Adapter turn protocol into the native runtime: distinguish synth_finished, successful/failed turn_finished, and interrupt."
+    - "Emit at most one turn-level playback_finished only after synthesis closes and every output segment's audio and motion reach terminal state."
+    - "Cancel only the retired turn's queued/current audio and motion; generation-tag acknowledgement work and serialize its final send check against turn retirement."
+    - "Choose failure reasons in segment order with text, audio, then motion priority to match the TypeScript completion coordinator."
+  review_corrections:
+    - "Retain interrupted assembler turns until the Adapter publishes turn_finished, while rejecting further output and synthesis signals."
+    - "Serialize final motion delivery with turn retirement so canceled plans cannot be queued again by a late audio-worker callback."
+    - "Stop only the captured audio serial under the audio-file mutex; publish playback serial, RMS, and start/end timestamps under that same mutex."
+    - "Make missing motion sinks produce a reachable failure terminal instead of leaving the segment unfinished."
+  non_actions:
+    - "Do not change the wire schema or implement a retry policy different from the current TypeScript client's one-shot failure behavior."
+    - "Do not modify concurrent Web snapshot work."
+    - "Do not claim hardware-accurate audio position or live playback acceptance."
+  validation:
+    - "Release ag99-runtime-protocol-smoke build passed; ctest passed (1/1), including synth-finished rejection and interrupt followed by failed turn-finished callback with the backend reason."
+    - "Release ag99-render-host build passed after coordinator, interruption, and audio-serial cancellation corrections."
+    - "Independent read-only review found no remaining deterministic lock-order or acknowledgement-loss issue in the current diff."
+    - "git diff --check passed; only line-ending conversion warnings were emitted."
+  evidence_gap:
+    - "No live Adapter + native host + audio + Live2D run verified multi-segment acknowledgement timing, output-failure cancellation, or interruption during playback."
+    - "A playback_finished send failure is terminal for the local coordinator and is not retried, matching the TypeScript coordinator; recovery relies on connection cleanup/reconnect."
+    - "The replay CLI still dispatches controls independently of RuntimeProtocolSession, so it does not validate the new synthesis/interruption lifecycle."
+
 native_runtime_segment_clock:
   recorded_at: "2026-10-04"
   class: feature

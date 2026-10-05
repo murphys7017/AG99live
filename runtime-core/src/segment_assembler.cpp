@@ -48,6 +48,12 @@ SegmentAssembler::IngestResult SegmentAssembler::ingest(OutputSegment segment) {
     return {false, "segment_turn_not_started", {}};
   }
   auto& turn = turn_it->second;
+  if (turn.interrupted) {
+    return {false, "segment_turn_interrupted", {}};
+  }
+  if (turn.synthesis_finished) {
+    return {false, "segment_after_synth_finished", {}};
+  }
   if (turn.pending_message_ids.contains(message_id)) {
     return {false, "segment_duplicate_pending", {}};
   }
@@ -86,6 +92,32 @@ SegmentAssembler::IngestResult SegmentAssembler::ingest(OutputSegment segment) {
     ++turn.next_sequence;
   }
   return {true, {}, std::move(ready)};
+}
+
+bool SegmentAssembler::mark_synthesis_finished(std::string_view turn_id) {
+  const auto turn_it = turns_.find(std::string(turn_id));
+  if (turn_it == turns_.end()) {
+    return false;
+  }
+  auto& turn = turn_it->second;
+  if (turn.interrupted || turn.synthesis_finished || turn.next_sequence == 0
+      || !turn.pending.empty()) {
+    return false;
+  }
+  turn.synthesis_finished = true;
+  return true;
+}
+
+bool SegmentAssembler::interrupt_turn(std::string_view turn_id) {
+  const auto turn_it = turns_.find(std::string(turn_id));
+  if (turn_it == turns_.end() || turn_it->second.interrupted) {
+    return false;
+  }
+  auto& turn = turn_it->second;
+  turn.interrupted = true;
+  turn.pending.clear();
+  turn.pending_message_ids.clear();
+  return true;
 }
 
 bool SegmentAssembler::clear_turn(std::string_view turn_id) {
