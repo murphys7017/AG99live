@@ -122,10 +122,6 @@ export function useBilibiliLiveRuntime(options: BilibiliLiveRuntimeOptions) {
     return { ...settings };
   }
 
-  function getStatus(): BilibiliLiveStatus {
-    return { ...status };
-  }
-
   function handleDanmaku(message: BilibiliDanmakuMessage): void {
     buffer.push(message);
     if (buffer.length > MAX_BUFFER_SIZE) {
@@ -205,7 +201,6 @@ export function useBilibiliLiveRuntime(options: BilibiliLiveRuntimeOptions) {
     dispose,
     applySettings,
     getSettings,
-    getStatus,
   };
 }
 

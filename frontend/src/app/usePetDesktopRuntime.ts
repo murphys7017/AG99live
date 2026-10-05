@@ -566,7 +566,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     aiState,
     manualPreviewText,
     latestAssistantFeedback,
-    bilibiliLiveStatus: () => bilibiliLive.getStatus(),
+    bilibiliLiveStatus: bilibiliLive.status,
   });
 
   const commandHandler = createDesktopRuntimeCommandHandler({

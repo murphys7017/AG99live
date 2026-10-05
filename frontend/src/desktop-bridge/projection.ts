@@ -22,7 +22,7 @@ export interface AdapterRuntimeProjection {
   adapterAddress: string;
   desktopScreenshotOnSendEnabled: boolean;
   microphoneDeviceId: string;
-  microphoneDevices: DesktopMicrophoneDevice[];
+  microphoneDevices: readonly DesktopMicrophoneDevice[];
   connectionStatusMessage: string;
   serverWsUrl: string;
   httpBaseUrl: string;
@@ -33,23 +33,23 @@ export interface AdapterRuntimeProjection {
   micCapturing: boolean;
   microphoneStandby: boolean;
   pttModeEnabled: boolean;
-  pttKeyBinding: DesktopPttKeyBinding;
-  pttHookStatus: DesktopPttHookStatus;
+  pttKeyBinding: Readonly<DesktopPttKeyBinding>;
+  pttHookStatus: Readonly<DesktopPttHookStatus>;
   audioPlaying: boolean;
-  historyEntries: DesktopHistoryEntry[];
-  backendHistorySummaries: DesktopBackendHistorySummary[];
-  backendHistoryEntries: DesktopBackendHistoryMessage[];
+  historyEntries: readonly DesktopHistoryEntry[];
+  backendHistorySummaries: readonly DesktopBackendHistorySummary[];
+  backendHistoryEntries: readonly DesktopBackendHistoryMessage[];
   activeBackendHistoryUid: string;
   backendHistoryLoading: boolean;
   backendHistoryStatusMessage: string;
-  bilibiliLiveStatus: BilibiliLiveStatus;
+  bilibiliLiveStatus: Readonly<BilibiliLiveStatus>;
 }
 
 export interface AdapterRuntimeProjectionInput {
   address: string;
   desktopScreenshotOnSendEnabled: boolean;
   microphoneDeviceId: string;
-  microphoneDevices: DesktopMicrophoneDevice[];
+  microphoneDevices: readonly DesktopMicrophoneDevice[];
   statusMessage: string;
   serverWsUrl: string;
   httpBaseUrl: string;
@@ -60,16 +60,16 @@ export interface AdapterRuntimeProjectionInput {
   micCapturing: boolean;
   microphoneStandby: boolean;
   pttModeEnabled: boolean;
-  pttKeyBinding: DesktopPttKeyBinding;
-  pttHookStatus: DesktopPttHookStatus;
+  pttKeyBinding: Readonly<DesktopPttKeyBinding>;
+  pttHookStatus: Readonly<DesktopPttHookStatus>;
   isPlayingAudio: boolean;
-  historyEntries: DesktopHistoryEntry[];
-  backendHistorySummaries: DesktopBackendHistorySummary[];
-  backendHistoryEntries: DesktopBackendHistoryMessage[];
+  historyEntries: readonly DesktopHistoryEntry[];
+  backendHistorySummaries: readonly DesktopBackendHistorySummary[];
+  backendHistoryEntries: readonly DesktopBackendHistoryMessage[];
   activeBackendHistoryUid: string;
   backendHistoryLoading: boolean;
   backendHistoryStatusMessage: string;
-  bilibiliLiveStatus: BilibiliLiveStatus;
+  bilibiliLiveStatus: Readonly<BilibiliLiveStatus>;
 }
 
 export interface DesktopRuntimeSnapshotInput {
@@ -132,7 +132,7 @@ export function buildAdapterRuntimeProjection(
     adapterAddress: input.address,
     desktopScreenshotOnSendEnabled: input.desktopScreenshotOnSendEnabled,
     microphoneDeviceId: input.microphoneDeviceId,
-    microphoneDevices: input.microphoneDevices.map((device) => ({ ...device })),
+    microphoneDevices: input.microphoneDevices,
     connectionStatusMessage: input.statusMessage,
     serverWsUrl: input.serverWsUrl,
     httpBaseUrl: input.httpBaseUrl,
@@ -144,19 +144,15 @@ export function buildAdapterRuntimeProjection(
     microphoneStandby: input.microphoneStandby,
     audioPlaying: input.isPlayingAudio,
     pttModeEnabled: input.pttModeEnabled,
-    pttKeyBinding: { ...input.pttKeyBinding },
-    pttHookStatus: { ...input.pttHookStatus },
-    historyEntries: [...input.historyEntries],
-    backendHistorySummaries: input.backendHistorySummaries.map((s) =>
-      cloneJson(s),
-    ),
-    backendHistoryEntries: input.backendHistoryEntries.map((e) =>
-      cloneJson(e),
-    ),
+    pttKeyBinding: input.pttKeyBinding,
+    pttHookStatus: input.pttHookStatus,
+    historyEntries: input.historyEntries,
+    backendHistorySummaries: input.backendHistorySummaries,
+    backendHistoryEntries: input.backendHistoryEntries,
     activeBackendHistoryUid: input.activeBackendHistoryUid,
     backendHistoryLoading: input.backendHistoryLoading,
     backendHistoryStatusMessage: input.backendHistoryStatusMessage,
-    bilibiliLiveStatus: { ...input.bilibiliLiveStatus },
+    bilibiliLiveStatus: input.bilibiliLiveStatus,
   };
 }
 

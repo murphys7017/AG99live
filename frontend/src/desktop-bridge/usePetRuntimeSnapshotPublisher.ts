@@ -1,7 +1,6 @@
 import { watch, type ComputedRef, type Ref } from "vue";
-import { cloneModelEngineSettings, type ModelEngineSettings } from "../model-engine/settings";
+import type { ModelEngineSettings } from "../model-engine/settings";
 import {
-  cloneLive2dPresentationSettings,
   type Live2dPresentationSettings,
 } from "../live2d-renderer/settings";
 import type {
@@ -93,7 +92,7 @@ interface PetRuntimeSnapshotPublisherOptions {
   aiState: ComputedRef<string>;
   manualPreviewText: Ref<string>;
   latestAssistantFeedback: ComputedRef<DesktopAssistantFeedbackState>;
-  bilibiliLiveStatus: () => BilibiliLiveStatus;
+  bilibiliLiveStatus: Readonly<BilibiliLiveStatus>;
 }
 
 function createDebounce(): {
@@ -158,7 +157,7 @@ export function createPetRuntimeSnapshotPublisher(
       address: a.address,
       desktopScreenshotOnSendEnabled: a.desktopScreenshotOnSendEnabled,
       microphoneDeviceId: a.microphoneDeviceId,
-      microphoneDevices: a.microphoneDevices.map((device) => ({ ...device })),
+      microphoneDevices: a.microphoneDevices,
       statusMessage: a.statusMessage,
       serverWsUrl: a.serverInfo?.ws_url ?? "",
       httpBaseUrl: a.serverInfo?.http_base_url ?? "",
@@ -172,31 +171,27 @@ export function createPetRuntimeSnapshotPublisher(
       pttModeEnabled: a.pttModeEnabled,
       pttKeyBinding: a.pttKeyBinding,
       pttHookStatus: a.pttHookStatus,
-      historyEntries: [...a.historyEntries],
-      backendHistorySummaries: [...a.backendHistorySummaries],
-      backendHistoryEntries: [...a.backendHistoryEntries],
+      historyEntries: a.historyEntries,
+      backendHistorySummaries: a.backendHistorySummaries,
+      backendHistoryEntries: a.backendHistoryEntries,
       activeBackendHistoryUid: a.activeBackendHistoryUid,
       backendHistoryLoading: a.backendHistoryLoading,
       backendHistoryStatusMessage: a.backendHistoryStatusMessage,
-      bilibiliLiveStatus: options.bilibiliLiveStatus(),
+      bilibiliLiveStatus: options.bilibiliLiveStatus,
     });
 
     return {
       adapter: adapterProjection,
-      motionEngineSettings: cloneModelEngineSettings(options.motionEngineSettings),
-      live2dPresentationSettings: cloneLive2dPresentationSettings(
-        options.live2dPresentationSettings,
-      ),
-      motionPlaybackRecords: options.motionPlaybackRecords.value.map((record) =>
-        cloneJson(record),
-      ) as DesktopMotionPlaybackRecord[],
+      motionEngineSettings: options.motionEngineSettings,
+      live2dPresentationSettings: options.live2dPresentationSettings,
+      motionPlaybackRecords: options.motionPlaybackRecords.value,
       connectionState: options.connectionState.value,
       connectionLabel: options.connectionLabel.value,
       stageMessage: options.stageMessage.value,
       aiState: options.aiState.value,
       lastUpdated: options.modelSyncState.lastUpdated,
       manualPreviewText: options.manualPreviewText.value,
-      latestAssistantFeedback: { ...options.latestAssistantFeedback.value },
+      latestAssistantFeedback: options.latestAssistantFeedback.value,
     };
   }
 
@@ -251,7 +246,7 @@ export function createPetRuntimeSnapshotPublisher(
         activeBackendHistoryUid: a.activeBackendHistoryUid,
         backendHistoryLoading: a.backendHistoryLoading,
         backendHistoryStatusMessage: a.backendHistoryStatusMessage,
-        bilibiliLiveStatus: options.bilibiliLiveStatus(),
+        bilibiliLiveStatus: options.bilibiliLiveStatus,
       },
       motionEngineSettings: options.motionEngineSettings,
       live2dPresentationSettings: options.live2dPresentationSettings,

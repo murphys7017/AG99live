@@ -401,35 +401,47 @@ export function createDesktopBridge(): DesktopBridgeInstance {
       );
     }
 
-    const onStorage = (event: StorageEvent) => {
-      if (event.key === RUNTIME_SNAPSHOT_STORAGE_KEY && event.newValue) {
-        try {
-          state.snapshot = normalizeSnapshot(
-            JSON.parse(event.newValue) as DesktopRuntimeSnapshot,
-          );
-        } catch (error) {
-          console.warn("[DesktopBridge] malformed cross-window snapshot rejected.", error);
+    const useRuntimeStorageFallback = !window.ag99desktop && !("BroadcastChannel" in window);
+    const useProfileStorageFallback = !("BroadcastChannel" in window);
+    if (useRuntimeStorageFallback || useProfileStorageFallback) {
+      const onStorage = (event: StorageEvent) => {
+        if (
+          useRuntimeStorageFallback
+          && event.key === RUNTIME_SNAPSHOT_STORAGE_KEY
+          && event.newValue
+        ) {
+          try {
+            state.snapshot = normalizeSnapshot(
+              JSON.parse(event.newValue) as DesktopRuntimeSnapshot,
+            );
+          } catch (error) {
+            console.warn("[DesktopBridge] malformed cross-window snapshot rejected.", error);
+          }
+          return;
         }
-        return;
-      }
 
-      if (event.key === PROFILE_AUTHORING_SNAPSHOT_STORAGE_KEY && event.newValue) {
-        try {
-          state.profileAuthoringSnapshot = normalizeProfileAuthoringSnapshot(
-            JSON.parse(event.newValue) as DesktopProfileAuthoringSnapshot,
-          );
-        } catch (error) {
-          console.warn(
-            "[DesktopBridge] malformed cross-window profile authoring snapshot rejected.",
-            error,
-          );
+        if (
+          useProfileStorageFallback
+          && event.key === PROFILE_AUTHORING_SNAPSHOT_STORAGE_KEY
+          && event.newValue
+        ) {
+          try {
+            state.profileAuthoringSnapshot = normalizeProfileAuthoringSnapshot(
+              JSON.parse(event.newValue) as DesktopProfileAuthoringSnapshot,
+            );
+          } catch (error) {
+            console.warn(
+              "[DesktopBridge] malformed cross-window profile authoring snapshot rejected.",
+              error,
+            );
+          }
         }
-      }
-    };
-    window.addEventListener("storage", onStorage);
-    removeStorageListener = () => {
-      window.removeEventListener("storage", onStorage);
-    };
+      };
+      window.addEventListener("storage", onStorage);
+      removeStorageListener = () => {
+        window.removeEventListener("storage", onStorage);
+      };
+    }
 
     const detachWindowState = window.ag99desktop?.onWindowState((nextState: DesktopWindowVisibilityState) => {
       state.windowState = nextState;
