@@ -4,6 +4,8 @@ import MotionTuningPanel from "../components/MotionTuningPanel.vue";
 import SemanticAxisProfileEditor from "../components/SemanticAxisProfileEditor.vue";
 import SettingsForm from "./SettingsForm.vue";
 import DesktopSettingsPanel from "./DesktopSettingsPanel.vue";
+import HistoryPanel from "./HistoryPanel.vue";
+import { useWebHistory } from "./useWebHistory";
 import { useParameterExcludeKeywords } from "../action-lab/parameterExcludeKeywords";
 import {
   desktopErrorMessage,
@@ -33,7 +35,7 @@ import {
   serializeMotionTuningSample,
 } from "../adapter-connection/features/motionTuningPayload.js";
 
-type ControlSection = "overview" | "settings" | "profile" | "action-lab";
+type ControlSection = "overview" | "settings" | "profile" | "action-lab" | "history";
 type AdapterSummary = {
   platform_id: string;
   host: string;
@@ -103,6 +105,7 @@ const activeTitle = computed(() => ({
   settings: "系统设置",
   profile: "Profile Editor",
   "action-lab": "动作实验室",
+  history: "对话历史",
 }[section.value]));
 const modelNameOptions = computed(() => activePlatform.value?.available_models ?? []);
 
@@ -125,6 +128,11 @@ async function apiPost<T>(path: string, body: unknown): Promise<T> {
   await bridge.ready();
   return bridge.apiPost<T>(path, body);
 }
+
+const history = useWebHistory(selectedPlatformId, computed(() => section.value === "history"), {
+  get: apiGet,
+  post: apiPost,
+});
 
 function showError(error: unknown): void {
   pageError.value = error instanceof Error ? error.message : String(error);
@@ -155,6 +163,9 @@ async function loadOverview(): Promise<void> {
     if (revision !== overviewLoadRevision) return;
     if (selectedPlatformId.value) {
       await Promise.all([loadProfile(), loadSamples()]);
+      if (revision === overviewLoadRevision && section.value === "history") {
+        await history.refresh();
+      }
     }
   } catch (error) {
     if (revision === overviewLoadRevision) showError(error);
@@ -684,6 +695,7 @@ onMounted(() => void loadOverview());
         <button :aria-current="section === 'settings' ? 'page' : undefined" @click="section = 'settings'">系统设置</button>
         <button :aria-current="section === 'profile' ? 'page' : undefined" @click="section = 'profile'">Profile</button>
         <button :aria-current="section === 'action-lab' ? 'page' : undefined" @click="section = 'action-lab'">动作实验室</button>
+        <button :aria-current="section === 'history' ? 'page' : undefined" @click="section = 'history'">对话历史</button>
       </nav>
       <div class="web-control-nav__footer">AstrBot Plugin Page</div>
     </aside>
@@ -790,7 +802,7 @@ onMounted(() => void loadOverview());
         <div v-else class="web-control-empty">当前模型没有可编辑的 Semantic Axis Profile。</div>
       </section>
 
-      <section v-else class="web-control-content">
+      <section v-else-if="section === 'action-lab'" class="web-control-content">
         <div class="web-control-section-heading"><div><p>MOTION / REFERENCES</p><h2>动作样例与 Prompt 参考</h2></div></div>
         <section class="web-control-settings-group web-control-action-preferences">
           <header>
@@ -827,6 +839,24 @@ onMounted(() => void loadOverview());
           @preview-recorded-parameter-plan="previewRecordedUnavailable"
           @save-motion-tuning-sample="saveSample"
           @delete-motion-tuning-sample="deleteSample"
+        />
+      </section>
+
+      <section v-else-if="section === 'history'" class="web-control-content">
+        <HistoryPanel
+          :histories="history.histories.value"
+          :messages="history.messages.value"
+          :active-history-uid="history.activeHistoryUid.value"
+          :viewed-history-uid="history.viewedHistoryUid.value"
+          :busy="history.busy.value"
+          :available="!!selectedPlatformId"
+          :error="history.error.value"
+          :notice="history.notice.value"
+          @refresh="void history.refresh()"
+          @create="void history.create()"
+          @view="void history.view($event)"
+          @load="void history.load($event)"
+          @delete="void history.delete($event)"
         />
       </section>
     </section>

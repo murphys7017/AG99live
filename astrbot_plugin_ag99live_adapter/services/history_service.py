@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Literal
 
 from astrbot.api import logger
 from astrbot.core.platform.message_session import MessageSession
@@ -10,8 +11,12 @@ from astrbot.core.platform.message_type import MessageType
 from ..motion.output_sanitizer import sanitize_assistant_output_text
 
 
+class HistoryNotFoundError(LookupError):
+    """The requested conversation does not belong to this adapter session."""
+
+
 class ConversationHistoryBridge:
-    """Bridge AstrBot conversation history to the desktop frontend format."""
+    """Project AstrBot conversation history for desktop and authenticated Web clients."""
 
     def __init__(
         self,
@@ -27,51 +32,141 @@ class ConversationHistoryBridge:
         self._client_uid = client_uid
         self._speaker_name = speaker_name
         self._chat_buffer = chat_buffer
+        self._lock = asyncio.Lock()
 
     def set_client_uid(self, client_uid: str) -> None:
         self._client_uid = client_uid
 
     async def list_histories(self) -> list[dict[str, Any]]:
-        conv_mgr = self._get_conversation_manager()
+        async with self._lock:
+            return await self._list_histories(
+                self._get_conversation_manager(), self._build_unified_msg_origin()
+            )
+
+    async def read_history_state(self, history_uid: str | None = None) -> dict[str, Any]:
+        async with self._lock:
+            return await self._read_history_state(
+                self._get_conversation_manager(),
+                self._build_unified_msg_origin(),
+                history_uid,
+            )
+
+    async def mutate_history_state(
+        self,
+        action: Literal["create", "load", "delete"],
+        history_uid: str | None = None,
+    ) -> dict[str, Any]:
+        async with self._lock:
+            conv_mgr = self._get_conversation_manager()
+            umo = self._build_unified_msg_origin()
+            if action == "create":
+                await self._create_history(conv_mgr, umo)
+            elif action == "load" and history_uid:
+                await self._fetch_history(conv_mgr, umo, history_uid)
+            elif action == "delete" and history_uid:
+                if not await self._delete_history(conv_mgr, umo, history_uid):
+                    raise RuntimeError("history_operation_failed")
+            else:
+                raise ValueError("history_operation_invalid")
+            return await self._read_history_state(conv_mgr, umo)
+
+    async def fetch_history(self, history_uid: str) -> list[dict[str, Any]]:
+        async with self._lock:
+            return await self._fetch_history(
+                self._get_conversation_manager(),
+                self._build_unified_msg_origin(),
+                history_uid,
+            )
+
+    async def create_history(self) -> str:
+        async with self._lock:
+            return await self._create_history(
+                self._get_conversation_manager(), self._build_unified_msg_origin()
+            )
+
+    async def delete_history(self, history_uid: str) -> bool:
+        async with self._lock:
+            return await self._delete_history(
+                self._get_conversation_manager(),
+                self._build_unified_msg_origin(),
+                history_uid,
+            )
+
+    async def _list_histories(self, conv_mgr: Any, umo: str) -> list[dict[str, Any]]:
         conversations = await conv_mgr.get_conversations(
-            unified_msg_origin=self._build_unified_msg_origin(),
+            unified_msg_origin=umo,
             platform_id=self._platform_id,
         )
         histories: list[dict[str, Any]] = []
         for conversation in conversations:
+            if not self._owns_conversation(conversation, umo):
+                continue
             messages = self._conversation_to_frontend_messages(conversation)
             latest_message = self._pick_latest_text_message(messages)
-            if latest_message is None:
-                continue
             histories.append(
                 {
                     "uid": conversation.cid,
                     "latest_message": latest_message,
-                    "timestamp": latest_message["timestamp"],
+                    "timestamp": latest_message["timestamp"]
+                    if latest_message
+                    else self._resolve_anchor_time(conversation).isoformat(),
                 }
             )
 
         histories.sort(key=lambda item: item.get("timestamp") or "", reverse=True)
         return histories
 
-    async def fetch_history(self, history_uid: str) -> list[dict[str, Any]]:
-        conv_mgr = self._get_conversation_manager()
-        umo = self._build_unified_msg_origin()
-        await conv_mgr.switch_conversation(umo, history_uid)
+    def _owns_conversation(self, conversation: Any | None, umo: str) -> bool:
+        return bool(
+            conversation is not None
+            and getattr(conversation, "user_id", None) == umo
+            and getattr(conversation, "platform_id", None) == self._platform_id
+        )
+
+    async def _get_owned_conversation(
+        self, conv_mgr: Any, umo: str, history_uid: str
+    ) -> Any:
         conversation = await conv_mgr.get_conversation(
             unified_msg_origin=umo,
             conversation_id=history_uid,
         )
-        if conversation is None:
-            raise ValueError(f"Conversation `{history_uid}` does not exist.")
+        # AstrBot's ID lookup does not itself filter by the supplied session.
+        if not self._owns_conversation(conversation, umo):
+            raise HistoryNotFoundError("history_not_found")
+        return conversation
+
+    async def _read_history_state(
+        self, conv_mgr: Any, umo: str, history_uid: str | None = None
+    ) -> dict[str, Any]:
+        histories = await self._list_histories(conv_mgr, umo)
+        active_uid = await conv_mgr.get_curr_conversation_id(umo) or ""
+        if not any(item["uid"] == active_uid for item in histories):
+            active_uid = ""
+        selected_uid = history_uid if history_uid is not None else active_uid
+        messages = []
+        if selected_uid:
+            conversation = await self._get_owned_conversation(conv_mgr, umo, selected_uid)
+            messages = self._conversation_to_frontend_messages(conversation)
+        return {
+            "platform_id": self._platform_id,
+            "active_history_uid": active_uid,
+            "history_uid": selected_uid,
+            "histories": histories,
+            "messages": messages,
+        }
+
+    async def _fetch_history(
+        self, conv_mgr: Any, umo: str, history_uid: str
+    ) -> list[dict[str, Any]]:
+        conversation = await self._get_owned_conversation(conv_mgr, umo, history_uid)
         messages = self._conversation_to_frontend_messages(conversation)
+        await conv_mgr.switch_conversation(umo, history_uid)
         self._sync_chat_buffer(messages)
         return messages
 
-    async def create_history(self) -> str:
-        conv_mgr = self._get_conversation_manager()
+    async def _create_history(self, conv_mgr: Any, umo: str) -> str:
         history_uid = await conv_mgr.new_conversation(
-            self._build_unified_msg_origin(),
+            umo,
             platform_id=self._platform_id,
         )
         if not isinstance(history_uid, str) or not history_uid.strip():
@@ -79,9 +174,8 @@ class ConversationHistoryBridge:
         self._sync_chat_buffer([])
         return history_uid.strip()
 
-    async def delete_history(self, history_uid: str) -> bool:
-        conv_mgr = self._get_conversation_manager()
-        umo = self._build_unified_msg_origin()
+    async def _delete_history(self, conv_mgr: Any, umo: str, history_uid: str) -> bool:
+        await self._get_owned_conversation(conv_mgr, umo, history_uid)
         try:
             await conv_mgr.delete_conversation(
                 unified_msg_origin=umo,
@@ -93,22 +187,16 @@ class ConversationHistoryBridge:
 
         current_cid = await conv_mgr.get_curr_conversation_id(umo)
         if not current_cid:
-            remaining = await conv_mgr.get_conversations(
-                unified_msg_origin=umo,
-                platform_id=self._platform_id,
-            )
+            remaining = await self._list_histories(conv_mgr, umo)
             if remaining:
-                current_cid = remaining[0].cid
+                current_cid = remaining[0]["uid"]
                 await conv_mgr.switch_conversation(umo, current_cid)
 
         if not current_cid:
             self._sync_chat_buffer([])
             return True
 
-        conversation = await conv_mgr.get_conversation(
-            unified_msg_origin=umo,
-            conversation_id=current_cid,
-        )
+        conversation = await self._get_owned_conversation(conv_mgr, umo, current_cid)
         self._sync_chat_buffer(self._conversation_to_frontend_messages(conversation))
         return True
 

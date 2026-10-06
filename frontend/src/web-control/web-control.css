@@ -410,7 +410,7 @@
   }
 
   .web-control-nav nav {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
   }
 
   .web-control-nav nav button {
@@ -446,6 +446,22 @@
   .web-control-platform-picker,
   .web-control-platform-picker select {
     width: 100%;
+  }
+
+  .web-control-platform-picker {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .web-control-platform-picker span,
+  .web-control-header__tools > button {
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+
+  .web-control-platform-picker select {
+    flex: 1;
+    width: 0;
   }
 
   .web-control-section-heading {

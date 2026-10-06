@@ -52,9 +52,11 @@ AstrBot Persona
 
 ## AstrBot Web 控制台
 
-启用插件后，在 AstrBot WebUI 的插件详情页打开 **AG99live 控制台**，可以编辑 Adapter 配置、Live2D 语义轴 Profile 和动作调参样例。页面通过 AstrBot 插件视图 bridge 访问受认证的插件 API，不单独启动 Web 服务。
+启用插件后，在 AstrBot WebUI 的插件详情页打开 **AG99live 控制台**，可以编辑 Adapter 配置、Live2D 语义轴 Profile 和动作调参样例，并管理当前 Adapter 的对话历史。页面通过 AstrBot 插件视图 bridge 访问受认证的插件 API，不单独启动 Web 服务。
 
-麦克风、全局快捷键和 Spout/ESP32 等本机功能仍由 AG99live 桌面运行时持有，Web 页面经桌面设置 broker 读写，不把本机配置存入 Adapter。Electron 还支持从 Web 修改鼠标凝视参数与托盘使用的 WebUI 基址；native runtime 以实际支持的设置项为准。实时动作预览和对话历史暂时保留本机入口。
+**对话历史** 支持只读查看、新建、显式载入和确认删除。只读查看不会切换当前会话；新建或载入会话会改变桌宠后续聊天的上下文。API 检查会话所属的 Adapter 平台及 Client UID，不允许跨实例操作；新建的空会话也会保留在列表中。此功能直接复用 AstrBot 会话服务，不依赖桌面 WebSocket 在线，也不占用第二条连接。页面按需读取历史，会话和消息每页最多渲染 100 项。
+
+麦克风、全局快捷键和 Spout/ESP32 等本机功能仍由 AG99live 桌面运行时持有，Web 页面经桌面设置 broker 读写，不把本机配置存入 Adapter。Electron 还支持从 Web 修改鼠标凝视参数与托盘使用的 WebUI 基址；native runtime 以实际支持的设置项为准。实时动作预览仍保留本机入口；旧历史窗口保留到 Web 历史现场验收完成，不会自动同步 Web 会话选择，历史管理请优先使用 Web。
 
 Electron 托盘和桌宠右键的 **打开 Web 控制面板** 会在默认浏览器打开本插件页面。默认 WebUI 基址为 `http://127.0.0.1:6185/`；使用其他地址或反向代理时，在桌面 **本机工具 > 本机设置** 或已连接的 Web 本机配置中设置。登录继续由 AstrBot 管理。
 

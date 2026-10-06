@@ -5,7 +5,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from math import isfinite
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 from astrbot.api import logger
@@ -27,6 +27,7 @@ from .runtime.plugin_runtime import (
     reconcile_control_platforms,
     set_plugin_config,
 )
+from .services.history_service import HistoryNotFoundError
 
 _PLUGIN_NAME = "astrbot_plugin_ag99live_adapter"
 _PAGE_API_PREFIX = "/control"
@@ -724,6 +725,10 @@ def register_web_control_page(context: Any, plugin: Any) -> bool:
         ("/desktop/settings", api.apply_desktop_setting, ["POST"], "Query or apply a desktop-owned setting"),
         ("/settings", api.get_settings, ["GET"], "Read AG99live adapter settings"),
         ("/settings", api.save_settings, ["POST"], "Save AG99live adapter settings"),
+        ("/history", api.get_history, ["GET"], "Read AG99live conversation history"),
+        ("/history/create", api.create_history, ["POST"], "Create an AG99live conversation"),
+        ("/history/load", api.load_history, ["POST"], "Select an AG99live conversation"),
+        ("/history/delete", api.delete_history, ["POST"], "Delete an AG99live conversation"),
         ("/profile", api.get_profile, ["GET"], "Read a Live2D semantic profile"),
         ("/profile", api.save_profile, ["POST"], "Save a Live2D semantic profile"),
         ("/samples", api.get_samples, ["GET"], "Read motion tuning samples"),
@@ -791,6 +796,63 @@ class WebControlPageApi:
         if response := _require_dashboard_user():
             return response
         return jsonify({"settings": _project_settings(self._plugin.config)})
+
+    async def get_history(self):
+        if response := _require_dashboard_user():
+            return response
+        platform, error = _resolve_platform_from_query()
+        if error:
+            return error
+        history_uid = None
+        if "history_uid" in request.args:
+            history_uid, error = _read_history_uid(request.args.get("history_uid"))
+            if error:
+                return error
+        return await self._history_response(platform, history_uid=history_uid)
+
+    async def create_history(self):
+        return await self._mutate_history("create")
+
+    async def load_history(self):
+        return await self._mutate_history("load")
+
+    async def delete_history(self):
+        return await self._mutate_history("delete")
+
+    async def _mutate_history(self, action: Literal["create", "load", "delete"]):
+        if response := _require_dashboard_user():
+            return response
+        body = await _read_json_body()
+        if isinstance(body, tuple):
+            return body[1]
+        platform, error = _resolve_platform_from_body(body)
+        if error:
+            return error
+        history_uid = None
+        if action != "create":
+            history_uid, error = _read_history_uid(body.get("history_uid"))
+            if error:
+                return error
+        return await self._history_response(platform, history_uid=history_uid, action=action)
+
+    async def _history_response(
+        self,
+        platform: Any,
+        *,
+        history_uid: str | None = None,
+        action: Literal["create", "load", "delete"] | None = None,
+    ):
+        try:
+            if action is None:
+                state = await platform.history_bridge.read_history_state(history_uid)
+            else:
+                state = await platform.history_bridge.mutate_history_state(action, history_uid)
+        except HistoryNotFoundError:
+            return _error("history_not_found", 404)
+        except Exception:
+            logger.exception("AG99live web history operation failed: action=%s", action or "read")
+            return _error("history_operation_failed", 500)
+        return jsonify(state)
 
     async def get_desktop_settings(self):
         """Report what the desktop last said, which stays valid while it is offline."""
@@ -1076,6 +1138,15 @@ def _resolve_platform_from_body(body: dict[str, Any]):
     if not platform:
         return None, _error("platform_not_found", 404)
     return platform, None
+
+
+def _read_history_uid(value: Any):
+    if not isinstance(value, str) or not value.strip():
+        return None, _error("history_uid_required", 400)
+    history_uid = value.strip()
+    if len(history_uid) > 255:
+        return None, _error("history_uid_invalid", 400)
+    return history_uid, None
 
 
 def _desktop_settings_payload(platform: Any) -> dict[str, Any]:
