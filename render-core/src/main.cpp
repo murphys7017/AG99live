@@ -47,6 +47,7 @@
 #include "ag99/live2d/log.hpp"
 #include "ag99/platform/tray_controller.hpp"
 #include "ag99/platform/input_text.hpp"
+#include "ag99/platform/input_overlay_state.hpp"
 #include <CubismFramework.hpp>
 #include <CubismModelSettingJson.hpp>
 #include <Effect/CubismBreath.hpp>
@@ -105,10 +106,7 @@ std::function<bool()> g_approve_latest_segment;
 std::atomic<bool> g_runtime_connected{false};
 std::mutex g_input_window_mutex;
 HWND g_input_window = nullptr;
-std::wstring g_input_preview_text = L"连接已关闭。";
-std::wstring g_input_state_text = L"离线";
-std::atomic<bool> g_input_feedback_available{false};
-std::atomic<bool> g_input_feedback_approved{false};
+ag99::platform::InputOverlayState g_input_state;
 bool g_click_through = false;
 
 void NotifyInputConnectionChanged();
@@ -1587,14 +1585,11 @@ public:
     if (sent) {
       std::scoped_lock lock(playback_mutex_);
       last_input_turn_id_ = turn_id;
-      g_input_feedback_available.store(false);
-      g_input_feedback_approved.store(false);
+      g_input_state.SetFeedbackAvailable(false);
+      g_input_state.SetFeedbackApproved(false);
     }
     if (sent) {
-      {
-        std::scoped_lock input_lock(g_input_window_mutex);
-        g_input_state_text = L"思考中";
-      }
+      g_input_state.SetStatusText(L"思考中");
       NotifyInputRuntimeStateChanged();
     }
     return sent;
@@ -1616,10 +1611,7 @@ public:
     if (sent) {
       std::scoped_lock lock(playback_mutex_);
       last_input_turn_id_.clear();
-      {
-        std::scoped_lock input_lock(g_input_window_mutex);
-        g_input_state_text = L"待命";
-      }
+      g_input_state.SetStatusText(L"待命");
       NotifyInputRuntimeStateChanged();
     }
     return sent;
@@ -1656,7 +1648,7 @@ public:
         segment.turn_id,
         "frontend");
     if (websocket_.send_text(envelope.dump())) {
-      g_input_feedback_approved.store(true);
+      g_input_state.SetFeedbackApproved(true);
       NotifyInputRuntimeStateChanged();
       return true;
     }
@@ -1922,11 +1914,8 @@ private:
       }
       if (terminal.success && latest_assistant_segment_
           && latest_assistant_segment_->message_id == terminal.clock.message_id) {
-        g_input_feedback_available.store(true);
-        {
-          std::scoped_lock input_lock(g_input_window_mutex);
-          g_input_state_text = L"待命";
-        }
+        g_input_state.SetFeedbackAvailable(true);
+        g_input_state.SetStatusText(L"待命");
         NotifyInputRuntimeStateChanged();
       }
     }
@@ -2112,13 +2101,7 @@ private:
       last_input_turn_id_.clear();
       latest_assistant_segment_.reset();
     }
-    g_input_feedback_available.store(false);
-    g_input_feedback_approved.store(false);
-    {
-      std::scoped_lock input_lock(g_input_window_mutex);
-      g_input_preview_text = L"连接已关闭。";
-      g_input_state_text = L"离线";
-    }
+    g_input_state.ResetDisconnected();
     NotifyInputRuntimeStateChanged();
     {
       std::scoped_lock lock(audio_queue_mutex_);
@@ -2141,10 +2124,7 @@ private:
     }
     std::cerr << "[runtime] websocket closed\n";
     g_runtime_connected.store(false);
-    {
-      std::scoped_lock input_lock(g_input_window_mutex);
-      g_input_state_text = L"离线";
-    }
+    g_input_state.SetStatusText(L"离线");
     NotifyInputRuntimeStateChanged();
     NotifyInputConnectionChanged();
     pending_closed_generation_.store(generation);
@@ -2181,17 +2161,11 @@ private:
           segment.envelope.message_id,
           segment.text.content,
           false};
-      {
-        std::scoped_lock input_lock(g_input_window_mutex);
-        g_input_preview_text = std::wstring(
-            segment.text.content.begin(), segment.text.content.end());
-      }
-      g_input_feedback_available.store(false);
-      g_input_feedback_approved.store(false);
-      {
-        std::scoped_lock input_lock(g_input_window_mutex);
-        g_input_state_text = L"播放中";
-      }
+      g_input_state.SetPreviewText(std::wstring(
+          segment.text.content.begin(), segment.text.content.end()));
+      g_input_state.SetFeedbackAvailable(false);
+      g_input_state.SetFeedbackApproved(false);
+      g_input_state.SetStatusText(L"播放中");
       NotifyInputRuntimeStateChanged();
     }
     const auto generation = connection_generation_.load();
@@ -5377,18 +5351,13 @@ void SetInputConnectionLabels(HWND window) {
     return;
   }
   const bool connected = g_runtime_connected.load();
-  std::wstring preview;
-  std::wstring state;
-  {
-    std::scoped_lock lock(g_input_window_mutex);
-    preview = g_input_preview_text;
-    state = g_input_state_text;
-  }
-  SetInputPreview(window, connected ? preview : L"连接已关闭。");
-  SetInputStatus(window, connected ? state : L"离线");
+  const auto snapshot = g_input_state.Snapshot();
+  SetInputPreview(
+      window, connected ? snapshot.preview_text : L"连接已关闭。");
+  SetInputStatus(window, connected ? snapshot.status_text : L"离线");
   if (const HWND feedback = GetDlgItem(window, kInputFeedback)) {
-    EnableWindow(feedback, connected && g_input_feedback_available.load()
-        && !g_input_feedback_approved.load());
+    EnableWindow(feedback, connected && snapshot.feedback_available
+        && !snapshot.feedback_approved);
     InvalidateRect(feedback, nullptr, TRUE);
   }
 }
