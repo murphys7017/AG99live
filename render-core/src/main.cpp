@@ -45,6 +45,7 @@
 #include "ag99/live2d/d3d11_composition_surface.hpp"
 #include "ag99/live2d/d3d11_renderer.hpp"
 #include "ag99/live2d/log.hpp"
+#include "ag99/platform/tray_controller.hpp"
 #include <CubismFramework.hpp>
 #include <CubismModelSettingJson.hpp>
 #include <Effect/CubismBreath.hpp>
@@ -74,8 +75,7 @@ constexpr UINT kTrayOpenLog = 1008;
 constexpr UINT kInputConnectionChanged = WM_APP + 2;
 constexpr UINT kInputRuntimeStateChanged = WM_APP + 3;
 
-NOTIFYICONDATAW g_tray_icon{};
-bool g_tray_icon_added = false;
+ag99::platform::TrayController g_tray_controller;
 bool g_dragging = false;
 POINT g_drag_cursor{};
 POINT g_drag_origin{};
@@ -5125,22 +5125,11 @@ private:
 };
 
 void AddTrayIcon(HWND window) {
-  g_tray_icon = {};
-  g_tray_icon.cbSize = sizeof(g_tray_icon);
-  g_tray_icon.hWnd = window;
-  g_tray_icon.uID = 1;
-  g_tray_icon.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
-  g_tray_icon.uCallbackMessage = kTrayMessage;
-  g_tray_icon.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
-  wcscpy_s(g_tray_icon.szTip, L"AG99live Native Runtime");
-  g_tray_icon_added = Shell_NotifyIconW(NIM_ADD, &g_tray_icon) != FALSE;
+  g_tray_controller.Add(window, kTrayMessage, L"AG99live Native Runtime");
 }
 
 void RemoveTrayIcon() {
-  if (g_tray_icon_added) {
-    Shell_NotifyIconW(NIM_DELETE, &g_tray_icon);
-    g_tray_icon_added = false;
-  }
+  g_tray_controller.Remove();
 }
 
 void SetClickThrough(HWND window, bool enabled);

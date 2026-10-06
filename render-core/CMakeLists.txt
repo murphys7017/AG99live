@@ -57,6 +57,7 @@ set_target_properties(ag99_directxtk PROPERTIES
 
 add_executable(ag99-render-host WIN32
   src/main.cpp
+  src/tray_controller.cpp
 )
 
 add_subdirectory("${AG99_RUNTIME_ROOT}"
@@ -111,6 +112,7 @@ target_compile_definitions(ag99-render-host PRIVATE
   AG99_CUBISM_SHADER_DIR="${CUBISM_SHADER_PATH}"
 )
 target_include_directories(ag99-render-host PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/include"
   "${CUBISM_CORE_PATH}/include"
   "${CUBISM_FRAMEWORK_PATH}/src"
   "${DIRECTXTK_PATH}/Inc"
@@ -121,5 +123,6 @@ target_link_libraries(ag99-render-host PRIVATE
   ag99_cubism_core
   ag99_runtime_core
   shell32
+  imm32
   winmm
 )
