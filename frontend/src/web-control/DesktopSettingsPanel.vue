@@ -54,6 +54,10 @@ const props = defineProps<{
 }>();
 
 const capturingKey = ref<string | null>(null);
+const expandedGroups = ref<Record<string, boolean>>({
+  connection: true,
+  appearance: true,
+});
 
 function isDisabled(entry: DesktopSettingEntry): boolean {
   return props.busy || !props.connected || !entry.reportedAt;
@@ -162,12 +166,20 @@ function groupedSettings(settings: DesktopSettingEntry[]): Array<DesktopSettingG
   return groups;
 }
 
+function isGroupOpen(key: string): boolean {
+  return expandedGroups.value[key] ?? false;
+}
+
+function rememberGroupState(key: string, event: Event): void {
+  expandedGroups.value[key] = (event.currentTarget as HTMLDetailsElement).open;
+}
+
 onMounted(() => window.addEventListener("keydown", captureKey, true));
 onBeforeUnmount(() => window.removeEventListener("keydown", captureKey, true));
 </script>
 
 <template>
-  <div class="web-control-settings-grid">
+  <div class="web-control-settings-grid web-control-settings-grid--single">
     <section class="web-control-settings-group">
       <header>
         <h2>桌面端本机配置</h2>
@@ -186,7 +198,8 @@ onBeforeUnmount(() => window.removeEventListener("keydown", captureKey, true));
         v-for="group in groupedSettings(settings)"
         :key="group.key"
         class="web-control-settings-subgroup"
-        :open="group.key === 'connection' || group.key === 'appearance'"
+        :open="isGroupOpen(group.key)"
+        @toggle="rememberGroupState(group.key, $event)"
       >
         <summary class="web-control-settings-subgroup__header">
           <div>

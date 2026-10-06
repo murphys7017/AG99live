@@ -264,6 +264,10 @@
   gap: 14px;
 }
 
+.web-control-settings-grid--single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .web-control-settings-group {
   display: grid;
   align-content: start;
