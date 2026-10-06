@@ -52,6 +52,7 @@
 #include "ag99/platform/input_overlay_button_paint.hpp"
 #include "ag99/platform/input_overlay_controls.hpp"
 #include "ag99/platform/input_overlay_view.hpp"
+#include "ag99/platform/input_overlay_resources.hpp"
 #include <CubismFramework.hpp>
 #include <CubismModelSettingJson.hpp>
 #include <Effect/CubismBreath.hpp>
@@ -5332,11 +5333,7 @@ constexpr int kInputControlId = 100;
 constexpr int kInputMessageId = 101;
 constexpr int kInputStatusId = 102;
 
-HBRUSH g_input_background_brush = nullptr;
-HBRUSH g_input_edit_brush = nullptr;
-HFONT g_input_message_font = nullptr;
-HFONT g_input_status_font = nullptr;
-HFONT g_input_input_font = nullptr;
+ag99::platform::InputOverlayResources g_input_resources;
 
 void SetInputStatus(HWND window, std::wstring_view text) {
   ag99::platform::SetInputOverlayStatus(window, kInputStatusId, text);
@@ -5464,11 +5461,11 @@ LRESULT CALLBACK InputWindowProc(
       const HDC dc = BeginPaint(window, &paint);
       RECT client{};
       GetClientRect(window, &client);
-      if (!g_input_background_brush) {
-        g_input_background_brush = CreateSolidBrush(RGB(8, 9, 12));
+      if (!g_input_resources.background_brush) {
+        g_input_resources.background_brush = CreateSolidBrush(RGB(8, 9, 12));
       }
       ag99::platform::PaintInputOverlayBackground(
-          dc, client, g_input_background_brush);
+          dc, client, g_input_resources.background_brush);
       EndPaint(window, &paint);
       return 0;
     }
@@ -5476,16 +5473,16 @@ LRESULT CALLBACK InputWindowProc(
       const HDC dc = reinterpret_cast<HDC>(wparam);
       SetTextColor(dc, RGB(232, 234, 240));
       SetBkMode(dc, TRANSPARENT);
-      return reinterpret_cast<LRESULT>(g_input_background_brush);
+      return reinterpret_cast<LRESULT>(g_input_resources.background_brush);
     }
     case WM_CTLCOLOREDIT: {
       const HDC dc = reinterpret_cast<HDC>(wparam);
       SetTextColor(dc, RGB(238, 240, 246));
       SetBkColor(dc, RGB(19, 21, 26));
-      if (!g_input_edit_brush) {
-        g_input_edit_brush = CreateSolidBrush(RGB(19, 21, 26));
+      if (!g_input_resources.edit_brush) {
+        g_input_resources.edit_brush = CreateSolidBrush(RGB(19, 21, 26));
       }
-      return reinterpret_cast<LRESULT>(g_input_edit_brush);
+      return reinterpret_cast<LRESULT>(g_input_resources.edit_brush);
     }
     case WM_NCPAINT: {
       // The TS composer uses a soft 1px border rather than the native
@@ -5514,26 +5511,7 @@ LRESULT CALLBACK InputWindowProc(
         std::scoped_lock lock(g_input_window_mutex);
         g_input_window = nullptr;
       }
-      if (g_input_background_brush) {
-        DeleteObject(g_input_background_brush);
-        g_input_background_brush = nullptr;
-      }
-      if (g_input_edit_brush) {
-        DeleteObject(g_input_edit_brush);
-        g_input_edit_brush = nullptr;
-      }
-      if (g_input_message_font) {
-        DeleteObject(g_input_message_font);
-        g_input_message_font = nullptr;
-      }
-      if (g_input_status_font) {
-        DeleteObject(g_input_status_font);
-        g_input_status_font = nullptr;
-      }
-      if (g_input_input_font) {
-        DeleteObject(g_input_input_font);
-        g_input_input_font = nullptr;
-      }
+      ag99::platform::DestroyInputOverlayResources(g_input_resources);
       return 0;
     default:
       break;
@@ -5584,24 +5562,8 @@ void ShowInputWindow(HINSTANCE instance) {
   }
   SetLayeredWindowAttributes(window, 0, 255, LWA_ALPHA);
   SetWindowRgn(window, CreateRoundRectRgn(0, 0, width + 1, height + 1, 12, 12), TRUE);
-  g_input_background_brush = CreateSolidBrush(RGB(8, 9, 12));
-  g_input_edit_brush = CreateSolidBrush(RGB(19, 21, 26));
-
   const HFONT font = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
-  LOGFONTW message_logfont{};
-  GetObjectW(font, sizeof(message_logfont), &message_logfont);
-  HDC window_dc = GetDC(window);
-  const int dpi = window_dc ? GetDeviceCaps(window_dc, LOGPIXELSY) : 96;
-  if (window_dc) {
-    ReleaseDC(window, window_dc);
-  }
-  message_logfont.lfHeight = -MulDiv(14, dpi, 72);
-  message_logfont.lfWeight = FW_NORMAL;
-  g_input_message_font = CreateFontIndirectW(&message_logfont);
-  message_logfont.lfHeight = -MulDiv(12, dpi, 72);
-  g_input_status_font = CreateFontIndirectW(&message_logfont);
-  message_logfont.lfHeight = -MulDiv(14, dpi, 72);
-  g_input_input_font = CreateFontIndirectW(&message_logfont);
+  g_input_resources = ag99::platform::CreateInputOverlayResources(window, font);
 
   const ag99::platform::InputOverlayControlIds control_ids{
       kInputControlId,
@@ -5614,9 +5576,9 @@ void ShowInputWindow(HINSTANCE instance) {
   };
   const ag99::platform::InputOverlayControlFonts control_fonts{
       font,
-      g_input_message_font,
-      g_input_status_font,
-      g_input_input_font,
+      g_input_resources.message_font,
+      g_input_resources.status_font,
+      g_input_resources.input_font,
   };
   const auto controls = ag99::platform::CreateInputOverlayControls(
       window,
