@@ -115,6 +115,10 @@ export function useWebHistory(platformId: Ref<string>, enabled: Readonly<Ref<boo
         delete: "会话已删除。",
       })[action];
     } catch (cause) {
+      if (isCurrent() && action === "view" && historyUid && historyErrorMessage(cause).includes("该会话已不存在")) {
+        await request("view");
+        return;
+      }
       if (isCurrent()) error.value = historyErrorMessage(cause);
     } finally {
       if (isCurrent()) busy.value = false;

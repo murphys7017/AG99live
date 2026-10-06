@@ -103,13 +103,14 @@ class ConversationHistoryBridge:
                 continue
             messages = self._conversation_to_frontend_messages(conversation)
             latest_message = self._pick_latest_text_message(messages)
+            anchor_time = self._resolve_anchor_time(conversation)
             histories.append(
                 {
                     "uid": conversation.cid,
                     "latest_message": latest_message,
                     "timestamp": latest_message["timestamp"]
                     if latest_message
-                    else self._resolve_anchor_time(conversation).isoformat(),
+                    else anchor_time.isoformat() if anchor_time else "",
                 }
             )
 
@@ -185,11 +186,12 @@ class ConversationHistoryBridge:
             logger.warning("Failed to delete conversation `%s`: %s", history_uid, exc)
             return False
 
+        remaining = await self._list_histories(conv_mgr, umo)
         current_cid = await conv_mgr.get_curr_conversation_id(umo)
-        if not current_cid:
-            remaining = await self._list_histories(conv_mgr, umo)
-            if remaining:
-                current_cid = remaining[0]["uid"]
+        remaining_uids = {item["uid"] for item in remaining}
+        if current_cid not in remaining_uids:
+            current_cid = remaining[0]["uid"] if remaining else ""
+            if current_cid:
                 await conv_mgr.switch_conversation(umo, current_cid)
 
         if not current_cid:
@@ -343,16 +345,17 @@ class ConversationHistoryBridge:
         return tool_results
 
     @staticmethod
-    def _resolve_anchor_time(conversation: Any) -> datetime:
+    def _resolve_anchor_time(conversation: Any) -> datetime | None:
         updated_at = getattr(conversation, "updated_at", 0) or 0
         created_at = getattr(conversation, "created_at", 0) or 0
         timestamp = updated_at or created_at
         if isinstance(timestamp, bool) or not isinstance(timestamp, (int, float)) or timestamp <= 0:
-            raise ValueError("Conversation has no valid creation or update timestamp.")
+            return None
         try:
             return datetime.fromtimestamp(timestamp, tz=timezone.utc)
         except (OverflowError, OSError, ValueError) as exc:
-            raise ValueError(f"Conversation timestamp is invalid: {timestamp!r}.") from exc
+            logger.warning("Conversation timestamp is invalid: %r", timestamp)
+            return None
 
     def _sync_chat_buffer(self, messages: list[dict[str, Any]]) -> None:
         self._chat_buffer.clear()
