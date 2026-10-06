@@ -48,6 +48,7 @@
 #include "ag99/platform/tray_controller.hpp"
 #include "ag99/platform/input_text.hpp"
 #include "ag99/platform/input_overlay_state.hpp"
+#include "ag99/platform/input_overlay_paint.hpp"
 #include <CubismFramework.hpp>
 #include <CubismModelSettingJson.hpp>
 #include <Effect/CubismBreath.hpp>
@@ -5470,14 +5471,8 @@ LRESULT CALLBACK InputWindowProc(
       if (!g_input_background_brush) {
         g_input_background_brush = CreateSolidBrush(RGB(8, 9, 12));
       }
-      FillRect(dc, &client, g_input_background_brush);
-      HPEN border = CreatePen(PS_SOLID, 1, RGB(52, 54, 62));
-      HGDIOBJ previous_pen = SelectObject(dc, border);
-      HGDIOBJ previous_brush = SelectObject(dc, GetStockObject(NULL_BRUSH));
-      RoundRect(dc, 0, 0, client.right, client.bottom, 12, 12);
-      SelectObject(dc, previous_brush);
-      SelectObject(dc, previous_pen);
-      DeleteObject(border);
+      ag99::platform::PaintInputOverlayBackground(
+          dc, client, g_input_background_brush);
       EndPaint(window, &paint);
       return 0;
     }
@@ -5500,22 +5495,7 @@ LRESULT CALLBACK InputWindowProc(
       // The TS composer uses a soft 1px border rather than the native
       // client-edge frame. Paint the control border ourselves.
       const HWND edit = GetDlgItem(window, kInputControlId);
-      if (edit) {
-        HDC dc = GetWindowDC(edit);
-        if (dc) {
-          RECT rect{};
-          GetWindowRect(edit, &rect);
-          OffsetRect(&rect, -rect.left, -rect.top);
-          HPEN pen = CreatePen(PS_SOLID, 1, RGB(52, 54, 62));
-          HGDIOBJ old_pen = SelectObject(dc, pen);
-          HGDIOBJ old_brush = SelectObject(dc, GetStockObject(NULL_BRUSH));
-          RoundRect(dc, 0, 0, rect.right, rect.bottom, 8, 8);
-          SelectObject(dc, old_brush);
-          SelectObject(dc, old_pen);
-          DeleteObject(pen);
-          ReleaseDC(edit, dc);
-        }
-      }
+      ag99::platform::PaintInputOverlayEditBorder(edit);
       return 0;
     }
     case WM_DRAWITEM: {
