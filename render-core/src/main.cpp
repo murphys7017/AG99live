@@ -1,12 +1,19 @@
 #include <windows.h>
+#include <commctrl.h>
+#include <imm.h>
 #include <mmsystem.h>
 #include <shellapi.h>
 #include <winhttp.h>
 #include <windowsx.h>
 
+#ifndef EM_SETCUEBANNER
+#define EM_SETCUEBANNER (WM_USER + 1)
+#endif
+
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <charconv>
 #include <cctype>
 #include <chrono>
 #include <cmath>
@@ -14,6 +21,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <condition_variable>
+#include <cwctype>
 #include <deque>
 #include <filesystem>
 #include <functional>
@@ -63,6 +71,8 @@ constexpr UINT kTrayMicToggle = 1005;
 constexpr UINT kTrayInputWindow = 1006;
 constexpr UINT kTrayClickThrough = 1007;
 constexpr UINT kTrayOpenLog = 1008;
+constexpr UINT kInputConnectionChanged = WM_APP + 2;
+constexpr UINT kInputRuntimeStateChanged = WM_APP + 3;
 
 NOTIFYICONDATAW g_tray_icon{};
 bool g_tray_icon_added = false;
@@ -88,8 +98,20 @@ std::vector<float> g_audio_rms;
 std::function<bool(std::string)> g_send_text;
 std::function<void()> g_toggle_microphone;
 std::function<bool()> g_microphone_running;
+std::function<bool()> g_reconnect_adapter;
+std::function<bool()> g_interrupt_turn;
+std::function<bool()> g_approve_latest_segment;
+std::atomic<bool> g_runtime_connected{false};
+std::mutex g_input_window_mutex;
 HWND g_input_window = nullptr;
+std::wstring g_input_preview_text = L"连接已关闭。";
+std::wstring g_input_state_text = L"离线";
+std::atomic<bool> g_input_feedback_available{false};
+std::atomic<bool> g_input_feedback_approved{false};
 bool g_click_through = false;
+
+void NotifyInputConnectionChanged();
+void NotifyInputRuntimeStateChanged();
 
 constexpr float kSpeechHeadAttack = 10.0f;
 constexpr float kSpeechHeadRelease = 3.4f;
@@ -125,6 +147,22 @@ float AdvanceSpeechEnvelope(
 double NowSeconds() {
   return std::chrono::duration<double>(
       std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+std::string TrimAsciiText(std::string value) {
+  const auto whitespace = [](unsigned char character) {
+    return character == ' ' || character == '\t' || character == '\n'
+        || character == '\r' || character == '\v' || character == '\f';
+  };
+  auto first = value.begin();
+  while (first != value.end() && whitespace(static_cast<unsigned char>(*first))) {
+    ++first;
+  }
+  auto last = value.end();
+  while (last != first && whitespace(static_cast<unsigned char>(*(last - 1)))) {
+    --last;
+  }
+  return std::string(first, last);
 }
 
 void UpdateAudioLevel(float delta_seconds) {
@@ -1395,6 +1433,12 @@ class RuntimeBridge final {
     std::mutex mutex;
     RuntimeBridge* owner = nullptr;
   };
+  struct AssistantSegment {
+    std::string turn_id;
+    std::string message_id;
+    std::string text;
+    bool approved = false;
+  };
 
 public:
   RuntimeBridge(
@@ -1406,7 +1450,9 @@ public:
       std::function<void(const std::string&)> on_turn_started,
       std::function<void(const std::string&, bool, const std::string&)>
           on_turn_finished,
-      std::function<void(const std::string&)> on_turn_interrupted)
+      std::function<void(const std::string&)> on_turn_interrupted,
+      std::function<ag99::runtime::DesktopSettingsResult(
+          const ag99::runtime::DesktopSettingsQuery&)> on_desktop_settings_query)
       : microphone_(websocket_),
         callback_lifetime_(std::make_shared<CallbackLifetime>()),
         on_model_sync_(std::move(on_model_sync)),
@@ -1415,6 +1461,7 @@ public:
         on_turn_started_(std::move(on_turn_started)),
         on_turn_finished_(std::move(on_turn_finished)),
         on_turn_interrupted_(std::move(on_turn_interrupted)),
+        on_desktop_settings_query_(std::move(on_desktop_settings_query)),
         session_({
             [this](ag99::runtime::OutputSegment segment) {
               OnSegment(std::move(segment));
@@ -1455,6 +1502,21 @@ public:
                 on_turn_interrupted_(turn_id);
               }
             },
+            [this](ag99::runtime::DesktopSettingsQuery query) {
+              const auto result = on_desktop_settings_query_
+                  ? on_desktop_settings_query_(query)
+                  : ag99::runtime::DesktopSettingsResult{
+                        query.request_id, query.key, std::nullopt,
+                        "desktop_setting_unsupported"};
+              const auto reply =
+                  ag99::runtime::build_system_desktop_settings_result(result);
+              // InvalidateConnection takes session_mutex_ before replacing the
+              // socket. Do not take transport_mutex_ from a receive callback.
+              if (!websocket_.send_text(reply.dump())) {
+                std::cerr << "[runtime] failed to send desktop setting result: "
+                          << query.key << '\n';
+              }
+            },
         }) {
     callback_lifetime_->owner = this;
     audio_worker_ = std::thread([this] {
@@ -1481,7 +1543,7 @@ public:
     ResetDisconnectedState();
 
     const std::weak_ptr<CallbackLifetime> weak_lifetime = callback_lifetime_;
-    return websocket_.connect(
+    const bool connected = websocket_.connect(
         url,
         {
             [weak_lifetime, generation](std::string text) {
@@ -1503,16 +1565,106 @@ public:
               });
             },
         });
+    g_runtime_connected.store(connected);
+    NotifyInputConnectionChanged();
+    return connected;
+  }
+
+  bool Reconnect() {
+    return Connect("ws://127.0.0.1:12396");
   }
 
   bool SendText(std::string_view text) {
-    if (text.empty()) {
+    const auto message = TrimAsciiText(std::string(text));
+    if (message.empty() || !g_runtime_connected.load()) {
       return false;
     }
     const auto turn_id = "native-demo-" +
         std::to_string(next_turn_id_.fetch_add(1));
-    const auto envelope = ag99::runtime::build_input_text(text, {}, turn_id);
-    return websocket_.send_text(envelope.dump());
+    const auto envelope = ag99::runtime::build_input_text(message, {}, turn_id);
+    const bool sent = websocket_.send_text(envelope.dump());
+    if (sent) {
+      std::scoped_lock lock(playback_mutex_);
+      last_input_turn_id_ = turn_id;
+      g_input_feedback_available.store(false);
+      g_input_feedback_approved.store(false);
+    }
+    if (sent) {
+      {
+        std::scoped_lock input_lock(g_input_window_mutex);
+        g_input_state_text = L"思考中";
+      }
+      NotifyInputRuntimeStateChanged();
+    }
+    return sent;
+  }
+
+  bool InterruptCurrentTurn() {
+    std::string turn_id;
+    {
+      std::scoped_lock lock(playback_mutex_);
+      turn_id = last_input_turn_id_;
+      if (turn_id.empty()) {
+        return false;
+      }
+    }
+    const auto envelope = ag99::runtime::build_envelope(
+        "control.interrupt", ag99::runtime::Json::object(), turn_id,
+        "frontend");
+    const bool sent = websocket_.send_text(envelope.dump());
+    if (sent) {
+      std::scoped_lock lock(playback_mutex_);
+      last_input_turn_id_.clear();
+      {
+        std::scoped_lock input_lock(g_input_window_mutex);
+        g_input_state_text = L"待命";
+      }
+      NotifyInputRuntimeStateChanged();
+    }
+    return sent;
+  }
+
+  bool ApproveLatestAssistantSegment() {
+    AssistantSegment segment;
+    {
+      std::scoped_lock lock(playback_mutex_);
+      if (!latest_assistant_segment_ || latest_assistant_segment_->approved) {
+        return false;
+      }
+      segment = *latest_assistant_segment_;
+      latest_assistant_segment_->approved = true;
+    }
+    const auto event_id = "native-feedback-" +
+        std::to_string(next_feedback_id_.fetch_add(1));
+    const auto envelope = ag99::runtime::build_envelope(
+        "system.motion_lab_raw_event",
+        {
+            {"event_id", event_id},
+            {"event_type", "motion.feedback_positive"},
+            {"message_id", segment.message_id},
+            {"source_route", "pet_overlay"},
+            {"phase", "assistant_segment_feedback"},
+            {"assistant_text", segment.text},
+            {"raw", {
+                {"feedback", "positive"},
+                {"interaction", "overlay_thumbs_up"},
+                {"turnId", segment.turn_id},
+                {"messageId", segment.message_id},
+            }},
+        },
+        segment.turn_id,
+        "frontend");
+    if (websocket_.send_text(envelope.dump())) {
+      g_input_feedback_approved.store(true);
+      NotifyInputRuntimeStateChanged();
+      return true;
+    }
+    std::scoped_lock lock(playback_mutex_);
+    if (latest_assistant_segment_
+        && latest_assistant_segment_->message_id == segment.message_id) {
+      latest_assistant_segment_->approved = false;
+    }
+    return false;
   }
 
   bool ToggleMicrophone() {
@@ -1553,6 +1705,8 @@ public:
       websocket_.close();
       ResetDisconnectedState();
     }
+    g_runtime_connected.store(false);
+    NotifyInputConnectionChanged();
     audio_queue_condition_.notify_all();
     transport_lock.unlock();
     {
@@ -1765,6 +1919,15 @@ private:
             terminal.reason,
             "motion_playback_failed:" + terminal.clock.message_id);
       }
+      if (terminal.success && latest_assistant_segment_
+          && latest_assistant_segment_->message_id == terminal.clock.message_id) {
+        g_input_feedback_available.store(true);
+        {
+          std::scoped_lock input_lock(g_input_window_mutex);
+          g_input_state_text = L"待命";
+        }
+        NotifyInputRuntimeStateChanged();
+      }
     }
     QueuePlaybackAcknowledgement(terminal.clock.turn_id);
   }
@@ -1773,6 +1936,9 @@ private:
     {
       std::scoped_lock lock(playback_mutex_);
       playback_turns_.erase(turn_id);
+      if (last_input_turn_id_ == turn_id) {
+        last_input_turn_id_.clear();
+      }
     }
     if (cancel_playback) {
       std::optional<std::uint64_t> audio_serial_to_stop;
@@ -1942,7 +2108,17 @@ private:
     {
       std::scoped_lock lock(playback_mutex_);
       playback_turns_.clear();
+      last_input_turn_id_.clear();
+      latest_assistant_segment_.reset();
     }
+    g_input_feedback_available.store(false);
+    g_input_feedback_approved.store(false);
+    {
+      std::scoped_lock input_lock(g_input_window_mutex);
+      g_input_preview_text = L"连接已关闭。";
+      g_input_state_text = L"离线";
+    }
+    NotifyInputRuntimeStateChanged();
     {
       std::scoped_lock lock(audio_queue_mutex_);
       audio_queue_.clear();
@@ -1963,6 +2139,13 @@ private:
       return;
     }
     std::cerr << "[runtime] websocket closed\n";
+    g_runtime_connected.store(false);
+    {
+      std::scoped_lock input_lock(g_input_window_mutex);
+      g_input_state_text = L"离线";
+    }
+    NotifyInputRuntimeStateChanged();
+    NotifyInputConnectionChanged();
     pending_closed_generation_.store(generation);
     StopCurrentAudio();
     audio_queue_condition_.notify_all();
@@ -1988,10 +2171,28 @@ private:
     if (closing_.load()) {
       return;
     }
+    auto turn_id = segment.envelope.turn_id.value_or("");
     if (segment.text.state == ag99::runtime::TextSlot::State::Present) {
       std::cout << "[assistant] " << segment.text.content << '\n';
+      std::scoped_lock lock(playback_mutex_);
+      latest_assistant_segment_ = AssistantSegment{
+          turn_id,
+          segment.envelope.message_id,
+          segment.text.content,
+          false};
+      {
+        std::scoped_lock input_lock(g_input_window_mutex);
+        g_input_preview_text = std::wstring(
+            segment.text.content.begin(), segment.text.content.end());
+      }
+      g_input_feedback_available.store(false);
+      g_input_feedback_approved.store(false);
+      {
+        std::scoped_lock input_lock(g_input_window_mutex);
+        g_input_state_text = L"播放中";
+      }
+      NotifyInputRuntimeStateChanged();
     }
-    auto turn_id = segment.envelope.turn_id.value_or("");
     const auto generation = connection_generation_.load();
     NativeSegmentClock clock;
     clock.turn_id = turn_id;
@@ -2226,6 +2427,8 @@ private:
   std::function<void(const std::string&, bool, const std::string&)>
       on_turn_finished_;
   std::function<void(const std::string&)> on_turn_interrupted_;
+  std::function<ag99::runtime::DesktopSettingsResult(
+      const ag99::runtime::DesktopSettingsQuery&)> on_desktop_settings_query_;
   ag99::runtime::RuntimeProtocolSession session_;
   std::mutex session_mutex_;
   std::mutex transport_mutex_;
@@ -2243,6 +2446,9 @@ private:
   std::atomic<bool> closing_{false};
   std::thread audio_worker_;
   std::atomic<std::uint64_t> next_turn_id_{1};
+  std::atomic<std::uint64_t> next_feedback_id_{1};
+  std::string last_input_turn_id_;
+  std::optional<AssistantSegment> latest_assistant_segment_;
   std::atomic<std::uint64_t> connection_generation_{0};
   std::atomic<std::uint64_t> pending_closed_generation_{0};
 };
@@ -2520,6 +2726,38 @@ public:
     std::cerr << "[motion] model sync received\n";
   }
 
+  ag99::runtime::DesktopSettingsResult HandleDesktopSettingsQuery(
+      const ag99::runtime::DesktopSettingsQuery& query) {
+    ag99::runtime::DesktopSettingsResult result{
+        query.request_id, query.key, std::nullopt, {}};
+    if (query.key != "live2d_physics_response_scale") {
+      result.error = "desktop_setting_unsupported";
+      return result;
+    }
+    std::scoped_lock lock(_motion_mutex);
+    if (query.action == "set") {
+      const auto parsed = ParseDesktopSettingNumber(query.value.value_or(""));
+      if (!parsed) {
+        result.error = "desktop_setting_value_invalid";
+        return result;
+      }
+      if (*parsed < 0.5 || *parsed > 2.0) {
+        result.error = "desktop_setting_value_out_of_range";
+        return result;
+      }
+      // Translate normalizeLive2dPresentationSettings; round, do not snap to step.
+      _physics_response_scale_setting = std::round(*parsed * 100.0) / 100.0;
+      _pending_physics_response_scale = _physics_response_scale_setting;
+    }
+    std::array<char, 32> value_text{};
+    const auto formatted = std::to_chars(
+        value_text.data(), value_text.data() + value_text.size(),
+        _physics_response_scale_setting);
+    result.entry = ag99::runtime::DesktopSettingsEntry{
+        std::string(value_text.data(), formatted.ptr), {}, 0.5, 2.0, 0.05};
+    return result;
+  }
+
   void QueueOutputSegment(
       ag99::runtime::OutputSegment segment,
       std::optional<NativeSegmentClock> clock = std::nullopt) {
@@ -2677,6 +2915,63 @@ public:
   }
 
 private:
+  static std::optional<double> ParseDesktopSettingNumber(
+      const std::string& input) {
+    // Translate parseFiniteNumber (String.trim + Number), including radix
+    // literals. C strtod alone would also accept JS-invalid hex exponents.
+    constexpr std::wstring_view whitespace =
+        L"\t\n\v\f\r \u00a0\u1680\u2000\u2001\u2002\u2003\u2004"
+        L"\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f"
+        L"\u205f\u3000\ufeff";
+    const auto wide = WidenUtf8(input);
+    const auto first = wide.find_first_not_of(whitespace);
+    if (first == std::wstring::npos) {
+      return std::nullopt;
+    }
+    const auto last = wide.find_last_not_of(whitespace);
+    std::string value;
+    value.reserve(last - first + 1);
+    for (auto index = first; index <= last; ++index) {
+      if (wide[index] > 0x7f) {
+        return std::nullopt;
+      }
+      value.push_back(static_cast<char>(wide[index]));
+    }
+    int radix = 0;
+    if (value.size() > 2 && value[0] == '0') {
+      if (value[1] == 'x' || value[1] == 'X') radix = 16;
+      if (value[1] == 'o' || value[1] == 'O') radix = 8;
+      if (value[1] == 'b' || value[1] == 'B') radix = 2;
+    }
+    if (radix != 0) {
+      double number = 0.0;
+      for (std::size_t index = 2; index < value.size(); ++index) {
+        const auto character = value[index];
+        const int digit = character >= '0' && character <= '9'
+            ? character - '0'
+            : character >= 'a' && character <= 'f'
+                ? character - 'a' + 10
+                : character >= 'A' && character <= 'F'
+                    ? character - 'A' + 10 : -1;
+        if (digit < 0 || digit >= radix) {
+          return std::nullopt;
+        }
+        number = number * radix + digit;
+      }
+      return std::isfinite(number)
+          ? std::optional<double>(number) : std::nullopt;
+    }
+    if (value.find_first_of("xXpP") != std::string::npos) {
+      return std::nullopt;
+    }
+    char* end = nullptr;
+    const auto number = std::strtod(value.c_str(), &end);
+    if (end != value.c_str() + value.size() || !std::isfinite(number)) {
+      return std::nullopt;
+    }
+    return number;
+  }
+
   void QueueMotionTerminalLocked(
       const NativeSegmentClock& clock,
       bool success,
@@ -3568,6 +3863,11 @@ private:
       _model->SetPhysicsResponseProtectedParameterIds(
           *_pending_physics_response_protected_parameter_ids);
       _pending_physics_response_protected_parameter_ids.reset();
+    }
+    if (_pending_physics_response_scale) {
+      _model->SetPhysicsResponseScale(
+          static_cast<csmFloat32>(*_pending_physics_response_scale));
+      _pending_physics_response_scale.reset();
     }
     if (_pending_parameter_plan) {
       const auto clock = _pending_parameter_clock.value_or(
@@ -4811,6 +5111,8 @@ private:
   std::uint64_t _connection_generation = 0;
   std::optional<std::unordered_set<std::string>>
       _pending_physics_response_protected_parameter_ids;
+  double _physics_response_scale_setting = 1.0;
+  std::optional<double> _pending_physics_response_scale;
   std::optional<std::string> _pending_thinking_turn_id;
   std::optional<InteractionSwayState> _interaction_sway;
   std::optional<InteractionGazeState> _interaction_gaze;
@@ -5054,25 +5356,16 @@ void SetClickThrough(HWND window, bool enabled) {
 // --- Text input window ---------------------------------------------------
 
 constexpr wchar_t kInputClassName[] = L"AG99liveTextInputWindow";
-constexpr wchar_t kInputTitle[] = L"AG99live 输入";
 constexpr UINT kInputSend = 2001;
+constexpr UINT kInputMicToggle = 2003;
+constexpr UINT kInputFeedback = 2004;
+constexpr UINT kInputInterrupt = 2005;
 constexpr int kInputControlId = 100;
+constexpr int kInputMessageId = 101;
+constexpr int kInputStatusId = 102;
 
-std::wstring WidenUtf8ForInput(std::string_view value) {
-  if (value.empty()) {
-    return {};
-  }
-  const int length = MultiByteToWideChar(
-      CP_UTF8, 0, value.data(), static_cast<int>(value.size()), nullptr, 0);
-  if (length <= 0) {
-    return {};
-  }
-  std::wstring result(static_cast<std::size_t>(length), L'\0');
-  MultiByteToWideChar(
-      CP_UTF8, 0, value.data(), static_cast<int>(value.size()), result.data(),
-      length);
-  return result;
-}
+HBRUSH g_input_background_brush = nullptr;
+HBRUSH g_input_edit_brush = nullptr;
 
 std::string NarrowUtf8ForInput(std::wstring_view value) {
   if (value.empty()) {
@@ -5091,9 +5384,64 @@ std::string NarrowUtf8ForInput(std::wstring_view value) {
   return result;
 }
 
+std::wstring TrimInputWhitespace(std::wstring value) {
+  const auto is_input_whitespace = [](wchar_t character) {
+    return character == L'\u0009'
+        || character == L'\u000a'
+        || character == L'\u000b'
+        || character == L'\u000c'
+        || character == L'\u000d'
+        || character == L'\u0020'
+        || character == L'\u00a0'
+        || character == L'\u1680'
+        || (character >= L'\u2000' && character <= L'\u200a')
+        || character == L'\u2028'
+        || character == L'\u2029'
+        || character == L'\u202f'
+        || character == L'\u205f'
+        || character == L'\u3000'
+        || character == L'\ufeff';
+  };
+  const auto first = std::find_if_not(
+      value.begin(), value.end(), is_input_whitespace);
+  if (first == value.end()) {
+    return {};
+  }
+  const auto last = std::find_if_not(
+      value.rbegin(), value.rend(), is_input_whitespace).base();
+  return std::wstring(first, last);
+}
+
 void SetInputStatus(HWND window, std::wstring_view text) {
-  if (const HWND status = GetDlgItem(window, kInputControlId + 1)) {
+  if (const HWND status = GetDlgItem(window, kInputStatusId)) {
     SetWindowTextW(status, std::wstring(text).c_str());
+  }
+}
+
+void SetInputPreview(HWND window, std::wstring_view text) {
+  if (const HWND message = GetDlgItem(window, kInputMessageId)) {
+    SetWindowTextW(message, std::wstring(text).c_str());
+  }
+}
+
+void SetInputConnectionLabels(HWND window) {
+  if (!window) {
+    return;
+  }
+  const bool connected = g_runtime_connected.load();
+  std::wstring preview;
+  std::wstring state;
+  {
+    std::scoped_lock lock(g_input_window_mutex);
+    preview = g_input_preview_text;
+    state = g_input_state_text;
+  }
+  SetInputPreview(window, connected ? preview : L"连接已关闭。");
+  SetInputStatus(window, connected ? state : L"离线");
+  if (const HWND feedback = GetDlgItem(window, kInputFeedback)) {
+    EnableWindow(feedback, connected && g_input_feedback_available.load()
+        && !g_input_feedback_approved.load());
+    InvalidateRect(feedback, nullptr, TRUE);
   }
 }
 
@@ -5111,6 +5459,7 @@ void SubmitInputText(HWND window) {
   const int copied = GetWindowTextW(
       edit, buffer.data(), static_cast<int>(buffer.size()));
   buffer.resize(copied > 0 ? static_cast<std::size_t>(copied) : 0);
+  buffer = TrimInputWhitespace(std::move(buffer));
   const std::string text = NarrowUtf8ForInput(buffer);
   if (text.empty()) {
     SetInputStatus(window, L"请输入文本");
@@ -5127,6 +5476,36 @@ void SubmitInputText(HWND window) {
   SetInputStatus(window, L"已发送");
 }
 
+LRESULT CALLBACK InputEditProc(
+    HWND edit, UINT message, WPARAM wparam, LPARAM lparam) {
+  if (message == WM_KEYDOWN && wparam == VK_RETURN) {
+    HIMC context = ImmGetContext(edit);
+    const bool composing = context != nullptr
+        && ImmGetCompositionStringW(context, GCS_COMPSTR, nullptr, 0) > 0;
+    if (context) {
+      ImmReleaseContext(edit, context);
+    }
+    if (composing) {
+      const auto previous = reinterpret_cast<WNDPROC>(
+          GetPropW(edit, L"AG99liveInputPreviousProc"));
+      return previous
+          ? CallWindowProcW(previous, edit, message, wparam, lparam)
+          : DefWindowProcW(edit, message, wparam, lparam);
+    }
+    if (const HWND parent = GetParent(edit)) {
+      SubmitInputText(parent);
+    }
+    return 0;
+  }
+
+  const auto previous = reinterpret_cast<WNDPROC>(
+      GetPropW(edit, L"AG99liveInputPreviousProc"));
+  if (previous) {
+    return CallWindowProcW(previous, edit, message, wparam, lparam);
+  }
+  return DefWindowProcW(edit, message, wparam, lparam);
+}
+
 LRESULT CALLBACK InputWindowProc(
     HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
   switch (message) {
@@ -5135,9 +5514,172 @@ LRESULT CALLBACK InputWindowProc(
         SubmitInputText(window);
         return 0;
       }
+      if (LOWORD(wparam) == kInputMicToggle) {
+        if (g_toggle_microphone) {
+          g_toggle_microphone();
+          SetInputStatus(
+              window,
+              g_microphone_running && g_microphone_running()
+                  ? L"麦克风已开启" : L"麦克风已关闭");
+        } else {
+          SetInputStatus(window, L"麦克风不可用");
+        }
+        return 0;
+      }
+      if (LOWORD(wparam) == kInputFeedback) {
+        const bool sent = g_approve_latest_segment && g_approve_latest_segment();
+        SetInputStatus(window, sent ? L"已赞同最近一条回复" : L"暂无可赞同的回复");
+        return 0;
+      }
+      if (LOWORD(wparam) == kInputInterrupt) {
+        const bool sent = g_interrupt_turn && g_interrupt_turn();
+        SetInputStatus(window, sent ? L"已打断当前回复" : L"当前没有可打断的回复");
+        return 0;
+      }
       break;
+    case WM_NCHITTEST: {
+      POINT point{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+      ScreenToClient(window, &point);
+      RECT drag_zone{0, 0, 420, 84};
+      return PtInRect(&drag_zone, point) ? HTCAPTION : HTCLIENT;
+    }
+    case WM_ERASEBKGND:
+      return 1;
+    case WM_PAINT: {
+      PAINTSTRUCT paint{};
+      const HDC dc = BeginPaint(window, &paint);
+      RECT client{};
+      GetClientRect(window, &client);
+      if (!g_input_background_brush) {
+        g_input_background_brush = CreateSolidBrush(RGB(8, 9, 12));
+      }
+      FillRect(dc, &client, g_input_background_brush);
+      HPEN border = CreatePen(PS_SOLID, 1, RGB(70, 74, 84));
+      HGDIOBJ previous_pen = SelectObject(dc, border);
+      HGDIOBJ previous_brush = SelectObject(dc, GetStockObject(NULL_BRUSH));
+      RoundRect(dc, 0, 0, client.right, client.bottom, 22, 22);
+      SelectObject(dc, previous_brush);
+      SelectObject(dc, previous_pen);
+      DeleteObject(border);
+      EndPaint(window, &paint);
+      return 0;
+    }
+    case WM_CTLCOLORSTATIC: {
+      const HDC dc = reinterpret_cast<HDC>(wparam);
+      SetTextColor(dc, RGB(232, 234, 240));
+      SetBkMode(dc, TRANSPARENT);
+      return reinterpret_cast<LRESULT>(g_input_background_brush);
+    }
+    case WM_CTLCOLOREDIT: {
+      const HDC dc = reinterpret_cast<HDC>(wparam);
+      SetTextColor(dc, RGB(238, 240, 246));
+      SetBkColor(dc, RGB(19, 21, 26));
+      if (!g_input_edit_brush) {
+        g_input_edit_brush = CreateSolidBrush(RGB(19, 21, 26));
+      }
+      return reinterpret_cast<LRESULT>(g_input_edit_brush);
+    }
+    case WM_DRAWITEM: {
+      const auto* item = reinterpret_cast<DRAWITEMSTRUCT*>(lparam);
+      if (!item || (item->CtlID != kInputSend
+                    && item->CtlID != kInputMicToggle
+                    && item->CtlID != kInputFeedback
+                    && item->CtlID != kInputInterrupt)) {
+        break;
+      }
+      const bool pressed = (item->itemState & ODS_SELECTED) != 0;
+      const bool disabled = (item->itemState & ODS_DISABLED) != 0;
+      const COLORREF fill = disabled ? RGB(20, 22, 27)
+          : (pressed ? RGB(45, 51, 64) : RGB(34, 37, 46));
+      HBRUSH button_brush = CreateSolidBrush(fill);
+      HPEN button_pen = CreatePen(PS_SOLID, 1, RGB(76, 82, 96));
+      HGDIOBJ previous_brush = SelectObject(item->hDC, button_brush);
+      HGDIOBJ previous_pen = SelectObject(item->hDC, button_pen);
+      RoundRect(
+          item->hDC,
+          item->rcItem.left,
+          item->rcItem.top,
+          item->rcItem.right,
+          item->rcItem.bottom,
+          10,
+          10);
+      SelectObject(item->hDC, previous_pen);
+      SelectObject(item->hDC, previous_brush);
+      DeleteObject(button_pen);
+      DeleteObject(button_brush);
+      const int center_x = (item->rcItem.left + item->rcItem.right) / 2;
+      const int center_y = (item->rcItem.top + item->rcItem.bottom) / 2;
+      HPEN icon_pen = CreatePen(PS_SOLID, 1,
+          disabled ? RGB(105, 108, 118) : RGB(232, 235, 242));
+      HGDIOBJ previous_icon_pen = SelectObject(item->hDC, icon_pen);
+      HGDIOBJ previous_icon_brush = SelectObject(
+          item->hDC, GetStockObject(NULL_BRUSH));
+      if (item->CtlID == kInputMicToggle) {
+        RoundRect(item->hDC, center_x - 4, center_y - 9,
+                  center_x + 4, center_y + 3, 5, 5);
+        Arc(item->hDC, center_x - 10, center_y - 2,
+            center_x + 10, center_y + 10, center_x + 10, center_y + 4,
+            center_x - 10, center_y + 4);
+        MoveToEx(item->hDC, center_x, center_y + 10, nullptr);
+        LineTo(item->hDC, center_x, center_y + 5);
+        MoveToEx(item->hDC, center_x - 4, center_y + 10, nullptr);
+        LineTo(item->hDC, center_x + 4, center_y + 10);
+      } else if (item->CtlID == kInputFeedback) {
+        MoveToEx(item->hDC, center_x - 8, center_y - 2, nullptr);
+        LineTo(item->hDC, center_x - 3, center_y - 2);
+        LineTo(item->hDC, center_x + 1, center_y - 9);
+        LineTo(item->hDC, center_x + 4, center_y - 8);
+        LineTo(item->hDC, center_x + 2, center_y - 2);
+        LineTo(item->hDC, center_x + 8, center_y - 2);
+        LineTo(item->hDC, center_x + 8, center_y + 7);
+        LineTo(item->hDC, center_x - 3, center_y + 7);
+        LineTo(item->hDC, center_x - 8, center_y + 7);
+        LineTo(item->hDC, center_x - 8, center_y - 2);
+      } else if (item->CtlID == kInputInterrupt) {
+        Rectangle(item->hDC, center_x - 5, center_y - 5,
+                  center_x + 5, center_y + 5);
+      } else if (item->CtlID == kInputSend) {
+        POINT plane[] = {
+            {center_x - 8, center_y - 1},
+            {center_x + 8, center_y - 8},
+            {center_x + 2, center_y + 8},
+            {center_x - 1, center_y + 2},
+            {center_x - 8, center_y - 1},
+        };
+        Polyline(item->hDC, plane, static_cast<int>(std::size(plane)));
+        MoveToEx(item->hDC, center_x - 1, center_y + 2, nullptr);
+        LineTo(item->hDC, center_x + 8, center_y - 8);
+      } else {
+        wchar_t text[64]{};
+        GetWindowTextW(item->hwndItem, text, static_cast<int>(std::size(text)));
+        SetBkMode(item->hDC, TRANSPARENT);
+        SetTextColor(item->hDC, RGB(232, 235, 242));
+        RECT text_rect = item->rcItem;
+        DrawTextW(item->hDC, text, -1, &text_rect,
+            DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+      }
+      SelectObject(item->hDC, previous_icon_brush);
+      SelectObject(item->hDC, previous_icon_pen);
+      DeleteObject(icon_pen);
+      return TRUE;
+    }
+    case kInputConnectionChanged:
+    case kInputRuntimeStateChanged:
+      SetInputConnectionLabels(window);
+      return 0;
     case WM_DESTROY:
-      g_input_window = nullptr;
+      {
+        std::scoped_lock lock(g_input_window_mutex);
+        g_input_window = nullptr;
+      }
+      if (g_input_background_brush) {
+        DeleteObject(g_input_background_brush);
+        g_input_background_brush = nullptr;
+      }
+      if (g_input_edit_brush) {
+        DeleteObject(g_input_edit_brush);
+        g_input_edit_brush = nullptr;
+      }
       return 0;
     default:
       break;
@@ -5146,10 +5688,15 @@ LRESULT CALLBACK InputWindowProc(
 }
 
 void ShowInputWindow(HINSTANCE instance) {
-  if (g_input_window) {
-    SetForegroundWindow(g_input_window);
+  HWND existing = nullptr;
+  {
+    std::scoped_lock lock(g_input_window_mutex);
+    existing = g_input_window;
+  }
+  if (existing) {
+    SetForegroundWindow(existing);
     SetWindowPos(
-        g_input_window, HWND_TOPMOST, 0, 0, 0, 0,
+        existing, HWND_TOPMOST, 0, 0, 0, 0,
         SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
     return;
   }
@@ -5163,68 +5710,126 @@ void ShowInputWindow(HINSTANCE instance) {
   window_class.lpszClassName = kInputClassName;
   RegisterClassExW(&window_class);
 
-  const int width = 460;
+  const int width = 420;
   const int height = 168;
-  const int x = GetSystemMetrics(SM_CXSCREEN) - width - 48;
-  const int y = 96;
+  const int x = GetSystemMetrics(SM_CXSCREEN) - width - 28;
+  const int y = GetSystemMetrics(SM_CYSCREEN) - height - 96;
   HWND window = CreateWindowExW(
-      WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
+      WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_LAYERED,
       kInputClassName,
-      kInputTitle,
-      WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_BORDER,
+      L"AG99live",
+      WS_POPUP,
       x, y, width, height, nullptr, nullptr, instance, nullptr);
   if (!window) {
     AG99_ERROR("input", "failed to create the input window");
     return;
   }
-  g_input_window = window;
+  {
+    std::scoped_lock lock(g_input_window_mutex);
+    g_input_window = window;
+  }
+  SetLayeredWindowAttributes(window, 0, 255, LWA_ALPHA);
+  SetWindowRgn(window, CreateRoundRectRgn(0, 0, width + 1, height + 1, 12, 12), TRUE);
+  g_input_background_brush = CreateSolidBrush(RGB(8, 9, 12));
+  g_input_edit_brush = CreateSolidBrush(RGB(19, 21, 26));
 
   const HFONT font = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
-  RECT client{};
-  GetClientRect(window, &client);
 
   const HWND label = CreateWindowExW(
-      0, L"STATIC", L"发送文本到 Adapter", WS_CHILD | WS_VISIBLE,
-      14, 12, client.right - 28, 20, window, nullptr, instance, nullptr);
+      0, L"STATIC", L"连接已关闭。", WS_CHILD | WS_VISIBLE,
+      12, 10, 396, 54, window,
+      reinterpret_cast<HMENU>(static_cast<UINT_PTR>(kInputMessageId)),
+      instance, nullptr);
   if (label) {
     SendMessageW(label, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+  }
+
+  const HWND status = CreateWindowExW(
+      0, L"STATIC", L"离线", WS_CHILD | WS_VISIBLE,
+      12, 76, 220, 20, window,
+      reinterpret_cast<HMENU>(static_cast<UINT_PTR>(kInputStatusId)),
+      instance, nullptr);
+  if (status) {
+    SendMessageW(status, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+  }
+
+  const HWND mic = CreateWindowExW(
+      0, L"BUTTON", L"麦", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
+      330, 72, 26, 26, window,
+      reinterpret_cast<HMENU>(static_cast<UINT_PTR>(kInputMicToggle)), instance,
+      nullptr);
+  if (mic) {
+    SendMessageW(mic, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+  }
+
+  const HWND feedback = CreateWindowExW(
+      0, L"BUTTON", L"赞", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
+      360, 72, 26, 26, window,
+      reinterpret_cast<HMENU>(static_cast<UINT_PTR>(kInputFeedback)), instance,
+      nullptr);
+  if (feedback) {
+    SendMessageW(feedback, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+  }
+
+  const HWND interrupt = CreateWindowExW(
+      0, L"BUTTON", L"■", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
+      390, 72, 26, 26, window,
+      reinterpret_cast<HMENU>(static_cast<UINT_PTR>(kInputInterrupt)), instance,
+      nullptr);
+  if (interrupt) {
+    SendMessageW(interrupt, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
   }
 
   const HWND edit = CreateWindowExW(
       WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP |
       ES_AUTOHSCROLL,
-      14, 38, client.right - 28, 26, window,
+      10, 106, 366, 32, window,
       reinterpret_cast<HMENU>(static_cast<UINT_PTR>(kInputControlId)), instance,
       nullptr);
   if (edit) {
     SendMessageW(edit, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
     SendMessageW(edit, EM_SETLIMITTEXT, 2000, 0);
+    SendMessageW(edit, EM_SETCUEBANNER, TRUE,
+        reinterpret_cast<LPARAM>(L"直接和桌宠说话"));
+    const auto previous = reinterpret_cast<WNDPROC>(SetWindowLongPtrW(
+        edit, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(&InputEditProc)));
+    if (previous) {
+      SetPropW(
+          edit, L"AG99liveInputPreviousProc",
+          reinterpret_cast<HANDLE>(previous));
+    }
   }
 
   const HWND button = CreateWindowExW(
-      0, L"BUTTON", L"发送", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON,
-      client.right - 108, 74, 92, 30, window,
+      0, L"BUTTON", L"➤", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
+      384, 106, 26, 32, window,
       reinterpret_cast<HMENU>(static_cast<UINT_PTR>(kInputSend)), instance,
       nullptr);
   if (button) {
     SendMessageW(button, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
   }
 
-  const HWND status = CreateWindowExW(
-      0, L"STATIC", L"点击“发送”提交文本", WS_CHILD | WS_VISIBLE,
-      14, 80, client.right - 130, 20, window,
-      reinterpret_cast<HMENU>(static_cast<UINT_PTR>(kInputControlId + 1)),
-      instance, nullptr);
-  if (status) {
-    SendMessageW(status, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
-  }
-
   ShowWindow(window, SW_SHOW);
   UpdateWindow(window);
+  SetInputConnectionLabels(window);
   if (edit) {
     SetFocus(edit);
   }
   AG99_INFO("input", "text input window opened");
+}
+
+void NotifyInputConnectionChanged() {
+  std::scoped_lock lock(g_input_window_mutex);
+  if (g_input_window) {
+    PostMessageW(g_input_window, kInputConnectionChanged, 0, 0);
+  }
+}
+
+void NotifyInputRuntimeStateChanged() {
+  std::scoped_lock lock(g_input_window_mutex);
+  if (g_input_window) {
+    PostMessageW(g_input_window, kInputRuntimeStateChanged, 0, 0);
+  }
 }
 
 HWND CreateWindowHandle(HINSTANCE instance, UINT width, UINT height) {
@@ -5358,6 +5963,9 @@ int Run(
         [&model](const std::string& turn_id) {
           model.CancelTurn(turn_id);
           model.ReleaseThinkingSway(turn_id);
+        },
+        [&model](const ag99::runtime::DesktopSettingsQuery& query) {
+          return model.HandleDesktopSettingsQuery(query);
         });
     g_send_text = [&runtime](std::string text) {
       if (!runtime.SendText(text)) {
@@ -5371,6 +5979,15 @@ int Run(
     };
     g_microphone_running = [&runtime] {
       return runtime.MicrophoneRunning();
+    };
+    g_reconnect_adapter = [&runtime] {
+      return runtime.Reconnect();
+    };
+    g_interrupt_turn = [&runtime] {
+      return runtime.InterruptCurrentTurn();
+    };
+    g_approve_latest_segment = [&runtime] {
+      return runtime.ApproveLatestAssistantSegment();
     };
     if (!model_json.empty() && !model.Load(
             model_json, width, height, surface.Device(), surface.Context())) {
@@ -5449,14 +6066,21 @@ int Run(
     g_send_text = {};
     g_toggle_microphone = {};
     g_microphone_running = {};
+    g_reconnect_adapter = {};
+    g_interrupt_turn = {};
+    g_approve_latest_segment = {};
   }
 
   StopCurrentAudio();
   StopCubism();
   surface.Shutdown();
-  if (g_input_window) {
-    DestroyWindow(g_input_window);
-    g_input_window = nullptr;
+  HWND input_window = nullptr;
+  {
+    std::scoped_lock lock(g_input_window_mutex);
+    input_window = g_input_window;
+  }
+  if (input_window) {
+    DestroyWindow(input_window);
   }
   DestroyWindow(window);
   UnregisterClassW(kInputClassName, instance);
