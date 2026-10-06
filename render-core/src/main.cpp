@@ -43,6 +43,7 @@
 #include "ag99/runtime/runtime_session.hpp"
 #include "ag99/runtime/winhttp_websocket.hpp"
 #include "ag99/audio/audio_source.hpp"
+#include "ag99/audio/speech_signal.hpp"
 #include "ag99/audio/wav_audio.hpp"
 #include "ag99/live2d/d3d11_composition_surface.hpp"
 #include "ag99/live2d/d3d11_renderer.hpp"
@@ -91,12 +92,7 @@ POINT g_drag_origin{};
 std::atomic<double> g_audio_end_seconds{0.0};
 std::atomic<double> g_audio_start_seconds{0.0};
 std::atomic<float> g_audio_level{0.0f};
-std::atomic<float> g_lip_sync_intensity{0.0f};
-std::atomic<float> g_speech_energy_input{0.0f};
-std::atomic<float> g_speech_head_envelope{0.0f};
-std::atomic<float> g_speech_body_envelope{0.0f};
-std::atomic<float> g_speech_emphasis_envelope{0.0f};
-std::atomic<bool> g_speech_voiced{false};
+ag99::audio::SpeechSignalRuntime g_speech_signal;
 std::atomic<float> g_drag_x{0.0f};
 std::atomic<float> g_drag_y{0.0f};
 std::atomic<std::uint64_t> g_audio_serial{0};
@@ -118,37 +114,6 @@ bool g_click_through = false;
 
 void NotifyInputConnectionChanged();
 void NotifyInputRuntimeStateChanged();
-
-constexpr float kSpeechHeadAttack = 10.0f;
-constexpr float kSpeechHeadRelease = 3.4f;
-constexpr float kSpeechBodyAttack = 5.5f;
-constexpr float kSpeechBodyRelease = 2.4f;
-constexpr float kSpeechHeadActivityFloor = 0.42f;
-constexpr float kSpeechHeadGainSpan = 1.32f;
-constexpr float kSpeechHeadGainMax = 1.68f;
-constexpr float kSpeechPitchGainMax = 1.25f;
-constexpr float kSpeechBodyActivityFloor = 0.34f;
-constexpr float kSpeechBodyGainSpan = 1.0f;
-constexpr float kSpeechBodyGainMax = 1.18f;
-constexpr float kSpeechVoicedEnter = 0.028f;
-constexpr float kSpeechVoicedExit = 0.012f;
-constexpr float kSpeechEmphasisRiseThreshold = 1.5f;
-constexpr float kSpeechEmphasisRiseGain = 0.09f;
-constexpr float kSpeechEmphasisAttack = 18.0f;
-constexpr float kSpeechEmphasisRelease = 7.0f;
-constexpr float kSpeechEmphasisMax = 0.42f;
-
-float AdvanceSpeechEnvelope(
-    float current,
-    float target,
-    float delta_seconds,
-    float attack_per_second,
-    float release_per_second) {
-  const auto rate = target > current ? attack_per_second : release_per_second;
-  const auto blend = 1.0f - std::exp(
-      -std::max(0.0f, delta_seconds) * rate);
-  return current + (target - current) * blend;
-}
 
 double NowSeconds() {
   return std::chrono::duration<double>(
@@ -174,13 +139,11 @@ std::string TrimAsciiText(std::string value) {
 void UpdateAudioLevel(float delta_seconds) {
   const double now = NowSeconds();
   const double remaining = g_audio_end_seconds.load() - now;
+  float level = 0.0f;
   if (remaining <= 0.0) {
     g_audio_level.store(0.0f);
-    g_lip_sync_intensity.store(0.0f);
-    g_speech_energy_input.store(0.0f);
   } else {
     const double elapsed = std::max(0.0, now - g_audio_start_seconds.load());
-    float level = 0.0f;
     {
       std::scoped_lock lock(g_audio_signal_mutex);
       const auto index = static_cast<std::size_t>(elapsed * 50.0);
@@ -189,83 +152,16 @@ void UpdateAudioLevel(float delta_seconds) {
       }
     }
     g_audio_level.store(level);
-    g_lip_sync_intensity.store(std::clamp((level - 0.012f) * 30.0f, 0.0f, 1.0f));
-    g_speech_energy_input.store(std::clamp((level - 0.008f) * 5.5f, 0.0f, 1.0f));
   }
-  const float speech_energy = g_speech_energy_input.load();
-  const bool was_voiced = g_speech_voiced.load();
-  const bool voiced = speech_energy >= (was_voiced
-      ? kSpeechVoicedExit : kSpeechVoicedEnter);
-  g_speech_voiced.store(voiced);
-  const float target_energy = voiced ? speech_energy : 0.0f;
-  const float previous_head = g_speech_head_envelope.load();
-  const float head = AdvanceSpeechEnvelope(
-      previous_head,
-      target_energy,
-      delta_seconds,
-      kSpeechHeadAttack,
-      kSpeechHeadRelease);
-  const float body = AdvanceSpeechEnvelope(
-      g_speech_body_envelope.load(),
-      target_energy,
-      delta_seconds,
-      kSpeechBodyAttack,
-      kSpeechBodyRelease);
-  const float positive_rise = delta_seconds > 0.0f
-      ? std::max(0.0f, head - previous_head) / delta_seconds
-      : 0.0f;
-  const float emphasis_target = voiced
-      ? std::clamp(
-          (positive_rise - kSpeechEmphasisRiseThreshold)
-              * kSpeechEmphasisRiseGain,
-          0.0f,
-          kSpeechEmphasisMax)
-      : 0.0f;
-  const float emphasis = AdvanceSpeechEnvelope(
-      g_speech_emphasis_envelope.load(),
-      emphasis_target,
-      delta_seconds,
-      kSpeechEmphasisAttack,
-      kSpeechEmphasisRelease);
-  g_speech_head_envelope.store(head < 0.001f ? 0.0f : head);
-  g_speech_body_envelope.store(body < 0.001f ? 0.0f : body);
-  g_speech_emphasis_envelope.store(emphasis < 0.001f ? 0.0f : emphasis);
+  g_speech_signal.Update(level, delta_seconds);
 }
 
 float GetSpeechAudioGain(std::string_view axis_id) {
-  const auto channel_name = axis_id.starts_with("voice_following.")
-      ? axis_id.substr(std::string_view("voice_following.").size())
-      : axis_id;
-  const auto separator = channel_name.find('|');
-  const auto channel = channel_name.substr(0, separator);
-  const bool body = channel.starts_with("body_");
-  const auto voiced = g_speech_voiced.load();
-  const auto activity_floor = voiced
-      ? (body ? kSpeechBodyActivityFloor : kSpeechHeadActivityFloor)
-      : 0.0f;
-  const auto raw_gain = body
-      ? std::min(
-          kSpeechBodyGainMax,
-          activity_floor
-              + g_speech_body_envelope.load() * kSpeechBodyGainSpan
-              + g_speech_emphasis_envelope.load() * 0.24f)
-      : std::min(
-          kSpeechHeadGainMax,
-          activity_floor
-              + g_speech_head_envelope.load() * kSpeechHeadGainSpan
-              + g_speech_emphasis_envelope.load() * 0.38f);
-  return channel.find("pitch") != std::string_view::npos
-      ? std::min(kSpeechPitchGainMax, raw_gain)
-      : raw_gain;
+  return g_speech_signal.AudioGain(axis_id);
 }
 
 void ResetSpeechSignal() {
-  g_speech_head_envelope.store(0.0f);
-  g_speech_body_envelope.store(0.0f);
-  g_speech_emphasis_envelope.store(0.0f);
-  g_speech_voiced.store(false);
-  g_lip_sync_intensity.store(0.0f);
-  g_speech_energy_input.store(0.0f);
+  g_speech_signal.Reset();
 }
 
 std::wstring WidenUtf8(std::string_view value) {
@@ -2379,7 +2275,7 @@ public:
     _model->ApplyDrag(g_drag_x.load(), g_drag_y.load());
     UpdateAudioLevel(delta_seconds);
     ApplyParameterFrame(
-        g_lip_sync_intensity.load(),
+        g_speech_signal.LipSyncIntensity(),
         g_audio_end_seconds.load() > NowSeconds(),
         delta_seconds);
     _model->UpdatePhysicsAndPose(delta_seconds);

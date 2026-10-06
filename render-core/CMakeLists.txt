@@ -59,6 +59,7 @@ add_executable(ag99-render-host WIN32
   src/main.cpp
   src/audio_source.cpp
   src/audio_wav.cpp
+  src/speech_signal.cpp
   src/tray_controller.cpp
   src/input_text.cpp
   src/input_overlay_state.cpp
