@@ -5366,6 +5366,9 @@ constexpr int kInputStatusId = 102;
 
 HBRUSH g_input_background_brush = nullptr;
 HBRUSH g_input_edit_brush = nullptr;
+HFONT g_input_message_font = nullptr;
+HFONT g_input_status_font = nullptr;
+HFONT g_input_input_font = nullptr;
 
 std::string NarrowUtf8ForInput(std::wstring_view value) {
   if (value.empty()) {
@@ -5554,10 +5557,10 @@ LRESULT CALLBACK InputWindowProc(
         g_input_background_brush = CreateSolidBrush(RGB(8, 9, 12));
       }
       FillRect(dc, &client, g_input_background_brush);
-      HPEN border = CreatePen(PS_SOLID, 1, RGB(70, 74, 84));
+      HPEN border = CreatePen(PS_SOLID, 1, RGB(52, 54, 62));
       HGDIOBJ previous_pen = SelectObject(dc, border);
       HGDIOBJ previous_brush = SelectObject(dc, GetStockObject(NULL_BRUSH));
-      RoundRect(dc, 0, 0, client.right, client.bottom, 22, 22);
+      RoundRect(dc, 0, 0, client.right, client.bottom, 12, 12);
       SelectObject(dc, previous_brush);
       SelectObject(dc, previous_pen);
       DeleteObject(border);
@@ -5578,6 +5581,28 @@ LRESULT CALLBACK InputWindowProc(
         g_input_edit_brush = CreateSolidBrush(RGB(19, 21, 26));
       }
       return reinterpret_cast<LRESULT>(g_input_edit_brush);
+    }
+    case WM_NCPAINT: {
+      // The TS composer uses a soft 1px border rather than the native
+      // client-edge frame. Paint the control border ourselves.
+      const HWND edit = GetDlgItem(window, kInputControlId);
+      if (edit) {
+        HDC dc = GetWindowDC(edit);
+        if (dc) {
+          RECT rect{};
+          GetWindowRect(edit, &rect);
+          OffsetRect(&rect, -rect.left, -rect.top);
+          HPEN pen = CreatePen(PS_SOLID, 1, RGB(52, 54, 62));
+          HGDIOBJ old_pen = SelectObject(dc, pen);
+          HGDIOBJ old_brush = SelectObject(dc, GetStockObject(NULL_BRUSH));
+          RoundRect(dc, 0, 0, rect.right, rect.bottom, 8, 8);
+          SelectObject(dc, old_brush);
+          SelectObject(dc, old_pen);
+          DeleteObject(pen);
+          ReleaseDC(edit, dc);
+        }
+      }
+      return 0;
     }
     case WM_DRAWITEM: {
       const auto* item = reinterpret_cast<DRAWITEMSTRUCT*>(lparam);
@@ -5680,6 +5705,18 @@ LRESULT CALLBACK InputWindowProc(
         DeleteObject(g_input_edit_brush);
         g_input_edit_brush = nullptr;
       }
+      if (g_input_message_font) {
+        DeleteObject(g_input_message_font);
+        g_input_message_font = nullptr;
+      }
+      if (g_input_status_font) {
+        DeleteObject(g_input_status_font);
+        g_input_status_font = nullptr;
+      }
+      if (g_input_input_font) {
+        DeleteObject(g_input_input_font);
+        g_input_input_font = nullptr;
+      }
       return 0;
     default:
       break;
@@ -5734,23 +5771,39 @@ void ShowInputWindow(HINSTANCE instance) {
   g_input_edit_brush = CreateSolidBrush(RGB(19, 21, 26));
 
   const HFONT font = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+  LOGFONTW message_logfont{};
+  GetObjectW(font, sizeof(message_logfont), &message_logfont);
+  HDC window_dc = GetDC(window);
+  const int dpi = window_dc ? GetDeviceCaps(window_dc, LOGPIXELSY) : 96;
+  if (window_dc) {
+    ReleaseDC(window, window_dc);
+  }
+  message_logfont.lfHeight = -MulDiv(14, dpi, 72);
+  message_logfont.lfWeight = FW_NORMAL;
+  g_input_message_font = CreateFontIndirectW(&message_logfont);
+  message_logfont.lfHeight = -MulDiv(12, dpi, 72);
+  g_input_status_font = CreateFontIndirectW(&message_logfont);
+  message_logfont.lfHeight = -MulDiv(14, dpi, 72);
+  g_input_input_font = CreateFontIndirectW(&message_logfont);
 
   const HWND label = CreateWindowExW(
       0, L"STATIC", L"连接已关闭。", WS_CHILD | WS_VISIBLE,
-      12, 10, 396, 54, window,
+      12, 16, 396, 52, window,
       reinterpret_cast<HMENU>(static_cast<UINT_PTR>(kInputMessageId)),
       instance, nullptr);
   if (label) {
-    SendMessageW(label, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+    SendMessageW(label, WM_SETFONT,
+        reinterpret_cast<WPARAM>(g_input_message_font ? g_input_message_font : font), TRUE);
   }
 
   const HWND status = CreateWindowExW(
       0, L"STATIC", L"离线", WS_CHILD | WS_VISIBLE,
-      12, 76, 220, 20, window,
+      12, 78, 260, 20, window,
       reinterpret_cast<HMENU>(static_cast<UINT_PTR>(kInputStatusId)),
       instance, nullptr);
   if (status) {
-    SendMessageW(status, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+    SendMessageW(status, WM_SETFONT,
+        reinterpret_cast<WPARAM>(g_input_status_font ? g_input_status_font : font), TRUE);
   }
 
   const HWND mic = CreateWindowExW(
@@ -5783,11 +5836,12 @@ void ShowInputWindow(HINSTANCE instance) {
   const HWND edit = CreateWindowExW(
       WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP |
       ES_AUTOHSCROLL,
-      10, 106, 366, 32, window,
+      10, 108, 366, 32, window,
       reinterpret_cast<HMENU>(static_cast<UINT_PTR>(kInputControlId)), instance,
       nullptr);
   if (edit) {
-    SendMessageW(edit, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+    SendMessageW(edit, WM_SETFONT,
+        reinterpret_cast<WPARAM>(g_input_input_font ? g_input_input_font : font), TRUE);
     SendMessageW(edit, EM_SETLIMITTEXT, 2000, 0);
     SendMessageW(edit, EM_SETCUEBANNER, TRUE,
         reinterpret_cast<LPARAM>(L"直接和桌宠说话"));
@@ -5802,7 +5856,7 @@ void ShowInputWindow(HINSTANCE instance) {
 
   const HWND button = CreateWindowExW(
       0, L"BUTTON", L"➤", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-      384, 106, 26, 32, window,
+      384, 108, 26, 32, window,
       reinterpret_cast<HMENU>(static_cast<UINT_PTR>(kInputSend)), instance,
       nullptr);
   if (button) {
