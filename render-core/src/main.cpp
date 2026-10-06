@@ -51,6 +51,7 @@
 #include "ag99/platform/input_overlay_paint.hpp"
 #include "ag99/platform/input_overlay_button_paint.hpp"
 #include "ag99/platform/input_overlay_controls.hpp"
+#include "ag99/platform/input_overlay_view.hpp"
 #include <CubismFramework.hpp>
 #include <CubismModelSettingJson.hpp>
 #include <Effect/CubismBreath.hpp>
@@ -5338,31 +5339,24 @@ HFONT g_input_status_font = nullptr;
 HFONT g_input_input_font = nullptr;
 
 void SetInputStatus(HWND window, std::wstring_view text) {
-  if (const HWND status = GetDlgItem(window, kInputStatusId)) {
-    SetWindowTextW(status, std::wstring(text).c_str());
-  }
+  ag99::platform::SetInputOverlayStatus(window, kInputStatusId, text);
 }
 
 void SetInputPreview(HWND window, std::wstring_view text) {
-  if (const HWND message = GetDlgItem(window, kInputMessageId)) {
-    SetWindowTextW(message, std::wstring(text).c_str());
-  }
+  ag99::platform::SetInputOverlayPreview(window, kInputMessageId, text);
 }
 
 void SetInputConnectionLabels(HWND window) {
   if (!window) {
     return;
   }
-  const bool connected = g_runtime_connected.load();
-  const auto snapshot = g_input_state.Snapshot();
-  SetInputPreview(
-      window, connected ? snapshot.preview_text : L"连接已关闭。");
-  SetInputStatus(window, connected ? snapshot.status_text : L"离线");
-  if (const HWND feedback = GetDlgItem(window, kInputFeedback)) {
-    EnableWindow(feedback, connected && snapshot.feedback_available
-        && !snapshot.feedback_approved);
-    InvalidateRect(feedback, nullptr, TRUE);
-  }
+  const ag99::platform::InputOverlayViewIds ids{
+      kInputMessageId,
+      kInputStatusId,
+      kInputFeedback,
+  };
+  ag99::platform::ApplyInputOverlaySnapshot(
+      window, g_runtime_connected.load(), g_input_state.Snapshot(), ids);
 }
 
 void SubmitInputText(HWND window) {
