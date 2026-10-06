@@ -50,6 +50,7 @@
 #include "ag99/platform/input_overlay_state.hpp"
 #include "ag99/platform/input_overlay_paint.hpp"
 #include "ag99/platform/input_overlay_button_paint.hpp"
+#include "ag99/platform/input_overlay_controls.hpp"
 #include <CubismFramework.hpp>
 #include <CubismModelSettingJson.hpp>
 #include <Effect/CubismBreath.hpp>
@@ -5608,88 +5609,33 @@ void ShowInputWindow(HINSTANCE instance) {
   message_logfont.lfHeight = -MulDiv(14, dpi, 72);
   g_input_input_font = CreateFontIndirectW(&message_logfont);
 
-  const HWND label = CreateWindowExW(
-      0, L"STATIC", L"连接已关闭。", WS_CHILD | WS_VISIBLE,
-      12, 16, 396, 52, window,
-      reinterpret_cast<HMENU>(static_cast<UINT_PTR>(kInputMessageId)),
-      instance, nullptr);
-  if (label) {
-    SendMessageW(label, WM_SETFONT,
-        reinterpret_cast<WPARAM>(g_input_message_font ? g_input_message_font : font), TRUE);
-  }
-
-  const HWND status = CreateWindowExW(
-      0, L"STATIC", L"离线", WS_CHILD | WS_VISIBLE,
-      12, 78, 260, 20, window,
-      reinterpret_cast<HMENU>(static_cast<UINT_PTR>(kInputStatusId)),
-      instance, nullptr);
-  if (status) {
-    SendMessageW(status, WM_SETFONT,
-        reinterpret_cast<WPARAM>(g_input_status_font ? g_input_status_font : font), TRUE);
-  }
-
-  const HWND mic = CreateWindowExW(
-      0, L"BUTTON", L"麦", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-      330, 72, 26, 26, window,
-      reinterpret_cast<HMENU>(static_cast<UINT_PTR>(kInputMicToggle)), instance,
-      nullptr);
-  if (mic) {
-    SendMessageW(mic, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
-  }
-
-  const HWND feedback = CreateWindowExW(
-      0, L"BUTTON", L"赞", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-      360, 72, 26, 26, window,
-      reinterpret_cast<HMENU>(static_cast<UINT_PTR>(kInputFeedback)), instance,
-      nullptr);
-  if (feedback) {
-    SendMessageW(feedback, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
-  }
-
-  const HWND interrupt = CreateWindowExW(
-      0, L"BUTTON", L"■", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-      390, 72, 26, 26, window,
-      reinterpret_cast<HMENU>(static_cast<UINT_PTR>(kInputInterrupt)), instance,
-      nullptr);
-  if (interrupt) {
-    SendMessageW(interrupt, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
-  }
-
-  const HWND edit = CreateWindowExW(
-      WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP |
-      ES_AUTOHSCROLL,
-      10, 108, 366, 32, window,
-      reinterpret_cast<HMENU>(static_cast<UINT_PTR>(kInputControlId)), instance,
-      nullptr);
-  if (edit) {
-    SendMessageW(edit, WM_SETFONT,
-        reinterpret_cast<WPARAM>(g_input_input_font ? g_input_input_font : font), TRUE);
-    SendMessageW(edit, EM_SETLIMITTEXT, 2000, 0);
-    SendMessageW(edit, EM_SETCUEBANNER, TRUE,
-        reinterpret_cast<LPARAM>(L"直接和桌宠说话"));
-    const auto previous = reinterpret_cast<WNDPROC>(SetWindowLongPtrW(
-        edit, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(&InputEditProc)));
-    if (previous) {
-      SetPropW(
-          edit, L"AG99liveInputPreviousProc",
-          reinterpret_cast<HANDLE>(previous));
-    }
-  }
-
-  const HWND button = CreateWindowExW(
-      0, L"BUTTON", L"➤", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-      384, 108, 26, 32, window,
-      reinterpret_cast<HMENU>(static_cast<UINT_PTR>(kInputSend)), instance,
-      nullptr);
-  if (button) {
-    SendMessageW(button, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
-  }
+  const ag99::platform::InputOverlayControlIds control_ids{
+      kInputControlId,
+      kInputMessageId,
+      kInputStatusId,
+      static_cast<int>(kInputMicToggle),
+      static_cast<int>(kInputFeedback),
+      static_cast<int>(kInputInterrupt),
+      static_cast<int>(kInputSend),
+  };
+  const ag99::platform::InputOverlayControlFonts control_fonts{
+      font,
+      g_input_message_font,
+      g_input_status_font,
+      g_input_input_font,
+  };
+  const auto controls = ag99::platform::CreateInputOverlayControls(
+      window,
+      instance,
+      control_ids,
+      control_fonts,
+      &InputEditProc);
 
   ShowWindow(window, SW_SHOW);
   UpdateWindow(window);
   SetInputConnectionLabels(window);
-  if (edit) {
-    SetFocus(edit);
+  if (controls.input) {
+    SetFocus(controls.input);
   }
   AG99_INFO("input", "text input window opened");
 }

@@ -62,6 +62,7 @@ add_executable(ag99-render-host WIN32
   src/input_overlay_state.cpp
   src/input_overlay_paint.cpp
   src/input_overlay_button_paint.cpp
+  src/input_overlay_controls.cpp
 )
 
 add_subdirectory("${AG99_RUNTIME_ROOT}"
