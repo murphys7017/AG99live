@@ -46,6 +46,7 @@
 #include "ag99/live2d/d3d11_renderer.hpp"
 #include "ag99/live2d/log.hpp"
 #include "ag99/platform/tray_controller.hpp"
+#include "ag99/platform/input_text.hpp"
 #include <CubismFramework.hpp>
 #include <CubismModelSettingJson.hpp>
 #include <Effect/CubismBreath.hpp>
@@ -5359,51 +5360,6 @@ HFONT g_input_message_font = nullptr;
 HFONT g_input_status_font = nullptr;
 HFONT g_input_input_font = nullptr;
 
-std::string NarrowUtf8ForInput(std::wstring_view value) {
-  if (value.empty()) {
-    return {};
-  }
-  const int length = WideCharToMultiByte(
-      CP_UTF8, 0, value.data(), static_cast<int>(value.size()), nullptr, 0,
-      nullptr, nullptr);
-  if (length <= 0) {
-    return {};
-  }
-  std::string result(static_cast<std::size_t>(length), '\0');
-  WideCharToMultiByte(
-      CP_UTF8, 0, value.data(), static_cast<int>(value.size()), result.data(),
-      length, nullptr, nullptr);
-  return result;
-}
-
-std::wstring TrimInputWhitespace(std::wstring value) {
-  const auto is_input_whitespace = [](wchar_t character) {
-    return character == L'\u0009'
-        || character == L'\u000a'
-        || character == L'\u000b'
-        || character == L'\u000c'
-        || character == L'\u000d'
-        || character == L'\u0020'
-        || character == L'\u00a0'
-        || character == L'\u1680'
-        || (character >= L'\u2000' && character <= L'\u200a')
-        || character == L'\u2028'
-        || character == L'\u2029'
-        || character == L'\u202f'
-        || character == L'\u205f'
-        || character == L'\u3000'
-        || character == L'\ufeff';
-  };
-  const auto first = std::find_if_not(
-      value.begin(), value.end(), is_input_whitespace);
-  if (first == value.end()) {
-    return {};
-  }
-  const auto last = std::find_if_not(
-      value.rbegin(), value.rend(), is_input_whitespace).base();
-  return std::wstring(first, last);
-}
-
 void SetInputStatus(HWND window, std::wstring_view text) {
   if (const HWND status = GetDlgItem(window, kInputStatusId)) {
     SetWindowTextW(status, std::wstring(text).c_str());
@@ -5451,8 +5407,8 @@ void SubmitInputText(HWND window) {
   const int copied = GetWindowTextW(
       edit, buffer.data(), static_cast<int>(buffer.size()));
   buffer.resize(copied > 0 ? static_cast<std::size_t>(copied) : 0);
-  buffer = TrimInputWhitespace(std::move(buffer));
-  const std::string text = NarrowUtf8ForInput(buffer);
+  buffer = ag99::platform::TrimInputText(std::move(buffer));
+  const std::string text = ag99::platform::InputTextToUtf8(buffer);
   if (text.empty()) {
     SetInputStatus(window, L"请输入文本");
     return;
