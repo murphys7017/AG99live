@@ -6,6 +6,14 @@ import type {
   ProviderOption,
 } from "./configSchema";
 
+const SECTION_GROUPS: Record<string, string> = {
+  general: "基础与会话",
+  live2d_input: "模型与输入",
+  independent_motion: "动作生成",
+  performance_curve: "动作节奏",
+  vad: "语音输入",
+};
+
 const props = defineProps<{
   sections: ConfigSection[];
   values: ConfigValues;
@@ -96,7 +104,7 @@ function onInput(field: ConfigField, sectionKey: string, event: Event): void {
     <section v-for="section in sections" :key="section.key" class="web-control-settings-group">
       <header>
         <h2>{{ section.label }}</h2>
-        <span>{{ section.key.toUpperCase() }}</span>
+        <span>{{ SECTION_GROUPS[section.key] ?? section.key.toUpperCase() }}</span>
       </header>
       <p class="web-control-settings-group__description">{{ section.description }}</p>
 

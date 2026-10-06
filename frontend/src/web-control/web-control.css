@@ -292,6 +292,66 @@
   font-size: 10px;
 }
 
+.web-control-settings-subgroup {
+  display: grid;
+  gap: 14px;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid #30383a;
+}
+
+.web-control-settings-subgroup:first-of-type {
+  margin-top: 4px;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.web-control-settings-subgroup__header {
+  display: flex;
+  list-style: none;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  cursor: pointer;
+}
+
+.web-control-settings-subgroup__header::-webkit-details-marker {
+  display: none;
+}
+
+.web-control-settings-subgroup__header::after {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: #90a69c;
+  content: "＋";
+  font-size: 15px;
+  line-height: 1;
+}
+
+.web-control-settings-subgroup[open] .web-control-settings-subgroup__header::after {
+  content: "−";
+}
+
+.web-control-settings-subgroup__header h3 {
+  margin: 0;
+  color: #e2ebe7;
+  font-size: 13px;
+}
+
+.web-control-settings-subgroup__header p {
+  max-width: 62ch;
+  margin: 5px 0 0;
+  color: #95a19e;
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.web-control-settings-subgroup__header > span {
+  flex: 0 0 auto;
+  color: #90a69c;
+  font-size: 10px;
+}
+
 .web-control-settings-group label {
   display: grid;
   gap: 6px;
