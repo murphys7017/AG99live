@@ -31,6 +31,10 @@ from ...motion.output_sanitizer import (
     contains_hidden_output_markup,
     sanitize_assistant_output_text,
 )
+from .independent import (
+    IndependentMotionResult,
+    take_motion_result_for_turn,
+)
 
 
 @dataclass(slots=True)
@@ -92,6 +96,18 @@ class AG99liveMotionResultContributor:
         speech_cues = _take_pending_speech_cues(event)
 
         attempt = await _schedule_motion_from_interaction_result(event, view)
+        bundle = _resolve_motion_runtime_bundle(event)
+        logger.info(
+            "WIRING motion.contributor phase=%s independent_enabled=%s "
+            "attempt_present=%s speech_cue_count=%s",
+            _resolve_result_phase(view),
+            bool(
+                bundle is not None
+                and getattr(bundle.runtime_state, "independent_motion_enabled", False)
+            ),
+            attempt is not None,
+            len(speech_cues),
+        )
         if attempt is None and not speech_cues:
             return None
 
@@ -111,6 +127,17 @@ class AG99liveMotionResultContributor:
                 }
             )
             _defer_optional_performance_curve_request(event, attempt=attempt)
+        logger.info(
+            "WIRING motion.contributor_result phase=%s "
+            "scheduled=%s payload_present=%s source=%s reason=%s "
+            "client_object_count=%s",
+            attempt.phase if attempt is not None else _resolve_result_phase(view),
+            attempt.scheduled if attempt is not None else False,
+            bool(attempt is not None and attempt.motion_payload is not None),
+            attempt.source if attempt is not None else "<none>",
+            attempt.reason if attempt is not None else "speech_cues_only",
+            len(client_objects),
+        )
         platform_extras = {}
         if speech_cues:
             platform_extras["ag99live_speech_cues"] = speech_cues
@@ -212,6 +239,17 @@ async def _schedule_motion_from_interaction_result(
     assistant_text = _extract_assistant_text(view)
     identity = _resolve_frontend_identity_snapshot(event)
     reply_plan = _resolve_interaction_reply_plan_snapshot(event, view)
+
+    if bool(getattr(bundle.runtime_state, "independent_motion_enabled", False)):
+        return await _schedule_motion_from_independent_provider(
+            event,
+            view,
+            bundle=bundle,
+            phase=phase,
+            assistant_text=assistant_text,
+            identity=identity,
+            reply_plan=reply_plan,
+        )
 
     motion_payload, motion_reason = _resolve_persona_effect_motion_payload_with_reason(
         event, bundle.runtime_state, view=view
@@ -333,6 +371,174 @@ async def _schedule_motion_from_interaction_result(
         assistant_text=assistant_text,
         motion_resolution_reason=motion_reason,
     )
+
+async def _schedule_motion_from_independent_provider(
+    event: Any,
+    view: Any,
+    *,
+    bundle: _MotionRuntimeBundle,
+    phase: str,
+    assistant_text: str,
+    identity: _FrontendIdentitySnapshot,
+    reply_plan: _InteractionReplyPlanSnapshot | None,
+) -> _MotionScheduleAttempt:
+    logger.info(
+        "WIRING independent_motion.schedule_started phase=%s turn_id=%s "
+        "assistant_text_len=%s",
+        phase,
+        identity.event_frontend_turn_id or "<missing>",
+        len(assistant_text),
+    )
+    policy = _resolve_motion_schedule_policy(
+        event,
+        phase=phase,
+        reply_plan=reply_plan,
+    )
+    common = {
+        "phase": phase,
+        "scheduled_frontend_turn_id": identity.event_frontend_turn_id,
+        "event_frontend_turn_id": identity.event_frontend_turn_id,
+        "reply_plan_route_mode": reply_plan.route_mode if reply_plan is not None else None,
+        "reply_plan_should_emit_immediate_reply": (
+            reply_plan.should_emit_immediate_reply if reply_plan is not None else None
+        ),
+        "reply_plan_source": reply_plan.source if reply_plan is not None else None,
+        "assistant_text": assistant_text,
+    }
+    if not assistant_text:
+        return _MotionScheduleAttempt(
+            **common,
+            source=None,
+            scheduled=False,
+            reason="assistant_text_empty",
+            motion_resolution_reason="independent_provider_response_text_missing",
+        )
+    if not policy.should_schedule or policy.source is None:
+        return _MotionScheduleAttempt(
+            **common,
+            source=None,
+            scheduled=False,
+            reason=policy.reason,
+            motion_resolution_reason=policy.reason,
+        )
+    cache = getattr(bundle.runtime_state, "independent_motion_result_cache", None)
+    cache_entries_before = (
+        len(cache.get(str(_call_event_method(event, "get_extra", "_turn_id", "") or ""), []))
+        if isinstance(cache, dict)
+        else 0
+    )
+    result = take_motion_result_for_turn(
+        bundle.runtime_state,
+        turn_id=str(_call_event_method(event, "get_extra", "_turn_id", "") or ""),
+        assistant_text=assistant_text,
+    )
+    logger.info(
+        "WIRING independent_motion.cache_lookup phase=%s turn_id=%s hit=%s "
+        "entries_before=%s requested_text_len=%s",
+        phase,
+        identity.event_frontend_turn_id or "<missing>",
+        isinstance(result, IndependentMotionResult),
+        cache_entries_before,
+        len(assistant_text),
+    )
+    motion_payload = (
+        result.motion_payload if isinstance(result, IndependentMotionResult) else None
+    )
+    motion_reason = (
+        result.reason
+        if isinstance(result, IndependentMotionResult)
+        else "independent_result_missing"
+    )
+    _record_independent_motion_result(
+        bundle,
+        view=view,
+        identity=identity,
+        phase=phase,
+        assistant_text=assistant_text,
+        motion_payload=motion_payload,
+        motion_reason=motion_reason,
+        image_count=result.image_count if isinstance(result, IndependentMotionResult) else 0,
+    )
+    if motion_payload is None:
+        logger.warning(
+            "WIRING independent_motion.not_scheduled phase=%s "
+            "reason=motion_payload_missing turn_id=%s result_reason=%s",
+            phase,
+            identity.event_frontend_turn_id or "<missing>",
+            motion_reason,
+        )
+        return _MotionScheduleAttempt(
+            **common,
+            source="independent_provider",
+            scheduled=False,
+            reason="motion_payload_missing",
+            motion_resolution_reason=motion_reason,
+        )
+
+    _call_event_method(event, "set_extra", "ag99live_split_motion_scheduled", True)
+    logger.info(
+        "WIRING independent_motion.schedule_succeeded phase=%s turn_id=%s "
+        "source=independent_provider payload_present=true reason=%s",
+        phase,
+        identity.event_frontend_turn_id or "<missing>",
+        motion_reason,
+    )
+    return _MotionScheduleAttempt(
+        **common,
+        source="independent_provider",
+        scheduled=True,
+        reason="independent_provider_motion_client_object",
+        motion_payload=motion_payload,
+        motion_resolution_reason=motion_reason,
+    )
+
+
+def _record_independent_motion_result(
+    bundle: _MotionRuntimeBundle,
+    *,
+    view: Any,
+    identity: _FrontendIdentitySnapshot,
+    phase: str,
+    assistant_text: str,
+    motion_payload: dict[str, Any] | None,
+    motion_reason: str,
+    image_count: int,
+) -> None:
+    profile = None
+    try:
+        profile = resolve_selected_semantic_axis_profile(runtime_state=bundle.runtime_state)
+    except Exception:  # noqa: BLE001
+        logger.exception("MotionLab independent motion profile resolution failed")
+    record_motion_observation(
+        getattr(bundle.runtime_state, "motion_lab_recorder", None),
+        conversation_uid=identity.event_frontend_turn_id,
+        turn_id=identity.event_frontend_turn_id,
+        frontend_turn_id=identity.event_frontend_turn_id,
+        source_route="independent_provider",
+        phase=phase,
+        model_name=str((profile or {}).get("model_id") or "").strip(),
+        profile_id=str((profile or {}).get("profile_id") or "").strip(),
+        profile_revision=(profile or {}).get("revision"),
+        assistant_text=assistant_text,
+        event_type="motion.intent_resolved",
+        payload_kind=(
+            str(motion_payload.get("schema_version") or "").strip()
+            if isinstance(motion_payload, dict)
+            else ""
+        ),
+        raw={
+            "motion_payload": motion_payload,
+            "motion_reason": motion_reason,
+            "image_count": image_count,
+            "provider_id": getattr(
+                bundle.runtime_state,
+                "independent_motion_provider_id",
+                "",
+            ),
+            "view_metadata": _thaw_snapshot_value(getattr(view, "metadata", None)),
+        },
+    )
+
 
 def _log_persona_effect_motion_resolution(
     event: Any,

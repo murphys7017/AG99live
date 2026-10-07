@@ -106,7 +106,6 @@ def _build_ag99live_motion_effect_parameters(event: Any) -> dict[str, Any]:
         "properties": axis_properties,
         "additionalProperties": False,
         "minProperties": 1,
-        "maxProperties": min(6, len(axis_properties)),
     }
     expression_resource_ids = _resource_ids_for_schema(
         bundle.runtime_state,
@@ -230,7 +229,10 @@ def _resource_ids_for_schema(runtime_state: Any, *, resource_type: str) -> list[
 
 
 def _is_ag99live_motion_effect_event(event: Any) -> bool:
-    return _resolve_motion_runtime_bundle(event) is not None
+    bundle = _resolve_motion_runtime_bundle(event)
+    return bundle is not None and not bool(
+        getattr(bundle.runtime_state, "independent_motion_enabled", False)
+    )
 
 
 def _resolve_persona_effect_motion_payload_with_reason(

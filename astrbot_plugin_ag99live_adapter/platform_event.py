@@ -39,6 +39,24 @@ class OLVPetPlatformEvent(AstrMessageEvent):
     ):
         super().__init__(message_str, message_obj, platform_meta, session_id)
         self.adapter = adapter
+        runtime_state = getattr(adapter, "runtime_state", None)
+        if bool(getattr(runtime_state, "independent_motion_enabled", False)):
+            self.set_extra(
+                "_interaction_core_bypass_requested",
+                "ag99live_independent_motion",
+            )
+            logger.info(
+                "WIRING interaction.core_bypass_requested "
+                "reason=ag99live_independent_motion mode=%s provider=%s",
+                (
+                    "parallel"
+                    if bool(
+                        getattr(runtime_state, "independent_motion_parallel", False)
+                    )
+                    else "serial"
+                ),
+                getattr(runtime_state, "independent_motion_provider_id", "<missing>"),
+            )
         self._standard_output_platform_extras = {
             "logical_message_id": "standard_reply",
         }

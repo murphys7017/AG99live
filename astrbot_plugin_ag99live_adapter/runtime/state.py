@@ -84,6 +84,11 @@ class RuntimeState:
 
         self.performance_curve_provider_id = ""
         self.enable_performance_curve = False
+        self.independent_motion_enabled = False
+        self.independent_motion_provider_id = ""
+        self.independent_motion_history_turns = 6
+        self.independent_motion_parallel = False
+        self.independent_motion_result_cache: dict[str, list[Any]] = {}
         self.interaction_contributors_available = supports_interaction_contributors(
             plugin_context
         )
@@ -109,6 +114,7 @@ class RuntimeState:
         self.model_info: dict[str, Any] = {}
         self.image_cooldown_seconds = 0
         self.selected_performance_curve_provider: Provider | None = None
+        self.selected_independent_motion_provider: Provider | None = None
         self.performance_curve_runtime = PerformanceCurveRuntime(runtime_state=self)
         self._live2d_runtime_cache_path = (
             self.runtime_cache_dir / "live2d_runtime_cache.json"
@@ -150,11 +156,18 @@ class RuntimeState:
 
         previous_performance_curve_provider_id = self.performance_curve_provider_id
         previous_enable_performance_curve = self.enable_performance_curve
+        previous_independent_motion_provider_id = self.independent_motion_provider_id
+        previous_independent_motion_enabled = self.independent_motion_enabled
         general_config = get_config_value(self.plugin_config, "general", {})
         live2d_input_config = get_config_value(self.plugin_config, "live2d_input", {})
         performance_curve_config = get_config_value(
             self.plugin_config,
             "performance_curve",
+            {},
+        )
+        independent_motion_config = get_config_value(
+            self.plugin_config,
+            "independent_motion",
             {},
         )
         vad_config = get_config_value(self.plugin_config, "vad", {})
@@ -177,6 +190,31 @@ class RuntimeState:
         )
         self.enable_performance_curve = bool(
             get_config_value(performance_curve_config, "enabled", False)
+        )
+        self.independent_motion_enabled = bool(
+            get_config_value(independent_motion_config, "enabled", False)
+        )
+        self.independent_motion_provider_id = str(
+            get_config_value(independent_motion_config, "provider_id", "") or ""
+        ).strip()
+        try:
+            self.independent_motion_history_turns = max(
+                0,
+                min(
+                    int(
+                        get_config_value(
+                            independent_motion_config,
+                            "history_turns",
+                            6,
+                        )
+                    ),
+                    20,
+                ),
+            )
+        except (TypeError, ValueError):
+            self.independent_motion_history_turns = 6
+        self.independent_motion_parallel = bool(
+            get_config_value(independent_motion_config, "parallel", False)
         )
         self.vad_config = {
             "orig_sr": 16000,
@@ -239,13 +277,26 @@ class RuntimeState:
         provider_config_changed = (
             previous_performance_curve_provider_id != self.performance_curve_provider_id
             or previous_enable_performance_curve != self.enable_performance_curve
+            or previous_independent_motion_provider_id
+            != self.independent_motion_provider_id
+            or previous_independent_motion_enabled != self.independent_motion_enabled
         )
         provider_binding_missing = (
-            self.enable_performance_curve
-            and self.selected_performance_curve_provider is None
+            (
+                self.enable_performance_curve
+                and self.selected_performance_curve_provider is None
+            )
             or (
                 not self.enable_performance_curve
                 and self.selected_performance_curve_provider is not None
+            )
+            or (
+                self.independent_motion_enabled
+                and self.selected_independent_motion_provider is None
+            )
+            or (
+                not self.independent_motion_enabled
+                and self.selected_independent_motion_provider is not None
             )
         )
         if reload_providers or provider_config_changed or provider_binding_missing:
@@ -258,6 +309,7 @@ class RuntimeState:
                 self.enable_performance_curve,
             )
             self.selected_performance_curve_provider = None
+            self.selected_independent_motion_provider = None
             self.load_selected_providers()
 
         return None
@@ -293,6 +345,24 @@ class RuntimeState:
             logger.info(
                 "Loaded performance curve provider from plugin config: %s",
                 self.performance_curve_provider_id,
+            )
+
+        if self.independent_motion_enabled:
+            if self.independent_motion_provider_id:
+                provider = self.plugin_context.get_provider_by_id(
+                    self.independent_motion_provider_id
+                )
+                if isinstance(provider, Provider):
+                    self.selected_independent_motion_provider = provider
+                    logger.info(
+                        "Loaded independent motion provider from plugin config: %s",
+                        self.independent_motion_provider_id,
+                    )
+                    return
+            logger.warning(
+                "Independent motion generation is enabled but provider `%s` "
+                "is not available; this turn will not use the independent motion path.",
+                self.independent_motion_provider_id or "<empty>",
             )
 
     def resolve_stt_provider(self) -> STTProvider:

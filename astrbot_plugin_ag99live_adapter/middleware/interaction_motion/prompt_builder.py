@@ -138,6 +138,10 @@ def _build_motion_capability_prompt_payload(
 ) -> dict[str, Any]:
     result: dict[str, Any] = {
         "axis_value_format": "axis_levels",
+        "motion_plan_limits": {
+            "max_motion_steps": 4,
+            "axis_count_scope": "sparse controlled-axis union; no fixed total axis-count cap",
+        },
         "axis_level_scale": {
             "-4": "短时夸张负方向",
             "-3": "普通 Live2D 清晰可见负方向",

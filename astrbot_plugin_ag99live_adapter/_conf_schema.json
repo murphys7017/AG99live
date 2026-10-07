@@ -53,6 +53,33 @@
       }
     }
   },
+  "independent_motion": {
+    "description": "实验性独立 Live2D 动作参数生成，可与主模型生成回复并行执行或在回复后执行。",
+    "type": "object",
+    "items": {
+      "enabled": {
+        "description": "启用后由单独的聊天 Provider 生成动作参数，并完全切换到该实现。",
+        "type": "bool",
+        "default": false
+      },
+      "provider_id": {
+        "description": "用于生成 Live2D 动作参数的聊天 Provider。启用后必须选择；需要读取图片时请使用支持视觉输入的模型。",
+        "type": "string",
+        "default": "",
+        "_special": "select_provider"
+      },
+      "history_turns": {
+        "description": "传给独立模型的历史对话轮数；当前轮图片单独附加。",
+        "type": "int",
+        "default": 6
+      },
+      "parallel": {
+        "description": "启用时与主回复文本生成并行启动；关闭时在主回复生成后启动。",
+        "type": "bool",
+        "default": false
+      }
+    }
+  },
   "vad": {
     "description": "语音断句",
     "type": "object",

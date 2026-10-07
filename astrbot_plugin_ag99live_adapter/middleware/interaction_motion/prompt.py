@@ -30,6 +30,8 @@ class AG99liveMotionPromptContributor:
         bundle = _resolve_motion_runtime_bundle(event)
         if bundle is None:
             return None
+        if bool(getattr(bundle.runtime_state, "independent_motion_enabled", False)):
+            return None
 
         static_capability_payload = _build_motion_static_capability_payload(
             bundle.runtime_state

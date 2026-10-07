@@ -64,6 +64,10 @@ from .performance_curve_coordinator import PerformanceCurveCoordinator
 
 
 MAX_REMEMBERED_TERMINAL_TURNS = 256
+_INDEPENDENT_MOTION_TASK_EXTRA_KEY = "_ag99live_independent_motion_task"
+_INDEPENDENT_MOTION_RESULT_EXTRA_KEY = "_ag99live_independent_motion_result"
+
+
 class TurnCoordinator:
     """后端单连接的协议+轮次编排器。
 
@@ -221,6 +225,11 @@ class TurnCoordinator:
         try:
             active_events = tuple(self._events_by_turn_id.items())
             for turn_id, event in active_events:
+                self._cancel_turn_owned_motion_task(
+                    event,
+                    turn_id=turn_id,
+                    reason="transport_disconnected",
+                )
                 set_extra = getattr(event, "set_extra", None)
                 if callable(set_extra):
                     try:
@@ -273,6 +282,9 @@ class TurnCoordinator:
             self._events_by_turn_id.clear()
             self._active_vad_turn_by_capture_turn.clear()
             self.motion_observations.reset()
+            cache = getattr(self.runtime_state, "independent_motion_result_cache", None)
+            if isinstance(cache, dict):
+                cache.clear()
 
         if cleanup_failures:
             raise RuntimeError(
@@ -541,6 +553,11 @@ class TurnCoordinator:
         try:
             event = self._events_by_turn_id.get(resolved_turn_id)
             if event is not None:
+                self._cancel_turn_owned_motion_task(
+                    event,
+                    turn_id=resolved_turn_id,
+                    reason=normalized_reason,
+                )
                 set_extra = getattr(event, "set_extra", None)
                 if callable(set_extra):
                     set_extra("agent_stop_requested", True)
@@ -601,6 +618,16 @@ class TurnCoordinator:
             return
 
         self._turn_terminal_results[resolved_turn_id] = None
+        event = self._events_by_turn_id.get(resolved_turn_id)
+        if event is not None:
+            self._cancel_turn_owned_motion_task(
+                event,
+                turn_id=resolved_turn_id,
+                reason=normalized_reason or "turn_finished",
+            )
+            set_extra = getattr(event, "set_extra", None)
+            if callable(set_extra):
+                set_extra("agent_stop_requested", True)
         try:
             sent = await self._send_json(
                 build_control_turn_finished(
@@ -633,6 +660,70 @@ class TurnCoordinator:
             )
         self._clear_active_vad_turn(resolved_turn_id)
         self._turn_timings.pop(resolved_turn_id, None)
+        discard_motion_result = getattr(
+            self,
+            "_discard_independent_motion_result",
+            None,
+        )
+        if callable(discard_motion_result):
+            discard_motion_result(resolved_turn_id)
+        else:
+            cache = getattr(
+                getattr(self, "runtime_state", None),
+                "independent_motion_result_cache",
+                None,
+            )
+            if isinstance(cache, dict):
+                cache.pop(resolved_turn_id, None)
+
+    def _cancel_turn_owned_motion_task(
+        self,
+        event: Any,
+        *,
+        turn_id: str,
+        reason: str,
+    ) -> None:
+        """Cancel motion work owned by a turn before its event is discarded.
+
+        Independent motion generation is started from an AstrBot hook, while turn
+        termination is coordinated here. Keeping the task handle on the event
+        lets this boundary cancel it without coupling the coordinator to the
+        middleware implementation.
+        """
+        get_extra = getattr(event, "get_extra", None)
+        set_extra = getattr(event, "set_extra", None)
+        task = None
+        if callable(get_extra):
+            try:
+                task = get_extra(_INDEPENDENT_MOTION_TASK_EXTRA_KEY)
+            except Exception:  # noqa: BLE001 - cleanup must continue.
+                logger.exception(
+                    "Failed to inspect independent motion task during turn cleanup: "
+                    "turn_id=%s",
+                    turn_id,
+                )
+        if isinstance(task, asyncio.Task) and not task.done():
+            task.cancel()
+            logger.info(
+                "WIRING independent_motion.task_cancelled turn_id=%s reason=%s",
+                turn_id,
+                reason,
+            )
+        if callable(set_extra):
+            try:
+                set_extra(_INDEPENDENT_MOTION_TASK_EXTRA_KEY, None)
+                set_extra(_INDEPENDENT_MOTION_RESULT_EXTRA_KEY, None)
+            except Exception:  # noqa: BLE001 - cleanup must continue.
+                logger.exception(
+                    "Failed to clear independent motion event state: turn_id=%s",
+                    turn_id,
+                )
+        self._discard_independent_motion_result(turn_id)
+
+    def _discard_independent_motion_result(self, turn_id: str) -> None:
+        cache = getattr(self.runtime_state, "independent_motion_result_cache", None)
+        if isinstance(cache, dict):
+            cache.pop(str(turn_id or "").strip(), None)
 
     def _prune_turn_terminal_results(self) -> None:
         completed_count = sum(

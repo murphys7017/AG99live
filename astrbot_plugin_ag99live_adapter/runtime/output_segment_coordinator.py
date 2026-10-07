@@ -205,6 +205,18 @@ class OutputSegmentCoordinator:
                 raw_reply_text=raw_reply_text,
             )
             motion_expected, motion_failure_reason = _resolve_motion_schedule(extras)
+            logger.info(
+                "WIRING output_motion_resolved turn_id=%s message_id=%s "
+                "client_object_count=%s candidate_present=%s expected=%s "
+                "failure=%s schedule_failure=%s",
+                normalized_turn_id,
+                segment_message_id,
+                len(iter_platform_motion_client_objects(extras)),
+                motion_candidate is not None,
+                motion_expected,
+                motion_resolution_failure or "<none>",
+                motion_failure_reason or "<none>",
+            )
             if motion_expected:
                 segment.require_motion()
             if motion_resolution_failure:
@@ -311,6 +323,11 @@ class OutputSegmentCoordinator:
         raw_reply_text: str,
     ) -> tuple[dict[str, Any] | None, str]:
         candidates = iter_platform_motion_client_objects(platform_extras)
+        logger.info(
+            "WIRING output_motion_candidates count=%s official_inline_compat=%s",
+            len(candidates),
+            self._is_official_inline_anim_compat_enabled(),
+        )
         if len(candidates) > 1:
             return None, "output_segment_multiple_motion_objects"
         if candidates:
@@ -360,6 +377,22 @@ class OutputSegmentCoordinator:
             audio_slot = {"state": "present", "url": audio_url}
 
         motion_slot = self._build_motion_slot(segment)
+        logger.info(
+            "WIRING output_motion_slot_built turn_id=%s message_id=%s "
+            "state=%s source=%s schema=%s",
+            segment.turn_id,
+            segment.message_id,
+            motion_slot.get("state"),
+            motion_slot.get("source") or "<none>",
+            (
+                str(
+                    (motion_slot.get("payload") or {}).get("schema_version")
+                    or ""
+                )
+                if isinstance(motion_slot.get("payload"), dict)
+                else ""
+            ),
+        )
         speech_slot = (
             {"state": "present", "cues": segment.speech_cues}
             if segment.speech_cues
@@ -388,6 +421,15 @@ class OutputSegmentCoordinator:
         )
         if not sent:
             raise RuntimeError(f"output_segment_send_failed:{segment.message_id}")
+        logger.info(
+            "WIRING output_segment_sent turn_id=%s message_id=%s sequence=%s "
+            "motion_state=%s motion_source=%s",
+            segment.turn_id,
+            segment.message_id,
+            segment.sequence,
+            motion_slot.get("state"),
+            motion_slot.get("source") or "<none>",
+        )
 
         key = self._segment_key(segment.turn_id, segment.message_id)
         self._pending_segments.pop(key, None)
@@ -466,8 +508,21 @@ class OutputSegmentCoordinator:
     def _build_motion_slot(self, segment: PendingOutputSegment) -> dict[str, Any]:
         if segment.motion_payload is None:
             if segment.motion_failure_reason:
+                logger.warning(
+                    "WIRING output_motion_slot_failed turn_id=%s message_id=%s "
+                    "reason=%s",
+                    segment.turn_id,
+                    segment.message_id,
+                    segment.motion_failure_reason,
+                )
                 return {"state": "failed", "reason": segment.motion_failure_reason}
             if segment.motion_expected:
+                logger.warning(
+                    "WIRING output_motion_slot_failed turn_id=%s message_id=%s "
+                    "reason=motion_schedule_payload_missing",
+                    segment.turn_id,
+                    segment.message_id,
+                )
                 return {"state": "failed", "reason": "motion_schedule_payload_missing"}
             return {"state": "absent"}
         payload = segment.motion_payload
@@ -482,13 +537,22 @@ class OutputSegmentCoordinator:
             message_id=segment.message_id,
             request_id=segment.performance_curve_request_id,
         )
-        return {
+        slot = {
             "state": "present",
             "message_type": message_type,
             "mode": segment.motion_mode,
             "source": segment.motion_source,
             "payload": payload,
         }
+        logger.info(
+            "WIRING output_motion_slot_present turn_id=%s message_id=%s "
+            "source=%s schema=%s",
+            segment.turn_id,
+            segment.message_id,
+            segment.motion_source or "<none>",
+            str(payload.get("schema_version") or ""),
+        )
+        return slot
 
 
 def _require_segment_sequence(value: Any) -> int:

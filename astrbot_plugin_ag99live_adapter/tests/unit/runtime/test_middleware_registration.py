@@ -9,6 +9,19 @@ from types import SimpleNamespace
 
 def _install_middleware_astrbot_stubs(install_fake_astrbot, monkeypatch) -> None:
     install_fake_astrbot()
+    event_module = types.ModuleType("astrbot.api.event")
+
+    class _Filter:
+        @staticmethod
+        def on_llm_response():
+            def decorator(fn):
+                return fn
+
+            return decorator
+
+    event_module.filter = _Filter()
+    monkeypatch.setitem(sys.modules, "astrbot.api.event", event_module)
+
     prompt_module = types.ModuleType("astrbot.core.prompt")
 
     class PromptExtension:
@@ -45,15 +58,33 @@ def test_register_ag99live_interaction_contributors_keeps_motion_only(
 
     prompt_collectors: list[object] = []
     result_contributors: list[object] = []
+    persona_effects: list[object] = []
     removed_extension_prefixes: list[str] = []
     removed_result_prefixes: list[str] = []
 
     class ContextStub:
         def remove_prompt_extension_collectors_by_module_prefix(self, prefix: str) -> None:
             removed_extension_prefixes.append(prefix)
+            prompt_collectors[:] = [
+                item
+                for item in prompt_collectors
+                if not type(item).__module__.startswith(prefix)
+            ]
 
         def remove_interaction_result_contributors_by_module_prefix(self, prefix: str) -> None:
             removed_result_prefixes.append(prefix)
+            result_contributors[:] = [
+                item
+                for item in result_contributors
+                if not type(item).__module__.startswith(prefix)
+            ]
+
+        def unregister_persona_effects(self, *, plugin_id: str | None = None) -> None:
+            persona_effects[:] = [
+                item
+                for item in persona_effects
+                if getattr(item, "plugin_id", None) != plugin_id
+            ]
 
         def register_prompt_extension_collector(self, collector: object) -> None:
             prompt_collectors.append(collector)
@@ -62,9 +93,12 @@ def test_register_ag99live_interaction_contributors_keeps_motion_only(
             result_contributors.append(contributor)
 
         def register_persona_effect(self, effect: object, **kwargs) -> None:
-            return None
+            del kwargs
+            persona_effects.append(effect)
 
-    module.register_ag99live_interaction_contributors(ContextStub())
+    context = ContextStub()
+    module.register_ag99live_interaction_contributors(context)
+    module.register_ag99live_interaction_contributors(context)
 
     assert "astrbot_plugin_ag99live_adapter.middleware" in removed_extension_prefixes
     assert "data.plugins.astrbot_plugin_ag99live_adapter.middleware" in removed_extension_prefixes
@@ -76,6 +110,9 @@ def test_register_ag99live_interaction_contributors_keeps_motion_only(
     assert [item.plugin_id for item in result_contributors] == [
         "ag99live.motion.result",
     ]
+    assert len(prompt_collectors) == 2
+    assert len(result_contributors) == 1
+    assert len(persona_effects) == 1
 
 
 def test_motion_effect_schema_limits_axis_names_to_current_profile(
@@ -257,3 +294,259 @@ def test_enhanced_interaction_requires_dynamic_effect_schema_support(
     module = importlib.reload(module)
 
     assert module.get_interaction_capabilities() is None
+
+
+def test_enhanced_interaction_requires_llm_response_hook(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_middleware_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    event_module = sys.modules["astrbot.api.event"]
+    event_module.filter.on_llm_response = None
+    module = importlib.import_module("astrbot_plugin_ag99live_adapter.core_compatibility")
+    module = importlib.reload(module)
+
+    context = types.SimpleNamespace(
+        register_persona_effect=lambda *_args, **_kwargs: None,
+        register_prompt_extension_collector=lambda *_args, **_kwargs: None,
+        register_interaction_result_contributor=lambda *_args, **_kwargs: None,
+        remove_prompt_extension_collectors_by_module_prefix=lambda *_args: None,
+        remove_interaction_result_contributors_by_module_prefix=lambda *_args: None,
+        unregister_persona_effects=lambda *_args, **_kwargs: None,
+    )
+
+    assert not module.supports_llm_response_hook()
+    assert not module.supports_interaction_contributors(context)
+
+
+def test_independent_motion_results_match_each_visible_persona_reply(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_middleware_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = importlib.import_module(
+        "astrbot_plugin_ag99live_adapter.middleware.interaction_motion.independent"
+    )
+    module = importlib.reload(module)
+
+    immediate = module.IndependentMotionResult(
+        assistant_text="我先查一下。",
+        motion_payload={"schema_version": "ag99.motion_intent.v4", "intent_tags": ["thinking"]},
+        reason="ok",
+        image_count=0,
+    )
+    final = module.IndependentMotionResult(
+        assistant_text="已经查到了。",
+        motion_payload={"schema_version": "ag99.motion_intent.v4", "intent_tags": ["happy"]},
+        reason="ok",
+        image_count=1,
+    )
+    runtime_state = SimpleNamespace(independent_motion_result_cache={})
+    persona_request = types.SimpleNamespace(
+        metadata={
+            "interaction.persona_expression_intent": {"phase": "immediate"}
+        }
+    )
+    core_request = types.SimpleNamespace(metadata={"source": "core"})
+
+    assert module.is_persona_expression_request(persona_request)
+    assert not module.is_persona_expression_request(core_request)
+    assert module.store_motion_result_for_turn(
+        runtime_state,
+        turn_id="turn-1",
+        result=immediate,
+        assistant_text=immediate.assistant_text,
+    )
+    assert module.store_motion_result_for_turn(
+        runtime_state,
+        turn_id="turn-1",
+        result=final,
+        assistant_text=final.assistant_text,
+    )
+
+    assert module.take_motion_result_for_turn(
+        runtime_state,
+        turn_id="turn-1",
+        assistant_text="not a reply in this turn",
+    ) == final
+    assert module.take_motion_result_for_turn(
+        runtime_state,
+        turn_id="turn-1",
+        assistant_text=immediate.assistant_text,
+    ) == immediate
+    assert runtime_state.independent_motion_result_cache == {}
+
+
+def test_independent_motion_result_matches_sanitized_visible_reply(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_middleware_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = importlib.import_module(
+        "astrbot_plugin_ag99live_adapter.middleware.interaction_motion.independent"
+    )
+    module = importlib.reload(module)
+    result = module.IndependentMotionResult(
+        assistant_text=(
+            '<system_reminder>hidden</system_reminder>'
+            '已经查到了。<@anim {"motion":"wave"}>'
+        ),
+        motion_payload={
+            "schema_version": "ag99.motion_intent.v4",
+            "intent_tags": ["happy"],
+        },
+        reason="ok",
+        image_count=0,
+    )
+    runtime_state = SimpleNamespace(independent_motion_result_cache={})
+
+    assert module.store_motion_result_for_turn(
+        runtime_state,
+        turn_id="turn-1",
+        result=result,
+        assistant_text=result.assistant_text,
+    )
+    selected = module.take_motion_result_for_turn(
+        runtime_state,
+        turn_id="turn-1",
+        assistant_text="已经查到了。",
+    )
+
+    assert selected is not None
+    assert selected.motion_payload == result.motion_payload
+    assert selected.assistant_text == "已经查到了。"
+
+
+def test_independent_motion_request_uses_prior_text_and_only_current_images(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_middleware_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = importlib.import_module(
+        "astrbot_plugin_ag99live_adapter.middleware.interaction_motion.independent"
+    )
+    module = importlib.reload(module)
+
+    class ConversationManager:
+        async def get_curr_conversation_id(self, _origin: str) -> str:
+            return "conversation-1"
+
+        async def get_conversation(self, _origin: str, _conversation_id: str):
+            return types.SimpleNamespace(
+                history=[
+                    {"role": "user", "content": "更早的问题"},
+                    {"role": "assistant", "content": "更早的回答"},
+                    {"role": "user", "content": "上一轮问题"},
+                    {"role": "assistant", "content": "上一轮回答"},
+                    {"role": "user", "content": "本轮输入"},
+                    {"role": "assistant", "content": "本轮文本回复"},
+                ]
+            )
+
+    runtime_state = SimpleNamespace(
+        independent_motion_history_turns=1,
+        independent_motion_provider_id="motion-provider",
+        plugin_context=types.SimpleNamespace(
+            conversation_manager=ConversationManager()
+        ),
+    )
+    bundle = types.SimpleNamespace(
+        runtime_state=runtime_state,
+        turn_coordinator=object(),
+    )
+    calls: list[dict[str, object]] = []
+
+    class Provider:
+        async def text_chat(self, **kwargs):
+            calls.append(kwargs)
+            return types.SimpleNamespace(
+                completion_text=(
+                    '{"intent_tags":["平和"],"axis_levels":{"head_roll":0}}'
+                )
+            )
+
+    monkeypatch.setattr(
+        module,
+        "_build_motion_static_capability_payload",
+        lambda _state: {"axes": [], "resources": []},
+    )
+    monkeypatch.setattr(
+        module,
+        "_build_motion_runtime_payload",
+        lambda *args, **kwargs: ({}, []),
+    )
+    monkeypatch.setattr(
+        module,
+        "_build_motion_capability_prompt_payload",
+        lambda _payload: {"axes": [], "resources": []},
+    )
+    monkeypatch.setattr(
+        module,
+        "_record_motion_prompt_reference_observation",
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        module,
+        "normalize_motion_arguments_payload",
+        lambda *_args, **_kwargs: (
+            {"schema_version": "ag99.motion_intent.v4", "intent_tags": ["平和"]},
+            "ok",
+        ),
+    )
+
+    def build_event(raw_message: dict[str, object]):
+        extras = {"_turn_id": "turn-1"}
+        event = types.SimpleNamespace(
+            message_str="本轮输入",
+            message_obj=types.SimpleNamespace(raw_message=raw_message),
+            unified_msg_origin="olv_pet_adapter:FriendMessage:desktop-client",
+        )
+        event.get_extra = lambda key, default=None: extras.get(key, default)
+        return event
+
+    current_event = build_event(
+        {
+            "resolved_images": [
+                {"type": "input_image", "image_url": "file:///current.png"}
+            ]
+        }
+    )
+    current_result = asyncio.run(
+        module.generate_independent_motion(
+            current_event,
+            bundle,
+            provider=Provider(),
+            assistant_text="回复文本",
+        )
+    )
+    reused_snapshot_event = build_event(
+        {
+            "reused_desktop_snapshot": True,
+            "resolved_images": [
+                {"type": "input_image", "image_url": "file:///stale.png"}
+            ],
+        }
+    )
+    reused_snapshot_result = asyncio.run(
+        module.generate_independent_motion(
+            reused_snapshot_event,
+            bundle,
+            provider=Provider(),
+            assistant_text="回复文本",
+        )
+    )
+
+    assert current_result.motion_payload is not None
+    assert current_result.image_count == 1
+    assert reused_snapshot_result.motion_payload is not None
+    assert reused_snapshot_result.image_count == 0
+    assert calls[0]["image_urls"] == ["file:///current.png"]
+    assert calls[1]["image_urls"] is None
+    expected_history = [
+        {"role": "user", "content": "上一轮问题"},
+        {"role": "assistant", "content": "上一轮回答"},
+    ]
+    assert calls[0]["contexts"] == expected_history
+    assert calls[1]["contexts"] == expected_history
+    assert "本轮输入" in str(calls[0]["prompt"])
+    assert "回复文本" in str(calls[0]["prompt"])

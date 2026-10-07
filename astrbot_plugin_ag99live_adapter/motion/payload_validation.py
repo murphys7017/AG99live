@@ -20,7 +20,6 @@ from ..prompts.semantic_axis_prompt import (
     resolve_available_axis_levels,
 )
 
-
 def normalize_motion_arguments_payload(
     raw_motion_arguments: dict[str, Any],
     runtime_state: ModelInfoRuntimeContext,
@@ -252,8 +251,6 @@ def validate_normalized_motion_intent_payload(
             reason,
             "unavailable_axis_levels:" + ",".join(unavailable_levels),
         )
-    if len(used_axis_ids) > 6:
-        return None, append_resolution_reason(reason, "axis_level_count_exceeded")
     return payload, reason
 
 

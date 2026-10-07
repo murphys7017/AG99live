@@ -70,7 +70,11 @@ def _install_main_astrbot_stubs(install_fake_astrbot, monkeypatch) -> None:
     class ProviderRequest:
         pass
 
+    class LLMResponse:
+        pass
+
     provider_module.ProviderRequest = ProviderRequest
+    provider_module.LLMResponse = LLMResponse
     monkeypatch.setitem(sys.modules, "astrbot.api.provider", provider_module)
 
     star_module = types.ModuleType("astrbot.api.star")
@@ -87,6 +91,7 @@ def _install_main_astrbot_stubs(install_fake_astrbot, monkeypatch) -> None:
     monkeypatch.setitem(sys.modules, "astrbot.api.star", star_module)
 
 
+
 def test_main_plugin_normalizes_output_and_starts_curve_on_tts_generating(
     install_fake_astrbot,
     monkeypatch,
@@ -95,6 +100,9 @@ def test_main_plugin_normalizes_output_and_starts_curve_on_tts_generating(
 
     # Stub plugin runtime side effects
     plugin_runtime = types.ModuleType("astrbot_plugin_ag99live_adapter.runtime.plugin_runtime")
+    plugin_runtime.get_live_control_platform = lambda *_args: None
+    plugin_runtime.get_plugin_context = lambda: None
+    plugin_runtime.reconcile_control_platforms = lambda _context: []
     plugin_runtime.set_plugin_config = lambda _config: None
     plugin_runtime.set_plugin_context = lambda _context: None
     monkeypatch.setitem(
@@ -198,6 +206,9 @@ def test_main_plugin_registers_interaction_contributors_during_init(
     _install_main_astrbot_stubs(install_fake_astrbot, monkeypatch)
 
     plugin_runtime = types.ModuleType("astrbot_plugin_ag99live_adapter.runtime.plugin_runtime")
+    plugin_runtime.get_live_control_platform = lambda *_args: None
+    plugin_runtime.get_plugin_context = lambda: None
+    plugin_runtime.reconcile_control_platforms = lambda _context: []
     plugin_runtime.set_plugin_config = lambda _config: None
     plugin_runtime.set_plugin_context = lambda _context: None
     monkeypatch.setitem(

@@ -20,6 +20,20 @@ class PromptAnnotationCapabilities:
     build_message_annotation_key: Any | None
 
 
+def supports_llm_response_hook() -> bool:
+    """Return whether AstrBot can invoke the post-LLM response hook.
+
+    The enhanced interaction path uses this hook to join an independently
+    generated motion result with the visible assistant reply.  Without it,
+    starting the enhanced contributors would leave that result unconsumed.
+    """
+    try:
+        from astrbot.api.event import filter
+    except (ImportError, ModuleNotFoundError):
+        return False
+    return callable(getattr(filter, "on_llm_response", None))
+
+
 def get_interaction_capabilities() -> InteractionCapabilities | None:
     """Return enhanced APIs only when the complete interaction contract exists."""
     try:
@@ -72,6 +86,7 @@ def _persona_effect_supports_dynamic_parameters(effect_type: type[Any]) -> bool:
 def supports_interaction_contributors(context: Any) -> bool:
     return (
         get_interaction_capabilities() is not None
+        and supports_llm_response_hook()
         and callable(getattr(context, "register_persona_effect", None))
         and callable(
             getattr(context, "register_prompt_extension_collector", None)
@@ -79,6 +94,13 @@ def supports_interaction_contributors(context: Any) -> bool:
         and callable(
             getattr(context, "register_interaction_result_contributor", None)
         )
+        and callable(
+            getattr(context, "remove_prompt_extension_collectors_by_module_prefix", None)
+        )
+        and callable(
+            getattr(context, "remove_interaction_result_contributors_by_module_prefix", None)
+        )
+        and callable(getattr(context, "unregister_persona_effects", None))
     )
 
 
@@ -119,5 +141,6 @@ __all__ = [
     "PromptAnnotationCapabilities",
     "get_interaction_capabilities",
     "get_prompt_annotation_capabilities",
+    "supports_llm_response_hook",
     "supports_interaction_contributors",
 ]
