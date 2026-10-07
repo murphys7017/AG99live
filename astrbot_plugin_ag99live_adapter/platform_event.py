@@ -42,6 +42,10 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         runtime_state = getattr(adapter, "runtime_state", None)
         if bool(getattr(runtime_state, "independent_motion_enabled", False)):
             self.set_extra(
+                "_interaction_plugin_runtime_target_overrides",
+                {"astrbot_plugin_ag99live_adapter": "core"},
+            )
+            self.set_extra(
                 "_interaction_core_bypass_requested",
                 "ag99live_independent_motion",
             )
