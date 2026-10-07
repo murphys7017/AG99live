@@ -59,7 +59,7 @@ LOOPBACK_BIND_HOST = "127.0.0.1"
 
 @register_platform_adapter(
     ADAPTER_PLATFORM_NAME,
-    "AG99live Adapter",
+    "AG99live 桌宠连接适配器",
     default_config_tmpl={
         "port": 12396,
         "http_port": 12397,
@@ -222,9 +222,12 @@ class OLVPetPlatformAdapter(Platform):
     def meta(self) -> PlatformMetadata:
         metadata = PlatformMetadata(
             name=ADAPTER_PLATFORM_NAME,
-            description="AG99live desktop adapter",
+            description=(
+                "AG99live 桌宠连接适配器；每个 AstrBot 配置实例对应一个桌宠连接。"
+            ),
             id=self.platform_id,
         )
+        metadata.adapter_display_name = "AG99live 桌宠适配器"
         # Older AstrBot constructors reject this newer keyword but accept metadata extensions.
         metadata.support_personal_runtime = True
         return metadata

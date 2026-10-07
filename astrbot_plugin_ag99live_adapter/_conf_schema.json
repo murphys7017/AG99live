@@ -1,15 +1,15 @@
 {
   "general": {
-    "description": "基础身份与会话",
+    "description": "客户端与会话身份（桌宠连接实例与桌面端消息客户端是两套不同身份）",
     "type": "object",
     "items": {
       "client_uid": {
-        "description": "桌面端前端在 AstrBot 中使用的用户 ID。",
+        "description": "桌面端作为消息发送者和会话使用的客户端 ID。不是桌宠实例 ID，也不是 AstrBot 登录用户账号；多台独立桌面端建议使用不同值。",
         "type": "string",
         "default": "desktop-client"
       },
       "client_nickname": {
-        "description": "桌面端前端在 AstrBot 中显示的用户昵称。",
+        "description": "桌面端消息在 AstrBot 中显示的发送者名称。不是桌宠实例 ID，也不是桌宠回复时使用的说话人名称。",
         "type": "string",
         "default": "DesktopUser"
       },

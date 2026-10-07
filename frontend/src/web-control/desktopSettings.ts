@@ -76,7 +76,7 @@ export const DESKTOP_ERROR_FALLBACKS: Record<string, string> = {
   astrbot_webui_url_save_failed: "无法保存 WebUI 地址，请检查桌面端配置目录是否可写。",
   adapter_address_invalid: "适配器地址格式不正确。",
   adapter_connect_failed: "适配器连接失败，请检查地址和 AstrBot 插件状态。",
-  platform_not_found: "没有找到对应的 Adapter 实例。",
+  platform_not_found: "没有找到对应的桌宠实例（Adapter）。",
 };
 
 export function desktopErrorMessage(code: string | undefined): string {

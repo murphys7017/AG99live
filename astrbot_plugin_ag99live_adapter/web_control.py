@@ -95,22 +95,31 @@ class ConfigSection:
 CONFIG_SCHEMA: tuple[ConfigSection, ...] = (
     ConfigSection(
         key="general",
-        label="基础身份与会话",
-        description="桌面端在 AstrBot 中使用的身份标识，以及它维护的对话上下文长度。",
+        label="客户端与会话身份",
+        description=(
+            "区分桌宠连接实例与桌面端消息客户端；两者不是同一个身份。"
+            "这里的客户端 ID 用于会话、发送者和历史记录。"
+        ),
         fields=(
             ConfigField(
                 key="client_uid",
                 kind="text",
-                label="Client UID",
-                description="桌面端前端在 AstrBot 中使用的用户 ID。",
+                label="桌面端客户端 ID（会话身份）",
+                description=(
+                    "桌面端作为消息发送者和会话使用的 ID。它不是桌宠实例 ID，"
+                    "也不是 AstrBot 登录用户账号；多台独立桌面端建议使用不同值。"
+                ),
                 default="desktop-client",
                 max_length=128,
             ),
             ConfigField(
                 key="client_nickname",
                 kind="text",
-                label="显示名称",
-                description="桌面端前端在 AstrBot 中显示的用户昵称。",
+                label="桌面端消息显示名",
+                description=(
+                    "桌面端消息在 AstrBot 中显示的发送者名称。它不是桌宠实例 ID，"
+                    "也不是桌宠回复时使用的说话人名称。"
+                ),
                 default="DesktopUser",
                 max_length=128,
             ),
@@ -764,9 +773,22 @@ class WebControlPageApi:
             return response
         platforms = []
         for platform in _live_control_platforms():
+            metadata = platform.meta()
             model_info = platform.runtime_state.model_info
             platforms.append({
                 "platform_id": platform.platform_id,
+                "platform_type": str(
+                    getattr(metadata, "name", "") or "olv_pet_adapter"
+                ),
+                "adapter_display_name": str(
+                    getattr(metadata, "adapter_display_name", "")
+                    or getattr(metadata, "name", "")
+                    or "olv_pet_adapter"
+                ),
+                "client_uid": str(getattr(platform, "client_uid", "") or ""),
+                "client_nickname": str(
+                    getattr(platform, "client_nickname", "") or ""
+                ),
                 "host": platform.host,
                 "websocket_port": platform.port,
                 "http_port": platform.http_port,

@@ -38,6 +38,10 @@ import {
 type ControlSection = "overview" | "settings" | "profile" | "action-lab" | "history";
 type AdapterSummary = {
   platform_id: string;
+  platform_type: string;
+  adapter_display_name: string;
+  client_uid: string;
+  client_nickname: string;
   host: string;
   websocket_port: number;
   http_port: number;
@@ -708,10 +712,10 @@ onMounted(() => void loadOverview());
         </div>
         <div class="web-control-header__tools">
           <label v-if="overview.platforms.length" class="web-control-platform-picker">
-            <span>适配器</span>
-            <select v-model="selectedPlatformId">
+            <span>桌宠实例</span>
+            <select v-model="selectedPlatformId" aria-label="选择桌宠实例">
               <option v-for="item in overview.platforms" :key="item.platform_id" :value="item.platform_id">
-                {{ item.platform_id }}
+                实例 ID：{{ item.platform_id }} · 客户端：{{ item.client_uid || "未设置" }}
               </option>
             </select>
           </label>
@@ -724,25 +728,28 @@ onMounted(() => void loadOverview());
 
       <section v-if="section === 'overview'" class="web-control-content">
         <div class="web-control-section-heading">
-          <div><p>STATUS</p><h2>Adapter 实例</h2></div>
+          <div><p>STATUS</p><h2>桌宠实例（Adapter）</h2></div>
         </div>
         <div v-if="overview.platforms.length" class="web-control-instance-list">
           <article v-for="item in overview.platforms" :key="item.platform_id" class="web-control-instance">
             <div>
               <span class="web-control-instance__state" :data-connected="item.connected"></span>
-              <strong>{{ item.platform_id }}</strong>
+              <strong>桌宠实例 ID：{{ item.platform_id }}</strong>
               <span>{{ item.connected ? "桌面端已连接" : "等待桌面端连接" }}</span>
             </div>
             <dl>
+              <div><dt>适配器类型</dt><dd>{{ item.adapter_display_name || item.platform_type || "olv_pet_adapter" }} <small>({{ item.platform_type || "olv_pet_adapter" }})</small></dd></div>
+              <div><dt>桌面端客户端 ID（会话/发送者）</dt><dd>{{ item.client_uid || "未设置" }}</dd></div>
+              <div><dt>桌面端消息显示名</dt><dd>{{ item.client_nickname || "未设置" }}</dd></div>
               <div><dt>模型</dt><dd>{{ item.selected_model || "未选择" }}</dd></div>
-              <div><dt>说话人</dt><dd>{{ item.speaker_name || "AstrBot" }}</dd></div>
+              <div><dt>桌宠回复说话人</dt><dd>{{ item.speaker_name || "AstrBot" }}</dd></div>
               <div><dt>自动开麦</dt><dd>{{ item.auto_start_mic ? "已开启" : "已关闭" }}</dd></div>
               <div><dt>WebSocket</dt><dd>{{ item.host }}:{{ item.websocket_port }}</dd></div>
               <div><dt>HTTP</dt><dd>{{ item.host }}:{{ item.http_port }}</dd></div>
             </dl>
           </article>
         </div>
-        <div v-else class="web-control-empty">尚未发现 AG99live Adapter 实例。请先在 AstrBot 中启用插件并配置平台。</div>
+        <div v-else class="web-control-empty">尚未发现 AG99live 桌宠实例（Adapter）。请先在 AstrBot 中启用插件并配置平台。</div>
         <div class="web-control-footnote">
           <strong>桌面运行状态</strong>
           <p>本页面可配置 AstrBot 插件参数、Live2D Profile、动作样例，以及桌面端的截图、按键说话、模型表现、麦克风、Spout 输出和 ESP32 小屏。PTT 按键绑定与桌面实时动作预览仍由本机运行时处理。</p>

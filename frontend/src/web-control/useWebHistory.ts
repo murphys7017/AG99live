@@ -45,13 +45,13 @@ export function normalizeWebHistoryState(value: unknown, platformId: string): We
 }
 
 const HISTORY_ERRORS: Record<string, string> = {
-  history_not_found: "该会话已不存在，或不属于当前适配器。请刷新会话列表。",
+  history_not_found: "该会话已不存在，或不属于当前桌宠实例。请刷新会话列表。",
   history_uid_required: "请选择要操作的会话。",
   history_uid_invalid: "会话标识格式不正确，请刷新会话列表。",
   history_operation_failed: "无法确认会话操作结果，请先刷新列表核对，再决定是否重试。",
   history_delete_failed: "删除失败，会话可能仍然存在。请刷新确认。",
-  history_response_invalid: "会话响应与当前适配器不一致，请刷新重试。",
-  platform_not_found: "当前适配器已不可用，请刷新运行概况。",
+  history_response_invalid: "会话响应与当前桌宠实例不一致，请刷新重试。",
+  platform_not_found: "当前桌宠实例（Adapter）已不可用，请刷新运行概况。",
   astrbot_dashboard_login_required: "请先登录 AstrBot。",
 };
 

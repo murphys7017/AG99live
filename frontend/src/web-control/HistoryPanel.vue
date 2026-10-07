@@ -115,7 +115,7 @@ function messageLabel(message: DesktopBackendHistoryMessage): string {
     </div>
     <p v-if="error" class="web-history__error" role="alert">{{ error }}</p>
     <p v-else-if="notice" class="web-history__notice" role="status">{{ notice }}</p>
-    <p v-if="!available" class="web-history__empty">当前没有可用的 Adapter 实例。</p>
+    <p v-if="!available" class="web-history__empty">当前没有可用的桌宠实例（Adapter）。</p>
 
     <div class="web-history__columns">
       <section class="web-history__sessions" aria-labelledby="web-history-sessions-heading">

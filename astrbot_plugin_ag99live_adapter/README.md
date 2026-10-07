@@ -22,6 +22,18 @@ AstrBot 插件 `astrbot_plugin_ag99live_adapter` 将 AstrBot 的对话、TTS 和
 
 端口由插件根配置的 `port` 和 `http_port` 设置。其他常用根配置包括 `speaker_name` 和 `auto_start_mic`；运行资料归入 `general`、`live2d_input`、`performance_curve`、`independent_motion` 与 `vad`。请使用 AstrBot 当前插件 Schema 生成或编辑配置，旧平级路径不再读取。
 
+### 身份字段
+
+AstrBot 的平台配置和插件的 `general` 配置使用的是两套身份，不能混为一个“用户 ID”：
+
+- `olv_pet_adapter` 是固定的适配器类型，不是桌宠名称，也不是用户 ID。
+- AstrBot 平台配置中的 `id`（界面可能标成“机器人名称”）是具体的**桌宠实例 ID**，例如 `aki`。它用于区分连接实例、作为平台路由键，并作为入站消息的 `self_id`；多个桌宠实例必须使用不同值。
+- 插件 `general.client_uid` 是桌面端消息客户端的**会话/发送者 ID**，例如 `desktop-client`。它不是桌宠实例 ID，也不是 AstrBot WebUI 登录用户账号。注意它当前属于插件级配置，所有 Adapter 实例共用同一个值；当前不能为每个桌宠实例分别设置。
+- 插件 `general.client_nickname` 是桌面端消息在 AstrBot 中显示的发送者名称。
+- 平台配置的 `speaker_name` 是桌宠回复侧的说话人名称，不承担实例寻址或用户身份作用。
+
+当前适配器实际读取的平台字段是 `id`、`enable`、`port`、`http_port`、`speaker_name` 和 `auto_start_mic`；旧配置中若仍看到 `host`、`debug_port` 或 `conf_name`，它们不会改变当前运行时行为。
+
 ## 动作路径
 
 ```text
