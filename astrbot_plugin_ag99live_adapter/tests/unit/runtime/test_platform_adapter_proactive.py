@@ -76,6 +76,7 @@ def test_metadata_declares_personal_runtime_support(adapter_module) -> None:
 
     assert metadata.name == "olv_pet_adapter"
     assert metadata.id == "aki"
+    assert metadata.adapter_display_name == "AG99live 桌宠适配器"
     assert metadata.support_proactive_message is True
     assert metadata.support_personal_runtime is True
 

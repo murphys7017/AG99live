@@ -17,6 +17,7 @@ _plugin_config: dict[str, Any] = {}
 _plugin_config_path: str | None = None
 _control_platforms: dict[str, Any] = {}
 ADAPTER_PLATFORM_NAME = "olv_pet_adapter"
+ADAPTER_DISPLAY_NAME = "AG99live 桌宠适配器"
 PLUGIN_CONFIG_BASENAME = "astrbot_plugin_ag99live_adapter_config.json"
 _default_plugin_config_paths = tuple(
     os.path.join(get_astrbot_config_path(), filename)

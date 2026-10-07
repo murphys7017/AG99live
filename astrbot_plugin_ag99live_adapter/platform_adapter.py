@@ -28,6 +28,7 @@ from .services.message_factory import MessageFactory
 from .transport.static_routes import build_static_routes, list_background_files
 from .runtime.plugin_runtime import (
     ADAPTER_PLATFORM_NAME,
+    ADAPTER_DISPLAY_NAME,
     get_config_value,
     register_control_platform,
     get_plugin_config_snapshot,
@@ -60,6 +61,7 @@ LOOPBACK_BIND_HOST = "127.0.0.1"
 @register_platform_adapter(
     ADAPTER_PLATFORM_NAME,
     "AG99live 桌宠连接适配器",
+    adapter_display_name=ADAPTER_DISPLAY_NAME,
     default_config_tmpl={
         "port": 12396,
         "http_port": 12397,
@@ -227,8 +229,8 @@ class OLVPetPlatformAdapter(Platform):
             ),
             id=self.platform_id,
         )
-        metadata.adapter_display_name = "AG99live 桌宠适配器"
-        # Older AstrBot constructors reject this newer keyword but accept metadata extensions.
+        metadata.adapter_display_name = ADAPTER_DISPLAY_NAME
+        # Keep the optional runtime capability available on older metadata constructors.
         metadata.support_personal_runtime = True
         return metadata
 

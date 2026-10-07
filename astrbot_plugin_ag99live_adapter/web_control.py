@@ -22,6 +22,8 @@ from .protocol.constants import (
 )
 from .runtime.desktop_settings_broker import DesktopSettingsError
 from .runtime.plugin_runtime import (
+    ADAPTER_DISPLAY_NAME,
+    ADAPTER_PLATFORM_NAME,
     get_live_control_platform,
     get_plugin_context,
     reconcile_control_platforms,
@@ -763,6 +765,27 @@ def _live_control_platform(platform_id: str) -> Any | None:
     return get_live_control_platform(get_plugin_context(), platform_id)
 
 
+def _overview_metadata(platform: Any) -> tuple[str, str]:
+    """Return stable display metadata without letting one stale platform break overview."""
+    try:
+        metadata = platform.meta()
+    except Exception as exc:
+        logger.warning(
+            "Failed to read metadata for AG99live platform %s: %s; using fallback.",
+            getattr(platform, "platform_id", "<unknown>"),
+            exc,
+        )
+        return ADAPTER_PLATFORM_NAME, ADAPTER_DISPLAY_NAME
+
+    platform_type = str(
+        getattr(metadata, "name", "") or ADAPTER_PLATFORM_NAME
+    )
+    adapter_display_name = str(
+        getattr(metadata, "adapter_display_name", "") or platform_type
+    )
+    return platform_type, adapter_display_name
+
+
 class WebControlPageApi:
     def __init__(self, plugin: Any) -> None:
         self._plugin = plugin
@@ -773,18 +796,12 @@ class WebControlPageApi:
             return response
         platforms = []
         for platform in _live_control_platforms():
-            metadata = platform.meta()
+            platform_type, adapter_display_name = _overview_metadata(platform)
             model_info = platform.runtime_state.model_info
             platforms.append({
                 "platform_id": platform.platform_id,
-                "platform_type": str(
-                    getattr(metadata, "name", "") or "olv_pet_adapter"
-                ),
-                "adapter_display_name": str(
-                    getattr(metadata, "adapter_display_name", "")
-                    or getattr(metadata, "name", "")
-                    or "olv_pet_adapter"
-                ),
+                "platform_type": platform_type,
+                "adapter_display_name": adapter_display_name,
                 "client_uid": str(getattr(platform, "client_uid", "") or ""),
                 "client_nickname": str(
                     getattr(platform, "client_nickname", "") or ""
