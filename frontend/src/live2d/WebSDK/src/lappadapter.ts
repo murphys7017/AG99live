@@ -51,7 +51,24 @@ export class LAppAdapter {
     priority: number,
     callbacks?: MotionResourceLifecycleCallbacks
   ): CubismMotionQueueEntryHandle {
-    return this.getModel()?.startMotion(group, no, priority, callbacks) ?? InvalidMotionQueueEntryHandleValue;
+    const model = this.getModel();
+    console.info("[LAppAdapter] motion resource start requested.", {
+      group,
+      index: no,
+      priority,
+      modelAvailable: model !== null,
+    });
+    const handle = model?.startMotion(group, no, priority, callbacks)
+      ?? InvalidMotionQueueEntryHandleValue;
+    console.info("[LAppAdapter] motion resource start completed.", {
+      group,
+      index: no,
+      priority,
+      handle,
+      started: handle !== InvalidMotionQueueEntryHandleValue,
+      error: model?.getMotionStartError?.() ?? "live2d_model_unavailable",
+    });
+    return handle;
   }
 
   public stopMotion(reason?: string): void {
@@ -85,12 +102,26 @@ export class LAppAdapter {
     const model = this.getModel();
     if (!model) {
       this._directParameterPlanError = "live2d_model_unavailable";
+      console.error("[LAppAdapter] direct parameter plan rejected: model unavailable.");
       return false;
     }
+    console.info("[LAppAdapter] starting direct parameter plan.", {
+      modelReady: true,
+      mode: plan.mode,
+      emotion: plan.emotion_label,
+      parameterCount: Array.isArray(plan.parameters) ? plan.parameters.length : 0,
+      durationMs: plan.timing?.duration_ms ?? null,
+      runId: options?.runId ?? null,
+    });
     const started = model.startDirectParameterPlan(plan, options);
     this._directParameterPlanError = started
       ? ""
       : model.getDirectParameterPlanError() || "direct_parameter_plan_rejected";
+    console.info("[LAppAdapter] direct parameter plan start completed.", {
+      started,
+      runId: options?.runId ?? null,
+      error: this._directParameterPlanError,
+    });
     return started;
   }
 

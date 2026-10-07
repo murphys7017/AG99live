@@ -204,6 +204,17 @@ export function createPlaybackTimelineEngine(
       if (isReady()) {
         phase = "ready";
       }
+      console.info("[PlaybackTimelineEngine] timeline loaded.", {
+        timelineId: createTimelineId(nextJob),
+        turnId: nextJob.turnId,
+        messageId: nextJob.messageId,
+        phase,
+        sinks: definitions.map((sink) => ({
+          id: sink.id,
+          required: sink.required,
+          requiredForStart: sink.requiredForStart ?? sink.required,
+        })),
+      });
     },
     start(startedAtMs) {
       ensureLoaded();
@@ -218,6 +229,11 @@ export function createPlaybackTimelineEngine(
       }
       clock.start(startedAtMs);
       phase = "playing";
+      console.info("[PlaybackTimelineEngine] timeline started.", {
+        timelineId: createTimelineId(ensureLoaded()),
+        startedAtMs,
+        phase,
+      });
     },
     pause() {
       ensureLoaded();
@@ -281,7 +297,14 @@ export function createPlaybackTimelineEngine(
       if (!sink.definition.start) {
         throw new Error(`Playback timeline sink has no start callback: ${sinkId}`);
       }
-      return sink.definition.start();
+      const accepted = sink.definition.start();
+      console.info("[PlaybackTimelineEngine] sink start callback completed.", {
+        timelineId: createTimelineId(ensureLoaded()),
+        sinkId,
+        phase,
+        accepted,
+      });
+      return accepted;
     },
     attachAudioClock(audioClock) {
       ensureLoaded();
@@ -305,6 +328,11 @@ export function createPlaybackTimelineEngine(
       if (phase === "preparing" && isReady()) {
         phase = "ready";
       }
+      console.info("[PlaybackTimelineEngine] sink marked started.", {
+        timelineId: createTimelineId(ensureLoaded()),
+        sinkId,
+        phase,
+      });
     },
     markSinkTerminal(sinkId, terminal, reason) {
       ensureLoaded();
@@ -321,6 +349,13 @@ export function createPlaybackTimelineEngine(
         phase = "ready";
       }
       updatePhaseFromTerminals();
+      console.info("[PlaybackTimelineEngine] sink marked terminal.", {
+        timelineId: createTimelineId(ensureLoaded()),
+        sinkId,
+        terminal,
+        reason: reason ?? "",
+        phase,
+      });
     },
     setExpectedDurationMs(durationMs) {
       clock.setExpectedDurationMs(durationMs);

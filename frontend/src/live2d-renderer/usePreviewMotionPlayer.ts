@@ -136,13 +136,33 @@ export function usePreviewMotionPlayer() {
     _model: ModelSummary | null = null,
     options: PlayPlanOptions = {},
   ): MotionPlaybackStartResult {
-    console.info("[MotionPlayer] playPlan called. plan type:", typeof plan, "plan:", JSON.stringify(plan)?.slice(0, 200));
+    const planSummary = plan && typeof plan === "object"
+      ? {
+          schema: normalizeText((plan as Record<string, unknown>).schema_version),
+          parameterCount: Array.isArray((plan as Record<string, unknown>).parameters)
+            ? ((plan as Record<string, unknown>).parameters as unknown[]).length
+            : 0,
+          mode: normalizeText((plan as Record<string, unknown>).mode),
+          emotion: normalizeText((plan as Record<string, unknown>).emotion_label),
+        }
+      : { schema: "", parameterCount: 0, mode: "", emotion: "" };
+    console.info("[MotionPlayer] playPlan called.", {
+      planType: typeof plan,
+      plan: planSummary,
+      requiresPlaybackClock: options.requiresPlaybackClock === true,
+      hasPlaybackClockReader: options.playbackClockReader !== null
+        && options.playbackClockReader !== undefined,
+    });
     const hadActivePlayback = Boolean(activeDirectPlanRunId || activeMotionResourceRunId);
 
     const parsed = parseParameterPlan(plan);
     if (!parsed) {
       const reason = `动作计划无效：仅支持 ${SCHEMA_PARAMETER_PLAN_V3}。`;
-      console.warn("[MotionPlayer] parse failed:", reason, "plan keys:", plan && typeof plan === "object" ? Object.keys(plan as object) : "N/A");
+      console.warn("[MotionPlayer] parameter plan parse failed.", {
+        reason,
+        plan: planSummary,
+        planKeys: plan && typeof plan === "object" ? Object.keys(plan as object) : [],
+      });
       if (!hadActivePlayback) {
         state.status = "failed";
         state.message = reason;
@@ -167,16 +187,14 @@ export function usePreviewMotionPlayer() {
       console.error("[MotionPlayer]", reason);
       return { status: "rejected", reason: "parameter_plan_clock_missing" };
     }
-    console.info(
-      "[MotionPlayer] parse OK. mode=",
-      playbackPlan.plan.mode,
-      "emotion=",
-      playbackPlan.plan.emotion_label,
-      "parameters=",
-      playbackPlan.plan.parameters.length,
-      "resolvedDurationMs=",
-      playbackPlan.totalDurationMs,
-    );
+    console.info("[MotionPlayer] parameter plan parsed.", {
+      mode: playbackPlan.plan.mode,
+      emotion: playbackPlan.plan.emotion_label,
+      parameterCount: playbackPlan.plan.parameters.length,
+      durationMs: playbackPlan.totalDurationMs,
+      profileId: playbackPlan.plan.profile_id,
+      profileRevision: playbackPlan.plan.profile_revision,
+    });
 
     const adapter = window.getLAppAdapter?.();
     if (!adapter || typeof adapter.startDirectParameterPlan !== "function") {
@@ -199,10 +217,17 @@ export function usePreviewMotionPlayer() {
       }
     }
 
-    console.info("[MotionPlayer] calling startDirectParameterPlan...");
     const playbackRunId = `motion-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const previousDirectPlanRunId = activeDirectPlanRunId;
     activeDirectPlanRunId = playbackRunId;
+    console.info("[MotionPlayer] calling startDirectParameterPlan.", {
+      runId: playbackRunId,
+      mode: playbackPlan.plan.mode,
+      emotion: playbackPlan.plan.emotion_label,
+      parameterCount: playbackPlan.plan.parameters.length,
+      durationMs: playbackPlan.totalDurationMs,
+      requiresPlaybackClock: options.requiresPlaybackClock === true,
+    });
     const started = adapter.startDirectParameterPlan(playbackPlan.plan, {
       runId: playbackRunId,
       playbackClockReader,
@@ -228,7 +253,13 @@ export function usePreviewMotionPlayer() {
         options.onFinished?.(event);
       },
     });
-    console.info("[MotionPlayer] startDirectParameterPlan returned:", started);
+    console.info("[MotionPlayer] startDirectParameterPlan returned.", {
+      runId: playbackRunId,
+      started,
+      runtimeError: typeof adapter.getDirectParameterPlanError === "function"
+        ? normalizeText(adapter.getDirectParameterPlanError())
+        : "",
+    });
     if (!started) {
       if (activeDirectPlanRunId === playbackRunId) {
         activeDirectPlanRunId = previousDirectPlanRunId;
@@ -251,7 +282,11 @@ export function usePreviewMotionPlayer() {
       };
     }
 
-    console.info("[MotionPlayer] plan started successfully. totalDurationMs=", playbackPlan.totalDurationMs);
+    console.info("[MotionPlayer] plan started successfully.", {
+      runId: playbackRunId,
+      durationMs: playbackPlan.totalDurationMs,
+      parameterCount: playbackPlan.plan.parameters.length,
+    });
     state.status = "playing";
     state.message = `正在执行参数计划（mode=${playbackPlan.plan.mode}, emotion=${playbackPlan.plan.emotion_label}）...`;
     state.keyAxesCount = playbackPlan.plan.summary?.axis_count ?? playbackPlan.plan.parameters.length;
@@ -267,6 +302,18 @@ export function usePreviewMotionPlayer() {
     _model: ModelSummary | null = null,
     options: PlayMotionResourceOptions = {},
   ): MotionPlaybackStartResult {
+    console.info("[MotionPlayer] motion resource play requested.", {
+      motionId: motion.motion_id,
+      group: motion.group,
+      index: motion.index,
+      priority: motion.priority,
+      durationMs: motion.duration_ms,
+      requiresPlaybackClock: options.requiresPlaybackClock === true,
+      hasPlaybackClockReader: options.playbackClockReader !== null
+        && options.playbackClockReader !== undefined,
+      activeDirectPlan: Boolean(activeDirectPlanRunId),
+      activeMotionResource: Boolean(activeMotionResourceRunId),
+    });
     const hadActivePlayback = Boolean(activeDirectPlanRunId || activeMotionResourceRunId);
     const manualPreviewStartedAtMs = performance.now();
     const playbackClockReader = options.playbackClockReader ?? (
@@ -365,6 +412,13 @@ export function usePreviewMotionPlayer() {
         onStarted: () => {
           lifecycleStarted = true;
           activeMotionResourceRunId = playbackRunId;
+          console.info("[MotionPlayer] motion resource lifecycle started.", {
+            runId: playbackRunId,
+            motionId: motion.motion_id,
+            group: motion.group,
+            index: motion.index,
+            priority: motion.priority,
+          });
           state.status = "playing";
           state.message = `正在执行完整动作资源（${motion.label || motion.motion_id}）...`;
           state.startedAt = new Date().toISOString();
@@ -386,6 +440,13 @@ export function usePreviewMotionPlayer() {
         },
       },
     );
+    console.info("[MotionPlayer] adapter.startMotion returned.", {
+      runId: playbackRunId,
+      motionId: motion.motion_id,
+      handle,
+      lifecycleStarted,
+      motionStartError: getMotionStartError(),
+    });
     if (handle === -1) {
       const motionStartError = getMotionStartError();
       const failureReason = motionStartError || "motion_resource_start_rejected";

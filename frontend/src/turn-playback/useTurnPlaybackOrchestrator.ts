@@ -27,7 +27,11 @@ export function useTurnPlaybackOrchestrator(
   options: TurnPlaybackOrchestratorOptions,
 ) {
   function scheduleReadySegments(): void {
-    if (options.timelineRuntime.findPlaybackReleaseBlockers().length > 0) {
+    const blockers = options.timelineRuntime.findPlaybackReleaseBlockers();
+    if (blockers.length > 0) {
+      console.debug("[TurnPlaybackOrchestrator] playback release blocked by active timeline.", {
+        blockers,
+      });
       return;
     }
     let segment: DeepReadonly<TurnPlaybackSegment> | null = null;
@@ -40,10 +44,38 @@ export function useTurnPlaybackOrchestrator(
         break;
       }
       if (!session.backend.synthFinished) {
+        console.debug("[TurnPlaybackOrchestrator] waiting for synth_finished before releasing segment.", {
+          turnId: session.turnId,
+          phase: session.phase,
+        });
         return;
       }
     }
     if (!segment || !isAtomicSegmentResolved(segment)) {
+      if (segment) {
+        console.debug("[TurnPlaybackOrchestrator] candidate segment is not atomically resolved.", {
+          turnId: segment.turnId,
+          messageId: segment.messageId,
+          text: {
+            contentPresent: Boolean(segment.text.content),
+            released: segment.text.released,
+            delivered: segment.text.delivered,
+          },
+          audio: {
+            urlPresent: Boolean(segment.audio.url),
+            released: segment.audio.released,
+            terminal: segment.audio.terminal,
+          },
+          motion: {
+            payloadPresent: segment.motion.payload !== null,
+            released: segment.motion.released,
+            started: segment.motion.started,
+            completed: segment.motion.completed,
+            absent: segment.motion.absent,
+            failed: segment.motion.failed,
+          },
+        });
+      }
       return;
     }
     const session = options.sessionStore.getSession(segment.turnId);
@@ -75,6 +107,13 @@ export function useTurnPlaybackOrchestrator(
       && segment.motion.payload !== null
       && segment.audio.terminal !== "failed";
     if (!releaseText && !releaseAudio && !releaseMotion) {
+      console.debug("[TurnPlaybackOrchestrator] resolved segment has no newly releasable material.", {
+        turnId: segment.turnId,
+        messageId: segment.messageId,
+        textReleased: segment.text.released,
+        audioReleased: segment.audio.released,
+        motionReleased: segment.motion.released,
+      });
       return;
     }
     const motionPayload = releaseMotion && segment.motion.payload
@@ -97,6 +136,18 @@ export function useTurnPlaybackOrchestrator(
       return;
     }
 
+    console.info("[TurnPlaybackOrchestrator] releasing atomic segment to playback timeline.", {
+      turnId: segment.turnId,
+      messageId: segment.messageId,
+      releaseText,
+      releaseAudio,
+      releaseMotion,
+      timelineMode: segment.audio.terminal === "absent" && !releaseAudio
+        ? "motion_only"
+        : "audio",
+      audioTerminal: segment.audio.terminal,
+      motionPayloadKind: motionPayload?.kind ?? null,
+    });
     options.timelineRuntime.startSegmentJob({
       turnId: segment.turnId,
       messageId: segment.messageId,

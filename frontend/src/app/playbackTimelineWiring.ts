@@ -195,6 +195,11 @@ export function configurePlaybackTimelineMotionRuntime(options: {
     }
     const motionSink = currentTimeline.sinks.find((sink) => sink.id === "motion");
     if (!motionSink || motionSink.terminal !== "idle") {
+      console.info("[PlaybackTimelineWiring] audio timeline started without pending motion sink.", {
+        turnId: normalizedTurnId,
+        messageId: normalizedMessageId,
+        timeline: currentTimeline,
+      });
       return;
     }
     const timelineClockReader = playbackTimeline.getTimelineClockReaderForSegment(
@@ -204,12 +209,18 @@ export function configurePlaybackTimelineMotionRuntime(options: {
     if (!timelineClockReader) {
       throw new Error("Audio-backed motion requires its segment Timeline clock reader.");
     }
-    motionEngine.handlePlaybackTimelineStarted(
+    const started = motionEngine.handlePlaybackTimelineStarted(
       projectMotionPlaybackClock(currentTimeline),
       projectMotionPlaybackClockReader(timelineClockReader),
       getCanonicalAssistantText(normalizedTurnId, normalizedMessageId),
       getCanonicalSpeechCues(normalizedTurnId, normalizedMessageId),
     );
+    console.info("[PlaybackTimelineWiring] audio timeline start forwarded to motion engine.", {
+      turnId: normalizedTurnId,
+      messageId: normalizedMessageId,
+      started,
+      timeline: currentTimeline,
+    });
   }
 
   function handleAudioTimelineDurationReady(
@@ -261,6 +272,13 @@ export function configurePlaybackTimelineMotionRuntime(options: {
     if (!registered) {
       throw new Error("Prepared motion could not register its timeline sink.");
     }
+    console.info("[PlaybackTimelineWiring] motion preparation registered with timeline.", {
+      turnId,
+      messageId,
+      timelineId: preparedTimeline.timelineId,
+      source: result.source,
+      durationMs: preparedTimeline.durationMs,
+    });
   }
 
   const motionTimelineSink = createModelEngineMotionTimelineSink({

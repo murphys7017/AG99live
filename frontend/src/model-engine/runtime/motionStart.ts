@@ -101,6 +101,9 @@ export function startNormalizedMotionPayload(
     playbackOrigin: context.playbackOrigin,
     startReason: context.startReason,
     queuedDelayMs: context.queuedDelayMs,
+    timelineMode: context.playbackClock?.source ?? null,
+    timelinePhase: context.playbackClock?.phase ?? null,
+    timelineId: context.playbackClock?.timelineId ?? null,
   });
 
   return startCompilableMotionPayload(
@@ -181,6 +184,11 @@ function prepareCompilableMotionPayload(
 ): PreparedSemanticMotionPayload | null {
   const selectedModel = dependencies.getSelectedModel();
   if (!selectedModel) {
+    console.error("[ModelEngine] motion preparation failed: selected model missing.", {
+      messageId: context.messageId,
+      turnId: context.turnId,
+      startReason: context.startReason,
+    });
     state.setLastCompileReason("missing_selected_model");
     state.setState("failed", "动作意图无法编译：当前未选中模型。", null);
     state.pushHistory("error", "动作意图无法编译：当前未选中模型。");
@@ -202,6 +210,23 @@ function prepareCompilableMotionPayload(
   let targetDurationMs = resolveTimelineTargetDurationMs(context);
   let speechActive = isSpeechActiveForPayload(context);
   let intent = resolveCompilerIntent(payload);
+  console.info("[ModelEngine] compiling motion intent.", {
+    messageId: context.messageId,
+    turnId: context.turnId,
+    payloadKind: payload.kind,
+    targetDurationMs,
+    speechActive,
+    hasPerformanceCurveHint: Boolean(intent.performance_curve_hint),
+    timeline: context.playbackClock
+      ? {
+          timelineId: context.playbackClock.timelineId,
+          source: context.playbackClock.source,
+          phase: context.playbackClock.phase,
+          currentTimeMs: context.playbackClock.currentTimeMs,
+          durationMs: context.playbackClock.durationMs,
+        }
+      : null,
+  });
   if (isMotionResourceIntent(intent)) {
     throw new Error("motion_resource_intent_reached_parameter_compiler");
   }
@@ -251,6 +276,9 @@ function prepareCompilableMotionPayload(
 
   if (!compileResult.ok || !compileResult.plan) {
     console.warn("[ModelEngine] semantic intent compile failed.", {
+      messageId: context.messageId,
+      turnId: context.turnId,
+      payloadKind: payload.kind,
       reason: compileResult.reason,
       diagnostics: compileResult.diagnostics,
     });
@@ -291,6 +319,11 @@ function prepareCompilableMotionPayload(
 
   console.info("[ModelEngine] semantic intent prepared.", {
     parameterCount: compileResult.plan.parameters.length,
+    durationMs: compileResult.plan.timing.duration_ms,
+    mode: compileResult.plan.mode,
+    emotion: compileResult.plan.emotion_label,
+    profileId: compileResult.plan.profile_id,
+    profileRevision: compileResult.plan.profile_revision,
     diagnostics: compileResult.diagnostics,
     messageId: context.messageId,
     turnId: context.turnId,
@@ -471,6 +504,21 @@ function startMotionResourceExecution(
   } = options;
   let notifiedStarted = false;
 
+  console.info("[ModelEngine] motion resource execution requested.", {
+    motionId: motion.motion_id,
+    group: motion.group,
+    index: motion.index,
+    file: motion.file,
+    durationMs: motion.duration_ms,
+    priority: motion.priority,
+    messageId: context.messageId,
+    turnId: context.turnId,
+    startReason: context.startReason,
+    timeline: context.playbackClock,
+    clockReaderAvailable: context.playbackClockReader !== null
+      && context.playbackClockReader !== undefined,
+  });
+
   const startResult: MotionPlaybackStartResult = dependencies.playMotionResource(
     motion,
     selectedModel,
@@ -501,16 +549,44 @@ function startMotionResourceExecution(
     state.setLastCompileReason(failureReason);
     state.setState("failed", failureReason, diagnostics);
     state.pushHistory("error", `动作播放失败：${failureReason}`);
+    console.error("[ModelEngine] motion resource execution rejected.", {
+      motionId: motion.motion_id,
+      group: motion.group,
+      index: motion.index,
+      messageId: context.messageId,
+      turnId: context.turnId,
+      startReason: context.startReason,
+      failureReason,
+    });
     return false;
   }
 
   const runId = normalizeMotionRunId(startResult.runId);
   if (!runId) {
+    console.error("[ModelEngine] motion resource execution returned no run id.", {
+      motionId: motion.motion_id,
+      messageId: context.messageId,
+      turnId: context.turnId,
+    });
     return rejectMotionStartWithoutRunId(state, diagnostics);
   }
-  return notifiedStarted
-    ? true
-    : rejectMotionStartWithoutRunId(state, diagnostics);
+  if (!notifiedStarted) {
+    console.error("[ModelEngine] motion resource execution started without lifecycle callback.", {
+      motionId: motion.motion_id,
+      runId,
+      messageId: context.messageId,
+      turnId: context.turnId,
+    });
+    return rejectMotionStartWithoutRunId(state, diagnostics);
+  }
+  console.info("[ModelEngine] motion resource execution accepted.", {
+    motionId: motion.motion_id,
+    runId,
+    messageId: context.messageId,
+    turnId: context.turnId,
+    startReason: context.startReason,
+  });
+  return true;
 }
 
 function startCompilableMotionPayload(
@@ -534,6 +610,11 @@ function startCompilableMotionPayload(
       || context.playbackClock?.source === "audio_pending"
     ) {
       const reason = "motion_plan_not_prepared_before_audio_start";
+      console.error("[ModelEngine] motion start rejected because audio began before preparation.", {
+        messageId: context.messageId,
+        turnId: context.turnId,
+        timeline: context.playbackClock,
+      });
       state.setLastCompileReason(reason);
       state.setState("failed", `动作启动失败：${reason}`, null);
       state.pushHistory("error", `动作启动失败：${reason}`);
@@ -551,6 +632,12 @@ function startCompilableMotionPayload(
   }
   if (selectedModel.model_path.trim() !== prepared.modelPath) {
     const reason = "prepared_motion_model_changed_before_start";
+    console.error("[ModelEngine] motion start rejected: model changed after preparation.", {
+      messageId: context.messageId,
+      turnId: context.turnId,
+      preparedModelPath: prepared.modelPath,
+      selectedModelPath: selectedModel.model_path.trim(),
+    });
     state.setLastCompileReason(reason);
     state.setState("failed", `动作启动失败：${reason}`, prepared.diagnostics);
     state.pushHistory("error", `动作启动失败：${reason}`);
@@ -564,6 +651,14 @@ function startCompilableMotionPayload(
     || selectedProfile.source_hash !== prepared.profileSourceHash
   ) {
     const reason = "prepared_motion_profile_changed_before_start";
+    console.error("[ModelEngine] motion start rejected: profile changed after preparation.", {
+      messageId: context.messageId,
+      turnId: context.turnId,
+      preparedProfileId: prepared.profileId,
+      preparedProfileRevision: prepared.profileRevision,
+      selectedProfileId: selectedProfile?.profile_id ?? null,
+      selectedProfileRevision: selectedProfile?.revision ?? null,
+    });
     state.setLastCompileReason(reason);
     state.setState("failed", `动作启动失败：${reason}`, prepared.diagnostics);
     state.pushHistory("error", `动作启动失败：${reason}`);
@@ -580,6 +675,7 @@ function startCompilableMotionPayload(
   }
 
   let notifiedStarted = false;
+  let startedRunId: string | null = null;
   const startResult = dependencies.playPlan(
     prepared.plan,
     selectedModel,
@@ -593,6 +689,7 @@ function startCompilableMotionPayload(
         }
         dependencies.stopInteractionSway();
         notifiedStarted = true;
+        startedRunId = normalizedRunId;
         const eventBase = {
           plan,
           model: selectedModel,
@@ -632,6 +729,18 @@ function startCompilableMotionPayload(
     state.setLastCompileReason(failureReason);
     state.setState("failed", failureReason, prepared.diagnostics);
     state.pushHistory("error", `动作播放失败：${failureReason}`);
+    console.error("[ModelEngine] parameter plan start rejected.", {
+      messageId: context.messageId,
+      turnId: context.turnId,
+      startReason: context.startReason,
+      failureReason,
+      plan: {
+        mode: prepared.plan.mode,
+        emotion: prepared.plan.emotion_label,
+        parameterCount: prepared.plan.parameters.length,
+        durationMs: prepared.plan.timing.duration_ms,
+      },
+    });
     return false;
   }
 
@@ -641,6 +750,14 @@ function startCompilableMotionPayload(
   }
 
   state.setState("playing", successMessage, prepared.diagnostics);
+  console.info("[ModelEngine] parameter plan accepted by motion player.", {
+    messageId: context.messageId,
+    turnId: context.turnId,
+    runId: startedRunId,
+    startReason: context.startReason,
+    parameterCount: prepared.plan.parameters.length,
+    durationMs: prepared.plan.timing.duration_ms,
+  });
   state.pushHistory("system", `动作计划执行中（${successMessage}）。`);
   return true;
 }

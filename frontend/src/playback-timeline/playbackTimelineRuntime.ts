@@ -283,6 +283,11 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
           required: false,
         });
       }
+      console.info("[PlaybackTimelineRuntime] audio timeline reused.", {
+        turnId,
+        messageId,
+        timeline: existing.engine.getSnapshot(),
+      });
       return;
     }
     const engine = createPlaybackTimelineEngine();
@@ -308,6 +313,11 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
       ],
     );
     setTimeline(turnId, messageId, entry);
+    console.info("[PlaybackTimelineRuntime] audio timeline created.", {
+      turnId,
+      messageId,
+      timeline: engine.getSnapshot(),
+    });
   }
 
   function ensureAudioSegmentTimeline(
@@ -324,8 +334,20 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     }
     if (options.hasMotion) {
       timeline.projectsMotionSession = true;
-      return ensureMotionTimelineSink(turnId, messageId);
+      const ensured = ensureMotionTimelineSink(turnId, messageId);
+      console.info("[PlaybackTimelineRuntime] audio segment timeline prepared for motion.", {
+        turnId,
+        messageId,
+        ensured,
+        timeline: timeline.engine.getSnapshot(),
+      });
+      return ensured;
     }
+    console.info("[PlaybackTimelineRuntime] audio segment timeline prepared without motion.", {
+      turnId,
+      messageId,
+      timeline: timeline.engine.getSnapshot(),
+    });
     return true;
   }
 
@@ -354,6 +376,12 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     if (accepted === false) {
       clearAudioStartTimeout(timeline);
     }
+    console.info("[PlaybackTimelineRuntime] audio sink start requested.", {
+      turnId,
+      messageId,
+      accepted,
+      timeline: timeline.engine.getSnapshot(),
+    });
     return accepted;
   }
 
@@ -394,6 +422,15 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
   function startSegmentJob(
     job: PlaybackTimelineSegmentJob<TMotionPayload>,
   ): void {
+    console.info("[PlaybackTimelineRuntime] segment job started.", {
+      turnId: job.turnId,
+      messageId: job.messageId,
+      reason: job.reason,
+      textRelease: job.text.release,
+      audioRelease: job.audio.release,
+      audioNoAudioConfirmed: job.audio.noAudioConfirmed,
+      motionPresent: job.motion.payload !== null,
+    });
     executePlaybackTimelineSegmentJob({
       job,
       ports: deps.segmentExecution,
@@ -429,11 +466,20 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
       );
     },
     startMotionSink(turnId, messageId) {
-      return startTimelineSink(
+      const accepted = startTimelineSink(
         turnId,
         messageId,
         MOTION_TIMELINE_SINK_ID,
       );
+      const started = accepted !== false;
+      console.info("[PlaybackTimelineRuntime] motion sink start requested.", {
+        turnId,
+        messageId,
+        accepted,
+        started,
+        timeline: getTimelineSnapshotForSegment(turnId, messageId),
+      });
+      return started;
     },
     rejectMotionBeforeStart,
     rejectAudioBeforeStart,
@@ -471,6 +517,12 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     messageId: string,
     reason: string,
   ): void {
+    console.warn("[PlaybackTimelineRuntime] motion rejected before start.", {
+      turnId,
+      messageId,
+      reason,
+      timeline: getTimelineSnapshotForSegment(turnId, messageId),
+    });
     const key = resolveTimelineKey(turnId, messageId);
     if (!sessionProjection.claimMotionRejection(key)) {
       return;
@@ -533,9 +585,14 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     const existing = getTimeline(turnId, messageId);
     if (existing) {
       existing.projectsMotionSession = true;
-      return ensureMotionTimelineSink(turnId, messageId, options)
-        ? existing.engine.getSnapshot()
-        : null;
+      const ensured = ensureMotionTimelineSink(turnId, messageId, options);
+      console.info("[PlaybackTimelineRuntime] motion-only timeline reused.", {
+        turnId,
+        messageId,
+        ensured,
+        timeline: existing.engine.getSnapshot(),
+      });
+      return ensured ? existing.engine.getSnapshot() : null;
     }
     const engine = createPlaybackTimelineEngine();
     engine.load(
@@ -558,7 +615,13 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
       audioStartTimeoutHandle: null,
       audioInterruptHandler: null,
     });
-    return engine.getSnapshot();
+    const snapshot = engine.getSnapshot();
+    console.info("[PlaybackTimelineRuntime] motion-only timeline created.", {
+      turnId,
+      messageId,
+      timeline: snapshot,
+    });
+    return snapshot;
   }
 
   function markAudioTimelineDuration(
@@ -593,6 +656,12 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
       if (!snapshot) {
         throw new Error("Playback timeline snapshot missing after audio duration update.");
       }
+      console.info("[PlaybackTimelineRuntime] audio timeline duration ready.", {
+        turnId,
+        messageId,
+        durationMs,
+        timeline: snapshot,
+      });
       deps.onAudioTimelineDurationReady?.(turnId, messageId, snapshot);
     }
   }
@@ -643,6 +712,13 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     if (!snapshot) {
       throw new Error("Playback timeline snapshot missing after audio start.");
     }
+    console.info("[PlaybackTimelineRuntime] audio timeline marked started.", {
+      turnId,
+      messageId,
+      startedAtMs,
+      durationMs,
+      timeline: snapshot,
+    });
     deps.onAudioTimelineStarted?.(turnId, messageId, snapshot);
     return true;
   }
@@ -740,6 +816,12 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
         onInterrupt: options.onInterrupt,
       });
     }
+    console.info("[PlaybackTimelineRuntime] motion sink ensured.", {
+      turnId,
+      messageId,
+      hasStartCallback: typeof options.start === "function",
+      timeline: engine.getSnapshot(),
+    });
     return true;
   }
 
@@ -757,6 +839,7 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
       return;
     }
     const engine = timeline.engine;
+    const before = engine.getSnapshot();
     if (
       timeline.projectsMotionSession
       && hasOpenSink(timeline, MOTION_TIMELINE_SINK_ID)
@@ -767,6 +850,12 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     if (engine.getPhase() === "ready") {
       engine.start();
     }
+    console.info("[PlaybackTimelineRuntime] motion timeline marked started.", {
+      turnId,
+      messageId,
+      before,
+      after: engine.getSnapshot(),
+    });
   }
 
   function markMotionTimelineTerminal(
@@ -788,6 +877,7 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     if (!timeline) {
       return;
     }
+    const before = timeline.engine.getSnapshot();
     if (hasOpenSink(timeline, MOTION_TIMELINE_SINK_ID)) {
       markMotionSessionTerminal(turnId, messageId, terminal, reason);
     }
@@ -797,6 +887,14 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
       reason,
     );
     clearTimelineIfTerminal(turnId, messageId);
+    console.info("[PlaybackTimelineRuntime] motion timeline terminal recorded.", {
+      turnId,
+      messageId,
+      terminal,
+      reason,
+      before,
+      after: timeline.engine.getSnapshot(),
+    });
     notifyExecutionStateChanged();
   }
 

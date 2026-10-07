@@ -59,14 +59,39 @@ function applyOutputSegment(
 ): void {
   const { payload } = event;
   const { state } = deps;
+  console.info("[InboundOutputDispatcher] output segment received.", {
+    turnId: event.turnId,
+    messageId: event.messageId,
+    sequence: payload.sequence,
+    textState: payload.text.state,
+    audioState: payload.audio.state,
+    motionState: payload.motion.state,
+    motionSchema: payload.motion.state === "present"
+      && payload.motion.payload
+      && typeof payload.motion.payload === "object"
+      ? String((payload.motion.payload as Record<string, unknown>).schema_version ?? "")
+      : "",
+    imageCount: payload.images.length,
+    speechCueCount: payload.speech.state === "present" ? payload.speech.cues.length : 0,
+  });
   let normalizedMotion: NormalizedMotionPayload | null = null;
   let rejectionReason: string | null = null;
   if (payload.motion.state === "present") {
     const normalized = deps.normalizeMotionPayload(payload.motion.payload);
     if (!normalized.ok) {
       rejectionReason = `output_segment_motion_invalid:${event.messageId}:${normalized.reason}`;
+      console.warn("[InboundOutputDispatcher] motion payload normalization failed.", {
+        turnId: event.turnId,
+        messageId: event.messageId,
+        reason: normalized.reason,
+      });
     } else {
       normalizedMotion = normalized.payload;
+      console.info("[InboundOutputDispatcher] motion payload normalized.", {
+        turnId: event.turnId,
+        messageId: event.messageId,
+        kind: normalized.payload.kind,
+      });
     }
   }
 
@@ -105,10 +130,20 @@ function applyOutputSegment(
     material,
   );
   if (commitResult.status === "rejected") {
+    console.error("[InboundOutputDispatcher] output segment commit rejected.", {
+      turnId: event.turnId,
+      messageId: event.messageId,
+      reason: commitResult.reason,
+    });
     deps.reportOutputSegmentRejected(commitResult.reason, event.envelope);
     return;
   }
   if (material.state === "rejected") {
+    console.error("[InboundOutputDispatcher] output segment rejected before playback.", {
+      turnId: event.turnId,
+      messageId: event.messageId,
+      reason: material.reason,
+    });
     deps.reportOutputSegmentRejected(material.reason, event.envelope);
     return;
   }
@@ -123,6 +158,15 @@ function applyOutputSegment(
   state.statusMessage = failures.length > 0
     ? "已收到完整回复，但部分播放材料失败。"
     : "已收到完整回复，准备统一播放。";
+  console.info("[InboundOutputDispatcher] output segment committed for playback.", {
+    turnId: event.turnId,
+    messageId: event.messageId,
+    motionPayloadPresent: normalizedMotion !== null,
+    audioUrlPresent: payload.audio.state === "present",
+    textLength: payload.text.state === "present" ? payload.text.content.length : 0,
+    imageCount: payload.images.length,
+    failures,
+  });
 }
 
 function applyOutputTranscription(

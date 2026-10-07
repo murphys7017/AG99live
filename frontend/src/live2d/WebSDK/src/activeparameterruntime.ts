@@ -138,8 +138,14 @@ export class ActiveParameterRuntime {
       : null;
     if (execution.directPlan.shouldLogFrame && planState) {
       console.info("[LAppModel] Active parameter frame resolved.", {
+        runId: (planState as ActiveDirectParameterFrameState & { runId?: string }).runId ?? null,
         mode: planState.mode,
         emotion: planState.emotionLabel,
+        elapsedMs: execution.directPlan.elapsedMs,
+        bindingCount: planState.semanticBindings.length,
+        contributionCount: execution.directPlan.contributions.length,
+        allBindingsActivated: execution.directPlan.allBindingsActivated,
+        nominalReleaseReached: execution.directPlan.nominalReleaseReached,
         parameters: execution.parameters.map((parameter) => ({
           parameterId: parameter.parameterIdRaw,
           baseValue: parameter.baseValue,

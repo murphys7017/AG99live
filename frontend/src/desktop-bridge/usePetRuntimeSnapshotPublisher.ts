@@ -148,6 +148,7 @@ export function createPetRuntimeSnapshotPublisher(
   options: PetRuntimeSnapshotPublisherOptions,
 ): PetRuntimeSnapshotPublisher {
   const snapshotDebounce = createDebounce();
+  const motionTuningDebounce = createDebounce();
   const modelProjectionDebounce = createDebounce();
   const profileDebounce = createDebounce();
   let lastPublishedMotionRecordId: string | null = null;
@@ -291,7 +292,7 @@ export function createPetRuntimeSnapshotPublisher(
       status: options.adapter.state.motionTuningSamplesStatus,
     }),
     () => {
-      snapshotDebounce.schedule(() => {
+      motionTuningDebounce.schedule(() => {
         publishMotionTuningSamples();
       });
     },
@@ -361,6 +362,7 @@ export function createPetRuntimeSnapshotPublisher(
     stopModelProjectionWatch();
     stopProfileWatch();
     snapshotDebounce.flush();
+    motionTuningDebounce.flush();
     modelProjectionDebounce.flush();
     profileDebounce.flush();
   }

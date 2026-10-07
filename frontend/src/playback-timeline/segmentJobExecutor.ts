@@ -50,7 +50,7 @@ export interface PlaybackTimelineSegmentExecutorTimelinePort {
   startMotionSink(
     turnId: string | null,
     messageId: string,
-  ): boolean | void;
+  ): boolean;
   rejectMotionBeforeStart(
     turnId: string | null,
     messageId: string,
@@ -181,6 +181,14 @@ export function executePlaybackTimelineSegmentJob<TMotionPayload>(
     const timelineMode = job.audio.noAudioConfirmed && !job.audio.release
       ? "motion_only"
       : "audio";
+    console.info("[PlaybackTimelineSegmentExecutor] motion release selected.", {
+      turnId: job.turnId,
+      messageId: job.messageId,
+      timelineMode,
+      receivedAtMs,
+      audioReleased: releasedAudio,
+      audioNoAudioConfirmed: job.audio.noAudioConfirmed,
+    });
     const interruptMotion = (reason: string) => ports.motionSink.interrupt(
       job.turnId,
       job.messageId,
@@ -242,7 +250,13 @@ export function executePlaybackTimelineSegmentJob<TMotionPayload>(
       motionStarted = timeline.startMotionSink(
         job.turnId,
         job.messageId,
-      ) === true;
+      );
+      console.info("[PlaybackTimelineSegmentExecutor] motion sink start returned.", {
+        turnId: job.turnId,
+        messageId: job.messageId,
+        timelineMode,
+        motionStarted,
+      });
     } catch (error) {
       timeline.rejectMotionBeforeStart(
         job.turnId,

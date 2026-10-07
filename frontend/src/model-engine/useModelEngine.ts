@@ -143,11 +143,24 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     onPendingStateChanged: (pendingCount, pendingMessageId) => {
       state.pendingCount = pendingCount;
       state.pendingMessageId = pendingMessageId;
+      console.debug("[ModelEngine] pending motion state changed.", {
+        pendingCount,
+        pendingMessageId,
+      });
     },
     onPendingStatus: (message) => {
+      console.info("[ModelEngine] pending motion status.", { message });
       setState("pending", message, null);
     },
     onStartPayload: (payload: NormalizedMotionPayload, context: StartPayloadContext) => {
+      console.info("[ModelEngine] scheduler requested motion start.", {
+        kind: payload.kind,
+        turnId: context.turnId,
+        messageId: context.messageId,
+        startReason: context.startReason,
+        queuedDelayMs: context.queuedDelayMs,
+        timeline: context.playbackClock,
+      });
       const key = buildSegmentKey(context.turnId, context.messageId);
       const cached = preparedSemanticMotions.get(key);
       const prepared = payload.kind === "semantic_intent"
@@ -165,6 +178,13 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
       );
     },
     onStartFailed: (context: StartPayloadContext) => {
+      console.error("[ModelEngine] scheduler reported motion start failure.", {
+        turnId: context.turnId,
+        messageId: context.messageId,
+        startReason: context.startReason,
+        queuedDelayMs: context.queuedDelayMs,
+        timeline: context.playbackClock,
+      });
       if (!normalizeTurnId(context.turnId)) {
         state.lastCompileReason = context.startReason;
         setState("failed", `动作启动失败：${context.startReason}`, null);
@@ -183,7 +203,15 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     payload: NormalizedMotionPayload,
     context: InboundPayloadContext,
   ): boolean {
-    return runtimeScheduler.queueInboundPayload(payload, context);
+    const accepted = runtimeScheduler.queueInboundPayload(payload, context);
+    console.info("[ModelEngine] normalized motion payload ingestion completed.", {
+      kind: payload.kind,
+      turnId: context.turnId,
+      messageId: context.messageId,
+      accepted,
+      timeline: context.playbackClock,
+    });
+    return accepted;
   }
 
   function handlePlaybackTimelineStarted(
@@ -192,6 +220,15 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     assistantText: string,
     speechCues: readonly OutputSegmentSpeechCue[],
   ): boolean {
+    console.info("[ModelEngine] playback timeline start forwarded to motion runtime.", {
+      turnId: playbackClock.turnId,
+      messageId: playbackClock.messageId,
+      timelineId: playbackClock.timelineId,
+      source: playbackClock.source,
+      phase: playbackClock.phase,
+      currentTimeMs: playbackClock.currentTimeMs,
+      durationMs: playbackClock.durationMs,
+    });
     const queuedMotionStarted =
       runtimeScheduler.handlePlaybackTimelineStarted(playbackClock);
     if (queuedMotionStarted) {

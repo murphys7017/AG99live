@@ -137,6 +137,8 @@ export class LAppModel extends CubismUserModel {
   private _activeMotionResourceFinish: (() => void) | null = null;
   private _activeMotionResourceClockReader: { getElapsedMs: () => number | null } | null = null;
   private _activeMotionResourceClockElapsedMs: number | null = null;
+  private _activeMotionResourceFirstFrameLogged = false;
+  private _lastLoggedDirectPlanNotReadyState: LoadStep | null = null;
 
   private failModelLoad(reason: string, error?: unknown): void {
     if (!this.isLoadActive()) {
@@ -620,7 +622,20 @@ export class LAppModel extends CubismUserModel {
    * 更新
    */
   public update(): void {
-    if (this._state != LoadStep.CompleteSetup) return;
+    if (this._state != LoadStep.CompleteSetup) {
+      if (
+        this._directParameterPlanState
+        && this._lastLoggedDirectPlanNotReadyState !== this._state
+      ) {
+        this._lastLoggedDirectPlanNotReadyState = this._state;
+        console.warn("[LAppModel] active direct parameter plan cannot render: model not ready.", {
+          state: this._state,
+          runId: this._directParameterPlanState.runId,
+        });
+      }
+      return;
+    }
+    this._lastLoggedDirectPlanNotReadyState = null;
 
     const deltaTimeSeconds: number = LAppPal.getDeltaTime();
     this._userTimeSeconds += deltaTimeSeconds;
@@ -660,6 +675,20 @@ export class LAppModel extends CubismUserModel {
         this._model,
         motionDeltaTimeSeconds
       ); // モーションを更新
+      if (
+        this._activeMotionResourceHandle !== InvalidMotionQueueEntryHandleValue
+        && !this._activeMotionResourceFirstFrameLogged
+      ) {
+        this._activeMotionResourceFirstFrameLogged = true;
+        console.info("[LAppModel] motion resource first frame applied.", {
+          handle: this._activeMotionResourceHandle,
+          renderDeltaMs: Math.round(deltaTimeSeconds * 1000),
+          motionDeltaMs: Math.round(motionDeltaTimeSeconds * 1000),
+          motionUpdated,
+          currentPriority: this._motionManager.getCurrentPriority(),
+          reservePriority: this._motionManager.getReservePriority(),
+        });
+      }
       this.completeActiveMotionResourceIfFinished();
     }
     this._model.saveParameters(); // 状態を保存
@@ -892,12 +921,18 @@ export class LAppModel extends CubismUserModel {
   }
 
   public stopMotion(reason = "motion_stopped"): void {
+    console.info("[LAppModel] motion resource stop requested.", {
+      reason,
+      activeHandle: this._activeMotionResourceHandle,
+      hasActiveLifecycleOwner: this._activeMotionResourceStop !== null,
+    });
     const activeStop = this._activeMotionResourceStop;
     this._activeMotionResourceStop = null;
     this._activeMotionResourceHandle = InvalidMotionQueueEntryHandleValue;
     this._activeMotionResourceFinish = null;
     this._activeMotionResourceClockReader = null;
     this._activeMotionResourceClockElapsedMs = null;
+    this._activeMotionResourceFirstFrameLogged = false;
     const stopErrors: unknown[] = [];
     try {
       this._motionManager.stopAllMotions();
@@ -992,16 +1027,46 @@ export class LAppModel extends CubismUserModel {
         this._activeMotionResourceClockReader = clockReader;
         this._activeMotionResourceClockElapsedMs = elapsedMs;
       }
+      console.info("[LAppModel] motion resource lifecycle started.", {
+        group,
+        index: no,
+        priority,
+        handle: this._activeMotionResourceHandle,
+        elapsedMs: this._activeMotionResourceClockElapsedMs,
+        state: this._state,
+      });
       notifyLifecycle("started", lifecycleCallbacks?.onStarted);
     };
     this._motionStartError = "";
+    console.info("[LAppModel] motion resource start entered.", {
+      group,
+      index: no,
+      priority,
+      state: this._state,
+      modelAvailable: this._model !== null,
+      loadedMotionCount: this._motionCount,
+      totalMotionCount: this._allMotionCount,
+    });
     if (this._released) {
       this._motionStartError = "motion_model_released";
+      console.warn("[LAppModel] motion resource start rejected.", {
+        group,
+        index: no,
+        reason: this._motionStartError,
+      });
       fail(this._motionStartError);
       return InvalidMotionQueueEntryHandleValue;
     }
     if (!this._model || !this._motionManager || this._state !== LoadStep.CompleteSetup) {
       this._motionStartError = "motion_model_not_ready";
+      console.warn("[LAppModel] motion resource start rejected.", {
+        group,
+        index: no,
+        reason: this._motionStartError,
+        state: this._state,
+        modelAvailable: this._model !== null,
+        motionManagerAvailable: this._motionManager !== null,
+      });
       fail(this._motionStartError);
       return InvalidMotionQueueEntryHandleValue;
     }
@@ -1010,6 +1075,11 @@ export class LAppModel extends CubismUserModel {
       const elapsedMs = requestedClockReader.getElapsedMs();
       if (elapsedMs === null || !Number.isFinite(elapsedMs)) {
         this._motionStartError = "motion_resource_clock_unavailable";
+        console.warn("[LAppModel] motion resource start rejected.", {
+          group,
+          index: no,
+          reason: this._motionStartError,
+        });
         fail(this._motionStartError);
         return InvalidMotionQueueEntryHandleValue;
       }
@@ -1019,6 +1089,12 @@ export class LAppModel extends CubismUserModel {
     const motion = this._motions.getValue(name) as CubismMotion;
     if (motion == null) {
       this._motionStartError = `motion_not_loaded:${name}`;
+      console.warn("[LAppModel] motion resource start rejected.", {
+        group,
+        index: no,
+        name,
+        reason: this._motionStartError,
+      });
       fail(this._motionStartError);
       return InvalidMotionQueueEntryHandleValue;
     }
@@ -1035,6 +1111,14 @@ export class LAppModel extends CubismUserModel {
         LAppPal.printMessage("[APP]can't start motion.");
       }
       this._motionStartError = "motion_priority_rejected";
+      console.warn("[LAppModel] motion resource start rejected.", {
+        group,
+        index: no,
+        priority,
+        currentPriority: this._motionManager.getCurrentPriority(),
+        reservePriority: this._motionManager.getReservePriority(),
+        reason: this._motionStartError,
+      });
       fail(this._motionStartError);
       return InvalidMotionQueueEntryHandleValue;
     }
@@ -1064,6 +1148,13 @@ export class LAppModel extends CubismUserModel {
       if (this._motionManager.getReservePriority() === priority) {
         this._motionManager.setReservePriority(0);
       }
+      console.warn("[LAppModel] motion resource start rejected.", {
+        group,
+        index: no,
+        priority,
+        handle,
+        reason: this._motionStartError,
+      });
       fail(this._motionStartError);
     } else {
       const previousActiveStop = this._activeMotionResourceStop;
@@ -1071,6 +1162,7 @@ export class LAppModel extends CubismUserModel {
       this._activeMotionResourceStop = activeStop;
       this._activeMotionResourceHandle = handle;
       this._activeMotionResourceFinish = finish;
+      this._activeMotionResourceFirstFrameLogged = false;
       start();
     }
     return handle;
@@ -1174,12 +1266,18 @@ export class LAppModel extends CubismUserModel {
     ) {
       return;
     }
+    console.info("[LAppModel] motion resource reached terminal frame.", {
+      handle,
+      currentPriority: this._motionManager.getCurrentPriority(),
+      reservePriority: this._motionManager.getReservePriority(),
+    });
     finish();
   }
 
   private clearMotionResourceClock(): void {
     this._activeMotionResourceClockReader = null;
     this._activeMotionResourceClockElapsedMs = null;
+    this._activeMotionResourceFirstFrameLogged = false;
   }
 
   public stopExpression(): void {
@@ -1637,10 +1735,21 @@ export class LAppModel extends CubismUserModel {
     options: DirectParameterPlanStartOptions = {},
   ): boolean {
     const execution = prepareDirectParameterExecution(plan);
-    console.info("[LAppModel] starting validated plan. mode=", plan.mode, "emotion=", plan.emotion_label);
+    console.info("[LAppModel] starting direct parameter plan.", {
+      state: this._state,
+      modelAvailable: this._model !== null,
+      mode: plan.mode,
+      emotion: plan.emotion_label,
+      parameterCount: Array.isArray(plan.parameters) ? plan.parameters.length : 0,
+      durationMs: plan.timing?.duration_ms ?? null,
+      runId: options.runId ?? null,
+    });
 
     if (!this._model || this._state != LoadStep.CompleteSetup) {
-      console.warn("[LAppModel] model not ready. _state=", this._state);
+      console.warn("[LAppModel] direct parameter plan rejected: model not ready.", {
+        state: this._state,
+        modelAvailable: this._model !== null,
+      });
       this._directParameterPlanError = "model_not_ready";
       return false;
     }
@@ -1664,6 +1773,13 @@ export class LAppModel extends CubismUserModel {
       playbackClockReader,
     );
     if (!candidate.ok) {
+      console.error("[LAppModel] direct parameter plan validation failed.", {
+        runId,
+        reason: candidate.reason,
+        mode: plan.mode,
+        emotion: plan.emotion_label,
+        parameterCount: Array.isArray(plan.parameters) ? plan.parameters.length : 0,
+      });
       this._directParameterPlanError = candidate.reason;
       return false;
     }
@@ -1672,6 +1788,11 @@ export class LAppModel extends CubismUserModel {
     if (expressionId && !this.setExpression(expressionId)) {
       this._directParameterPlanError = this.getExpressionStartError()
         || `expression_start_failed:${expressionId}`;
+      console.error("[LAppModel] direct parameter plan expression start failed.", {
+        runId,
+        expressionId,
+        reason: this._directParameterPlanError,
+      });
       return false;
     }
     if (this._tapExpressionExpiresAtSeconds !== null) {
@@ -1699,6 +1820,15 @@ export class LAppModel extends CubismUserModel {
 
     this._directParameterPlanState = candidate.state;
     this._directParameterPlanError = "";
+    console.info("[LAppModel] direct parameter plan activated.", {
+      runId,
+      mode: candidate.state.mode,
+      emotion: candidate.state.emotionLabel,
+      parameterCount: candidate.state.semanticBindings.length,
+      parameterIds: candidate.state.semanticBindings.map((binding) => binding.parameterIdRaw),
+      durationMs: candidate.state.timing.durationMs,
+      playbackClockAvailable: true,
+    });
     return true;
   }
 

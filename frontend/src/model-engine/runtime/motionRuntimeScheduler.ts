@@ -77,6 +77,23 @@ function isTimelineUnavailable(
   return snapshot.source === "audio_unavailable";
 }
 
+function summarizePlaybackClock(
+  clock: MotionPlaybackClockContext | null | undefined,
+): Record<string, unknown> | null {
+  if (!clock) {
+    return null;
+  }
+  return {
+    timelineId: clock.timelineId,
+    turnId: clock.turnId,
+    messageId: clock.messageId,
+    source: clock.source,
+    phase: clock.phase,
+    currentTimeMs: clock.currentTimeMs,
+    durationMs: clock.durationMs,
+  };
+}
+
 export function createMotionRuntimeScheduler(
   hooks: MotionRuntimeSchedulerHooks,
 ) {
@@ -126,6 +143,14 @@ export function createMotionRuntimeScheduler(
     entry: PendingInboundMotionPayload,
     startReason: string,
   ): void {
+    console.warn("[MotionRuntimeScheduler] pending motion dropped.", {
+      turnId: entry.turnId,
+      messageId: entry.messageId,
+      kind: entry.payload.kind,
+      reason: startReason,
+      timelineMode: entry.timelineMode,
+      playbackClock: summarizePlaybackClock(entry.playbackClock),
+    });
     pendingInboundMotionPayloads.delete(buildPendingMotionKey(entry.turnId, entry.messageId));
     hooks.onStartFailed?.(buildStartContext(entry, startReason));
   }
@@ -175,6 +200,12 @@ export function createMotionRuntimeScheduler(
     const key = buildPendingMotionKey(turnId, messageId);
     const entry = pendingInboundMotionPayloads.get(key);
     if (!entry) {
+      console.warn("[MotionRuntimeScheduler] start requested without pending motion.", {
+        turnId,
+        messageId,
+        startReason,
+        playbackClock: summarizePlaybackClock(playbackClock),
+      });
       return false;
     }
 
@@ -182,6 +213,15 @@ export function createMotionRuntimeScheduler(
       entry.playbackClock = playbackClock;
     }
     const context = buildStartContext(entry, startReason);
+    console.info("[MotionRuntimeScheduler] starting pending motion.", {
+      turnId: entry.turnId,
+      messageId: entry.messageId,
+      kind: entry.payload.kind,
+      startReason,
+      timelineMode: entry.timelineMode,
+      queuedDelayMs: context.queuedDelayMs,
+      playbackClock: summarizePlaybackClock(entry.playbackClock),
+    });
     let started = false;
     let startFailure: unknown = null;
     try {
@@ -213,7 +253,22 @@ export function createMotionRuntimeScheduler(
     }
 
     if (!started) {
+      console.warn("[MotionRuntimeScheduler] pending motion start rejected.", {
+        turnId: entry.turnId,
+        messageId: entry.messageId,
+        kind: entry.payload.kind,
+        startReason,
+        queuedDelayMs: context.queuedDelayMs,
+      });
       hooks.onStartFailed?.(context);
+    } else {
+      console.info("[MotionRuntimeScheduler] pending motion started.", {
+        turnId: entry.turnId,
+        messageId: entry.messageId,
+        kind: entry.payload.kind,
+        startReason,
+        queuedDelayMs: context.queuedDelayMs,
+      });
     }
     return started;
   }
@@ -236,6 +291,14 @@ export function createMotionRuntimeScheduler(
     payload: NormalizedMotionPayload,
     context: InboundPayloadContext,
   ): boolean {
+    console.info("[MotionRuntimeScheduler] inbound motion payload received.", {
+      turnId: context.turnId,
+      messageId: context.messageId,
+      kind: payload.kind,
+      timelineMode: context.timelineMode,
+      playbackClock: summarizePlaybackClock(context.playbackClock),
+      speechCueCount: context.speechCues.length,
+    });
     const normalizedTurnId = normalizeTurnId(context.turnId);
     const normalizedPlaybackTurnId =
       normalizeTurnId(context.playbackTurnId ?? null) ?? normalizedTurnId;
@@ -321,6 +384,12 @@ export function createMotionRuntimeScheduler(
           entry.playbackClock,
         );
       }
+      console.info("[MotionRuntimeScheduler] motion remains pending for timeline.", {
+        turnId: entry.turnId,
+        messageId: entry.messageId,
+        timelineMode: entry.timelineMode,
+        playbackClock: summarizePlaybackClock(entry.playbackClock),
+      });
     }
     return true;
   }
@@ -328,6 +397,10 @@ export function createMotionRuntimeScheduler(
   function handlePlaybackTimelineStarted(
     playbackClock: MotionPlaybackClockContext,
   ): boolean {
+    console.info("[MotionRuntimeScheduler] playback timeline started callback received.", {
+      playbackClock: summarizePlaybackClock(playbackClock),
+      pendingCount: pendingInboundMotionPayloads.size,
+    });
     const entry = pendingInboundMotionPayloads.get(
       buildPendingMotionKey(playbackClock.turnId, playbackClock.messageId),
     );
@@ -346,6 +419,12 @@ export function createMotionRuntimeScheduler(
           "playback_timeline_audio_unavailable_before_motion_start",
         );
       }
+      console.info("[MotionRuntimeScheduler] timeline callback did not satisfy motion start gate.", {
+        turnId: playbackClock.turnId,
+        messageId: playbackClock.messageId,
+        playbackClock: summarizePlaybackClock(playbackClock),
+        pending: true,
+      });
       return false;
     }
     const started = tryStartPendingPayload(

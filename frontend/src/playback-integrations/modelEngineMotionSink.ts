@@ -173,7 +173,22 @@ export function createModelEngineMotionTimelineSink(options: {
         playbackTimelineSnapshot,
         playbackTimelineClockReader,
       );
+      console.info("[ModelEngineMotionSink] motion start received.", {
+        turnId: context.turnId,
+        messageId: context.messageId,
+        timelineMode: context.timelineMode,
+        payloadKind: payload.kind,
+        timeline: playbackTimelineSnapshot,
+        clockReaderAvailable: playbackTimelineClockReader !== null,
+        attached: nextContext !== null,
+      });
       if (!nextContext) {
+        console.error("[ModelEngineMotionSink] motion start rejected: timeline unavailable.", {
+          turnId: context.turnId,
+          messageId: context.messageId,
+          timelineMode: context.timelineMode,
+          timeline: playbackTimelineSnapshot,
+        });
         options.markMotionTimelineTerminal(
           context.turnId,
           context.messageId,
@@ -188,9 +203,23 @@ export function createModelEngineMotionTimelineSink(options: {
         payload,
         nextContext,
       );
-      return accepted;
+      const acceptedByEngine = accepted !== false;
+      console.info("[ModelEngineMotionSink] motion payload handed to model engine.", {
+        turnId: nextContext.turnId,
+        messageId: nextContext.messageId,
+        timelineMode: nextContext.timelineMode,
+        timeline: nextContext.playbackClock,
+        accepted,
+        acceptedByEngine,
+      });
+      return acceptedByEngine;
     },
     interrupt(turnId, messageId, reason) {
+      console.warn("[ModelEngineMotionSink] motion interrupt requested.", {
+        turnId,
+        messageId,
+        reason,
+      });
       options.motionEngine.interruptPlaybackSegment(turnId, messageId, reason);
     },
   };
@@ -219,6 +248,14 @@ export function createMotionTimelineRunTracker(options: {
       if (event.playbackOrigin === "manual_preview") {
         return;
       }
+      console.info("[ModelEngineMotionSink] model engine run started for timeline.", {
+        turnId: event.turnId,
+        messageId: event.messageId,
+        runId: event.runId,
+        executionKind: event.executionKind,
+        startReason: event.startReason,
+        payloadKind: event.payloadKind,
+      });
       runs.set(event.runId, {
         turnId: event.turnId,
         messageId: event.messageId,
@@ -229,8 +266,20 @@ export function createMotionTimelineRunTracker(options: {
     recordTerminal(event) {
       const owner = runs.get(event.runId);
       if (!owner) {
+        console.debug("[ModelEngineMotionSink] terminal event has no timeline owner.", {
+          runId: event.runId,
+          status: event.status,
+          reason: event.reason,
+        });
         return;
       }
+      console.info("[ModelEngineMotionSink] model engine run reached terminal state.", {
+        turnId: owner.turnId,
+        messageId: owner.messageId,
+        runId: event.runId,
+        status: event.status,
+        reason: event.reason,
+      });
       const completedByHandoff = owner.executionKind === "parameter_plan"
         && event.status === "stopped"
         && event.reason === "direct_parameter_plan_replaced";

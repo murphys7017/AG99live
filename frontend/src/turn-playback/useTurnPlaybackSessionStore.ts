@@ -529,6 +529,11 @@ export function useTurnPlaybackSessionStore() {
     segment.motion.completed = false;
     segment.motion.failed = false;
     segment.motion.reason = reason;
+    log("motion absent", {
+      turnId,
+      messageId,
+      reason,
+    });
   }
 
   function markMotionFailed(
@@ -551,6 +556,11 @@ export function useTurnPlaybackSessionStore() {
     segment.motion.completed = false;
     segment.motion.failed = true;
     segment.motion.reason = reason || segment.motion.reason;
+    log("motion failed", {
+      turnId,
+      messageId,
+      reason: segment.motion.reason,
+    });
   }
 
   function markMotionReleased(
@@ -567,6 +577,10 @@ export function useTurnPlaybackSessionStore() {
     segment.motion.failed = false;
     segment.motion.reason = "";
     segment.motion.released = true;
+    log("motion released", {
+      turnId,
+      messageId,
+    });
   }
 
   function markMotionStarted(
@@ -584,6 +598,10 @@ export function useTurnPlaybackSessionStore() {
     segment.motion.reason = "";
     segment.motion.released = true;
     segment.motion.started = true;
+    log("motion started", {
+      turnId,
+      messageId,
+    });
   }
 
   function markMotionCompleted(
@@ -604,6 +622,10 @@ export function useTurnPlaybackSessionStore() {
     segment.motion.reason = "";
     segment.motion.released = true;
     segment.motion.completed = true;
+    log("motion completed", {
+      turnId,
+      messageId,
+    });
   }
 
   // ── backend ─────────────────────────────────────────────────────
