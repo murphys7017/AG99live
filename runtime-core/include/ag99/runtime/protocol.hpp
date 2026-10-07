@@ -90,6 +90,34 @@ struct ModelSync {
   Json payload;
 };
 
+struct DesktopSettingsQuery {
+  ProtocolEnvelope envelope;
+  std::string request_id;
+  std::string key;
+  std::string action;
+  std::optional<std::string> value;
+};
+
+struct DesktopSettingOption {
+  std::string id;
+  std::string label;
+};
+
+struct DesktopSettingsEntry {
+  std::string value;
+  std::vector<DesktopSettingOption> options;
+  std::optional<double> minimum;
+  std::optional<double> maximum;
+  std::optional<double> step;
+};
+
+struct DesktopSettingsResult {
+  std::string request_id;
+  std::string key;
+  std::optional<DesktopSettingsEntry> entry;
+  std::string error;
+};
+
 struct AudioChunkMetadata {
   std::string stream_id;
   std::optional<std::string> turn_id;
@@ -109,6 +137,8 @@ ProtocolEnvelope parse_envelope(const Json& raw);
 ProtocolEnvelope parse_envelope_json(std::string_view raw);
 OutputSegment parse_output_segment(const ProtocolEnvelope& envelope);
 ModelSync parse_model_sync(const ProtocolEnvelope& envelope);
+DesktopSettingsQuery parse_desktop_settings_query(
+    const ProtocolEnvelope& envelope);
 
 BinaryAudioChunkFrame parse_binary_audio_frame(std::span<const std::uint8_t> frame);
 std::vector<std::uint8_t> build_binary_audio_frame(
@@ -127,6 +157,11 @@ Json build_input_text(
     std::string_view text,
     const std::vector<std::string>& images = {},
     std::optional<std::string_view> turn_id = std::nullopt,
+    std::optional<std::string_view> message_id = std::nullopt,
+    std::optional<std::string_view> timestamp = std::nullopt);
+
+Json build_system_desktop_settings_result(
+    const DesktopSettingsResult& result,
     std::optional<std::string_view> message_id = std::nullopt,
     std::optional<std::string_view> timestamp = std::nullopt);
 

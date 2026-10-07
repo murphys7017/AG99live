@@ -81,21 +81,39 @@ audio amplitude analysis remain the next integration slices. The native runtime
 is not a second settings application: the existing frontend remains the source
 of configuration, while this host consumes the resulting runtime inputs.
 
-The current Adapter still emits `engine.motion_intent.v4`; the direct parameter
-plan path is prepared for the IPC bridge that will carry the frontend's
-compiled plan to the native host.
+The current Adapter still emits `engine.motion_intent.v4`. The native host also
+accepts `engine.parameter_plan.v3` segments directly; translating the remaining
+TypeScript compiler and runtime behavior remains separate migration work.
+
+## Web desktop settings
+
+The host handles `system.desktop_settings_query` from the existing AstrBot Web
+configuration broker and replies with `system.desktop_settings_result` on its
+current Adapter connection. No additional Web service or TS desktop bridge is
+required for this configuration path.
+
+Currently supported:
+
+- `live2d_physics_response_scale`: list/set, default `1`, range `0.5` to `2`,
+  UI step `0.05`. Values are rounded to two decimal places, matching the TS
+  presentation settings normalizer; they are not snapped to the UI step.
+
+Accepted changes are queued under the model runtime mutex and applied by the
+render thread before the next Physics update. They remain in memory for this
+host session, including reconnects, but are not persisted across host restarts.
+Invalid values return `desktop_setting_value_invalid`; finite out-of-range
+values return `desktop_setting_value_out_of_range`. All other setting keys
+return `desktop_setting_unsupported`, not a successful placeholder value.
 
 ## Production boundary
 
-The native host is intended to replace the frontend's rendering and playback
-runtime, not its settings application. The existing frontend remains the
-control plane for connection, audio, presentation, motion, and model settings.
-The native host remains the runtime plane for protocol consumption, motion
-execution, audio playback/lip-sync, and Live2D rendering.
+The TS desktop remains the stable reference implementation for new features
+and testing. The C++ desktop is a separate high-performance implementation of
+the same protocol and runtime behavior. Configuration continues to use the
+existing Web pages; Native migrates supported settings incrementally.
 
-The Adapter currently permits one WebSocket client. Therefore the direct
-Adapter connection used by this demo is not the final coexistence architecture:
-the production host must be the sole Adapter client, while the existing
-frontend sends settings and control commands to it through a local IPC bridge.
-Adding a second independent Adapter connection would make the frontend and
-native runtime compete for the same session.
+The Adapter currently permits one WebSocket client. The user manually chooses
+which desktop to run: TS or C++. Neither client requires the other to run.
+There is no launch mutex, automatic client switching, or concurrent-desktop
+coordination layer. Close the active desktop before testing the other against
+the same Adapter instance.

@@ -110,6 +110,13 @@ void RuntimeProtocolSession::ingest_text(std::string_view text_frame) {
       }
       return;
     }
+    if (envelope.type == "system.desktop_settings_query") {
+      auto query = parse_desktop_settings_query(envelope);
+      if (callbacks_.on_desktop_settings_query) {
+        callbacks_.on_desktop_settings_query(std::move(query));
+      }
+      return;
+    }
     if (envelope.type != "output.segment") {
       if (callbacks_.on_ignored_type) {
         callbacks_.on_ignored_type(envelope.type);

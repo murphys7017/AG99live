@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <iomanip>
 #include <limits>
 #include <random>
@@ -41,6 +42,36 @@ std::string require_string(
                         " must be a non-empty string");
   }
   return value;
+}
+
+std::string trim_protocol_identifier(std::string_view value) {
+  // Match String.trim() for the identifiers normalized by the TS responder.
+  constexpr std::array<std::string_view, 25> whitespace = {
+      "\x09", "\x0a", "\x0b", "\x0c", "\x0d", " ", "\xc2\xa0",
+      "\xe1\x9a\x80", "\xe2\x80\x80", "\xe2\x80\x81", "\xe2\x80\x82",
+      "\xe2\x80\x83", "\xe2\x80\x84", "\xe2\x80\x85", "\xe2\x80\x86",
+      "\xe2\x80\x87", "\xe2\x80\x88", "\xe2\x80\x89", "\xe2\x80\x8a",
+      "\xe2\x80\xa8", "\xe2\x80\xa9", "\xe2\x80\xaf", "\xe2\x81\x9f",
+      "\xe3\x80\x80", "\xef\xbb\xbf"};
+  for (;;) {
+    const auto it = std::ranges::find_if(whitespace, [&](auto token) {
+      return value.starts_with(token);
+    });
+    if (it == whitespace.end()) {
+      break;
+    }
+    value.remove_prefix(it->size());
+  }
+  for (;;) {
+    const auto it = std::ranges::find_if(whitespace, [&](auto token) {
+      return value.ends_with(token);
+    });
+    if (it == whitespace.end()) {
+      break;
+    }
+    value.remove_suffix(it->size());
+  }
+  return std::string(value);
 }
 
 std::optional<std::string> optional_string(
@@ -472,6 +503,37 @@ ModelSync parse_model_sync(const ProtocolEnvelope& envelope) {
   return ModelSync{envelope, envelope.payload};
 }
 
+DesktopSettingsQuery parse_desktop_settings_query(
+    const ProtocolEnvelope& envelope) {
+  if (envelope.type != "system.desktop_settings_query") {
+    throw ProtocolError("expected system.desktop_settings_query envelope");
+  }
+  if (envelope.source != "adapter") {
+    throw ProtocolError("system.desktop_settings_query.source must be adapter");
+  }
+  require_object(envelope.payload, "payload");
+  const auto request_id = trim_protocol_identifier(
+      require_string(envelope.payload, "request_id", "payload"));
+  const auto key = trim_protocol_identifier(
+      require_string(envelope.payload, "key", "payload"));
+  if (request_id.empty() || key.empty()) {
+    throw ProtocolError("payload.request_id and payload.key must be non-empty strings");
+  }
+  const auto action = require_string(envelope.payload, "action", "payload");
+  if (action != "list" && action != "set") {
+    throw ProtocolError("payload.action must be list or set");
+  }
+  std::optional<std::string> value;
+  const auto value_it = envelope.payload.find("value");
+  if (value_it != envelope.payload.end()) {
+    if (!value_it->is_string()) {
+      throw ProtocolError("payload.value must be a string when provided");
+    }
+    value = value_it->get<std::string>();
+  }
+  return DesktopSettingsQuery{envelope, request_id, key, action, std::move(value)};
+}
+
 BinaryAudioChunkFrame parse_binary_audio_frame(
     std::span<const std::uint8_t> frame) {
   if (frame.size() < kAudioHeaderBytes) {
@@ -616,6 +678,60 @@ Json build_input_text(
       "input.text",
       payload,
       turn_id,
+      "frontend",
+      message_id,
+      timestamp);
+}
+
+Json build_system_desktop_settings_result(
+    const DesktopSettingsResult& result,
+    std::optional<std::string_view> message_id,
+    std::optional<std::string_view> timestamp) {
+  if (trim_protocol_identifier(result.request_id).empty()
+      || trim_protocol_identifier(result.key).empty()) {
+    throw ProtocolError("desktop settings result requires request_id and key");
+  }
+  Json payload = {
+      {"request_id", result.request_id},
+      {"key", result.key},
+      {"ok", result.entry.has_value()},
+  };
+  if (result.entry) {
+    if (!result.error.empty()) {
+      throw ProtocolError("successful desktop settings result must not contain error");
+    }
+    const auto& entry = *result.entry;
+    payload["value"] = entry.value;
+    payload["options"] = Json::array();
+    for (const auto& option : entry.options) {
+      if (trim_protocol_identifier(option.id).empty()
+          || trim_protocol_identifier(option.label).empty()) {
+        throw ProtocolError("desktop setting options require id and label");
+      }
+      payload["options"].push_back({{"id", option.id}, {"label", option.label}});
+    }
+    const auto add_bound = [&](std::string_view name, std::optional<double> bound) {
+      if (!bound) {
+        return;
+      }
+      if (!std::isfinite(*bound)) {
+        throw ProtocolError("desktop setting bounds must be finite numbers");
+      }
+      payload[std::string(name)] = *bound;
+    };
+    add_bound("minimum", entry.minimum);
+    add_bound("maximum", entry.maximum);
+    add_bound("step", entry.step);
+  } else {
+    if (trim_protocol_identifier(result.error).empty()) {
+      throw ProtocolError("failed desktop settings result requires error");
+    }
+    payload["error"] = result.error;
+  }
+  return build_envelope(
+      "system.desktop_settings_result",
+      payload,
+      std::nullopt,
       "frontend",
       message_id,
       timestamp);

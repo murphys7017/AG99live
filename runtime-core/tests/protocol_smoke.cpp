@@ -2,6 +2,9 @@
 #include "ag99/runtime/runtime_session.hpp"
 #include "ag99/runtime/segment_assembler.hpp"
 
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
 #include <cassert>
 #include <cstdint>
 #include <string>
@@ -438,6 +441,68 @@ void test_audio_control_builders() {
   assert(finished.at("payload").at("success") == false);
 }
 
+void test_desktop_settings_boundary() {
+  std::vector<ag99::runtime::DesktopSettingsQuery> queries;
+  std::vector<std::string> errors;
+  ag99::runtime::RuntimeProtocolSession session({
+      .on_protocol_error = [&](std::string error) {
+        errors.push_back(std::move(error));
+      },
+      .on_desktop_settings_query = [&](ag99::runtime::DesktopSettingsQuery query) {
+        queries.push_back(std::move(query));
+      },
+  });
+  auto request = ag99::runtime::build_envelope(
+      "system.desktop_settings_query",
+      {{"request_id", " request-1 "},
+       {"key", " live2d_physics_response_scale "},
+       {"action", "set"},
+       {"value", ""},
+       {"extra", true}},
+      std::nullopt,
+      "adapter");
+  session.ingest_text(request.dump());
+  assert(errors.empty());
+  assert(queries.size() == 1);
+  assert(queries.front().request_id == "request-1");
+  assert(queries.front().key == "live2d_physics_response_scale");
+  assert(queries.front().action == "set");
+  assert(queries.front().value == std::optional<std::string>(""));
+
+  const auto response = ag99::runtime::build_system_desktop_settings_result({
+      .request_id = queries.front().request_id,
+      .key = queries.front().key,
+      .entry = ag99::runtime::DesktopSettingsEntry{
+          .value = "1",
+          .options = {{"1", "Normal"}},
+          .minimum = 0.5,
+          .maximum = 2.0,
+          .step = 0.05},
+  });
+  assert(response.at("type") == "system.desktop_settings_result");
+  assert(response.at("source") == "frontend");
+  assert(response.at("turn_id").is_null());
+  assert(response.at("payload").at("ok") == true);
+  assert(response.at("payload").at("value") == "1");
+  assert(response.at("payload").at("options").at(0).at("id") == "1");
+  assert(response.at("payload").at("minimum") == 0.5);
+  assert(response.at("payload").at("maximum") == 2.0);
+  assert(response.at("payload").at("step") == 0.05);
+
+  request["payload"]["value"] = nullptr;
+  session.ingest_text(request.dump());
+  assert(queries.size() == 1);
+  assert(errors.size() == 1);
+  const auto rejected = ag99::runtime::build_system_desktop_settings_result({
+      .request_id = "request-2",
+      .key = "spout_enabled",
+      .error = "desktop_setting_unsupported",
+  });
+  assert(rejected.at("payload").at("ok") == false);
+  assert(rejected.at("payload").at("error") == "desktop_setting_unsupported");
+  assert(!rejected.at("payload").contains("value"));
+}
+
 }  // namespace
 
 int main() {
@@ -449,5 +514,6 @@ int main() {
   test_input_text_builder();
   test_runtime_session_dispatch();
   test_audio_control_builders();
+  test_desktop_settings_boundary();
   return 0;
 }
