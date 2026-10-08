@@ -46,7 +46,7 @@ Escalate when uncertain.
 - Do not run full suites, broad regression suites, coverage jobs, or repeated test matrices by default.
 - When a check is necessary, limit it to the smallest public-boundary input/output case, normally one success case and one rejection case.
 - Do not add tests for private implementation details, branch combinations, internal state permutations, or fake integrations that reproduce the implementation's assumptions.
-- Prefer source tracing, type/static checks, real protocol payloads, runtime logs, and live AstrBot + Electron + TTS + Live2D verification.
+- Prefer source tracing, type/static checks, real protocol payloads, runtime logs, and live AG99 + Electron + TTS + Live2D verification.
 - If live verification is unavailable, report the gap explicitly instead of compensating with more mocks, tests, fallback behavior, or compatibility code.
 
 ## Checklists
