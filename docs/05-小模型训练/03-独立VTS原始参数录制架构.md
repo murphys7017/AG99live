@@ -39,7 +39,7 @@ SQLite 使用独立数据库、WAL 和外键级联。默认文件为：
 - 原始参数回放与审核 UI。
 - 自动语义轴推导、人工标注和文本关联。
 - 训练 JSON/JSONL 导出。
-- 与 AstrBot、Motion Lab、Electron 或 ModelEngine 的运行时接入。
+- 与 AG99、Motion Lab、Electron 或 ModelEngine 的运行时接入。
 
 训练职责稳定后，才能在不污染原始数据边界的前提下设计这些功能。
 

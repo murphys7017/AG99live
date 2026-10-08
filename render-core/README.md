@@ -87,7 +87,7 @@ TypeScript compiler and runtime behavior remains separate migration work.
 
 ## Web desktop settings
 
-The host handles `system.desktop_settings_query` from the existing AstrBot Web
+The host handles `system.desktop_settings_query` from the existing AG99 Web
 configuration broker and replies with `system.desktop_settings_result` on its
 current Adapter connection. No additional Web service or TS desktop bridge is
 required for this configuration path.

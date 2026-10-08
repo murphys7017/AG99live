@@ -10,7 +10,7 @@
 
 AG99live 是一个**边界划分清楚、Python 侧结构良好,但前端正在长出第二套运行时**的系统。
 
-主干(AstrBot Adapter → WebSocket → Electron 渲染进程)分层是健康的:`TurnPlaybackSessionStore` 单点持有 turn 会话状态,`ModelEngine` 42 个文件 10,277 行承担动作编译,Adapter 侧协议经 `schema_manifest.json` 统一加载。这部分做得比多数项目好。
+主干(AG99 Adapter → WebSocket → Electron 渲染进程)分层是健康的:`TurnPlaybackSessionStore` 单点持有 turn 会话状态,`ModelEngine` 42 个文件 10,277 行承担动作编译,Adapter 侧协议经 `schema_manifest.json` 统一加载。这部分做得比多数项目好。
 
 **主导的架构问题是 C++ 重写与 TS 运行时之间的协议版本同步缺少自动校验。** `runtime-core/` 在 `runtime-core/include/ag99/runtime/protocol.hpp:18-21` 手工维护 4 个协议版本字面量；`render-core/src/main.cpp:3149` 使用其中的 `kMotionIntentSchema`,而 `runtime-core` 不读取 `schema_manifest.json`。这意味着 manifest 与 C++ 常量可能各自演进,目前没有自动校验保证二者一致。同一套动作语义编译规则(`duration_weight` 1..3 约束、`motion_steps` 权重聚合)目前在 TS(`model-engine/normalize.ts:56-74`、`compileSemanticMotion.ts:71-124`)和 C++(`render-core/src/main.cpp:3145-3544`)中各自独立实现,且没有任何自动校验保证它们一致。
 
@@ -38,7 +38,7 @@ AG99live 是一个**边界划分清楚、Python 侧结构良好,但前端正在�
 三个进程,两个平面。
 
 ```text
-[AstrBot 宿主]
+[AG99 宿主]
    └─ astrbot_plugin_ag99live_adapter/   Python 插件
         ├─ protocol/    schema_manifest.json ← 协议版本唯一权威
         ├─ runtime/     turn 协调、段聚合、状态
@@ -457,7 +457,7 @@ Adapter 侧所有影响用户可见状态的失败都发 `control.error`;兼容�
 ## 5. Suspicious Compatibility Code
 
 **确认必要的兼容**
-- `core_compatibility.py` —— 探测 AstrBot Core 的两套增强 API(交互契约 + prompt 注解契约),有实际调用者:`runtime/state.py:14,87-89`、`middleware/__init__.py:3,7`、`platform_event.py:11,172`。**但**其静默降级路径(`:96-108`)不记日志,且 `turn_coordinator.py:566-574` 的 `getattr(..., True)` 默认值会让兼容路径在异常情况下静默关闭(见 P2-12)。
+- `core_compatibility.py` —— 探测 AG99 Core 的两套增强 API(交互契约 + prompt 注解契约),有实际调用者:`runtime/state.py:14,87-89`、`middleware/__init__.py:3,7`、`platform_event.py:11,172`。**但**其静默降级路径(`:96-108`)不记日志,且 `turn_coordinator.py:566-574` 的 `getattr(..., True)` 默认值会让兼容路径在异常情况下静默关闭(见 P2-12)。
 - 官方 AstrBot 走 `<@anim>` 的兼容入口 —— `README.md:74` 明确说明"该入口不承担增强 Persona Effect 的失败降级",是有意识的边界声明。
 
 **很可能可移除 / 收敛**
@@ -466,7 +466,7 @@ Adapter 侧所有影响用户可见状态的失败都发 `control.error`;兼容�
 - `outboundClient.ts` 的裸 `false` 返回链(`useAdapterConnection.ts:765-805`)—— 返回值语义不可区分,可收敛为抛错或具名结果。**删除置信度:Medium**(需确认是否有调用方依赖 `false` 而不检查)。
 
 **需要确认**
-- `core_compatibility` 兜底当前是否还会命中 —— 仓库未 vendored AstrBot(`astrbot.api` / `astrbot.core.*` 全为外部依赖),无法从本仓判定目标 Core 版本。**Needs confirmation:在目标环境打印 `astrbot.core.interaction` / `astrbot.core.prompt` 的实际导出符号。**
+- `core_compatibility` 兜底当前是否还会命中 —— 仓库未 vendored AG99(`astrbot.api` / `astrbot.core.*` 全为外部依赖),无法从本仓判定目标 Core 版本。**Needs confirmation:在目标环境打印 `astrbot.core.interaction` / `astrbot.core.prompt` 的实际导出符号。**
 - `render-core/README.md:74-78` 描述的"前端与原生运行时通过本地 IPC 桥接"的最终形态尚未实现;当前是**两个独立 Adapter 客户端争抢同一会话**。**Needs confirmation:迁移终态。**
 
 ---
@@ -624,5 +624,5 @@ ESP32 7 条失败路径接入日志 → 模型扫描失败发 `control.error` �
 
 - **未运行** `npm run typecheck`、`npm test`、`pytest`、CMake 构建。所有结论基于源码静态阅读与调用关系。
 - **未取证**:`vts-data-recorder/`(独立 VTube Studio 录制器,23 文件)、`tools/validate_runtime.py`、`native/spout/` C++ 源码、Spout Sender 构建脚本。
-- **无法验证**:`core_compatibility` 兜底在目标 AstrBot 版本是否命中(仓库未 vendored AstrBot);浏览器 Private Network Access 是否实际阻断 P7 的跨域读取;`F6` 非法 phase 转换的异常在 Vue watcher 中的实际传播路径(需运行时)。
+- **无法验证**:`core_compatibility` 兜底在目标 AG99 版本是否命中(仓库未 vendored AG99);浏览器 Private Network Access 是否实际阻断 P7 的跨域读取;`F6` 非法 phase 转换的异常在 Vue watcher 中的实际传播路径(需运行时)。
 - **工作区状态**:审计开始时 `git status` 显示 4 个已修改文件(`.gitignore`、`render-core/CMakeLists.txt`、`render-core/README.md`、`render-core/src/main.cpp`)—— 均为你自己的未提交改动,本次审计未修改任何文件。

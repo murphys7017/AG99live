@@ -17,4 +17,4 @@ cd frontend
 npm run typecheck
 ```
 
-协议检查验证 schema manifest 与生成的 TypeScript 文件一致；类型检查覆盖前端 TypeScript 边界。真实 AstrBot、TTS、Electron、Live2D 和 OBS 行为仍需手动运行验收。
+协议检查验证 schema manifest 与生成的 TypeScript 文件一致；类型检查覆盖前端 TypeScript 边界。真实 AG99、TTS、Electron、Live2D 和 OBS 行为仍需手动运行验收。
