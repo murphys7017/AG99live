@@ -134,6 +134,10 @@ class MyPlugin(Star):
                     bundle,
                     tasks=self._independent_motion_tasks,
                 )
+                # create_task() only queues the coroutine. Yield once so its
+                # prompt preparation and provider request can overlap the main
+                # model request instead of waiting for the next hook boundary.
+                await asyncio.sleep(0)
             else:
                 logger.info(
                     "WIRING independent_motion.request_hook mode=serial "

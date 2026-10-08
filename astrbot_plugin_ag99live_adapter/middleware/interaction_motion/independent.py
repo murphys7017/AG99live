@@ -29,6 +29,20 @@ INDEPENDENT_MOTION_TASK_EXTRA_KEY = "_ag99live_independent_motion_task"
 INDEPENDENT_MOTION_RESULT_EXTRA_KEY = "_ag99live_independent_motion_result"
 PERSONA_EXPRESSION_INTENT_METADATA_KEY = "interaction.persona_expression_intent"
 _MAX_RETAINED_RESULT_TURNS = 64
+# Independent motion is supplementary output; it must not hold the main reply
+# indefinitely when the secondary provider is slow.
+_PARALLEL_MOTION_WAIT_SECONDS = 2.0
+
+
+def _consume_background_motion_exception(task: asyncio.Task) -> None:
+    if task.cancelled():
+        return
+    error = task.exception()
+    if error is not None:
+        logger.warning(
+            "WIRING independent_motion.background_task_failed error=%s",
+            error,
+        )
 
 
 @dataclass(slots=True)
@@ -229,7 +243,21 @@ async def resolve_motion_after_llm_response(
             event.get_extra("_turn_id") or "<missing>",
         )
         try:
-            result = await task
+            # Keep the task alive on timeout so turn cleanup can still cancel it,
+            # but never let a slow motion provider block the visible reply.
+            result = await asyncio.wait_for(
+                asyncio.shield(task),
+                timeout=_PARALLEL_MOTION_WAIT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            task.add_done_callback(_consume_background_motion_exception)
+            logger.warning(
+                "WIRING independent_motion.wait_timeout mode=parallel "
+                "turn_id=%s timeout_seconds=%.2f",
+                event.get_extra("_turn_id") or "<missing>",
+                _PARALLEL_MOTION_WAIT_SECONDS,
+            )
+            return None
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001
