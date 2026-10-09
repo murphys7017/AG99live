@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -58,17 +59,30 @@ STATE_DIR = PLUGIN_DATA_DIR / "state"
 LOOPBACK_BIND_HOST = "127.0.0.1"
 
 
-@register_platform_adapter(
-    ADAPTER_PLATFORM_NAME,
-    "AG99live 桌宠连接适配器",
-    adapter_display_name=ADAPTER_DISPLAY_NAME,
-    default_config_tmpl={
-        "port": 12396,
-        "http_port": 12397,
-        "speaker_name": "AstrBot",
-        "auto_start_mic": False,
-    },
-)
+def _register_ag99live_adapter(adapter_class: type[Platform]) -> type[Platform]:
+    """Register with optional metadata supported by newer AstrBot cores."""
+    registration_kwargs: dict[str, Any] = {
+        "default_config_tmpl": {
+            "port": 12396,
+            "http_port": 12397,
+            "speaker_name": "AstrBot",
+            "auto_start_mic": False,
+        },
+    }
+    try:
+        parameters = inspect.signature(register_platform_adapter).parameters
+    except (TypeError, ValueError):
+        parameters = {}
+    if "adapter_display_name" in parameters:
+        registration_kwargs["adapter_display_name"] = ADAPTER_DISPLAY_NAME
+    return register_platform_adapter(
+        ADAPTER_PLATFORM_NAME,
+        "AG99live 桌宠连接适配器",
+        **registration_kwargs,
+    )(adapter_class)
+
+
+@_register_ag99live_adapter
 class OLVPetPlatformAdapter(Platform):
     """桌面侧 AstrBot 平台适配器，组装全部后端组件并对外暴露为单条连接。
 
