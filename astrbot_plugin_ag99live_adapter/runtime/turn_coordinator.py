@@ -66,6 +66,12 @@ from .performance_curve_coordinator import PerformanceCurveCoordinator
 MAX_REMEMBERED_TERMINAL_TURNS = 256
 _INDEPENDENT_MOTION_TASK_EXTRA_KEY = "_ag99live_independent_motion_task"
 _INDEPENDENT_MOTION_RESULT_EXTRA_KEY = "_ag99live_independent_motion_result"
+_INDEPENDENT_MOTION_TASKS_BY_TURN_ATTRIBUTE = (
+    "independent_motion_generation_tasks_by_turn"
+)
+_INDEPENDENT_MOTION_SEGMENT_BATCHES_BY_TURN_ATTRIBUTE = (
+    "independent_motion_segment_batches_by_turn"
+)
 
 
 class TurnCoordinator:
@@ -366,6 +372,13 @@ class TurnCoordinator:
     ) -> None:
         """Forward one completed logical output to the segment owner."""
         await self.output_segments.finalize_output_segment(
+            turn_id=turn_id,
+            message_id=message_id,
+        )
+
+    def has_pending_persona_segment(self, *, turn_id: str, message_id: str) -> bool:
+        """Return whether a physical output segment already carries Persona metadata."""
+        return self.output_segments.has_pending_persona_segment(
             turn_id=turn_id,
             message_id=message_id,
         )
@@ -686,28 +699,47 @@ class TurnCoordinator:
         """Cancel motion work owned by a turn before its event is discarded.
 
         Independent motion generation is started from an AstrBot hook, while turn
-        termination is coordinated here. Keeping the task handle on the event
-        lets this boundary cancel it without coupling the coordinator to the
-        middleware implementation.
+        termination is coordinated here. Whole-turn work can expose its task on
+        the event; Persona-hook work is tracked in RuntimeState because AstrBot
+        isolates hook-local event extras from later output contributors.
         """
         get_extra = getattr(event, "get_extra", None)
         set_extra = getattr(event, "set_extra", None)
-        task = None
+        tasks: set[asyncio.Task] = set()
         if callable(get_extra):
             try:
-                task = get_extra(_INDEPENDENT_MOTION_TASK_EXTRA_KEY)
+                event_task = get_extra(_INDEPENDENT_MOTION_TASK_EXTRA_KEY)
+                if isinstance(event_task, asyncio.Task):
+                    tasks.add(event_task)
             except Exception:  # noqa: BLE001 - cleanup must continue.
                 logger.exception(
                     "Failed to inspect independent motion task during turn cleanup: "
                     "turn_id=%s",
                     turn_id,
                 )
-        if isinstance(task, asyncio.Task) and not task.done():
+
+        tasks_by_turn = getattr(
+            getattr(self, "runtime_state", None),
+            _INDEPENDENT_MOTION_TASKS_BY_TURN_ATTRIBUTE,
+            None,
+        )
+        if isinstance(tasks_by_turn, dict):
+            turn_tasks = tasks_by_turn.pop(str(turn_id or "").strip(), None)
+            if isinstance(turn_tasks, (set, list, tuple)):
+                tasks.update(
+                    task for task in turn_tasks if isinstance(task, asyncio.Task)
+                )
+
+        for task in tasks:
+            if task.done():
+                continue
             task.cancel()
             logger.info(
-                "WIRING independent_motion.task_cancelled turn_id=%s reason=%s",
+                "WIRING independent_motion.task_cancelled turn_id=%s "
+                "reason=%s task_name=%s",
                 turn_id,
                 reason,
+                task.get_name(),
             )
         if callable(set_extra):
             try:
@@ -721,9 +753,17 @@ class TurnCoordinator:
         self._discard_independent_motion_result(turn_id)
 
     def _discard_independent_motion_result(self, turn_id: str) -> None:
+        normalized_turn_id = str(turn_id or "").strip()
         cache = getattr(self.runtime_state, "independent_motion_result_cache", None)
         if isinstance(cache, dict):
-            cache.pop(str(turn_id or "").strip(), None)
+            cache.pop(normalized_turn_id, None)
+        segment_batches = getattr(
+            self.runtime_state,
+            _INDEPENDENT_MOTION_SEGMENT_BATCHES_BY_TURN_ATTRIBUTE,
+            None,
+        )
+        if isinstance(segment_batches, dict):
+            segment_batches.pop(normalized_turn_id, None)
 
     def _prune_turn_terminal_results(self) -> None:
         completed_count = sum(

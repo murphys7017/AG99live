@@ -11,6 +11,7 @@ from .effects import (
     _effect_call_get,
     _extract_ag99live_motion_effect_arguments,
     _extract_effect_calls_for_motion,
+    _persona_segment_count,
     _resolve_persona_effect_motion_payload_with_reason,
 )
 from .shared import (
@@ -29,10 +30,12 @@ from ...motion.motion_intent import resolve_selected_semantic_axis_profile
 from ...motion.observation import record_motion_observation
 from ...motion.output_sanitizer import (
     contains_hidden_output_markup,
+    sanitize_assistant_output_segment_text,
     sanitize_assistant_output_text,
 )
 from .independent import (
     IndependentMotionResult,
+    take_motion_segment_batch,
     take_motion_result_for_turn,
 )
 
@@ -64,6 +67,8 @@ class _MotionScheduleAttempt:
     reason: str
     assistant_text: str
     motion_payload: dict[str, Any] | None = None
+    motion_payloads_by_segment: dict[int, dict[str, Any]] | None = None
+    persona_segment_count: int | None = None
     motion_resolution_reason: str | None = None
 
     def to_metadata(self) -> dict[str, Any]:
@@ -80,6 +85,14 @@ class _MotionScheduleAttempt:
         }
         if self.motion_resolution_reason:
             metadata["motion_resolution_reason"] = self.motion_resolution_reason
+        if self.persona_segment_count is not None:
+            metadata["persona_segment_count"] = self.persona_segment_count
+            if self.motion_payloads_by_segment is not None or self.reason == "motion_payload_missing":
+                metadata["persona_segmented"] = True
+        if self.motion_payloads_by_segment is not None:
+            metadata["persona_motion_segment_indexes"] = sorted(
+                self.motion_payloads_by_segment
+            )
         return metadata
 
 class AG99liveMotionResultContributor:
@@ -92,6 +105,9 @@ class AG99liveMotionResultContributor:
         if capabilities is None:
             return None
         event.set_extra("_ag99live_pending_performance_curve", None)
+        event.set_extra("_ag99live_pending_persona_tts_segments", None)
+        event.set_extra("_ag99live_persona_tts_segment_map", {})
+        event.set_extra("_ag99live_persona_tts_parent_message_id", "")
         event.set_extra("ag99live_raw_reply_text", None)
         speech_cues = _take_pending_speech_cues(event)
 
@@ -111,13 +127,64 @@ class AG99liveMotionResultContributor:
         if attempt is None and not speech_cues:
             return None
 
+        persona_speech_segments = _extract_persona_speech_segments(view)
+        persona_segment_count = len(persona_speech_segments)
+        empty_persona_speech_indexes = [
+            segment_index
+            for segment_index, speech in enumerate(persona_speech_segments)
+            if not speech.strip()
+        ]
+        persona_motion_payloads = (
+            attempt.motion_payloads_by_segment
+            if attempt is not None and attempt.motion_payloads_by_segment is not None
+            else {}
+        )
+        nonempty_persona_speech_segments = [
+            (segment_index, speech)
+            for segment_index, speech in enumerate(persona_speech_segments)
+            if speech.strip()
+        ]
+        if nonempty_persona_speech_segments:
+            event.set_extra(
+                "_ag99live_pending_persona_tts_segments",
+                [
+                    {
+                        "segment_index": segment_index,
+                        "segment_count": persona_segment_count,
+                        "speech": speech,
+                        "motion_payload": persona_motion_payloads.get(segment_index),
+                    }
+                    for segment_index, speech in nonempty_persona_speech_segments
+                ],
+            )
+        elif persona_speech_segments:
+            logger.info(
+                "WIRING persona_tts_segment_tracking_skipped "
+                "reason=no_nonempty_speech_segments count=%s",
+                persona_segment_count,
+            )
+
         client_objects = []
         raw_assistant_text = _extract_raw_assistant_text(view)
         final_text_override = None
         if raw_assistant_text and contains_hidden_output_markup(raw_assistant_text):
             event.set_extra("ag99live_raw_reply_text", raw_assistant_text)
             final_text_override = sanitize_assistant_output_text(raw_assistant_text)
-        if attempt is not None and attempt.motion_payload is not None:
+        if attempt is not None and attempt.motion_payloads_by_segment is not None:
+            for segment_index, motion_payload in sorted(
+                attempt.motion_payloads_by_segment.items()
+            ):
+                client_objects.append(
+                    {
+                        "type": "ag99live.motion_payload",
+                        "motion_payload": motion_payload,
+                        "mode": "preview",
+                        "source": attempt.source or "persona_effect",
+                        "persona_segment_index": segment_index,
+                        "persona_segment_count": attempt.persona_segment_count,
+                    }
+                )
+        elif attempt is not None and attempt.motion_payload is not None:
             client_objects.append(
                 {
                     "type": "ag99live.motion_payload",
@@ -133,14 +200,26 @@ class AG99liveMotionResultContributor:
             "client_object_count=%s",
             attempt.phase if attempt is not None else _resolve_result_phase(view),
             attempt.scheduled if attempt is not None else False,
-            bool(attempt is not None and attempt.motion_payload is not None),
+            bool(
+                attempt is not None
+                and (
+                    attempt.motion_payload is not None
+                    or attempt.motion_payloads_by_segment is not None
+                )
+            ),
             attempt.source if attempt is not None else "<none>",
-            attempt.reason if attempt is not None else "speech_cues_only",
+            attempt.reason if attempt is not None else "<none>",
             len(client_objects),
         )
         platform_extras = {}
         if speech_cues:
             platform_extras["ag99live_speech_cues"] = speech_cues
+        if persona_speech_segments:
+            platform_extras["persona_speech_segments"] = persona_speech_segments
+            if empty_persona_speech_indexes:
+                platform_extras["persona_speech_empty_indexes"] = (
+                    empty_persona_speech_indexes
+                )
         return capabilities.interaction_result_contribution(
             plugin_id=self.plugin_id,
             platform_extras=platform_extras,
@@ -155,13 +234,6 @@ class AG99liveMotionResultContributor:
         )
 
 
-def _get_interaction_reply_plan(event: Any) -> Any:
-    capabilities = get_interaction_capabilities()
-    if capabilities is None:
-        return None
-    return capabilities.get_interaction_route_decision(event)
-
-
 def _take_pending_speech_cues(event: Any) -> list[dict[str, Any]]:
     value = event.get_extra("_ag99live_pending_speech_cues")
     event.set_extra("_ag99live_pending_speech_cues", None)
@@ -170,6 +242,13 @@ def _take_pending_speech_cues(event: Any) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         raise TypeError("ag99live_pending_speech_cues_internal_contract_invalid")
     return value
+
+
+def _get_interaction_reply_plan(event: Any) -> Any:
+    capabilities = get_interaction_capabilities()
+    if capabilities is None:
+        return None
+    return capabilities.get_interaction_route_decision(event)
 
 
 def _defer_optional_performance_curve_request(
@@ -194,11 +273,39 @@ def start_deferred_performance_curve_request(
     message_id: str,
     tts_request_id: str,
     external_correlation_id: str | None,
+    stage: str,
+    status: str,
 ) -> str | None:
-    pending = event.get_extra("_ag99live_pending_performance_curve")
-    if not isinstance(pending, dict):
+    if stage != "interaction.outbound_tts":
         return None
-    event.set_extra("_ag99live_pending_performance_curve", None)
+
+    persona_segment = _track_persona_tts_request(
+        event,
+        turn_id=turn_id,
+        message_id=message_id,
+    )
+    if status != "generating":
+        return None
+
+    pending = event.get_extra("_ag99live_pending_performance_curve")
+    motion_payload = (
+        persona_segment.get("motion_payload")
+        if isinstance(persona_segment, dict)
+        else None
+    )
+    assistant_text = (
+        str(persona_segment.get("speech") or "")
+        if isinstance(persona_segment, dict)
+        else ""
+    )
+    if motion_payload is None and not isinstance(pending, dict):
+        return None
+    if motion_payload is None:
+        event.set_extra("_ag99live_pending_performance_curve", None)
+        motion_payload = pending.get("motion_payload")
+        assistant_text = str(pending.get("assistant_text") or "")
+    if not isinstance(motion_payload, dict) or not assistant_text.strip():
+        return None
     bundle = _resolve_motion_runtime_bundle(event)
     if bundle is None:
         logger.warning(
@@ -214,8 +321,8 @@ def start_deferred_performance_curve_request(
         tts_turn_id=turn_id,
         message_id=message_id,
         request_id=tts_request_id,
-        assistant_text=str(pending.get("assistant_text") or ""),
-        motion_payload=pending.get("motion_payload"),
+        assistant_text=assistant_text,
+        motion_payload=motion_payload,
     )
     if request_id:
         logger.info(
@@ -226,6 +333,48 @@ def start_deferred_performance_curve_request(
             tts_request_id,
         )
     return request_id
+
+
+def _track_persona_tts_request(
+    event: Any,
+    *,
+    turn_id: str,
+    message_id: str,
+) -> dict[str, Any] | None:
+    normalized_message_id = str(message_id or "").strip()
+    if not normalized_message_id:
+        return None
+    raw_mapping = event.get_extra("_ag99live_persona_tts_segment_map", {})
+    mapping = dict(raw_mapping) if isinstance(raw_mapping, dict) else {}
+    existing = mapping.get(normalized_message_id)
+    if isinstance(existing, dict):
+        return existing
+
+    raw_queue = event.get_extra("_ag99live_pending_persona_tts_segments")
+    if not isinstance(raw_queue, list) or not raw_queue:
+        return None
+    queue = list(raw_queue)
+    segment = queue.pop(0)
+    event.set_extra("_ag99live_pending_persona_tts_segments", queue)
+    if not isinstance(segment, dict):
+        return None
+
+    parent_message_id = str(
+        event.get_extra("_ag99live_persona_tts_parent_message_id", "") or ""
+    ).strip()
+    if not parent_message_id:
+        parent_message_id = normalized_message_id
+        event.set_extra(
+            "_ag99live_persona_tts_parent_message_id",
+            parent_message_id,
+        )
+    tracked = dict(segment)
+    tracked["message_id"] = normalized_message_id
+    tracked["parent_message_id"] = parent_message_id
+    tracked["turn_id"] = str(turn_id or "").strip()
+    mapping[normalized_message_id] = tracked
+    event.set_extra("_ag99live_persona_tts_segment_map", mapping)
+    return tracked
 
 async def _schedule_motion_from_interaction_result(
     event: Any,
@@ -251,13 +400,13 @@ async def _schedule_motion_from_interaction_result(
             reply_plan=reply_plan,
         )
 
-    motion_payload, motion_reason = _resolve_persona_effect_motion_payload_with_reason(
+    motion_payloads_by_segment, motion_reason = _resolve_persona_effect_motion_payload_with_reason(
         event, bundle.runtime_state, view=view
     )
     _log_persona_effect_motion_resolution(
         event,
         phase=phase,
-        payload=motion_payload,
+        payload=motion_payloads_by_segment,
         reason=motion_reason,
         view=view,
     )
@@ -268,7 +417,7 @@ async def _schedule_motion_from_interaction_result(
         phase=phase,
         identity=identity,
         assistant_text=assistant_text,
-        motion_payload=motion_payload,
+        motion_payloads_by_segment=motion_payloads_by_segment,
         motion_reason=motion_reason,
     )
 
@@ -278,7 +427,7 @@ async def _schedule_motion_from_interaction_result(
         reply_plan=reply_plan,
     )
 
-    if motion_payload is not None and policy.should_schedule:
+    if motion_payloads_by_segment and policy.should_schedule:
         _call_event_method(event, "set_extra", "ag99live_split_motion_scheduled", True)
         return _MotionScheduleAttempt(
             phase=phase,
@@ -293,7 +442,8 @@ async def _schedule_motion_from_interaction_result(
             scheduled=True,
             reason="persona_effect_motion_client_object",
             assistant_text=assistant_text,
-            motion_payload=motion_payload,
+            motion_payloads_by_segment=motion_payloads_by_segment,
+            persona_segment_count=_persona_segment_count(view),
             motion_resolution_reason=motion_reason,
         )
 
@@ -311,6 +461,7 @@ async def _schedule_motion_from_interaction_result(
             scheduled=False,
             reason="assistant_text_empty",
             assistant_text=assistant_text,
+            persona_segment_count=_persona_segment_count(view),
             motion_resolution_reason=motion_reason,
         )
 
@@ -328,10 +479,11 @@ async def _schedule_motion_from_interaction_result(
             scheduled=False,
             reason=policy.reason,
             assistant_text=assistant_text,
+            persona_segment_count=_persona_segment_count(view),
             motion_resolution_reason=motion_reason,
         )
 
-    if policy.should_schedule and motion_payload is None:
+    if policy.should_schedule and motion_payloads_by_segment is None:
         missing_reason = _append_resolution_reason(
             motion_reason,
             "self_reply_motion_missing"
@@ -353,6 +505,7 @@ async def _schedule_motion_from_interaction_result(
             scheduled=False,
             reason="motion_payload_missing",
             assistant_text=assistant_text,
+            persona_segment_count=_persona_segment_count(view),
             motion_resolution_reason=missing_reason,
         )
 
@@ -369,6 +522,7 @@ async def _schedule_motion_from_interaction_result(
         scheduled=False,
         reason=policy.reason,
         assistant_text=assistant_text,
+        persona_segment_count=_persona_segment_count(view),
         motion_resolution_reason=motion_reason,
     )
 
@@ -405,14 +559,6 @@ async def _schedule_motion_from_independent_provider(
         "reply_plan_source": reply_plan.source if reply_plan is not None else None,
         "assistant_text": assistant_text,
     }
-    if not assistant_text:
-        return _MotionScheduleAttempt(
-            **common,
-            source=None,
-            scheduled=False,
-            reason="assistant_text_empty",
-            motion_resolution_reason="independent_provider_response_text_missing",
-        )
     if not policy.should_schedule or policy.source is None:
         return _MotionScheduleAttempt(
             **common,
@@ -420,6 +566,48 @@ async def _schedule_motion_from_independent_provider(
             scheduled=False,
             reason=policy.reason,
             motion_resolution_reason=policy.reason,
+        )
+    if bool(
+        getattr(
+            bundle.runtime_state,
+            "independent_motion_per_speech_segment",
+            False,
+        )
+    ):
+        metadata = getattr(view, "metadata", None)
+        purpose = (
+            str(metadata.get("purpose") or "").strip()
+            if isinstance(metadata, Mapping)
+            else ""
+        )
+        if phase not in {"immediate", "final"} or purpose not in {
+            "persona_reply",
+            "core_reply",
+        }:
+            return _MotionScheduleAttempt(
+                **common,
+                source=None,
+                scheduled=False,
+                reason="unsupported_persona_result_candidate",
+                motion_resolution_reason="independent_segment_candidate_unsupported",
+            )
+        return _schedule_motion_from_independent_provider_per_segment(
+            event,
+            view,
+            bundle=bundle,
+            phase=phase,
+            assistant_text=assistant_text,
+            common=common,
+            identity=identity,
+            purpose=purpose,
+        )
+    if not assistant_text:
+        return _MotionScheduleAttempt(
+            **common,
+            source=None,
+            scheduled=False,
+            reason="assistant_text_empty",
+            motion_resolution_reason="independent_provider_response_text_missing",
         )
     cache = getattr(bundle.runtime_state, "independent_motion_result_cache", None)
     cache_entries_before = (
@@ -493,6 +681,103 @@ async def _schedule_motion_from_independent_provider(
     )
 
 
+def _schedule_motion_from_independent_provider_per_segment(
+    event: Any,
+    view: Any,
+    *,
+    bundle: _MotionRuntimeBundle,
+    phase: str,
+    assistant_text: str,
+    common: dict[str, Any],
+    identity: _FrontendIdentitySnapshot,
+    purpose: str,
+) -> _MotionScheduleAttempt:
+    speech_segments = tuple(_extract_persona_speech_segments(view))
+    if not any(speech.strip() for speech in speech_segments):
+        return _MotionScheduleAttempt(
+            **common,
+            source=None,
+            scheduled=False,
+            reason="assistant_text_empty",
+            motion_resolution_reason="independent_provider_response_text_missing",
+        )
+    batch = take_motion_segment_batch(
+        bundle.runtime_state,
+        turn_id=str(_call_event_method(event, "get_extra", "_turn_id", "") or ""),
+        phase=phase,
+        purpose=purpose,
+        speech_segments=speech_segments,
+    )
+    if batch is None:
+        motion_reason = "independent_segment_result_missing"
+        logger.warning(
+            "WIRING independent_motion.segment_schedule_missing phase=%s "
+            "turn_id=%s speech_segment_count=%s",
+            phase,
+            identity.event_frontend_turn_id or "<missing>",
+            len(speech_segments),
+        )
+        return _MotionScheduleAttempt(
+            **common,
+            source="independent_provider",
+            scheduled=False,
+            reason="motion_payload_missing",
+            motion_payloads_by_segment={},
+            persona_segment_count=len(speech_segments) or None,
+            motion_resolution_reason=motion_reason,
+        )
+
+    payloads_by_segment: dict[int, dict[str, Any]] = {}
+    failures: list[str] = []
+    for segment_index, result in sorted(batch.results_by_index.items()):
+        _record_independent_motion_result(
+            bundle,
+            view=view,
+            identity=identity,
+            phase=phase,
+            assistant_text=result.assistant_text,
+            motion_payload=result.motion_payload,
+            motion_reason=result.reason,
+            image_count=result.image_count,
+            segment_index=segment_index,
+        )
+        if result.motion_payload is None:
+            failures.append(f"{segment_index}:{result.reason}")
+        else:
+            payloads_by_segment[segment_index] = result.motion_payload
+
+    motion_reason = "independent_provider_segments"
+    if failures:
+        motion_reason = _append_resolution_reason(
+            motion_reason,
+            "segment_failures:" + ",".join(failures),
+        )
+    scheduled = bool(payloads_by_segment)
+    _call_event_method(event, "set_extra", "ag99live_split_motion_scheduled", scheduled)
+    logger.info(
+        "WIRING independent_motion.segment_schedule_resolved phase=%s "
+        "turn_id=%s input_count=%s payload_count=%s scheduled=%s",
+        phase,
+        identity.event_frontend_turn_id or "<missing>",
+        len(batch.results_by_index),
+        len(payloads_by_segment),
+        scheduled,
+    )
+    return _MotionScheduleAttempt(
+        **common,
+        source="independent_provider",
+        scheduled=scheduled,
+        reason=(
+            "independent_provider_segment_motion_payloads"
+            if scheduled
+            else "motion_payload_missing"
+        ),
+        motion_payloads_by_segment=payloads_by_segment,
+        persona_segment_count=len(speech_segments) or None,
+        motion_resolution_reason=motion_reason,
+    )
+
+
 def _record_independent_motion_result(
     bundle: _MotionRuntimeBundle,
     *,
@@ -503,6 +788,7 @@ def _record_independent_motion_result(
     motion_payload: dict[str, Any] | None,
     motion_reason: str,
     image_count: int,
+    segment_index: int | None = None,
 ) -> None:
     profile = None
     try:
@@ -530,6 +816,11 @@ def _record_independent_motion_result(
             "motion_payload": motion_payload,
             "motion_reason": motion_reason,
             "image_count": image_count,
+            **(
+                {"persona_segment_index": segment_index}
+                if segment_index is not None
+                else {}
+            ),
             "provider_id": getattr(
                 bundle.runtime_state,
                 "independent_motion_provider_id",
@@ -544,7 +835,7 @@ def _log_persona_effect_motion_resolution(
     event: Any,
     *,
     phase: str,
-    payload: dict[str, Any] | None,
+    payload: dict[int, dict[str, Any]] | None,
     reason: str,
     view: Any = None,
 ) -> None:
@@ -559,32 +850,46 @@ def _log_persona_effect_motion_resolution(
     payload_axes_keys: list[str] = []
     payload_expression_resource_id = ""
     payload_motion_resource_id = ""
-    if isinstance(payload, dict):
-        axes = payload.get("axis_levels")
-        motion_steps = payload.get("motion_steps")
-        if isinstance(axes, dict):
-            payload_axes_keys = sorted(
-                str(key).strip()
-                for key in axes.keys()
-                if str(key).strip()
-            )
-        elif isinstance(motion_steps, list):
-            payload_axes_keys = _collect_motion_step_axis_keys(motion_steps)
-        payload_expression_resource_id = str(
-            payload.get("expression_resource_id") or ""
-        ).strip()
-        payload_motion_resource_id = str(
-            payload.get("motion_resource_id") or ""
-        ).strip()
+    if isinstance(payload, Mapping):
+        axis_keys: set[str] = set()
+        expression_resource_ids: set[str] = set()
+        motion_resource_ids: set[str] = set()
+        for segment_payload in payload.values():
+            if not isinstance(segment_payload, Mapping):
+                continue
+            axes = segment_payload.get("axis_levels")
+            motion_steps = segment_payload.get("motion_steps")
+            if isinstance(axes, Mapping):
+                axis_keys.update(
+                    str(key).strip()
+                    for key in axes
+                    if str(key).strip()
+                )
+            elif isinstance(motion_steps, list):
+                axis_keys.update(_collect_motion_step_axis_keys(motion_steps))
+            expression_resource_id = str(
+                segment_payload.get("expression_resource_id") or ""
+            ).strip()
+            motion_resource_id = str(
+                segment_payload.get("motion_resource_id") or ""
+            ).strip()
+            if expression_resource_id:
+                expression_resource_ids.add(expression_resource_id)
+            if motion_resource_id:
+                motion_resource_ids.add(motion_resource_id)
+        payload_axes_keys = sorted(axis_keys)
+        payload_expression_resource_id = ",".join(sorted(expression_resource_ids))
+        payload_motion_resource_id = ",".join(sorted(motion_resource_ids))
 
     logger.info(
-        "WIRING persona_effect_motion phase=%s payload_present=%s reason=%s "
+        "WIRING persona_effect_motion phase=%s payload_present=%s segment_indexes=%s reason=%s "
         "effect_names=%s effect_fields=%s effect_axis_keys=%s effect_intent_tags=%s "
         "effect_expression_resource_id=%s effect_motion_resource_id=%s "
         "payload_axis_keys=%s payload_expression_resource_id=%s "
         "payload_motion_resource_id=%s",
         phase or "",
-        payload is not None,
+        bool(payload),
+        ",".join(str(index) for index in sorted(payload or {})),
         reason,
         ",".join(sorted(effect_names)),
         ",".join(effect_summary["fields"]),
@@ -605,7 +910,7 @@ def _record_motion_lab_interaction_event(
     phase: str,
     identity: _FrontendIdentitySnapshot,
     assistant_text: str,
-    motion_payload: dict[str, Any] | None,
+    motion_payloads_by_segment: dict[int, dict[str, Any]] | None,
     motion_reason: str,
 ) -> None:
     profile = None
@@ -615,6 +920,12 @@ def _record_motion_lab_interaction_event(
         logger.exception("MotionLab interaction profile resolution failed")
         profile = None
     effect_calls = [_thaw_snapshot_value(item) for item in _extract_effect_calls_for_motion(event, view)]
+    segments = _extract_persona_segments_for_observation(view)
+    for segment in segments:
+        segment_index = segment["segment_index"]
+        segment["motion_payload"] = (motion_payloads_by_segment or {}).get(
+            segment_index
+        )
     turn_id = identity.event_frontend_turn_id
     observation_context = {
         "conversation_uid": turn_id,
@@ -635,6 +946,7 @@ def _record_motion_lab_interaction_event(
         raw={
             "effect_calls": effect_calls,
             "effect_summary": _summarize_ag99live_motion_effect_arguments(event, view),
+            "segments": segments,
             "view_metadata": _thaw_snapshot_value(getattr(view, "metadata", None)),
             "reply_plan": _thaw_snapshot_value(_get_interaction_reply_plan(event)),
             "original_user_text": _call_event_method(event, "get_extra", "ag99live_original_message_str", ""),
@@ -644,15 +956,15 @@ def _record_motion_lab_interaction_event(
         getattr(bundle.runtime_state, "motion_lab_recorder", None),
         **observation_context,
         event_type="motion.intent_resolved",
-        payload_kind=(
-            str(motion_payload.get("schema_version") or "").strip()
-            if isinstance(motion_payload, dict)
-            else ""
-        ),
+        payload_kind="persona_segment_motion_payloads",
         raw={
-            "motion_payload": motion_payload,
+            "motion_payloads_by_segment": {
+                str(index): payload
+                for index, payload in (motion_payloads_by_segment or {}).items()
+            },
             "motion_reason": motion_reason,
             "effect_calls": effect_calls,
+            "segments": segments,
             "assistant_text": assistant_text,
         },
     )
@@ -664,43 +976,104 @@ def _summarize_ag99live_motion_effect_arguments(event: Any, view: Any) -> dict[s
         "intent_tags": [],
         "expression_resource_id": "",
         "motion_resource_id": "",
+        "segment_indexes": [],
     }
-    raw_arguments, _reason = _extract_ag99live_motion_effect_arguments(event, view)
-    if not isinstance(raw_arguments, dict):
+    segment_count = _persona_segment_count(view)
+    if segment_count is None:
+        return summary
+    arguments_by_segment, _reason = _extract_ag99live_motion_effect_arguments(
+        event,
+        view,
+        segment_count=segment_count,
+    )
+    if not isinstance(arguments_by_segment, dict):
         return summary
 
-    summary["fields"] = sorted(
-        str(key).strip()
-        for key in raw_arguments.keys()
-        if str(key).strip()
-    )
-    raw_axes = raw_arguments.get("axis_levels")
-    if not isinstance(raw_axes, Mapping):
-        motion_steps = _thaw_snapshot_value(raw_arguments.get("motion_steps"))
-        if isinstance(motion_steps, list):
-            summary["axis_keys"] = _collect_motion_step_axis_keys(motion_steps)
-    if isinstance(raw_axes, Mapping):
-        summary["axis_keys"] = sorted(
+    fields: set[str] = set()
+    axis_keys: set[str] = set()
+    intent_tags: list[str] = []
+    expression_resource_ids: set[str] = set()
+    motion_resource_ids: set[str] = set()
+    summary["segment_indexes"] = sorted(arguments_by_segment)
+    for raw_arguments in arguments_by_segment.values():
+        fields.update(
             str(key).strip()
-            for key in raw_axes.keys()
+            for key in raw_arguments
             if str(key).strip()
         )
-    raw_intent_tags = _thaw_snapshot_value(raw_arguments.get("intent_tags"))
-    if isinstance(raw_intent_tags, (list, tuple, set)):
-        summary["intent_tags"] = [
-            str(item).strip()
-            for item in raw_intent_tags
-            if str(item).strip()
-        ]
-    elif str(raw_intent_tags or "").strip():
-        summary["intent_tags"] = [str(raw_intent_tags).strip()]
-    summary["expression_resource_id"] = str(
-        raw_arguments.get("expression_resource_id") or ""
-    ).strip()
-    summary["motion_resource_id"] = str(
-        raw_arguments.get("motion_resource_id") or ""
-    ).strip()
+        raw_axes = raw_arguments.get("axis_levels")
+        if isinstance(raw_axes, Mapping):
+            axis_keys.update(
+                str(key).strip()
+                for key in raw_axes
+                if str(key).strip()
+            )
+        else:
+            motion_steps = _thaw_snapshot_value(raw_arguments.get("motion_steps"))
+            if isinstance(motion_steps, list):
+                axis_keys.update(_collect_motion_step_axis_keys(motion_steps))
+        raw_intent_tags = _thaw_snapshot_value(raw_arguments.get("intent_tags"))
+        if isinstance(raw_intent_tags, (list, tuple, set)):
+            intent_tags.extend(
+                str(item).strip()
+                for item in raw_intent_tags
+                if str(item).strip()
+            )
+        elif str(raw_intent_tags or "").strip():
+            intent_tags.append(str(raw_intent_tags).strip())
+        expression_resource_id = str(
+            raw_arguments.get("expression_resource_id") or ""
+        ).strip()
+        motion_resource_id = str(raw_arguments.get("motion_resource_id") or "").strip()
+        if expression_resource_id:
+            expression_resource_ids.add(expression_resource_id)
+        if motion_resource_id:
+            motion_resource_ids.add(motion_resource_id)
+    summary["fields"] = sorted(fields)
+    summary["axis_keys"] = sorted(axis_keys)
+    summary["intent_tags"] = intent_tags
+    summary["expression_resource_id"] = ",".join(sorted(expression_resource_ids))
+    summary["motion_resource_id"] = ",".join(sorted(motion_resource_ids))
     return summary
+
+
+def _extract_persona_segments_for_observation(view: Any) -> list[dict[str, Any]]:
+    segments = getattr(view, "segments", None)
+    if not isinstance(segments, (list, tuple)):
+        return []
+    result: list[dict[str, Any]] = []
+    for index, segment in enumerate(segments):
+        if not isinstance(segment, Mapping):
+            continue
+        result.append(
+            {
+                "segment_index": index,
+                "speech": str(segment.get("speech") or ""),
+            }
+        )
+    return result
+
+
+def _extract_persona_speech_segments(view: Any) -> list[str]:
+    segments = getattr(view, "segments", None)
+    if not isinstance(segments, (list, tuple)):
+        return []
+    return [
+        sanitize_assistant_output_segment_text(str(segment.get("speech") or ""))
+        for segment in segments
+        if isinstance(segment, Mapping)
+    ]
+
+
+def _extract_raw_persona_speech_segments(view: Any) -> list[str]:
+    segments = getattr(view, "segments", None)
+    if not isinstance(segments, (list, tuple)):
+        return []
+    return [
+        str(segment.get("speech") or "")
+        for segment in segments
+        if isinstance(segment, Mapping)
+    ]
 
 def _collect_motion_step_axis_keys(motion_steps: list[Any]) -> list[str]:
     axis_ids: set[str] = set()
@@ -716,6 +1089,13 @@ def _collect_motion_step_axis_keys(motion_steps: list[Any]) -> list[str]:
     return sorted(axis_ids)
 
 def _extract_assistant_text(view: Any) -> str:
+    persona_segments = _extract_persona_segments_for_observation(view)
+    if persona_segments:
+        persona_speech = "".join(
+            segment["speech"] for segment in persona_segments
+        ).strip()
+        if persona_speech:
+            return sanitize_assistant_output_text(persona_speech).strip()
     return sanitize_assistant_output_text(_extract_raw_assistant_text(view)).strip()
 
 def _extract_raw_assistant_text(view: Any) -> str:

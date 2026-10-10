@@ -85,10 +85,13 @@ class RuntimeState:
         self.performance_curve_provider_id = ""
         self.enable_performance_curve = False
         self.independent_motion_enabled = False
+        self.independent_motion_per_speech_segment = False
         self.independent_motion_provider_id = ""
         self.independent_motion_history_turns = 6
         self.independent_motion_parallel = False
         self.independent_motion_result_cache: dict[str, list[Any]] = {}
+        self.independent_motion_generation_tasks_by_turn: dict[str, set[Any]] = {}
+        self.independent_motion_segment_batches_by_turn: dict[str, list[Any]] = {}
         self.interaction_contributors_available = supports_interaction_contributors(
             plugin_context
         )
@@ -193,6 +196,13 @@ class RuntimeState:
         )
         self.independent_motion_enabled = bool(
             get_config_value(independent_motion_config, "enabled", False)
+        )
+        self.independent_motion_per_speech_segment = bool(
+            get_config_value(
+                independent_motion_config,
+                "per_speech_segment",
+                False,
+            )
         )
         self.independent_motion_provider_id = str(
             get_config_value(independent_motion_config, "provider_id", "") or ""

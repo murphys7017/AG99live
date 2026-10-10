@@ -220,6 +220,73 @@ def test_prompt_annotations_mark_cached_desktop_snapshot(
     assert annotations["message.1"]["semantic_type"] == "desktop_snapshot"
 
 
+def test_independent_per_speech_segment_mode_keeps_persona_route(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_platform_event_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_platform_event_module()
+    adapter = AdapterStub()
+    adapter.runtime_state = types.SimpleNamespace(
+        independent_motion_enabled=True,
+        independent_motion_per_speech_segment=True,
+        independent_motion_provider_id="motion-provider",
+    )
+    message_obj = type(
+        "MessageObjectStub",
+        (),
+        {"message": [Plain("hello")], "raw_message": {"payload": {"text": "hello"}}},
+    )()
+
+    event = module.OLVPetPlatformEvent(
+        "hello",
+        message_obj,
+        {},
+        "desktop-client",
+        adapter,
+    )
+
+    assert event.get_extra("_interaction_core_bypass_requested") is None
+    assert event.get_extra("_interaction_plugin_runtime_target_overrides") == {
+        "astrbot_plugin_ag99live_adapter": "personal_expression"
+    }
+
+
+def test_independent_whole_reply_mode_keeps_core_bypass(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_platform_event_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_platform_event_module()
+    adapter = AdapterStub()
+    adapter.runtime_state = types.SimpleNamespace(
+        independent_motion_enabled=True,
+        independent_motion_per_speech_segment=False,
+        independent_motion_parallel=False,
+        independent_motion_provider_id="motion-provider",
+    )
+    message_obj = type(
+        "MessageObjectStub",
+        (),
+        {"message": [Plain("hello")], "raw_message": {"payload": {"text": "hello"}}},
+    )()
+
+    event = module.OLVPetPlatformEvent(
+        "hello",
+        message_obj,
+        {},
+        "desktop-client",
+        adapter,
+    )
+
+    assert event.get_extra("_interaction_core_bypass_requested") == (
+        "ag99live_independent_motion"
+    )
+    assert event.get_extra("_interaction_plugin_runtime_target_overrides") == {
+        "astrbot_plugin_ag99live_adapter": "core"
+    }
+
+
 def test_send_message_with_extras_only_uses_adapter_emit_path(
     install_fake_astrbot,
     monkeypatch,
@@ -290,6 +357,44 @@ def test_standard_send_aggregates_parts_without_closing_output_queue(
 
     asyncio.run(event.complete_visible_turn())
     assert adapter.closed_output_queues == ["turn-1"]
+
+
+def test_persona_tts_gap_keeps_empty_speech_segment_without_motion(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_platform_event_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_platform_event_module()
+    event = _build_event(module, images=[])
+
+    asyncio.run(
+        event.send_message_with_extras(
+            [],
+            platform_extras={
+                "output_segment": {
+                    "message_id": "parent::persona::1",
+                    "tts": {"status": "succeeded"},
+                },
+                "_ag99live_persona_parent_message_id": "parent",
+                "persona_segment_index": 1,
+                "persona_segment_count": 2,
+                "persona_speech_segments": ["", "spoken"],
+                "persona_speech_empty_indexes": [0],
+            },
+            record_send_operation=False,
+        )
+    )
+
+    assert [
+        call["platform_extras"].get("persona_segment_index")
+        for call in event.adapter.emit_calls
+    ] == [0, 1]
+    assert event.adapter.emit_calls[0]["platform_extras"][
+        "_ag99live_motion_disabled"
+    ] is True
+    assert "_ag99live_motion_disabled" not in event.adapter.emit_calls[1][
+        "platform_extras"
+    ]
 
 
 def test_abort_visible_turn_routes_to_frontend_turn_coordinator(

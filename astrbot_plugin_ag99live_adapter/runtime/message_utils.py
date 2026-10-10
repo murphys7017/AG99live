@@ -72,7 +72,11 @@ def iter_message_chain(message_chain) -> list[Any]:
     return [message_chain]
 
 
-def extract_outbound_message_parts(message_chain) -> tuple[list[str], list[str], list[str], list[str]]:
+def extract_outbound_message_parts(
+    message_chain,
+    *,
+    preserve_text_whitespace: bool = False,
+) -> tuple[list[str], list[str], list[str], list[str]]:
     texts: list[str] = []
     picture_paths: list[str] = []
     record_paths: list[str] = []
@@ -81,7 +85,11 @@ def extract_outbound_message_parts(message_chain) -> tuple[list[str], list[str],
     for component in iter_message_chain(message_chain):
         component_text = getattr(component, "text", None)
         if isinstance(component, Plain) and isinstance(component_text, str) and component_text.strip():
-            texts.append(component_text.strip())
+            texts.append(
+                component_text
+                if preserve_text_whitespace
+                else component_text.strip()
+            )
             continue
 
         image_path = getattr(component, "file", None)
@@ -93,7 +101,11 @@ def extract_outbound_message_parts(message_chain) -> tuple[list[str], list[str],
             continue
 
         if isinstance(component_text, str) and component_text.strip():
-            record_texts.append(component_text.strip())
+            record_texts.append(
+                component_text
+                if preserve_text_whitespace
+                else component_text.strip()
+            )
 
         if isinstance(image_path, str) and image_path:
             record_paths.append(image_path)

@@ -248,3 +248,35 @@ motion_playback_logging_and_start_boundary_2026_10_06:
   evidence_gap:
     - "No live AstrBot + Electron + browser audio + Live2D run has yet confirmed visible action movement or exercised every new log branch."
     - "The existing playback-timeline and model-engine smoke scripts remain blocked by pre-existing Cubism Framework strict-type errors in the repository test compilation path."
+
+persona_segment_independent_motion_2026_10_10:
+  recorded_at: "2026-10-10"
+  class: feature
+  risk: high
+  status: source_complete_pending_live_acceptance
+  scope:
+    - "Consume AstrBot Persona segments[].speech as the authoritative visible and TTS segment boundary."
+    - "Add an independent Live2D Provider path that generates one motion result per non-empty speech segment, with optional serial or parallel execution."
+    - "Bind generated motion payloads to the matching Persona segment index through the output contributor, TTS tracking, and RuntimeState turn batches."
+    - "Keep the existing whole-reply independent Provider path and Persona effect path available through configuration."
+    - "Expose independent_motion.per_speech_segment in the plugin schema and Web control configuration."
+  review_corrections:
+    - "Preserve segment indexes and whitespace-sensitive speech text instead of flattening Persona output before matching."
+    - "Treat empty speech segments as text-only output with motion absent, including TTS motion-only gap resend paths."
+    - "Require exact speech-segment tuple matching before consuming a stored motion batch; do not let mismatched concurrent candidates clear valid batches."
+    - "Cancel per-turn Persona Provider generation tasks and clear both whole-turn results and segment batches when a turn terminates."
+    - "Use AstrBot delivery metadata to distinguish indexed Record segments from the merged dual-output Plain echo, and keep legacy speech cues off Persona subsegments."
+  non_actions:
+    - "Do not modify the local AstrBot checkout; it is used only as the implementation contract and source reference."
+    - "Do not add a plugin-level timeout beyond the Provider's existing behavior in this slice."
+    - "Do not claim live Electron, TTS, audio, or Live2D acceptance from source tests."
+  validation:
+    - "python -m pytest astrbot_plugin_ag99live_adapter/tests/unit -q passed: 97 passed, 15 warnings."
+    - "python -m compileall -q astrbot_plugin_ag99live_adapter passed."
+    - "_conf_schema.json parsed successfully."
+    - "git diff --check passed; only Windows LF/CRLF conversion warnings were emitted."
+    - "Independent source review found no deterministic blocking issue in segment matching, empty-segment handling, missing-segment resend, or turn cancellation."
+    - "Scoped source review covered AstrBot Record delivery metadata, dual-output Plain echo handling, sparse segment indexes, and Persona speech-cue isolation."
+  evidence_gap:
+    - "No live AstrBot + Electron + TTS + browser audio + Live2D run has yet verified multi-segment Provider timing, visible motion, or interruption during segment generation."
+    - "Persona segment hooks await the selected Provider calls; a slow Provider can delay Persona output until its own timeout or completion."

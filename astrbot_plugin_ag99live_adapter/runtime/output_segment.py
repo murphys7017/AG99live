@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
-from time import perf_counter
 from typing import Any
 
 from ..protocol.speech_cues import normalize_speech_cues
@@ -29,6 +28,8 @@ class PendingOutputSegment:
     motion_failure_reason: str = ""
     motion_mode: str = "preview"
     motion_source: str = ""
+    persona_segment_index: int | None = None
+    persona_segment_count: int | None = None
     performance_curve_request_id: str = ""
     speech_cues: list[dict[str, Any]] = field(default_factory=list)
     finalized: bool = False
@@ -42,15 +43,50 @@ class PendingOutputSegment:
             )
         self.sequence = value
 
-    def merge_text(self, value: str) -> None:
-        self.text = _merge_unique_text(self.text, value, "text")
+    def merge_text(self, value: str, *, preserve_whitespace: bool = False) -> None:
+        self.text = _merge_unique_text(
+            self.text,
+            value,
+            "text",
+            strip=not preserve_whitespace,
+        )
 
-    def merge_semantic_text(self, value: str) -> None:
+    def merge_semantic_text(
+        self,
+        value: str,
+        *,
+        preserve_whitespace: bool = False,
+    ) -> None:
         self.semantic_text = _merge_unique_text(
             self.semantic_text,
             value,
             "semantic_text",
+            strip=not preserve_whitespace,
         )
+
+    def merge_persona_segment(self, *, index: int, count: int) -> None:
+        if isinstance(index, bool) or not isinstance(index, int) or index < 0:
+            raise ValueError(f"output_segment_persona_index_invalid:{self.message_id}")
+        if isinstance(count, bool) or not isinstance(count, int) or count <= 0:
+            raise ValueError(f"output_segment_persona_count_invalid:{self.message_id}")
+        if index >= count:
+            raise ValueError(f"output_segment_persona_index_out_of_range:{self.message_id}")
+        if (
+            self.persona_segment_index is not None
+            and self.persona_segment_index != index
+        ):
+            raise OutputSegmentConflictError(
+                f"output_segment_persona_index_conflict:{self.message_id}"
+            )
+        if (
+            self.persona_segment_count is not None
+            and self.persona_segment_count != count
+        ):
+            raise OutputSegmentConflictError(
+                f"output_segment_persona_count_conflict:{self.message_id}"
+            )
+        self.persona_segment_index = index
+        self.persona_segment_count = count
 
     def merge_audio(self, *, path: str) -> None:
         if self.audio_failure_reason:
@@ -180,8 +216,16 @@ class PendingOutputSegment:
         self.finalized = True
 
 
-def _merge_unique_text(current: str, incoming: str, field_name: str) -> str:
-    normalized = str(incoming or "").strip()
+def _merge_unique_text(
+    current: str,
+    incoming: str,
+    field_name: str,
+    *,
+    strip: bool = True,
+) -> str:
+    normalized = str(incoming or "")
+    if strip:
+        normalized = normalized.strip()
     if not normalized:
         return current
     if current and current != normalized:

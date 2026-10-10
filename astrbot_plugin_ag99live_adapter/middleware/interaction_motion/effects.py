@@ -240,15 +240,32 @@ def _resolve_persona_effect_motion_payload_with_reason(
     runtime_state: Any,
     *,
     view: Any = None,
-) -> tuple[dict[str, Any] | None, str]:
-    raw_arguments, effect_reason = _extract_ag99live_motion_effect_arguments(event, view)
-    if raw_arguments is None:
-        return None, effect_reason
-    return _normalize_motion_arguments_payload(
-        raw_arguments,
-        runtime_state,
-        base_reason=effect_reason,
+) -> tuple[dict[int, dict[str, Any]] | None, str]:
+    segment_count = _persona_segment_count(view)
+    if segment_count is None:
+        return None, "persona_segments_missing"
+
+    arguments_by_segment, effect_reason = _extract_ag99live_motion_effect_arguments(
+        event,
+        view,
+        segment_count=segment_count,
     )
+    if arguments_by_segment is None:
+        return None, effect_reason
+
+    payloads_by_segment: dict[int, dict[str, Any]] = {}
+    for segment_index, raw_arguments in arguments_by_segment.items():
+        payload, reason = _normalize_motion_arguments_payload(
+            raw_arguments,
+            runtime_state,
+            base_reason="persona_effect",
+        )
+        if payload is None:
+            return None, (
+                f"persona_effect_segment_arguments_invalid:{segment_index}:{reason}"
+            )
+        payloads_by_segment[segment_index] = payload
+    return payloads_by_segment, "persona_effect_segments"
 
 def _normalize_motion_arguments_payload(
     raw_motion_arguments: dict[str, Any],
@@ -264,34 +281,64 @@ def _normalize_motion_arguments_payload(
         sanitize_reason_fragment=_sanitize_reason_fragment,
     )
 
-def _extract_ag99live_motion_effect_arguments(event: Any, view: Any) -> tuple[dict[str, Any] | None, str]:
+def _extract_ag99live_motion_effect_arguments(
+    event: Any,
+    view: Any,
+    *,
+    segment_count: int,
+) -> tuple[dict[int, dict[str, Any]] | None, str]:
     effect_calls = _extract_effect_calls_for_motion(event, view)
+    if segment_count == 0:
+        if effect_calls and any(
+            str(_effect_call_get(_thaw_snapshot_value(call), "name") or "").strip()
+            == AG99LIVE_MOTION_EFFECT_NAME
+            for call in effect_calls
+        ):
+            return None, "persona_effect_segment_index_out_of_range"
+        return {}, "persona_effect_no_speech_segments"
     if not effect_calls:
         return None, "effect_calls_missing"
 
-    matching_calls = []
+    arguments_by_segment: dict[int, dict[str, Any]] = {}
     for raw_call in effect_calls:
         call = _thaw_snapshot_value(raw_call)
         name = _effect_call_get(call, "name")
         if str(name or "").strip() != AG99LIVE_MOTION_EFFECT_NAME:
             continue
-        matching_calls.append(call)
+        segment_index = _effect_call_get(call, "segment_index")
+        if segment_index is None:
+            return None, "persona_effect_segment_index_missing"
+        if type(segment_index) is not int:
+            return None, "persona_effect_segment_index_invalid"
+        if segment_index < 0 or segment_index >= segment_count:
+            return None, "persona_effect_segment_index_out_of_range"
+        if segment_index in arguments_by_segment:
+            return None, "persona_effect_duplicate_segment"
 
-    if len(matching_calls) > 1:
-        return None, "persona_effect_duplicate"
-
-    if matching_calls:
-        call = matching_calls[0]
         arguments = _effect_call_get(call, "arguments")
         arguments = _thaw_snapshot_value(arguments)
         if isinstance(arguments, Mapping):
-            return {
+            arguments_by_segment[segment_index] = {
                 str(key): _thaw_snapshot_value(value)
                 for key, value in arguments.items()
-            }, "persona_effect"
-        return None, "persona_effect_arguments_invalid"
+            }
+            continue
+        return None, f"persona_effect_arguments_invalid:{segment_index}"
 
-    return None, "ag99live_motion_effect_missing"
+    if not arguments_by_segment:
+        return None, "persona_effect_segment_missing"
+
+    missing_segments = set(range(segment_count)) - arguments_by_segment.keys()
+    if missing_segments:
+        return None, "persona_effect_segment_missing"
+    return dict(sorted(arguments_by_segment.items())), "persona_effect"
+
+
+def _persona_segment_count(view: Any) -> int | None:
+    segments = getattr(view, "segments", None)
+    if not isinstance(segments, (list, tuple)):
+        return None
+    return len(segments)
 
 def _extract_effect_calls_for_motion(event: Any, view: Any) -> list[Any]:
     if _resolve_result_phase(view) == "final":

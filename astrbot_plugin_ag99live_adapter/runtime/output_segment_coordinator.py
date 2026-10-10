@@ -9,7 +9,10 @@ from astrbot.api import logger
 
 from ..motion.inline_motion import extract_official_inline_anim_motion_intent
 from ..motion.motion_intent import normalize_motion_intent_payload
-from ..motion.output_sanitizer import sanitize_assistant_output_text
+from ..motion.output_sanitizer import (
+    sanitize_assistant_output_segment_text,
+    sanitize_assistant_output_text,
+)
 from ..motion.payload_dispatch import (
     resolve_engine_motion_message_type,
     resolve_motion_payload_schema_version,
@@ -72,6 +75,7 @@ class OutputSegmentCoordinator:
         self._closing_turn_ids: set[str] = set()
         self._closed_turn_ids: set[str] = set()
         self._emitted_turn_ids: set[str] = set()
+        self._turn_level_motion_consumed: set[str] = set()
 
     def reset(self) -> None:
         self._pending_segments.clear()
@@ -82,6 +86,7 @@ class OutputSegmentCoordinator:
         self._closing_turn_ids.clear()
         self._closed_turn_ids.clear()
         self._emitted_turn_ids.clear()
+        self._turn_level_motion_consumed.clear()
 
     def tracked_turn_ids(self) -> set[str]:
         return (
@@ -90,6 +95,10 @@ class OutputSegmentCoordinator:
             | set(self._emitted_turn_ids)
             | {segment.turn_id for segment in self._pending_segments.values()}
         )
+
+    def has_pending_persona_segment(self, *, turn_id: str, message_id: str) -> bool:
+        segment = self._pending_segments.get(self._segment_key(turn_id, message_id))
+        return bool(segment is not None and segment.persona_segment_index is not None)
 
     def clear_turn(self, turn_id: str) -> None:
         prefix = f"{turn_id}|"
@@ -106,6 +115,7 @@ class OutputSegmentCoordinator:
         self._closing_turn_ids.discard(turn_id)
         self._closed_turn_ids.discard(turn_id)
         self._emitted_turn_ids.discard(turn_id)
+        self._turn_level_motion_consumed.discard(turn_id)
 
     async def emit_message_chain(
         self,
@@ -119,7 +129,7 @@ class OutputSegmentCoordinator:
         del unified_msg_origin
 
         normalized_turn_id = _require_turn_id_value(turn_id)
-        extras = platform_extras if isinstance(platform_extras, dict) else {}
+        extras = dict(platform_extras) if isinstance(platform_extras, dict) else {}
         segment_message_id = resolve_platform_segment_message_id(extras)
         async with self._get_turn_lock(normalized_turn_id):
             self._require_output_queue_open(normalized_turn_id)
@@ -140,8 +150,10 @@ class OutputSegmentCoordinator:
                 sequence=segment_sequence,
             )
             self._mark_turn_timing(normalized_turn_id, "emit_started_at")
+            persona_segment = _extract_persona_segment(extras)
             texts, picture_paths, record_paths, record_texts = extract_outbound_message_parts(
-                message_chain
+                message_chain,
+                preserve_text_whitespace=persona_segment is not None,
             )
             logger.info(
                 "WIRING output_parts turn_id=%s message_id=%s text_count=%s "
@@ -156,19 +168,55 @@ class OutputSegmentCoordinator:
                 str(raw_reply_text_override or "").strip()
                 or "\n".join(texts).strip()
             )
-            record_text = sanitize_assistant_output_text("\n".join(record_texts).strip())
-            reply_text = sanitize_assistant_output_text("\n".join(texts).strip())
-            semantic_text = str(extras.get("semantic_text") or "").strip()
-            canonical_text = _resolve_canonical_assistant_text(
-                semantic_text=semantic_text,
-                plain_text=reply_text,
-                record_text=record_text,
-                raw_reply_text=raw_reply_text,
-            )
+            if persona_segment is not None:
+                record_text = sanitize_assistant_output_segment_text(
+                    "\n".join(record_texts)
+                )
+                reply_text = sanitize_assistant_output_segment_text(
+                    "\n".join(texts)
+                )
+                semantic_text = str(extras.get("semantic_text") or "")
+            else:
+                record_text = sanitize_assistant_output_text(
+                    "\n".join(record_texts).strip()
+                )
+                reply_text = sanitize_assistant_output_text("\n".join(texts).strip())
+                semantic_text = str(extras.get("semantic_text") or "").strip()
             segment = self._get_pending_segment(normalized_turn_id, segment_message_id)
+            persona_plain_echo = (
+                persona_segment is None
+                and segment.persona_segment_index is not None
+                and bool(reply_text)
+                and not record_text
+            )
+            if persona_segment is not None:
+                canonical_text = record_text if record_paths else reply_text
+            elif persona_plain_echo:
+                # tts_dual_output adds one merged Plain after the indexed
+                # Records. It shares the first Record's logical ID, so it is
+                # a text echo, not another output segment.
+                canonical_text = ""
+            else:
+                canonical_text = _resolve_canonical_assistant_text(
+                    semantic_text=semantic_text,
+                    plain_text=reply_text,
+                    record_text=record_text,
+                    raw_reply_text=raw_reply_text,
+                )
             segment.merge_sequence(segment_sequence)
-            segment.merge_text(canonical_text)
-            segment.merge_semantic_text(canonical_text)
+            segment.merge_text(
+                canonical_text,
+                preserve_whitespace=persona_segment is not None,
+            )
+            segment.merge_semantic_text(
+                canonical_text,
+                preserve_whitespace=persona_segment is not None,
+            )
+            if persona_segment is not None:
+                segment.merge_persona_segment(
+                    index=persona_segment[0],
+                    count=persona_segment[1],
+                )
             segment.merge_images(picture_paths)
             if len(record_paths) > 1:
                 raise ValueError(
@@ -197,14 +245,44 @@ class OutputSegmentCoordinator:
                 ):
                     segment.bind_performance_curve_request(tts_state["request_id"])
 
-            if "ag99live_speech_cues" in extras:
+            # Persona uses speech segments as its timing contract. Legacy cues
+            # describe the whole reply and cannot be replayed on each segment
+            # (in particular, on empty motion-only gaps).
+            if (
+                persona_segment is None
+                and not persona_plain_echo
+                and "ag99live_speech_cues" in extras
+            ):
                 segment.merge_speech_cues(extras.get("ag99live_speech_cues"))
 
-            motion_candidate, motion_resolution_failure = self._resolve_motion(
-                platform_extras=extras,
-                raw_reply_text=raw_reply_text,
-            )
             motion_expected, motion_failure_reason = _resolve_motion_schedule(extras)
+            motion_disabled = bool(extras.pop("_ag99live_motion_disabled", False))
+            schedule = _extract_motion_schedule(extras)
+            turn_level_independent_motion = (
+                persona_segment is not None
+                and isinstance(schedule, dict)
+                and str(schedule.get("source") or "").strip()
+                == "independent_provider"
+                and schedule.get("persona_segmented") is not True
+            )
+            if persona_plain_echo or motion_disabled:
+                motion_candidate, motion_resolution_failure = None, ""
+            else:
+                motion_candidate, motion_resolution_failure = self._resolve_motion(
+                    platform_extras=extras,
+                    raw_reply_text=raw_reply_text,
+                )
+            if turn_level_independent_motion and not motion_disabled and not persona_plain_echo:
+                if normalized_turn_id in self._turn_level_motion_consumed:
+                    motion_candidate = None
+                    motion_expected = False
+                    motion_failure_reason = ""
+                else:
+                    if motion_candidate is not None or motion_expected:
+                        self._turn_level_motion_consumed.add(normalized_turn_id)
+            if motion_disabled:
+                motion_expected = False
+                motion_failure_reason = ""
             logger.info(
                 "WIRING output_motion_resolved turn_id=%s message_id=%s "
                 "client_object_count=%s candidate_present=%s expected=%s "
@@ -323,11 +401,80 @@ class OutputSegmentCoordinator:
         raw_reply_text: str,
     ) -> tuple[dict[str, Any] | None, str]:
         candidates = iter_platform_motion_client_objects(platform_extras)
+        persona_segment = _extract_persona_segment(platform_extras)
+        schedule = _extract_motion_schedule(platform_extras)
+        persona_segmented = bool(
+            isinstance(schedule, dict) and schedule.get("persona_segmented") is True
+        )
+        if persona_segment is not None:
+            persona_segmented = persona_segmented or any(
+                "persona_segment_index" in candidate
+                or "persona_segment_count" in candidate
+                for candidate in candidates
+            )
         logger.info(
-            "WIRING output_motion_candidates count=%s official_inline_compat=%s",
+            "WIRING output_motion_candidates count=%s official_inline_compat=%s "
+            "persona_segment_index=%s",
             len(candidates),
             self._is_official_inline_anim_compat_enabled(),
+            persona_segment[0] if persona_segment is not None else "<missing>",
         )
+        if persona_segmented:
+            if persona_segment is None:
+                # The merged dual-output Plain has no Persona index. It is
+                # visible text only and must not consume any segment action.
+                return None, "persona_segment_index_missing"
+            matching: list[dict[str, Any]] = []
+            for candidate in candidates:
+                candidate_index = candidate.get("persona_segment_index")
+                candidate_count = candidate.get("persona_segment_count")
+                if (
+                    isinstance(candidate_index, bool)
+                    or not isinstance(candidate_index, int)
+                    or isinstance(candidate_count, bool)
+                    or not isinstance(candidate_count, int)
+                    or candidate_index < 0
+                    or candidate_count <= 0
+                    or candidate_index >= candidate_count
+                ):
+                    return None, "output_segment_persona_motion_index_invalid"
+                if candidate_count != persona_segment[1]:
+                    return None, "output_segment_persona_motion_count_mismatch"
+                if candidate_index == persona_segment[0]:
+                    matching.append(candidate)
+            if len(matching) > 1:
+                return None, "output_segment_persona_multiple_motion_objects"
+            if not matching:
+                reason = (
+                    str(schedule.get("motion_resolution_reason") or "").strip()
+                    if isinstance(schedule, dict)
+                    else ""
+                ) or "persona_motion_payload_missing"
+                return None, f"persona_motion_segment_missing:{reason}"
+            candidates = matching
+        elif candidates:
+            # A Persona-indexed action without matching Record metadata must
+            # never fall through to the legacy single-action behavior.
+            unindexed_candidates = [
+                candidate
+                for candidate in candidates
+                if "persona_segment_index" not in candidate
+                and "persona_segment_count" not in candidate
+            ]
+            if len(unindexed_candidates) != len(candidates):
+                candidates = unindexed_candidates
+            if persona_segment is not None:
+                # The independent provider produces one turn-level result.
+                # It is consumed once, by the first delivered Persona TTS
+                # segment, without pretending it contains a Persona index.
+                turn_level = [
+                    candidate
+                    for candidate in candidates
+                    if str(candidate.get("source") or "").strip()
+                    == "independent_provider"
+                ]
+                if turn_level:
+                    candidates = turn_level
         if len(candidates) > 1:
             return None, "output_segment_multiple_motion_objects"
         if candidates:
@@ -595,6 +742,30 @@ def _resolve_canonical_assistant_text(
     if populated:
         return populated[0][1]
     return sanitize_assistant_output_text(raw_reply_text)
+
+
+def _extract_persona_segment(
+    platform_extras: dict[str, Any],
+) -> tuple[int, int] | None:
+    if "persona_segment_index" not in platform_extras and "persona_segment_count" not in platform_extras:
+        return None
+    index = platform_extras.get("persona_segment_index")
+    count = platform_extras.get("persona_segment_count")
+    if isinstance(index, bool) or not isinstance(index, int) or index < 0:
+        raise ValueError("output_segment_persona_index_invalid")
+    if isinstance(count, bool) or not isinstance(count, int) or count <= 0:
+        raise ValueError("output_segment_persona_count_invalid")
+    if index >= count:
+        raise ValueError("output_segment_persona_index_out_of_range")
+    return index, count
+
+
+def _extract_motion_schedule(platform_extras: dict[str, Any]) -> dict[str, Any] | None:
+    metadata = platform_extras.get("metadata")
+    if not isinstance(metadata, dict):
+        return None
+    schedule = metadata.get("ag99live_motion_schedule")
+    return schedule if isinstance(schedule, dict) else None
 
 
 def _extract_platform_tts_delivery_state(

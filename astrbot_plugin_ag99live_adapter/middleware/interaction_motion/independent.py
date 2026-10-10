@@ -27,8 +27,15 @@ from .shared import (
 
 INDEPENDENT_MOTION_TASK_EXTRA_KEY = "_ag99live_independent_motion_task"
 INDEPENDENT_MOTION_RESULT_EXTRA_KEY = "_ag99live_independent_motion_result"
+INDEPENDENT_MOTION_TASKS_BY_TURN_ATTRIBUTE = (
+    "independent_motion_generation_tasks_by_turn"
+)
+INDEPENDENT_MOTION_SEGMENT_BATCHES_BY_TURN_ATTRIBUTE = (
+    "independent_motion_segment_batches_by_turn"
+)
 PERSONA_EXPRESSION_INTENT_METADATA_KEY = "interaction.persona_expression_intent"
 _MAX_RETAINED_RESULT_TURNS = 64
+_MAX_PENDING_SEGMENT_BATCHES = 8
 # Independent motion is supplementary output; it must not hold the main reply
 # indefinitely when the secondary provider is slow.
 _PARALLEL_MOTION_WAIT_SECONDS = 2.0
@@ -53,6 +60,14 @@ class IndependentMotionResult:
     image_count: int
 
 
+@dataclass(slots=True)
+class IndependentMotionSegmentBatch:
+    phase: str
+    kind: str
+    speech_segments: tuple[str, ...]
+    results_by_index: dict[int, IndependentMotionResult]
+
+
 def is_persona_expression_request(request: Any) -> bool:
     """Identify an AstrBot request that belongs to the Persona expression path."""
     metadata = getattr(request, "metadata", None)
@@ -60,6 +75,253 @@ def is_persona_expression_request(request: Any) -> bool:
         return False
     intent = metadata.get(PERSONA_EXPRESSION_INTENT_METADATA_KEY)
     return isinstance(intent, Mapping) and bool(str(intent.get("phase") or "").strip())
+
+
+def persona_expression_intent(request: Any) -> Mapping[str, Any] | None:
+    """Return Persona intent metadata attached to AstrBot's active request."""
+    metadata = getattr(request, "metadata", None)
+    if not isinstance(metadata, Mapping):
+        return None
+    intent = metadata.get(PERSONA_EXPRESSION_INTENT_METADATA_KEY)
+    return intent if isinstance(intent, Mapping) else None
+
+
+def store_motion_segment_batch(
+    runtime_state: Any,
+    *,
+    turn_id: str,
+    phase: str,
+    kind: str,
+    speech_segments: tuple[str, ...],
+    results_by_index: dict[int, IndependentMotionResult],
+) -> bool:
+    """Keep generated actions until the matching output contributor consumes them."""
+    normalized_turn_id = str(turn_id or "").strip()
+    if not normalized_turn_id:
+        logger.warning(
+            "WIRING independent_motion.segment_results_not_stored "
+            "reason=turn_id_missing"
+        )
+        return False
+
+    batches_by_turn = getattr(
+        runtime_state,
+        INDEPENDENT_MOTION_SEGMENT_BATCHES_BY_TURN_ATTRIBUTE,
+        None,
+    )
+    if not isinstance(batches_by_turn, dict):
+        batches_by_turn = {}
+        setattr(
+            runtime_state,
+            INDEPENDENT_MOTION_SEGMENT_BATCHES_BY_TURN_ATTRIBUTE,
+            batches_by_turn,
+        )
+    batches = batches_by_turn.get(normalized_turn_id, [])
+    if not isinstance(batches, list):
+        batches = []
+    batches.append(
+        IndependentMotionSegmentBatch(
+            phase=str(phase or "").strip(),
+            kind=str(kind or "").strip(),
+            speech_segments=tuple(str(value or "") for value in speech_segments),
+            results_by_index=dict(results_by_index),
+        )
+    )
+    if len(batches) > _MAX_PENDING_SEGMENT_BATCHES:
+        del batches[:-_MAX_PENDING_SEGMENT_BATCHES]
+    batches_by_turn[normalized_turn_id] = batches
+    while len(batches_by_turn) > _MAX_RETAINED_RESULT_TURNS:
+        batches_by_turn.pop(next(iter(batches_by_turn)))
+    logger.info(
+        "WIRING independent_motion.segment_results_stored turn_id=%s "
+        "phase=%s kind=%s segment_count=%s result_count=%s",
+        normalized_turn_id,
+        str(phase or "<missing>"),
+        str(kind or "<missing>"),
+        len(speech_segments),
+        len(results_by_index),
+    )
+    return True
+
+
+def take_motion_segment_batch(
+    runtime_state: Any,
+    *,
+    turn_id: str,
+    phase: str,
+    purpose: str,
+    speech_segments: tuple[str, ...],
+) -> IndependentMotionSegmentBatch | None:
+    """Consume only an exact, indexed batch for this visible output candidate."""
+    normalized_turn_id = str(turn_id or "").strip()
+    batches_by_turn = getattr(
+        runtime_state,
+        INDEPENDENT_MOTION_SEGMENT_BATCHES_BY_TURN_ATTRIBUTE,
+        None,
+    )
+    if not normalized_turn_id or not isinstance(batches_by_turn, dict):
+        return None
+    batches = batches_by_turn.get(normalized_turn_id, [])
+    if not isinstance(batches, list) or not batches:
+        return None
+
+    normalized_segments = tuple(str(value or "") for value in speech_segments)
+    normalized_phase = str(phase or "").strip()
+    normalized_purpose = str(purpose or "").strip()
+    for index in range(len(batches) - 1, -1, -1):
+        batch = batches[index]
+        if not isinstance(batch, IndependentMotionSegmentBatch):
+            continue
+        purpose_matches = batch.kind == "plugin" and normalized_purpose == "plugin_reply"
+        if not purpose_matches and batch.phase != normalized_phase:
+            continue
+        if batch.speech_segments != normalized_segments:
+            logger.warning(
+                "WIRING independent_motion.segment_result_rejected "
+                "reason=speech_segments_mismatch phase=%s kind=%s "
+                "expected_count=%s actual_count=%s",
+                normalized_phase or "<missing>",
+                batch.kind or "<missing>",
+                len(batch.speech_segments),
+                len(normalized_segments),
+            )
+            continue
+        selected = batches.pop(index)
+        if not batches:
+            batches_by_turn.pop(normalized_turn_id, None)
+        logger.info(
+            "WIRING independent_motion.segment_results_consumed turn_id=%s "
+            "phase=%s kind=%s segment_count=%s result_count=%s",
+            normalized_turn_id,
+            normalized_phase or "<missing>",
+            selected.kind or "<missing>",
+            len(selected.speech_segments),
+            len(selected.results_by_index),
+        )
+        return selected
+    return None
+
+
+def track_motion_generation_task(
+    runtime_state: Any,
+    *,
+    turn_id: str,
+    task: asyncio.Task,
+) -> bool:
+    normalized_turn_id = str(turn_id or "").strip()
+    if not normalized_turn_id or not isinstance(task, asyncio.Task):
+        return False
+    tasks_by_turn = getattr(
+        runtime_state,
+        INDEPENDENT_MOTION_TASKS_BY_TURN_ATTRIBUTE,
+        None,
+    )
+    if not isinstance(tasks_by_turn, dict):
+        tasks_by_turn = {}
+        setattr(
+            runtime_state,
+            INDEPENDENT_MOTION_TASKS_BY_TURN_ATTRIBUTE,
+            tasks_by_turn,
+        )
+    tasks = tasks_by_turn.setdefault(normalized_turn_id, set())
+    if not isinstance(tasks, set):
+        tasks = set()
+        tasks_by_turn[normalized_turn_id] = tasks
+    tasks.add(task)
+    return True
+
+
+def untrack_motion_generation_task(
+    runtime_state: Any,
+    *,
+    turn_id: str,
+    task: asyncio.Task,
+) -> None:
+    normalized_turn_id = str(turn_id or "").strip()
+    tasks_by_turn = getattr(
+        runtime_state,
+        INDEPENDENT_MOTION_TASKS_BY_TURN_ATTRIBUTE,
+        None,
+    )
+    if not normalized_turn_id or not isinstance(tasks_by_turn, dict):
+        return
+    tasks = tasks_by_turn.get(normalized_turn_id)
+    if not isinstance(tasks, set):
+        return
+    tasks.discard(task)
+    if not tasks:
+        tasks_by_turn.pop(normalized_turn_id, None)
+
+
+async def generate_independent_motion_for_segments(
+    event: Any,
+    bundle: _MotionRuntimeBundle,
+    *,
+    speech_segments: tuple[str, ...],
+    parallel: bool,
+    tasks: set[asyncio.Task],
+) -> dict[int, IndependentMotionResult]:
+    """Generate one independent Provider result for each nonempty speech segment."""
+    inputs = [
+        (index, speech)
+        for index, speech in enumerate(speech_segments)
+        if speech.strip()
+    ]
+    if not inputs:
+        return {}
+
+    provider = getattr(
+        bundle.runtime_state,
+        "selected_independent_motion_provider",
+        None,
+    )
+    if provider is None:
+        return {
+            index: IndependentMotionResult(
+                assistant_text=speech,
+                motion_payload=None,
+                reason="provider_unavailable",
+                image_count=0,
+            )
+            for index, speech in inputs
+        }
+
+    async def _generate_one(
+        index: int,
+        speech: str,
+    ) -> tuple[int, IndependentMotionResult]:
+        task = asyncio.create_task(
+            generate_independent_motion(
+                event,
+                bundle,
+                provider=provider,
+                assistant_text=speech,
+            ),
+            name=f"ag99live-independent-motion-segment-{index}",
+        )
+        tasks.add(task)
+        task.add_done_callback(tasks.discard)
+        return index, await task
+
+    results: dict[int, IndependentMotionResult] = {}
+    if parallel:
+        generated = await asyncio.gather(
+            *(_generate_one(index, speech) for index, speech in inputs)
+        )
+        results.update(generated)
+    else:
+        for index, speech in inputs:
+            result_index, result = await _generate_one(index, speech)
+            results[result_index] = result
+    logger.info(
+        "WIRING independent_motion.segment_generation_completed mode=%s "
+        "input_count=%s result_count=%s payload_count=%s",
+        "parallel" if parallel else "serial",
+        len(inputs),
+        len(results),
+        sum(result.motion_payload is not None for result in results.values()),
+    )
+    return results
 
 
 def store_motion_result_for_turn(
@@ -134,7 +396,7 @@ def take_motion_result_for_turn(
 
     entries_before = len(entries)
     selected_index: int | None = None
-    match_mode = "turn_fallback"
+    match_mode = "assistant_text_exact"
     if normalized_text:
         for index in range(len(entries) - 1, -1, -1):
             result = entries[index]
@@ -146,14 +408,9 @@ def take_motion_result_for_turn(
                 match_mode = "assistant_text_exact"
                 break
     if selected_index is None:
-        for index in range(len(entries) - 1, -1, -1):
-            if isinstance(entries[index], IndependentMotionResult):
-                selected_index = index
-                break
-    if selected_index is None:
         logger.warning(
             "WIRING independent_motion.cache_consume_miss turn_id=%s "
-            "reason=entry_invalid entries=%s requested_text_len=%s",
+            "reason=assistant_text_mismatch entries=%s requested_text_len=%s",
             normalized_turn_id,
             entries_before,
             len(normalized_text),
@@ -808,11 +1065,18 @@ def _motion_output_shape_summary(value: Mapping[str, Any]) -> dict[str, Any]:
 __all__ = [
     "INDEPENDENT_MOTION_RESULT_EXTRA_KEY",
     "INDEPENDENT_MOTION_TASK_EXTRA_KEY",
+    "IndependentMotionSegmentBatch",
     "IndependentMotionResult",
+    "generate_independent_motion_for_segments",
     "generate_independent_motion",
     "is_persona_expression_request",
+    "persona_expression_intent",
     "resolve_motion_after_llm_response",
+    "store_motion_segment_batch",
     "store_motion_result_for_turn",
     "start_parallel_motion_generation",
+    "track_motion_generation_task",
+    "take_motion_segment_batch",
     "take_motion_result_for_turn",
+    "untrack_motion_generation_task",
 ]

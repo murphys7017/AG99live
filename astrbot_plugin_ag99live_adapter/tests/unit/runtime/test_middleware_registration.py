@@ -368,13 +368,195 @@ def test_independent_motion_results_match_each_visible_persona_reply(
         runtime_state,
         turn_id="turn-1",
         assistant_text="not a reply in this turn",
-    ) == final
+    ) is None
     assert module.take_motion_result_for_turn(
         runtime_state,
         turn_id="turn-1",
         assistant_text=immediate.assistant_text,
     ) == immediate
+    assert module.take_motion_result_for_turn(
+        runtime_state,
+        turn_id="turn-1",
+        assistant_text=final.assistant_text,
+    ) == final
     assert runtime_state.independent_motion_result_cache == {}
+
+
+def test_independent_motion_segment_results_preserve_speech_indexes(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_middleware_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = importlib.import_module(
+        "astrbot_plugin_ag99live_adapter.middleware.interaction_motion.independent"
+    )
+    module = importlib.reload(module)
+    calls: list[str] = []
+    selected_provider = object()
+
+    async def generate(_event, _bundle, *, provider, assistant_text):
+        assert provider is selected_provider
+        calls.append(assistant_text)
+        return module.IndependentMotionResult(
+            assistant_text=assistant_text,
+            motion_payload={
+                "schema_version": "ag99.motion_intent.v4",
+                "intent_tags": [assistant_text],
+            },
+            reason="ok",
+            image_count=0,
+        )
+
+    monkeypatch.setattr(module, "generate_independent_motion", generate)
+    bundle = SimpleNamespace(
+        runtime_state=SimpleNamespace(
+            selected_independent_motion_provider=selected_provider,
+        )
+    )
+
+    async def run_generation():
+        return await module.generate_independent_motion_for_segments(
+            object(),
+            bundle,
+            speech_segments=("", "first", "  ", "third"),
+            parallel=True,
+            tasks=set(),
+        )
+
+    results = asyncio.run(run_generation())
+
+    assert calls == ["first", "third"]
+    assert set(results) == {1, 3}
+    assert results[1].assistant_text == "first"
+    assert results[3].assistant_text == "third"
+
+
+def test_persona_hook_cancellation_reaches_segment_provider_requests(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_middleware_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = importlib.import_module(
+        "astrbot_plugin_ag99live_adapter.middleware.interaction_motion.independent"
+    )
+    module = importlib.reload(module)
+    provider_started = asyncio.Event()
+    provider_cancelled = asyncio.Event()
+    runtime_state = SimpleNamespace(selected_independent_motion_provider=object())
+    bundle = SimpleNamespace(runtime_state=runtime_state)
+
+    async def generate(_event, _bundle, *, provider, assistant_text):
+        del provider, assistant_text
+        provider_started.set()
+        try:
+            await asyncio.Future()
+        except asyncio.CancelledError:
+            provider_cancelled.set()
+            raise
+
+    monkeypatch.setattr(module, "generate_independent_motion", generate)
+
+    async def run_case() -> None:
+        async def persona_result_hook() -> None:
+            task = asyncio.current_task()
+            assert task is not None
+            assert module.track_motion_generation_task(
+                runtime_state,
+                turn_id="turn-1",
+                task=task,
+            )
+            try:
+                await module.generate_independent_motion_for_segments(
+                    object(),
+                    bundle,
+                    speech_segments=("first", "second"),
+                    parallel=True,
+                    tasks=set(),
+                )
+            finally:
+                module.untrack_motion_generation_task(
+                    runtime_state,
+                    turn_id="turn-1",
+                    task=task,
+                )
+
+        hook_task = asyncio.create_task(persona_result_hook())
+        await provider_started.wait()
+        hook_task.cancel()
+        await asyncio.gather(hook_task, return_exceptions=True)
+
+    asyncio.run(run_case())
+
+    assert provider_cancelled.is_set()
+    assert runtime_state.independent_motion_generation_tasks_by_turn == {}
+
+
+def test_independent_motion_segment_batch_requires_exact_candidate_speech(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_middleware_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = importlib.import_module(
+        "astrbot_plugin_ag99live_adapter.middleware.interaction_motion.independent"
+    )
+    module = importlib.reload(module)
+    runtime_state = SimpleNamespace()
+    result = module.IndependentMotionResult(
+        assistant_text="third",
+        motion_payload={"schema_version": "ag99.motion_intent.v4"},
+        reason="ok",
+        image_count=0,
+    )
+    assert module.store_motion_segment_batch(
+        runtime_state,
+        turn_id="turn-1",
+        phase="final",
+        kind="reply",
+        speech_segments=("first", "", "third"),
+        results_by_index={2: result},
+    )
+    other_candidate = module.IndependentMotionResult(
+        assistant_text="different",
+        motion_payload={"schema_version": "ag99.motion_intent.v4"},
+        reason="ok",
+        image_count=0,
+    )
+    assert module.store_motion_segment_batch(
+        runtime_state,
+        turn_id="turn-1",
+        phase="final",
+        kind="reply",
+        speech_segments=("different",),
+        results_by_index={0: other_candidate},
+    )
+
+    assert module.take_motion_segment_batch(
+        runtime_state,
+        turn_id="turn-1",
+        phase="immediate",
+        purpose="interaction",
+        speech_segments=("first", "", "third"),
+    ) is None
+    batch = module.take_motion_segment_batch(
+        runtime_state,
+        turn_id="turn-1",
+        phase="final",
+        purpose="interaction",
+        speech_segments=("first", "", "third"),
+    )
+
+    assert batch is not None
+    assert batch.results_by_index == {2: result}
+    other_batch = module.take_motion_segment_batch(
+        runtime_state,
+        turn_id="turn-1",
+        phase="final",
+        purpose="interaction",
+        speech_segments=("different",),
+    )
+    assert other_batch is not None
+    assert other_batch.results_by_index == {0: other_candidate}
+    assert runtime_state.independent_motion_segment_batches_by_turn == {}
 
 
 def test_independent_motion_result_matches_sanitized_visible_reply(

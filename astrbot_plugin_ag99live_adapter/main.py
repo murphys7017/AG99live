@@ -12,6 +12,7 @@ from .core_compatibility import supports_llm_response_hook
 from .middleware import register_ag99live_interaction_contributors
 from .motion.output_sanitizer import (
     contains_hidden_output_markup,
+    sanitize_assistant_output_segment_text,
     sanitize_assistant_output_text,
 )
 
@@ -123,6 +124,19 @@ class MyPlugin(Star):
             and not self._official_core_compatibility
         ):
             if bool(
+                getattr(
+                    bundle.runtime_state,
+                    "independent_motion_per_speech_segment",
+                    False,
+                )
+            ):
+                logger.info(
+                    "WIRING independent_motion.request_hook mode=per_speech_segment "
+                    "turn_id=%s; waiting for Persona speech segments",
+                    event.get_extra("_turn_id") or "<missing>",
+                )
+                return
+            if bool(
                 getattr(bundle.runtime_state, "independent_motion_parallel", False)
             ):
                 from .middleware.interaction_motion.independent import (
@@ -220,6 +234,19 @@ class MyPlugin(Star):
             logger.debug(
                 "WIRING independent_motion.response_hook_skipped turn_id=%s "
                 "reason=runtime_or_config_unavailable",
+                turn_id or "<missing>",
+            )
+            return
+        if bool(
+            getattr(
+                bundle.runtime_state,
+                "independent_motion_per_speech_segment",
+                False,
+            )
+        ):
+            logger.debug(
+                "WIRING independent_motion.response_hook_skipped turn_id=%s "
+                "reason=per_speech_segment_mode",
                 turn_id or "<missing>",
             )
             return
@@ -366,18 +393,25 @@ class MyPlugin(Star):
             return
         if str(event.get_platform_name() or "").strip() != "olv_pet_adapter":
             return
-        if state.status == "generating":
-            from .middleware.interaction_motion import (
-                start_deferred_performance_curve_request,
-            )
+        if (
+            state.stage != "interaction.outbound_tts"
+            or state.status not in {"requested", "generating"}
+        ):
+            return
 
-            start_deferred_performance_curve_request(
-                event,
-                turn_id=state.turn_id,
-                message_id=state.message_id,
-                tts_request_id=state.tts_request_id,
-                external_correlation_id=state.external_correlation_id,
-            )
+        from .middleware.interaction_motion import (
+            start_deferred_performance_curve_request,
+        )
+
+        start_deferred_performance_curve_request(
+            event,
+            turn_id=state.turn_id,
+            message_id=state.message_id,
+            tts_request_id=state.tts_request_id,
+            external_correlation_id=state.external_correlation_id,
+            stage=state.stage,
+            status=state.status,
+        )
 
     @_optional_persona_expression_hook()
     async def handle_persona_expression_result(
@@ -389,42 +423,6 @@ class MyPlugin(Star):
             return
         if str(event.get_platform_name() or "").strip() != "olv_pet_adapter":
             return
-
-        from .middleware.interaction_motion.independent import (
-            INDEPENDENT_MOTION_RESULT_EXTRA_KEY,
-            IndependentMotionResult,
-            store_motion_result_for_turn,
-        )
-        from .middleware.interaction_motion.shared import (
-            _resolve_motion_runtime_bundle,
-        )
-
-        bundle = _resolve_motion_runtime_bundle(event)
-        if (
-            bundle is not None
-            and bool(
-                getattr(bundle.runtime_state, "independent_motion_enabled", False)
-            )
-        ):
-            generated_result = event.get_extra(INDEPENDENT_MOTION_RESULT_EXTRA_KEY)
-            if (
-                isinstance(generated_result, IndependentMotionResult)
-                and not event.get_extra("agent_stop_requested", False)
-            ):
-                stored = store_motion_result_for_turn(
-                    bundle.runtime_state,
-                    turn_id=str(event.get_extra("_turn_id") or ""),
-                    result=generated_result,
-                    assistant_text=str(getattr(result, "spoken_reply", "") or ""),
-                )
-                if not stored:
-                    logger.warning(
-                        "WIRING independent_motion.result_not_stored turn_id=%s",
-                        event.get_extra("_turn_id") or "<missing>",
-                    )
-                event.set_extra(INDEPENDENT_MOTION_RESULT_EXTRA_KEY, None)
-            elif generated_result is not None:
-                event.set_extra(INDEPENDENT_MOTION_RESULT_EXTRA_KEY, None)
 
         from .protocol.speech_cues import normalize_speech_cues
 
@@ -439,6 +437,140 @@ class MyPlugin(Star):
                 exc,
             )
         event.set_extra("_ag99live_pending_speech_cues", speech_cues)
+
+        from .middleware.interaction_motion.independent import (
+            INDEPENDENT_MOTION_RESULT_EXTRA_KEY,
+            IndependentMotionResult,
+            generate_independent_motion_for_segments,
+            is_persona_expression_request,
+            persona_expression_intent,
+            store_motion_segment_batch,
+            store_motion_result_for_turn,
+            track_motion_generation_task,
+            untrack_motion_generation_task,
+        )
+        from .middleware.interaction_motion.shared import (
+            _resolve_motion_runtime_bundle,
+        )
+
+        bundle = _resolve_motion_runtime_bundle(event)
+        if (
+            bundle is not None
+            and bool(
+                getattr(bundle.runtime_state, "independent_motion_enabled", False)
+            )
+        ):
+            if bool(
+                getattr(
+                    bundle.runtime_state,
+                    "independent_motion_per_speech_segment",
+                    False,
+                )
+            ):
+                turn_id = str(event.get_extra("_turn_id") or "").strip()
+                if not turn_id:
+                    logger.warning(
+                        "WIRING independent_motion.segment_generation_skipped "
+                        "reason=turn_id_missing"
+                    )
+                    return
+                request = event.get_extra("provider_request")
+                intent = persona_expression_intent(request)
+                if (
+                    not is_persona_expression_request(request)
+                    or intent is None
+                    or str(intent.get("phase") or "").strip()
+                    not in {"immediate", "final"}
+                    or str(intent.get("kind") or "").strip() != "reply"
+                    or event.get_extra("agent_stop_requested", False)
+                ):
+                    return
+                phase = str(intent.get("phase") or "").strip()
+                kind = str(intent.get("kind") or "").strip()
+                raw_segments = getattr(result, "segments", ())
+                speech_segments = tuple(
+                    sanitize_assistant_output_segment_text(
+                        str(getattr(segment, "speech", "") or "")
+                    )
+                    for segment in raw_segments
+                )
+                if not any(speech.strip() for speech in speech_segments):
+                    return
+
+                generation_task = asyncio.current_task()
+                if not track_motion_generation_task(
+                    bundle.runtime_state,
+                    turn_id=turn_id,
+                    task=generation_task,
+                ):
+                    logger.warning(
+                        "WIRING independent_motion.segment_generation_skipped "
+                        "reason=task_tracking_unavailable turn_id=%s",
+                        turn_id,
+                    )
+                    return
+                try:
+                    result_map = await generate_independent_motion_for_segments(
+                        event,
+                        bundle,
+                        speech_segments=speech_segments,
+                        parallel=bool(
+                            getattr(
+                                bundle.runtime_state,
+                                "independent_motion_parallel",
+                                False,
+                            )
+                        ),
+                        tasks=self._independent_motion_tasks,
+                    )
+                finally:
+                    untrack_motion_generation_task(
+                        bundle.runtime_state,
+                        turn_id=turn_id,
+                        task=generation_task,
+                    )
+                if event.get_extra("agent_stop_requested", False):
+                    logger.info(
+                        "WIRING independent_motion.segment_results_discarded "
+                        "reason=turn_terminated turn_id=%s",
+                        event.get_extra("_turn_id") or "<missing>",
+                    )
+                    return
+                stored = store_motion_segment_batch(
+                    bundle.runtime_state,
+                    turn_id=turn_id,
+                    phase=phase,
+                    kind=kind,
+                    speech_segments=speech_segments,
+                    results_by_index=result_map,
+                )
+                if not stored:
+                    logger.warning(
+                        "WIRING independent_motion.segment_results_not_stored "
+                        "reason=runtime_state_storage_failed turn_id=%s",
+                        event.get_extra("_turn_id") or "<missing>",
+                    )
+                return
+
+            generated_result = event.get_extra(INDEPENDENT_MOTION_RESULT_EXTRA_KEY)
+            if (
+                isinstance(generated_result, IndependentMotionResult)
+                and not event.get_extra("agent_stop_requested", False)
+            ):
+                stored = store_motion_result_for_turn(
+                    bundle.runtime_state,
+                    turn_id=str(event.get_extra("_turn_id") or ""),
+                    result=generated_result,
+                    assistant_text=str(getattr(result, "speech", "") or ""),
+                )
+                if not stored:
+                    logger.warning(
+                        "WIRING independent_motion.result_not_stored turn_id=%s",
+                        event.get_extra("_turn_id") or "<missing>",
+                    )
+                event.set_extra(INDEPENDENT_MOTION_RESULT_EXTRA_KEY, None)
+            elif generated_result is not None:
+                event.set_extra(INDEPENDENT_MOTION_RESULT_EXTRA_KEY, None)
 
     async def terminate(self) -> None:
         tasks = list(self._independent_motion_tasks)

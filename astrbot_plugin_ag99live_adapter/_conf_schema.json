@@ -54,11 +54,11 @@
     }
   },
   "independent_motion": {
-    "description": "实验性独立 Live2D 动作参数生成，可与主模型生成回复并行执行或在回复后执行。",
+    "description": "实验性独立 Live2D 动作参数生成；可以为整条回复生成一次，或为 Persona 的每个 speech 段分别生成。",
     "type": "object",
     "items": {
       "enabled": {
-        "description": "启用后由单独的聊天 Provider 生成动作参数，并完全切换到该实现。",
+        "description": "启用后由单独的聊天 Provider 生成动作参数，并完全切换到该实现，不再使用主模型的 Persona Effect 动作。",
         "type": "bool",
         "default": false
       },
@@ -73,8 +73,13 @@
         "type": "int",
         "default": 6
       },
+      "per_speech_segment": {
+        "description": "启用时为 Persona 输出的每个非空 speech 段分别调用独立 Provider，并把动作绑定到对应输出段。此模式会保留 Persona 回复链路。",
+        "type": "bool",
+        "default": false
+      },
       "parallel": {
-        "description": "启用时与主回复文本生成并行启动；关闭时在主回复生成后启动。",
+        "description": "整条回复模式下，启用时与主回复文本生成并行；逐 speech 段模式下，启用时在 Persona 返回分段后并发生成各段动作，关闭时逐段串行生成。",
         "type": "bool",
         "default": false
       }

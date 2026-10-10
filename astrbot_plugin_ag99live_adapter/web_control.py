@@ -193,13 +193,13 @@ CONFIG_SCHEMA: tuple[ConfigSection, ...] = (
     ConfigSection(
         key="independent_motion",
         label="独立 Live2D 动作生成（实验）",
-        description="切换为独立 Provider 生成动作参数，并选择历史上下文长度和执行时序。",
+        description="切换为独立 Provider 生成动作参数；可按整条回复生成一次，或为 Persona 的每个 speech 段分别生成。",
         fields=(
             ConfigField(
                 key="enabled",
                 kind="bool",
                 label="启用独立动作生成",
-                description="启用后完全使用独立 Provider 的动作结果；关闭时沿用主模型动作生成。",
+                description="启用后完全使用独立 Provider 的动作结果，不再使用主模型的 Persona Effect 动作。",
                 default=False,
             ),
             ConfigField(
@@ -223,10 +223,17 @@ CONFIG_SCHEMA: tuple[ConfigSection, ...] = (
                 step=1,
             ),
             ConfigField(
+                key="per_speech_segment",
+                kind="bool",
+                label="按 speech 段分别生成动作",
+                description="为 Persona 输出的每个非空 speech 段单独调用独立 Provider，并将动作绑定到相同索引的 TTS 输出段；此模式保留 Persona 回复链路。",
+                default=False,
+            ),
+            ConfigField(
                 key="parallel",
                 kind="bool",
-                label="与主回复并行生成",
-                description="启用时在主模型生成回复文本前启动；关闭时在回复文本生成后启动。",
+                label="并行生成动作",
+                description="整条回复模式下，启用时与主回复文本生成并行；逐 speech 段模式下，启用时在 Persona 返回分段后并发生成各段动作，关闭时逐段串行生成。",
                 default=False,
             ),
         ),

@@ -49,6 +49,7 @@ def _install_main_astrbot_stubs(install_fake_astrbot, monkeypatch) -> None:
             self.message_id = "message-1"
             self.tts_request_id = "tts-1"
             self.external_correlation_id = "frontend-turn-1"
+            self.stage = "interaction.outbound_tts"
             self.status = status
 
     event_module.AstrMessageEvent = AstrMessageEvent
@@ -90,6 +91,16 @@ def _install_main_astrbot_stubs(install_fake_astrbot, monkeypatch) -> None:
     star_module.Star = Star
     monkeypatch.setitem(sys.modules, "astrbot.api.star", star_module)
 
+    web_control_module = types.ModuleType(
+        "astrbot_plugin_ag99live_adapter.web_control"
+    )
+    web_control_module.register_web_control_page = lambda *_args: False
+    monkeypatch.setitem(
+        sys.modules,
+        "astrbot_plugin_ag99live_adapter.web_control",
+        web_control_module,
+    )
+
 
 
 def test_main_plugin_normalizes_output_and_starts_curve_on_tts_generating(
@@ -127,9 +138,11 @@ def test_main_plugin_normalizes_output_and_starts_curve_on_tts_generating(
     )
 
     def start_deferred_performance_curve_request(event, **identity) -> None:
-        assert event.get_extra("ag99live_raw_reply_text")
-        curve_starts.append(identity)
-        event.set_extra("_ag99live_pending_performance_curve", None)
+        assert identity["stage"] == "interaction.outbound_tts"
+        if identity["status"] == "generating":
+            assert event.get_extra("ag99live_raw_reply_text")
+            curve_starts.append(identity)
+            event.set_extra("_ag99live_pending_performance_curve", None)
 
     interaction_motion_module.start_deferred_performance_curve_request = (
         start_deferred_performance_curve_request
@@ -197,6 +210,8 @@ def test_main_plugin_normalizes_output_and_starts_curve_on_tts_generating(
             "message_id": "message-1",
             "tts_request_id": "tts-1",
             "external_correlation_id": "frontend-turn-1",
+            "stage": "interaction.outbound_tts",
+            "status": "generating",
         }
     ]
 

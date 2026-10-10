@@ -98,7 +98,6 @@ def test_backend_abort_cancels_turn_owned_motion_task_and_discards_cache(
         task = asyncio.create_task(motion_worker())
         await task_started.wait()
         extras = {
-            "_ag99live_independent_motion_task": task,
             "_ag99live_independent_motion_result": object(),
         }
         event = types.SimpleNamespace(
@@ -108,7 +107,11 @@ def test_backend_abort_cancels_turn_owned_motion_task_and_discards_cache(
         )
         runtime = types.SimpleNamespace(
             runtime_state=types.SimpleNamespace(
-                independent_motion_result_cache={"old-turn": [object()]}
+                independent_motion_result_cache={"old-turn": [object()]},
+                independent_motion_generation_tasks_by_turn={"old-turn": {task}},
+                independent_motion_segment_batches_by_turn={
+                    "old-turn": [object()]
+                },
             ),
             _turn_terminal_results={},
             _terminating_turn_ids=set(),
@@ -149,5 +152,7 @@ def test_backend_abort_cancels_turn_owned_motion_task_and_discards_cache(
         assert extras["_ag99live_independent_motion_task"] is None
         assert extras["_ag99live_independent_motion_result"] is None
         assert runtime.runtime_state.independent_motion_result_cache == {}
+        assert runtime.runtime_state.independent_motion_generation_tasks_by_turn == {}
+        assert runtime.runtime_state.independent_motion_segment_batches_by_turn == {}
 
     asyncio.run(run_case())
