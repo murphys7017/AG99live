@@ -428,20 +428,6 @@ class MyPlugin(Star):
         if str(event.get_platform_name() or "").strip() != "olv_pet_adapter":
             return
 
-        from .protocol.speech_cues import normalize_speech_cues
-
-        raw_cues = getattr(result, "speech_cues", None)
-        try:
-            speech_cues = normalize_speech_cues(raw_cues)
-        except ValueError as exc:
-            speech_cues = []
-            logger.warning(
-                "WIRING speech_cues rejected turn_id=%s reason=%s",
-                event.get_extra("_turn_id") or "<missing>",
-                exc,
-            )
-        event.set_extra("_ag99live_pending_speech_cues", speech_cues)
-
         from .middleware.interaction_motion.independent import (
             INDEPENDENT_MOTION_RESULT_EXTRA_KEY,
             IndependentMotionResult,
@@ -491,7 +477,6 @@ class MyPlugin(Star):
                 ):
                     return
                 phase = str(intent.get("phase") or "").strip()
-                kind = str(intent.get("kind") or "").strip()
                 result_metadata = getattr(result, "metadata", None)
                 persona_result_id = str(
                     result_metadata.get(PERSONA_RESULT_ID_METADATA_KEY)
@@ -516,13 +501,9 @@ class MyPlugin(Star):
                     return
 
                 work = {
-                    "turn_id": turn_id,
-                    "persona_result_id": persona_result_id,
                     "phase": phase,
-                    "kind": kind,
                     "speech_segments": speech_segments,
                     "tts_bindings_by_index": {},
-                    "task": None,
                 }
 
                 async def _generate_for_persona_result():

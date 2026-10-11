@@ -245,16 +245,6 @@ class OutputSegmentCoordinator:
                 ):
                     segment.bind_performance_curve_request(tts_state["request_id"])
 
-            # Persona uses speech segments as its timing contract. Legacy cues
-            # describe the whole reply and cannot be replayed on each segment
-            # (in particular, on empty motion-only gaps).
-            if (
-                persona_segment is None
-                and not persona_plain_echo
-                and "ag99live_speech_cues" in extras
-            ):
-                segment.merge_speech_cues(extras.get("ag99live_speech_cues"))
-
             motion_expected, motion_failure_reason = _resolve_motion_schedule(extras)
             motion_disabled = bool(extras.pop("_ag99live_motion_disabled", False))
             schedule = _extract_motion_schedule(extras)
@@ -540,11 +530,7 @@ class OutputSegmentCoordinator:
                 else ""
             ),
         )
-        speech_slot = (
-            {"state": "present", "cues": segment.speech_cues}
-            if segment.speech_cues
-            else {"state": "absent"}
-        )
+        speech_slot = {"state": "absent"}
         if segment.audio_failure_reason:
             audio_slot = {"state": "failed", "reason": segment.audio_failure_reason}
         text_slot = (

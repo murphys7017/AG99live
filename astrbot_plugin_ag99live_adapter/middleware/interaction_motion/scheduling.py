@@ -109,8 +109,6 @@ class AG99liveMotionResultContributor:
         event.set_extra("_ag99live_pending_performance_curve", None)
         event.set_extra("_ag99live_persona_tts_segment_map", {})
         event.set_extra("ag99live_raw_reply_text", None)
-        speech_cues = _take_pending_speech_cues(event)
-
         bundle = _resolve_motion_runtime_bundle(event)
         persona_result_id = str(
             (
@@ -148,16 +146,15 @@ class AG99liveMotionResultContributor:
             attempt = await _schedule_motion_from_interaction_result(event, view)
         logger.info(
             "WIRING motion.contributor phase=%s independent_enabled=%s "
-            "attempt_present=%s speech_cue_count=%s",
+            "attempt_present=%s",
             _resolve_result_phase(view),
             bool(
                 bundle is not None
                 and getattr(bundle.runtime_state, "independent_motion_enabled", False)
             ),
             attempt is not None,
-            len(speech_cues),
         )
-        if attempt is None and not speech_cues and not isinstance(deferred_work, dict):
+        if attempt is None and not isinstance(deferred_work, dict):
             return None
 
         persona_speech_segments = _extract_persona_speech_segments(view)
@@ -224,8 +221,6 @@ class AG99liveMotionResultContributor:
             len(client_objects),
         )
         platform_extras = {}
-        if speech_cues:
-            platform_extras["ag99live_speech_cues"] = speech_cues
         if persona_speech_segments:
             platform_extras["persona_speech_segments"] = persona_speech_segments
             if empty_persona_speech_indexes:
@@ -554,16 +549,6 @@ def _persona_motion_finalization_timeout(
     if segment_timeout == 0:
         return 30.0
     return min(30.0, max(1.0, segment_timeout * (waves + 1) + 1.0))
-
-
-def _take_pending_speech_cues(event: Any) -> list[dict[str, Any]]:
-    value = event.get_extra("_ag99live_pending_speech_cues")
-    event.set_extra("_ag99live_pending_speech_cues", None)
-    if value is None:
-        return []
-    if not isinstance(value, list):
-        raise TypeError("ag99live_pending_speech_cues_internal_contract_invalid")
-    return value
 
 
 def _get_interaction_reply_plan(event: Any) -> Any:

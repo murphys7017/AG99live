@@ -144,9 +144,6 @@ def test_finalized_segments_flush_in_logical_message_order(
                 "persona_segment_index": 0,
                 "persona_segment_count": 3,
                 "_ag99live_motion_disabled": True,
-                "ag99live_speech_cues": [
-                    {"kind": "laugh", "phrase_index": 0, "position": "after"}
-                ],
                 "client_objects": persona_motion_objects(),
                 "metadata": persona_schedule(),
             },
@@ -209,10 +206,7 @@ def test_finalized_segments_flush_in_logical_message_order(
         assert emitted[2]["payload"]["motion"]["payload"]["intent_tags"] == ["segment_2"]
     else:
         assert emitted[2]["payload"]["motion"] == {"state": "absent"}
-    assert (
-        "speech" not in emitted[0]["payload"]
-        or not emitted[0]["payload"]["speech"].get("cues")
-    )
+    assert emitted[0]["payload"]["speech"] == {"state": "absent"}
     coordinator._flushed_segment_keys.add("turn-2|segment-1")
     coordinator.clear_turn("turn-1")
 

@@ -5,7 +5,7 @@ AG99 插件 `astrbot_plugin_ag99live_adapter` 将 AG99 的对话、TTS 和 Perso
 ## 职责
 
 - 接收文本、流式麦克风、图片和平台事件输入，并提交到 AG99 的正常对话流程。
-- 收集一条逻辑消息的文本、TTS、动作、speech cues 和媒体，提交原子 `output.segment` 消息，其 Payload Schema 为 `output.segment.v5`。
+- 收集一条逻辑消息的文本、TTS、动作和媒体，提交原子 `output.segment` 消息，其 Payload Schema 为 `output.segment.v5`。
 - 校验 `ag99live.motion`，提供模型扫描、profile、动作资源和媒体的本机服务。
 - 管理 Turn、段、取消、Motion Lab 记录、可选 performance curve 与连接清理。
 
