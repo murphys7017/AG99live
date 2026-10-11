@@ -89,9 +89,11 @@ class RuntimeState:
         self.independent_motion_provider_id = ""
         self.independent_motion_history_turns = 6
         self.independent_motion_parallel = False
+        self.independent_motion_max_concurrency = 4
+        self.independent_motion_segment_timeout_seconds = 5.0
         self.independent_motion_result_cache: dict[str, list[Any]] = {}
         self.independent_motion_generation_tasks_by_turn: dict[str, set[Any]] = {}
-        self.independent_motion_segment_batches_by_turn: dict[str, list[Any]] = {}
+        self.persona_motion_work_by_turn: dict[str, dict[str, Any]] = {}
         self.interaction_contributors_available = supports_interaction_contributors(
             plugin_context
         )
@@ -226,6 +228,38 @@ class RuntimeState:
         self.independent_motion_parallel = bool(
             get_config_value(independent_motion_config, "parallel", False)
         )
+        try:
+            self.independent_motion_max_concurrency = max(
+                1,
+                min(
+                    int(
+                        get_config_value(
+                            independent_motion_config,
+                            "max_concurrency",
+                            4,
+                        )
+                    ),
+                    8,
+                ),
+            )
+        except (TypeError, ValueError):
+            self.independent_motion_max_concurrency = 4
+        try:
+            self.independent_motion_segment_timeout_seconds = max(
+                0.0,
+                min(
+                    float(
+                        get_config_value(
+                            independent_motion_config,
+                            "segment_timeout_seconds",
+                            5.0,
+                        )
+                    ),
+                    60.0,
+                ),
+            )
+        except (TypeError, ValueError):
+            self.independent_motion_segment_timeout_seconds = 5.0
         self.vad_config = {
             "orig_sr": 16000,
             "target_sr": 16000,

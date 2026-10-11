@@ -397,6 +397,91 @@ def test_persona_tts_gap_keeps_empty_speech_segment_without_motion(
     ]
 
 
+def test_failed_persona_tts_segment_uses_bound_segment_identity(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_platform_event_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_platform_event_module()
+    event = _build_event(module, images=[])
+    event.set_extra(
+        "_ag99live_persona_tts_segment_map",
+        {
+            "tts-segment-1": {
+                "parent_message_id": "parent",
+                "persona_segment_index": 1,
+                "persona_segment_count": 2,
+            }
+        },
+    )
+
+    asyncio.run(
+        event.send_message_with_extras(
+            [Plain("firstsecond")],
+            platform_extras={
+                "output_segment": {
+                    "turn_id": "turn-1",
+                    "message_id": "tts-segment-1",
+                    "tts": {"status": "failed", "message_id": "tts-segment-1"},
+                },
+                "persona_speech_segments": ["first", "second"],
+            },
+            record_send_operation=False,
+        )
+    )
+
+    assert [
+        call["platform_extras"]["logical_message_id"]
+        for call in event.adapter.emit_calls
+    ] == ["parent::persona::0000", "tts-segment-1"]
+    assert "output_segment" not in event.adapter.emit_calls[0]["platform_extras"]
+    assert event.adapter.emit_calls[1]["platform_extras"]["output_segment"][
+        "message_id"
+    ] == "tts-segment-1"
+
+
+def test_dual_output_auxiliary_text_uses_bound_persona_parent(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_platform_event_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_platform_event_module()
+    event = _build_event(module, images=[])
+    event.set_extra(
+        "_ag99live_persona_tts_segment_map",
+        {
+            "parent": {
+                "parent_message_id": "parent",
+                "persona_segment_index": 0,
+                "persona_segment_count": 2,
+            }
+        },
+    )
+
+    asyncio.run(
+        event.send_message_with_extras(
+            [Plain("rewritten text")],
+            platform_extras={
+                "logical_message_id": "parent",
+                "persona_speech_segments": ["first", "second"],
+                "client_objects": [
+                    {
+                        "type": "ag99live.motion_payload",
+                        "motion_payload": {"intent_tags": ["happy"]},
+                    }
+                ],
+            },
+            record_send_operation=False,
+        )
+    )
+
+    assert len(event.adapter.emit_calls) == 1
+    extras = event.adapter.emit_calls[0]["platform_extras"]
+    assert extras["_ag99live_persona_parent_message_id"] == "parent"
+    assert extras["logical_message_id"] == "parent::persona_auxiliary"
+    assert extras["client_objects"] == []
+
+
 def test_abort_visible_turn_routes_to_frontend_turn_coordinator(
     install_fake_astrbot,
     monkeypatch,

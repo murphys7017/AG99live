@@ -69,9 +69,19 @@ _INDEPENDENT_MOTION_RESULT_EXTRA_KEY = "_ag99live_independent_motion_result"
 _INDEPENDENT_MOTION_TASKS_BY_TURN_ATTRIBUTE = (
     "independent_motion_generation_tasks_by_turn"
 )
-_INDEPENDENT_MOTION_SEGMENT_BATCHES_BY_TURN_ATTRIBUTE = (
-    "independent_motion_segment_batches_by_turn"
-)
+_PERSONA_MOTION_WORK_BY_TURN_ATTRIBUTE = "persona_motion_work_by_turn"
+
+
+def _resolve_motion_work_turn_id(event: Any, fallback_turn_id: str) -> str:
+    get_extra = getattr(event, "get_extra", None)
+    if callable(get_extra):
+        try:
+            runtime_turn_id = str(get_extra("_turn_id", "") or "").strip()
+        except Exception:  # noqa: BLE001 - cleanup must retain its fallback.
+            runtime_turn_id = ""
+        if runtime_turn_id:
+            return runtime_turn_id
+    return str(fallback_turn_id or "").strip()
 
 
 class TurnCoordinator:
@@ -291,6 +301,25 @@ class TurnCoordinator:
             cache = getattr(self.runtime_state, "independent_motion_result_cache", None)
             if isinstance(cache, dict):
                 cache.clear()
+            tasks_by_turn = getattr(
+                self.runtime_state,
+                _INDEPENDENT_MOTION_TASKS_BY_TURN_ATTRIBUTE,
+                None,
+            )
+            if isinstance(tasks_by_turn, dict):
+                for tasks in tasks_by_turn.values():
+                    if isinstance(tasks, (set, list, tuple)):
+                        for task in tasks:
+                            if isinstance(task, asyncio.Task) and not task.done():
+                                task.cancel()
+                tasks_by_turn.clear()
+            persona_work = getattr(
+                self.runtime_state,
+                _PERSONA_MOTION_WORK_BY_TURN_ATTRIBUTE,
+                None,
+            )
+            if isinstance(persona_work, dict):
+                persona_work.clear()
 
         if cleanup_failures:
             raise RuntimeError(
@@ -678,8 +707,12 @@ class TurnCoordinator:
             "_discard_independent_motion_result",
             None,
         )
+        motion_work_turn_id = _resolve_motion_work_turn_id(
+            event,
+            resolved_turn_id,
+        )
         if callable(discard_motion_result):
-            discard_motion_result(resolved_turn_id)
+            discard_motion_result(motion_work_turn_id)
         else:
             cache = getattr(
                 getattr(self, "runtime_state", None),
@@ -687,7 +720,7 @@ class TurnCoordinator:
                 None,
             )
             if isinstance(cache, dict):
-                cache.pop(resolved_turn_id, None)
+                cache.pop(motion_work_turn_id, None)
 
     def _cancel_turn_owned_motion_task(
         self,
@@ -705,6 +738,7 @@ class TurnCoordinator:
         """
         get_extra = getattr(event, "get_extra", None)
         set_extra = getattr(event, "set_extra", None)
+        motion_work_turn_id = _resolve_motion_work_turn_id(event, turn_id)
         tasks: set[asyncio.Task] = set()
         if callable(get_extra):
             try:
@@ -724,7 +758,7 @@ class TurnCoordinator:
             None,
         )
         if isinstance(tasks_by_turn, dict):
-            turn_tasks = tasks_by_turn.pop(str(turn_id or "").strip(), None)
+            turn_tasks = tasks_by_turn.pop(motion_work_turn_id, None)
             if isinstance(turn_tasks, (set, list, tuple)):
                 tasks.update(
                     task for task in turn_tasks if isinstance(task, asyncio.Task)
@@ -750,20 +784,20 @@ class TurnCoordinator:
                     "Failed to clear independent motion event state: turn_id=%s",
                     turn_id,
                 )
-        self._discard_independent_motion_result(turn_id)
+        self._discard_independent_motion_result(motion_work_turn_id)
 
     def _discard_independent_motion_result(self, turn_id: str) -> None:
         normalized_turn_id = str(turn_id or "").strip()
         cache = getattr(self.runtime_state, "independent_motion_result_cache", None)
         if isinstance(cache, dict):
             cache.pop(normalized_turn_id, None)
-        segment_batches = getattr(
+        persona_work = getattr(
             self.runtime_state,
-            _INDEPENDENT_MOTION_SEGMENT_BATCHES_BY_TURN_ATTRIBUTE,
+            _PERSONA_MOTION_WORK_BY_TURN_ATTRIBUTE,
             None,
         )
-        if isinstance(segment_batches, dict):
-            segment_batches.pop(normalized_turn_id, None)
+        if isinstance(persona_work, dict):
+            persona_work.pop(normalized_turn_id, None)
 
     def _prune_turn_terminal_results(self) -> None:
         completed_count = sum(

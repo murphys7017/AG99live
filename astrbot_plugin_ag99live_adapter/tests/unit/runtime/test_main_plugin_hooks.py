@@ -49,6 +49,10 @@ def _install_main_astrbot_stubs(install_fake_astrbot, monkeypatch) -> None:
             self.message_id = "message-1"
             self.tts_request_id = "tts-1"
             self.external_correlation_id = "frontend-turn-1"
+            self.parent_message_id = "parent-1"
+            self.persona_result_id = "persona-result-1"
+            self.persona_segment_index = 2
+            self.persona_segment_count = 3
             self.stage = "interaction.outbound_tts"
             self.status = status
 
@@ -212,6 +216,10 @@ def test_main_plugin_normalizes_output_and_starts_curve_on_tts_generating(
             "external_correlation_id": "frontend-turn-1",
             "stage": "interaction.outbound_tts",
             "status": "generating",
+            "parent_message_id": "parent-1",
+            "persona_result_id": "persona-result-1",
+            "persona_segment_index": 2,
+            "persona_segment_count": 3,
         }
     ]
 

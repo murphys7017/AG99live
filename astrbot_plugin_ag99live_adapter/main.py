@@ -411,6 +411,10 @@ class MyPlugin(Star):
             external_correlation_id=state.external_correlation_id,
             stage=state.stage,
             status=state.status,
+            parent_message_id=getattr(state, "parent_message_id", None),
+            persona_result_id=getattr(state, "persona_result_id", None),
+            persona_segment_index=getattr(state, "persona_segment_index", None),
+            persona_segment_count=getattr(state, "persona_segment_count", None),
         )
 
     @_optional_persona_expression_hook()
@@ -441,10 +445,11 @@ class MyPlugin(Star):
         from .middleware.interaction_motion.independent import (
             INDEPENDENT_MOTION_RESULT_EXTRA_KEY,
             IndependentMotionResult,
+            PERSONA_RESULT_ID_METADATA_KEY,
             generate_independent_motion_for_segments,
             is_persona_expression_request,
             persona_expression_intent,
-            store_motion_segment_batch,
+            store_persona_motion_work,
             store_motion_result_for_turn,
             track_motion_generation_task,
             untrack_motion_generation_task,
@@ -487,6 +492,19 @@ class MyPlugin(Star):
                     return
                 phase = str(intent.get("phase") or "").strip()
                 kind = str(intent.get("kind") or "").strip()
+                result_metadata = getattr(result, "metadata", None)
+                persona_result_id = str(
+                    result_metadata.get(PERSONA_RESULT_ID_METADATA_KEY)
+                    if isinstance(result_metadata, dict)
+                    else ""
+                ).strip()
+                if not persona_result_id:
+                    logger.warning(
+                        "WIRING independent_motion.segment_generation_skipped "
+                        "reason=persona_result_id_missing turn_id=%s",
+                        turn_id,
+                    )
+                    return
                 raw_segments = getattr(result, "segments", ())
                 speech_segments = tuple(
                     sanitize_assistant_output_segment_text(
@@ -497,59 +515,105 @@ class MyPlugin(Star):
                 if not any(speech.strip() for speech in speech_segments):
                     return
 
-                generation_task = asyncio.current_task()
+                work = {
+                    "turn_id": turn_id,
+                    "persona_result_id": persona_result_id,
+                    "phase": phase,
+                    "kind": kind,
+                    "speech_segments": speech_segments,
+                    "tts_bindings_by_index": {},
+                    "task": None,
+                }
+
+                async def _generate_for_persona_result():
+                    generation_task = asyncio.current_task()
+                    try:
+                        result_map = await generate_independent_motion_for_segments(
+                            event,
+                            bundle,
+                            speech_segments=speech_segments,
+                            parallel=bool(
+                                getattr(
+                                    bundle.runtime_state,
+                                    "independent_motion_parallel",
+                                    False,
+                                )
+                            ),
+                            tasks=self._independent_motion_tasks,
+                        )
+                        if event.get_extra("agent_stop_requested", False):
+                            logger.info(
+                                "WIRING independent_motion.segment_results_discarded "
+                                "reason=turn_terminated turn_id=%s persona_result_id=%s",
+                                turn_id,
+                                persona_result_id,
+                            )
+                            return {}
+                        return result_map
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning(
+                            "WIRING independent_motion.segment_generation_failed "
+                            "turn_id=%s persona_result_id=%s error=%s",
+                            turn_id,
+                            persona_result_id,
+                            exc,
+                            exc_info=True,
+                        )
+                        return {}
+                    finally:
+                        if isinstance(generation_task, asyncio.Task):
+                            untrack_motion_generation_task(
+                                bundle.runtime_state,
+                                turn_id=turn_id,
+                                task=generation_task,
+                            )
+
+                generation_task = asyncio.create_task(
+                    _generate_for_persona_result(),
+                    name=f"ag99live-persona-motion-{persona_result_id[:12]}",
+                )
                 if not track_motion_generation_task(
                     bundle.runtime_state,
                     turn_id=turn_id,
                     task=generation_task,
                 ):
+                    generation_task.cancel()
                     logger.warning(
                         "WIRING independent_motion.segment_generation_skipped "
                         "reason=task_tracking_unavailable turn_id=%s",
                         turn_id,
                     )
                     return
-                try:
-                    result_map = await generate_independent_motion_for_segments(
-                        event,
-                        bundle,
-                        speech_segments=speech_segments,
-                        parallel=bool(
-                            getattr(
-                                bundle.runtime_state,
-                                "independent_motion_parallel",
-                                False,
-                            )
-                        ),
-                        tasks=self._independent_motion_tasks,
-                    )
-                finally:
-                    untrack_motion_generation_task(
-                        bundle.runtime_state,
-                        turn_id=turn_id,
-                        task=generation_task,
-                    )
-                if event.get_extra("agent_stop_requested", False):
-                    logger.info(
-                        "WIRING independent_motion.segment_results_discarded "
-                        "reason=turn_terminated turn_id=%s",
-                        event.get_extra("_turn_id") or "<missing>",
-                    )
-                    return
-                stored = store_motion_segment_batch(
+                self._independent_motion_tasks.add(generation_task)
+                generation_task.add_done_callback(
+                    self._independent_motion_tasks.discard
+                )
+                work["task"] = generation_task
+                if not store_persona_motion_work(
                     bundle.runtime_state,
                     turn_id=turn_id,
-                    phase=phase,
-                    kind=kind,
-                    speech_segments=speech_segments,
-                    results_by_index=result_map,
-                )
-                if not stored:
+                    persona_result_id=persona_result_id,
+                    work=work,
+                ):
+                    generation_task.cancel()
                     logger.warning(
-                        "WIRING independent_motion.segment_results_not_stored "
-                        "reason=runtime_state_storage_failed turn_id=%s",
-                        event.get_extra("_turn_id") or "<missing>",
+                        "WIRING independent_motion.segment_generation_skipped "
+                        "reason=persona_result_id_conflict turn_id=%s "
+                        "persona_result_id=%s",
+                        turn_id,
+                        persona_result_id,
                     )
+                    return
+                logger.info(
+                    "WIRING independent_motion.segment_generation_started "
+                    "turn_id=%s persona_result_id=%s phase=%s segment_count=%s",
+                    turn_id,
+                    persona_result_id,
+                    phase,
+                    len(speech_segments),
+                )
                 return
 
             generated_result = event.get_extra(INDEPENDENT_MOTION_RESULT_EXTRA_KEY)

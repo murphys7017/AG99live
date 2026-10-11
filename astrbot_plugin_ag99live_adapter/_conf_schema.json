@@ -82,6 +82,20 @@
         "description": "整条回复模式下，启用时与主回复文本生成并行；逐 speech 段模式下，启用时在 Persona 返回分段后并发生成各段动作，关闭时逐段串行生成。",
         "type": "bool",
         "default": false
+      },
+      "max_concurrency": {
+        "description": "逐 speech 段模式下同时请求独立动作 Provider 的最大段数。仅在启用并行生成时生效。",
+        "type": "int",
+        "default": 4,
+        "minimum": 1,
+        "maximum": 8
+      },
+      "segment_timeout_seconds": {
+        "description": "单个 speech 段动作请求的最长等待时间（秒）。超时后该段仍保留文本和索引，但动作标记为超时；0 表示不限制单段请求，最终汇合仍受 AstrBot 的 30 秒上限约束。",
+        "type": "float",
+        "default": 5.0,
+        "minimum": 0,
+        "maximum": 60
       }
     }
   },

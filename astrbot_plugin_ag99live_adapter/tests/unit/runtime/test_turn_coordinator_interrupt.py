@@ -98,6 +98,7 @@ def test_backend_abort_cancels_turn_owned_motion_task_and_discards_cache(
         task = asyncio.create_task(motion_worker())
         await task_started.wait()
         extras = {
+            "_turn_id": "astrbot-turn",
             "_ag99live_independent_motion_result": object(),
         }
         event = types.SimpleNamespace(
@@ -107,10 +108,10 @@ def test_backend_abort_cancels_turn_owned_motion_task_and_discards_cache(
         )
         runtime = types.SimpleNamespace(
             runtime_state=types.SimpleNamespace(
-                independent_motion_result_cache={"old-turn": [object()]},
-                independent_motion_generation_tasks_by_turn={"old-turn": {task}},
-                independent_motion_segment_batches_by_turn={
-                    "old-turn": [object()]
+                independent_motion_result_cache={"astrbot-turn": [object()]},
+                independent_motion_generation_tasks_by_turn={"astrbot-turn": {task}},
+                persona_motion_work_by_turn={
+                    "astrbot-turn": {"persona-result": {"task": task}}
                 },
             ),
             _turn_terminal_results={},
@@ -153,6 +154,50 @@ def test_backend_abort_cancels_turn_owned_motion_task_and_discards_cache(
         assert extras["_ag99live_independent_motion_result"] is None
         assert runtime.runtime_state.independent_motion_result_cache == {}
         assert runtime.runtime_state.independent_motion_generation_tasks_by_turn == {}
-        assert runtime.runtime_state.independent_motion_segment_batches_by_turn == {}
+        assert runtime.runtime_state.persona_motion_work_by_turn == {}
+
+    asyncio.run(run_case())
+
+
+def test_disconnect_reset_cancels_orphaned_motion_work(install_fake_astrbot) -> None:
+    install_fake_astrbot()
+    from astrbot_plugin_ag99live_adapter.runtime.turn_coordinator import (
+        TurnCoordinator,
+    )
+
+    async def run_case() -> None:
+        async def wait_forever() -> None:
+            await asyncio.Future()
+
+        task = asyncio.create_task(wait_forever())
+        runtime = types.SimpleNamespace(
+            runtime_state=types.SimpleNamespace(
+                independent_motion_result_cache={"astrbot-turn": [object()]},
+                independent_motion_generation_tasks_by_turn={
+                    "astrbot-turn": {task}
+                },
+                persona_motion_work_by_turn={
+                    "astrbot-turn": {"persona-result": {"task": task}}
+                },
+            ),
+            _turn_timings={},
+            _events_by_turn_id={},
+            _turn_terminal_results={},
+            _active_vad_turn_by_capture_turn={},
+            output_segments=types.SimpleNamespace(
+                tracked_turn_ids=lambda: set(),
+                reset=lambda: None,
+            ),
+            performance_curves=types.SimpleNamespace(cancel_turns=lambda _turns: []),
+            motion_observations=types.SimpleNamespace(reset=lambda: None),
+        )
+
+        TurnCoordinator.reset_turn_tracking(runtime)
+        await asyncio.gather(task, return_exceptions=True)
+
+        assert task.cancelled()
+        assert runtime.runtime_state.independent_motion_result_cache == {}
+        assert runtime.runtime_state.independent_motion_generation_tasks_by_turn == {}
+        assert runtime.runtime_state.persona_motion_work_by_turn == {}
 
     asyncio.run(run_case())

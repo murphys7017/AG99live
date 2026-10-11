@@ -280,3 +280,53 @@ persona_segment_independent_motion_2026_10_10:
   evidence_gap:
     - "No live AstrBot + Electron + TTS + browser audio + Live2D run has yet verified multi-segment Provider timing, visible motion, or interruption during segment generation."
     - "Persona segment hooks await the selected Provider calls; a slow Provider can delay Persona output until its own timeout or completion."
+
+persona_segment_independent_motion_acceleration_2026_10_11:
+  recorded_at: "2026-10-11"
+  class: feature
+  risk: medium
+  status: source_complete_pending_live_acceptance
+  scope:
+    - "Add configurable bounded concurrency and per-segment timeout for independent Persona speech-segment motion requests."
+    - "Build one turn-scoped motion context snapshot so history, images, capability, runtime references, and diagnostics are not recomputed for every segment."
+    - "Remove the redundant nested task layer while preserving segment-index mapping, task cancellation tracking, and existing serial mode behavior."
+    - "Expose max_concurrency and segment_timeout_seconds in the plugin schema and Web control configuration."
+  non_actions:
+    - "Do not change output.segment wire schema or current logical-segment playback order."
+    - "Do not add AstrBot deferred output or concurrent TTS delivery in this slice."
+    - "Do not change the once-per-materialization TTS probability gate."
+  validation:
+    - "The full Adapter unit suite passed: 99 passed, 15 warnings."
+    - "Focused middleware, platform prompt, and turn-interrupt tests passed: 27 passed."
+    - "python -m compileall -q astrbot_plugin_ag99live_adapter passed."
+    - "scripts/check_protocol_schema_manifest.py passed."
+    - "git diff --check passed; only Windows line-ending conversion warnings were emitted."
+  evidence_gap:
+    - "No live Provider, AstrBot TTS, Electron, audio, or Live2D run has measured the latency improvement or verified provider-specific concurrency limits."
+    - "AstrBot still awaits the complete Persona hook and synthesizes TTS segments serially; deferred per-segment motion/TTS overlap remains a separate core change."
+
+persona_segment_motion_pre_tts_correlation_20261012:
+  recorded_at: "2026-10-12"
+  class: feature
+  risk: high
+  status: validated_pending_live_acceptance
+  scope:
+    - "Start independent motion generation from the Persona result hook before outbound TTS materialization."
+    - "Bind each action to the matching TTS segment by backend turn ID, Persona result ID, segment index, parent message ID, TTS message ID, and TTS request ID."
+    - "Join completed motion work after per-segment TTS materialization and before platform delivery."
+    - "Cancel and clear turn-owned motion work on termination and disconnect, resolving the runtime turn ID from the AstrBot event."
+  non_actions:
+    - "Do not parallelize TTS or change the output.segment wire schema."
+    - "Do not claim live Provider, AstrBot, Electron, audio, or Live2D acceptance."
+  validation:
+    - "Focused AG99 runtime and middleware tests passed: 21 passed."
+    - "AstrBot interaction output and voice boundary tests passed: 58 passed."
+    - "Python compilation passed in both repositories; git diff --check passed."
+    - "Independent review found and verified the frontend/backend turn-ID cleanup mismatch; regression coverage now uses distinct IDs and covers disconnect reset."
+    - "Review fixes align Persona TTS segment identity fields across binders and consumers; six focused TTS, concurrency, timeout, interrupt, and disconnect tests passed."
+    - "Shared context preparation is bounded by the per-segment timeout; finalizer wait accounts for that stage and uses the Core 30-second cap when the per-segment timeout is disabled."
+  architecture:
+    - "Motion work is registered by event._turn_id plus persona_result_id; TTS bindings are indexed by persona_segment_index and validated against parent/message/request IDs."
+    - "Core allocates parent output message IDs before collecting contributors, then invokes post-materialization finalizers after TTS segments are materialized and before delivery."
+  evidence_gap:
+    - "A live multi-segment Provider, TTS, Electron, audio, and Live2D run is still required to verify end-to-end timing and visible motion."

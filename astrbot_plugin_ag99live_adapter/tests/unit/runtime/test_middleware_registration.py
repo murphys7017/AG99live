@@ -491,7 +491,98 @@ def test_persona_hook_cancellation_reaches_segment_provider_requests(
     assert runtime_state.independent_motion_generation_tasks_by_turn == {}
 
 
-def test_independent_motion_segment_batch_requires_exact_candidate_speech(
+def test_independent_motion_segment_generation_respects_concurrency_limit(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_middleware_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = importlib.import_module(
+        "astrbot_plugin_ag99live_adapter.middleware.interaction_motion.independent"
+    )
+    module = importlib.reload(module)
+    selected_provider = object()
+    active = 0
+    max_active = 0
+
+    async def generate(_event, _bundle, *, provider, assistant_text):
+        nonlocal active, max_active
+        assert provider is selected_provider
+        active += 1
+        max_active = max(max_active, active)
+        await asyncio.sleep(0.02)
+        active -= 1
+        return module.IndependentMotionResult(
+            assistant_text=assistant_text,
+            motion_payload={"intent_tags": [assistant_text]},
+            reason="ok",
+            image_count=0,
+        )
+
+    monkeypatch.setattr(module, "generate_independent_motion", generate)
+    bundle = SimpleNamespace(
+        runtime_state=SimpleNamespace(
+            selected_independent_motion_provider=selected_provider,
+            independent_motion_max_concurrency=2,
+            independent_motion_segment_timeout_seconds=1,
+        )
+    )
+
+    async def run_generation():
+        return await module.generate_independent_motion_for_segments(
+            object(),
+            bundle,
+            speech_segments=("first", "second", "third", "fourth"),
+            parallel=True,
+            tasks=set(),
+        )
+
+    results = asyncio.run(run_generation())
+
+    assert max_active == 2
+    assert set(results) == {0, 1, 2, 3}
+
+
+def test_independent_motion_segment_timeout_returns_indexed_failure(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_middleware_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = importlib.import_module(
+        "astrbot_plugin_ag99live_adapter.middleware.interaction_motion.independent"
+    )
+    module = importlib.reload(module)
+
+    async def generate(_event, _bundle, *, provider, assistant_text):
+        del provider, assistant_text
+        await asyncio.Future()
+
+    monkeypatch.setattr(module, "generate_independent_motion", generate)
+    bundle = SimpleNamespace(
+        runtime_state=SimpleNamespace(
+            selected_independent_motion_provider=object(),
+            independent_motion_max_concurrency=2,
+            independent_motion_segment_timeout_seconds=0.01,
+        )
+    )
+    tasks: set[asyncio.Task] = set()
+
+    async def run_generation():
+        return await module.generate_independent_motion_for_segments(
+            object(),
+            bundle,
+            speech_segments=("first", "second"),
+            parallel=True,
+            tasks=tasks,
+        )
+
+    results = asyncio.run(run_generation())
+
+    assert results[0].reason == "motion_timeout"
+    assert results[1].reason == "motion_timeout"
+    assert tasks == set()
+
+
+def test_persona_motion_work_is_scoped_by_turn_and_result_id(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -501,62 +592,102 @@ def test_independent_motion_segment_batch_requires_exact_candidate_speech(
     )
     module = importlib.reload(module)
     runtime_state = SimpleNamespace()
-    result = module.IndependentMotionResult(
-        assistant_text="third",
-        motion_payload={"schema_version": "ag99.motion_intent.v4"},
-        reason="ok",
-        image_count=0,
-    )
-    assert module.store_motion_segment_batch(
+    work = {"speech_segments": ("first", "", "third")}
+    assert module.store_persona_motion_work(
         runtime_state,
         turn_id="turn-1",
-        phase="final",
-        kind="reply",
-        speech_segments=("first", "", "third"),
-        results_by_index={2: result},
-    )
-    other_candidate = module.IndependentMotionResult(
-        assistant_text="different",
-        motion_payload={"schema_version": "ag99.motion_intent.v4"},
-        reason="ok",
-        image_count=0,
-    )
-    assert module.store_motion_segment_batch(
-        runtime_state,
-        turn_id="turn-1",
-        phase="final",
-        kind="reply",
-        speech_segments=("different",),
-        results_by_index={0: other_candidate},
+        persona_result_id="result-1",
+        work=work,
     )
 
-    assert module.take_motion_segment_batch(
+    assert module.get_persona_motion_work(
         runtime_state,
         turn_id="turn-1",
-        phase="immediate",
-        purpose="interaction",
-        speech_segments=("first", "", "third"),
+        persona_result_id="result-1",
+    ) is work
+    assert module.get_persona_motion_work(
+        runtime_state,
+        turn_id="other-turn",
+        persona_result_id="result-1",
     ) is None
-    batch = module.take_motion_segment_batch(
+
+    assert module.remove_persona_motion_work(
         runtime_state,
         turn_id="turn-1",
-        phase="final",
-        purpose="interaction",
-        speech_segments=("first", "", "third"),
+        persona_result_id="result-1",
+    ) is work
+    assert runtime_state.persona_motion_work_by_turn == {}
+
+
+def test_persona_tts_requests_bind_by_segment_index_and_validate_identity(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_middleware_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    independent = importlib.import_module(
+        "astrbot_plugin_ag99live_adapter.middleware.interaction_motion.independent"
+    )
+    independent = importlib.reload(independent)
+    scheduling = importlib.import_module(
+        "astrbot_plugin_ag99live_adapter.middleware.interaction_motion.scheduling"
+    )
+    scheduling = importlib.reload(scheduling)
+
+    runtime_state = SimpleNamespace(persona_motion_work_by_turn={})
+    work = {
+        "phase": "final",
+        "speech_segments": ("first", "", "third"),
+        "parent_message_id": "parent-1",
+        "tts_bindings_by_index": {},
+    }
+    assert independent.store_persona_motion_work(
+        runtime_state,
+        turn_id="turn-1",
+        persona_result_id="result-1",
+        work=work,
+    )
+    turn_coordinator = SimpleNamespace(
+        runtime_state=runtime_state,
+        performance_curves=SimpleNamespace(start_request=lambda **_kwargs: None),
+    )
+    event_extras = {}
+    event = SimpleNamespace(
+        adapter=SimpleNamespace(turn_coordinator=turn_coordinator),
+        get_platform_id=lambda: "olv_pet_adapter",
+        get_platform_name=lambda: "olv_pet_adapter",
+        get_extra=lambda key, default=None: event_extras.get(key, default),
+        set_extra=lambda key, value: event_extras.__setitem__(key, value),
     )
 
-    assert batch is not None
-    assert batch.results_by_index == {2: result}
-    other_batch = module.take_motion_segment_batch(
-        runtime_state,
-        turn_id="turn-1",
-        phase="final",
-        purpose="interaction",
-        speech_segments=("different",),
-    )
-    assert other_batch is not None
-    assert other_batch.results_by_index == {0: other_candidate}
-    assert runtime_state.independent_motion_segment_batches_by_turn == {}
+    def track(index: int, message_id: str, request_id: str, *, parent: str = "parent-1"):
+        return scheduling.start_deferred_performance_curve_request(
+            event,
+            turn_id="turn-1",
+            message_id=message_id,
+            tts_request_id=request_id,
+            external_correlation_id="frontend-turn-1",
+            stage="interaction.outbound_tts",
+            status="requested",
+            parent_message_id=parent,
+            persona_result_id="result-1",
+            persona_segment_index=index,
+            persona_segment_count=3,
+        )
+
+    assert track(2, "message-2", "tts-2") is None
+    assert track(0, "message-0", "tts-0") is None
+    assert set(work["tts_bindings_by_index"]) == {0, 2}
+    assert work["tts_bindings_by_index"][2]["message_id"] == "message-2"
+    assert work["tts_bindings_by_index"][2]["tts_request_id"] == "tts-2"
+    assert work["tts_bindings_by_index"][0]["message_id"] == "message-0"
+    assert {
+        index: binding["persona_segment_index"]
+        for index, binding in work["tts_bindings_by_index"].items()
+    } == {0: 0, 2: 2}
+
+    assert track(1, "message-wrong-parent", "tts-wrong", parent="other-parent") is None
+    assert track(2, "message-2", "tts-retry") is None
+    assert work["tts_bindings_by_index"][2]["tts_request_id"] == "tts-2"
 
 
 def test_independent_motion_result_matches_sanitized_visible_reply(

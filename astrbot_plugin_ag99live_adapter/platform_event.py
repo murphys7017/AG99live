@@ -353,9 +353,7 @@ class OLVPetPlatformEvent(AstrMessageEvent):
             self._persona_delivery_state_key(turn_id, normalized_message_id),
             None,
         )
-        self.set_extra("_ag99live_pending_persona_tts_segments", None)
         self.set_extra("_ag99live_persona_tts_segment_map", {})
-        self.set_extra("_ag99live_persona_tts_parent_message_id", "")
 
     async def _close_frontend_turn_output_queue(self) -> None:
         turn_id = str(self.get_extra("output_correlation_id", "") or "").strip()
@@ -490,8 +488,8 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         tracked = mapping.get(message_id)
         if not isinstance(tracked, dict):
             return None
-        segment_index = tracked.get("segment_index")
-        segment_count = tracked.get("segment_count")
+        segment_index = tracked.get("persona_segment_index")
+        segment_count = tracked.get("persona_segment_count")
         if (
             isinstance(segment_index, bool)
             or not isinstance(segment_index, int)
@@ -539,8 +537,8 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         tracked = mapping.get(message_id)
         if not isinstance(tracked, dict):
             return ""
-        segment_index = tracked.get("segment_index")
-        segment_count = tracked.get("segment_count")
+        segment_index = tracked.get("persona_segment_index")
+        segment_count = tracked.get("persona_segment_count")
         if (
             type(segment_index) is not int
             or type(segment_count) is not int

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -35,7 +36,8 @@ from ...motion.output_sanitizer import (
 )
 from .independent import (
     IndependentMotionResult,
-    take_motion_segment_batch,
+    get_persona_motion_work,
+    remove_persona_motion_work,
     take_motion_result_for_turn,
 )
 
@@ -105,14 +107,45 @@ class AG99liveMotionResultContributor:
         if capabilities is None:
             return None
         event.set_extra("_ag99live_pending_performance_curve", None)
-        event.set_extra("_ag99live_pending_persona_tts_segments", None)
         event.set_extra("_ag99live_persona_tts_segment_map", {})
-        event.set_extra("_ag99live_persona_tts_parent_message_id", "")
         event.set_extra("ag99live_raw_reply_text", None)
         speech_cues = _take_pending_speech_cues(event)
 
-        attempt = await _schedule_motion_from_interaction_result(event, view)
         bundle = _resolve_motion_runtime_bundle(event)
+        persona_result_id = str(
+            (
+                getattr(view, "metadata", {}).get("persona_result_id")
+                if isinstance(getattr(view, "metadata", None), Mapping)
+                else ""
+            )
+            or ""
+        ).strip()
+        turn_id = str(
+            getattr(view, "turn_id", None)
+            or _call_event_method(event, "get_extra", "_turn_id", "")
+            or ""
+        ).strip()
+        deferred_work = (
+            get_persona_motion_work(
+                bundle.runtime_state,
+                turn_id=turn_id,
+                persona_result_id=persona_result_id,
+            )
+            if bundle is not None and persona_result_id
+            else None
+        )
+        if isinstance(deferred_work, dict):
+            deferred_work["view"] = view
+            output_draft = getattr(view, "output_draft", None)
+            if isinstance(output_draft, Mapping):
+                candidate_message_id = str(
+                    output_draft.get("message_id") or ""
+                ).strip()
+                if candidate_message_id:
+                    deferred_work["parent_message_id"] = candidate_message_id
+            attempt = None
+        else:
+            attempt = await _schedule_motion_from_interaction_result(event, view)
         logger.info(
             "WIRING motion.contributor phase=%s independent_enabled=%s "
             "attempt_present=%s speech_cue_count=%s",
@@ -124,7 +157,7 @@ class AG99liveMotionResultContributor:
             attempt is not None,
             len(speech_cues),
         )
-        if attempt is None and not speech_cues:
+        if attempt is None and not speech_cues and not isinstance(deferred_work, dict):
             return None
 
         persona_speech_segments = _extract_persona_speech_segments(view)
@@ -134,30 +167,9 @@ class AG99liveMotionResultContributor:
             for segment_index, speech in enumerate(persona_speech_segments)
             if not speech.strip()
         ]
-        persona_motion_payloads = (
-            attempt.motion_payloads_by_segment
-            if attempt is not None and attempt.motion_payloads_by_segment is not None
-            else {}
-        )
-        nonempty_persona_speech_segments = [
-            (segment_index, speech)
-            for segment_index, speech in enumerate(persona_speech_segments)
-            if speech.strip()
-        ]
-        if nonempty_persona_speech_segments:
-            event.set_extra(
-                "_ag99live_pending_persona_tts_segments",
-                [
-                    {
-                        "segment_index": segment_index,
-                        "segment_count": persona_segment_count,
-                        "speech": speech,
-                        "motion_payload": persona_motion_payloads.get(segment_index),
-                    }
-                    for segment_index, speech in nonempty_persona_speech_segments
-                ],
-            )
-        elif persona_speech_segments:
+        if persona_speech_segments and not any(
+            speech.strip() for speech in persona_speech_segments
+        ):
             logger.info(
                 "WIRING persona_tts_segment_tracking_skipped "
                 "reason=no_nonempty_speech_segments count=%s",
@@ -220,7 +232,7 @@ class AG99liveMotionResultContributor:
                 platform_extras["persona_speech_empty_indexes"] = (
                     empty_persona_speech_indexes
                 )
-        return capabilities.interaction_result_contribution(
+        contribution = capabilities.interaction_result_contribution(
             plugin_id=self.plugin_id,
             platform_extras=platform_extras,
             final_text_override=final_text_override,
@@ -228,10 +240,320 @@ class AG99liveMotionResultContributor:
             metadata=(
                 {"ag99live_motion_schedule": attempt.to_metadata()}
                 if attempt is not None
-                else {}
+                else (
+                    {
+                        "ag99live_motion_generation_deferred": True,
+                        "persona_result_id": persona_result_id,
+                    }
+                    if isinstance(deferred_work, dict)
+                    else {}
+                )
             ),
             priority=self.priority,
         )
+        if isinstance(deferred_work, dict):
+            finalizers = getattr(contribution, "post_materialization", None)
+            if isinstance(finalizers, list):
+                finalizers.append(self.finalize_output)
+                timeout_seconds = _persona_motion_finalization_timeout(
+                    bundle.runtime_state if bundle is not None else None,
+                    persona_speech_segments,
+                )
+                if hasattr(contribution, "post_materialization_timeout_seconds"):
+                    contribution.post_materialization_timeout_seconds = timeout_seconds
+            else:
+                logger.warning(
+                    "WIRING independent_motion.finalization_unavailable "
+                    "reason=core_post_materialization_hook_missing "
+                    "persona_result_id=%s",
+                    persona_result_id,
+                )
+        return contribution
+
+    async def finalize_output(
+        self,
+        event,
+        plugin_context,
+        *,
+        turn_id: str,
+        phase: str,
+        parent_message_id: str,
+        persona_result_id: str | None,
+        materialization: Mapping[str, Any],
+    ):
+        del plugin_context, materialization
+        normalized_result_id = str(persona_result_id or "").strip()
+        normalized_turn_id = str(turn_id or "").strip()
+        if not normalized_result_id or not normalized_turn_id:
+            return None
+        bundle = _resolve_motion_runtime_bundle(event)
+        if bundle is None:
+            return None
+        work = get_persona_motion_work(
+            bundle.runtime_state,
+            turn_id=normalized_turn_id,
+            persona_result_id=normalized_result_id,
+        )
+        if not isinstance(work, dict):
+            return None
+        if (
+            str(work.get("turn_id") or "").strip() != normalized_turn_id
+            or str(work.get("phase") or "").strip() != str(phase or "").strip()
+            or str(work.get("parent_message_id") or "").strip()
+            != str(parent_message_id or "").strip()
+        ):
+            logger.warning(
+                "WIRING independent_motion.finalization_rejected "
+                "reason=persona_result_identity_mismatch turn_id=%s "
+                "persona_result_id=%s phase=%s",
+                turn_id or "<missing>",
+                normalized_result_id,
+                phase or "<missing>",
+            )
+            return None
+
+        task = work.get("task")
+        if not hasattr(task, "__await__"):
+            return None
+        try:
+            results_by_index = await asyncio.shield(task)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "WIRING independent_motion.finalization_failed turn_id=%s "
+                "persona_result_id=%s error=%s",
+                turn_id,
+                normalized_result_id,
+                exc,
+                exc_info=True,
+            )
+            results_by_index = {}
+
+        if event.get_extra("agent_stop_requested", False):
+            logger.info(
+                "WIRING independent_motion.finalization_discarded "
+                "reason=turn_terminated turn_id=%s persona_result_id=%s",
+                turn_id,
+                normalized_result_id,
+            )
+            results_by_index = {}
+
+        speech_segments = tuple(work.get("speech_segments") or ())
+        bindings_by_index = work.get("tts_bindings_by_index", {})
+        bindings_by_index = (
+            bindings_by_index if isinstance(bindings_by_index, dict) else {}
+        )
+        view = work.get("view")
+        identity = _resolve_frontend_identity_snapshot(event)
+        client_objects: list[dict[str, Any]] = []
+        tts_binding_metadata: list[dict[str, Any]] = []
+        if isinstance(results_by_index, dict):
+            for segment_index, result in sorted(results_by_index.items()):
+                if not isinstance(segment_index, int) or not isinstance(
+                    result, IndependentMotionResult
+                ):
+                    continue
+                if segment_index < 0 or segment_index >= len(speech_segments):
+                    logger.warning(
+                        "WIRING independent_motion.result_rejected "
+                        "reason=segment_index_out_of_range turn_id=%s "
+                        "persona_result_id=%s segment_index=%s segment_count=%s",
+                        turn_id,
+                        normalized_result_id,
+                        segment_index,
+                        len(speech_segments),
+                    )
+                    continue
+                if bundle is not None:
+                    _record_independent_motion_result(
+                        bundle,
+                        view=view,
+                        identity=identity,
+                        phase=str(work.get("phase") or phase),
+                        assistant_text=result.assistant_text,
+                        motion_payload=result.motion_payload,
+                        motion_reason=result.reason,
+                        image_count=result.image_count,
+                        segment_index=segment_index,
+                    )
+                if result.motion_payload is None:
+                    continue
+
+                binding = bindings_by_index.get(segment_index)
+                if isinstance(binding, dict):
+                    if (
+                        str(binding.get("turn_id") or "").strip()
+                        != str(turn_id or "").strip()
+                        or str(binding.get("parent_message_id") or "").strip()
+                        != str(parent_message_id or "").strip()
+                        or str(binding.get("persona_result_id") or "").strip()
+                        != normalized_result_id
+                        or binding.get("persona_segment_index") != segment_index
+                        or binding.get("persona_segment_count")
+                        != len(speech_segments)
+                        or not str(binding.get("message_id") or "").strip()
+                        or not str(binding.get("tts_request_id") or "").strip()
+                    ):
+                        logger.warning(
+                            "WIRING independent_motion.tts_binding_rejected "
+                            "reason=message_identity_mismatch turn_id=%s "
+                            "persona_result_id=%s segment_index=%s message_id=%s",
+                            turn_id,
+                            normalized_result_id,
+                            segment_index,
+                            binding.get("message_id") or "<missing>",
+                        )
+                        binding = None
+                    else:
+                        binding["motion_payload"] = result.motion_payload
+                        tts_binding_metadata.append(
+                            {
+                                "persona_segment_index": segment_index,
+                                "turn_id": turn_id,
+                                "parent_message_id": parent_message_id,
+                                "message_id": binding.get("message_id"),
+                                "tts_request_id": binding.get("tts_request_id"),
+                            }
+                        )
+                        raw_tts_map = event.get_extra(
+                            "_ag99live_persona_tts_segment_map", {}
+                        )
+                        tts_map = (
+                            dict(raw_tts_map)
+                            if isinstance(raw_tts_map, dict)
+                            else {}
+                        )
+                        tracked = tts_map.get(binding.get("message_id"))
+                        if isinstance(tracked, dict):
+                            tracked["motion_payload"] = result.motion_payload
+                            tts_map[binding["message_id"]] = tracked
+                            event.set_extra(
+                                "_ag99live_persona_tts_segment_map",
+                                tts_map,
+                            )
+                        start_deferred_performance_curve_request(
+                            event,
+                            turn_id=str(binding.get("turn_id") or ""),
+                            message_id=str(binding.get("message_id") or ""),
+                            tts_request_id=str(binding.get("tts_request_id") or ""),
+                            external_correlation_id=binding.get(
+                                "external_correlation_id"
+                            ),
+                            stage="interaction.outbound_tts",
+                            status="generating",
+                            parent_message_id=parent_message_id,
+                            persona_result_id=normalized_result_id,
+                            persona_segment_index=segment_index,
+                            persona_segment_count=len(speech_segments),
+                        )
+                        logger.info(
+                            "WIRING independent_motion.segment_tts_bound "
+                            "turn_id=%s parent_message_id=%s persona_result_id=%s "
+                            "segment_index=%s message_id=%s tts_request_id=%s",
+                            turn_id,
+                            parent_message_id,
+                            normalized_result_id,
+                            segment_index,
+                            binding.get("message_id") or "<missing>",
+                            binding.get("tts_request_id") or "<missing>",
+                        )
+
+                client_objects.append(
+                    {
+                        "type": "ag99live.motion_payload",
+                        "motion_payload": result.motion_payload,
+                        "mode": "preview",
+                        "source": "independent_provider",
+                        "persona_segment_index": segment_index,
+                        "persona_segment_count": len(speech_segments),
+                    }
+                )
+
+        remove_persona_motion_work(
+            bundle.runtime_state,
+            turn_id=normalized_turn_id,
+            persona_result_id=normalized_result_id,
+        )
+        logger.info(
+            "WIRING independent_motion.segment_finalized turn_id=%s "
+            "parent_message_id=%s persona_result_id=%s phase=%s "
+            "segment_count=%s payload_count=%s tts_binding_count=%s",
+            turn_id,
+            parent_message_id,
+            normalized_result_id,
+            phase,
+            len(speech_segments),
+            len(client_objects),
+            len(tts_binding_metadata),
+        )
+        capabilities = get_interaction_capabilities()
+        if capabilities is None or not client_objects:
+            return None
+        return capabilities.interaction_result_contribution(
+            plugin_id=self.plugin_id,
+            client_objects=client_objects,
+            metadata={
+                "ag99live_persona_tts_bindings": tts_binding_metadata,
+            },
+            priority=self.priority,
+        )
+
+
+def _persona_motion_finalization_timeout(
+    runtime_state: Any,
+    speech_segments: tuple[str, ...],
+) -> float:
+    nonempty_count = sum(bool(speech.strip()) for speech in speech_segments)
+    if nonempty_count == 0:
+        return 1.0
+
+    try:
+        segment_timeout = max(
+            0.0,
+            min(
+                float(
+                    getattr(
+                        runtime_state,
+                        "independent_motion_segment_timeout_seconds",
+                        5.0,
+                    )
+                ),
+                60.0,
+            ),
+        )
+    except (TypeError, ValueError):
+        segment_timeout = 5.0
+
+    parallel = bool(
+        getattr(runtime_state, "independent_motion_parallel", False)
+    )
+    if parallel:
+        try:
+            concurrency = max(
+                1,
+                min(
+                    int(
+                        getattr(
+                            runtime_state,
+                            "independent_motion_max_concurrency",
+                            4,
+                        )
+                    ),
+                    8,
+                ),
+            )
+        except (TypeError, ValueError):
+            concurrency = 4
+    else:
+        concurrency = 1
+
+    waves = (nonempty_count + concurrency - 1) // concurrency
+    # Keep the join bounded while allowing the already-running action requests
+    # to overlap the complete TTS materialization.
+    if segment_timeout == 0:
+        return 30.0
+    return min(30.0, max(1.0, segment_timeout * (waves + 1) + 1.0))
 
 
 def _take_pending_speech_cues(event: Any) -> list[dict[str, Any]]:
@@ -275,38 +597,62 @@ def start_deferred_performance_curve_request(
     external_correlation_id: str | None,
     stage: str,
     status: str,
+    parent_message_id: str | None = None,
+    persona_result_id: str | None = None,
+    persona_segment_index: int | None = None,
+    persona_segment_count: int | None = None,
 ) -> str | None:
     if stage != "interaction.outbound_tts":
         return None
 
-    persona_segment = _track_persona_tts_request(
-        event,
-        turn_id=turn_id,
-        message_id=message_id,
+    has_persona_identity = bool(
+        str(persona_result_id or "").strip()
+        or persona_segment_index is not None
+        or persona_segment_count is not None
     )
-    if status != "generating":
-        return None
-
-    pending = event.get_extra("_ag99live_pending_performance_curve")
-    motion_payload = (
-        persona_segment.get("motion_payload")
-        if isinstance(persona_segment, dict)
-        else None
-    )
-    assistant_text = (
-        str(persona_segment.get("speech") or "")
-        if isinstance(persona_segment, dict)
-        else ""
-    )
-    if motion_payload is None and not isinstance(pending, dict):
-        return None
-    if motion_payload is None:
+    bundle = _resolve_motion_runtime_bundle(event)
+    persona_segment = None
+    if has_persona_identity:
+        if bundle is None:
+            logger.warning(
+                "WIRING persona_tts_binding_rejected "
+                "reason=motion_runtime_unavailable turn_id=%s "
+                "persona_result_id=%s segment_index=%s",
+                turn_id or "<missing>",
+                persona_result_id or "<missing>",
+                persona_segment_index,
+            )
+            return None
+        persona_segment = _track_persona_tts_request(
+            event,
+            runtime_state=bundle.runtime_state,
+            turn_id=turn_id,
+            message_id=message_id,
+            tts_request_id=tts_request_id,
+            external_correlation_id=external_correlation_id,
+            parent_message_id=parent_message_id,
+            persona_result_id=persona_result_id,
+            persona_segment_index=persona_segment_index,
+            persona_segment_count=persona_segment_count,
+        )
+        if persona_segment is None:
+            return None
+        if status != "generating":
+            return None
+        motion_payload = persona_segment.get("motion_payload")
+        assistant_text = str(persona_segment.get("speech") or "")
+    else:
+        if status != "generating":
+            return None
+        pending = event.get_extra("_ag99live_pending_performance_curve")
+        if not isinstance(pending, dict):
+            return None
         event.set_extra("_ag99live_pending_performance_curve", None)
         motion_payload = pending.get("motion_payload")
         assistant_text = str(pending.get("assistant_text") or "")
+
     if not isinstance(motion_payload, dict) or not assistant_text.strip():
         return None
-    bundle = _resolve_motion_runtime_bundle(event)
     if bundle is None:
         logger.warning(
             "WIRING performance_curve.skipped reason=motion_runtime_unavailable "
@@ -338,40 +684,144 @@ def start_deferred_performance_curve_request(
 def _track_persona_tts_request(
     event: Any,
     *,
+    runtime_state: Any,
     turn_id: str,
     message_id: str,
+    tts_request_id: str,
+    external_correlation_id: str | None,
+    parent_message_id: str | None,
+    persona_result_id: str | None,
+    persona_segment_index: int | None,
+    persona_segment_count: int | None,
 ) -> dict[str, Any] | None:
     normalized_message_id = str(message_id or "").strip()
-    if not normalized_message_id:
+    normalized_turn_id = str(turn_id or "").strip()
+    normalized_request_id = str(tts_request_id or "").strip()
+    normalized_parent_id = str(parent_message_id or "").strip()
+    normalized_result_id = str(persona_result_id or "").strip()
+    if (
+        not normalized_message_id
+        or not normalized_turn_id
+        or not normalized_request_id
+        or not normalized_parent_id
+        or not normalized_result_id
+        or type(persona_segment_index) is not int
+        or type(persona_segment_count) is not int
+        or persona_segment_count <= 0
+        or persona_segment_index < 0
+        or persona_segment_index >= persona_segment_count
+    ):
+        logger.warning(
+            "WIRING persona_tts_binding_rejected reason=identity_invalid "
+            "turn_id=%s parent_message_id=%s persona_result_id=%s "
+            "segment_index=%s segment_count=%s message_id=%s tts_request_id=%s",
+            normalized_turn_id or "<missing>",
+            normalized_parent_id or "<missing>",
+            normalized_result_id or "<missing>",
+            persona_segment_index,
+            persona_segment_count,
+            normalized_message_id or "<missing>",
+            normalized_request_id or "<missing>",
+        )
         return None
+    expected = {
+        "turn_id": normalized_turn_id,
+        "parent_message_id": normalized_parent_id,
+        "persona_result_id": normalized_result_id,
+        "persona_segment_index": persona_segment_index,
+        "persona_segment_count": persona_segment_count,
+        "message_id": normalized_message_id,
+        "tts_request_id": normalized_request_id,
+        "external_correlation_id": str(external_correlation_id or "").strip() or None,
+    }
+    work = get_persona_motion_work(
+        runtime_state,
+        turn_id=normalized_turn_id,
+        persona_result_id=normalized_result_id,
+    )
+    if work is None:
+        return None
+    speech_segments = tuple(work.get("speech_segments") or ())
     raw_mapping = event.get_extra("_ag99live_persona_tts_segment_map", {})
     mapping = dict(raw_mapping) if isinstance(raw_mapping, dict) else {}
-    existing = mapping.get(normalized_message_id)
-    if isinstance(existing, dict):
-        return existing
-
-    raw_queue = event.get_extra("_ag99live_pending_persona_tts_segments")
-    if not isinstance(raw_queue, list) or not raw_queue:
-        return None
-    queue = list(raw_queue)
-    segment = queue.pop(0)
-    event.set_extra("_ag99live_pending_persona_tts_segments", queue)
-    if not isinstance(segment, dict):
-        return None
-
-    parent_message_id = str(
-        event.get_extra("_ag99live_persona_tts_parent_message_id", "") or ""
-    ).strip()
-    if not parent_message_id:
-        parent_message_id = normalized_message_id
-        event.set_extra(
-            "_ag99live_persona_tts_parent_message_id",
-            parent_message_id,
+    existing_message_binding = mapping.get(normalized_message_id)
+    if isinstance(existing_message_binding, dict) and any(
+        existing_message_binding.get(key) != value
+        for key, value in expected.items()
+    ):
+        logger.warning(
+            "WIRING persona_tts_binding_rejected reason=message_binding_conflict "
+            "turn_id=%s persona_result_id=%s segment_index=%s message_id=%s",
+            normalized_turn_id,
+            normalized_result_id,
+            persona_segment_index,
+            normalized_message_id,
         )
-    tracked = dict(segment)
-    tracked["message_id"] = normalized_message_id
-    tracked["parent_message_id"] = parent_message_id
-    tracked["turn_id"] = str(turn_id or "").strip()
+        return None
+
+    if (
+        len(speech_segments) != persona_segment_count
+        or normalized_turn_id != str(work.get("turn_id") or "").strip()
+        or normalized_result_id
+        != str(work.get("persona_result_id") or "").strip()
+        or normalized_parent_id
+        != str(work.get("parent_message_id") or "").strip()
+    ):
+        logger.warning(
+            "WIRING persona_tts_binding_rejected reason=persona_identity_mismatch "
+            "turn_id=%s parent_message_id=%s persona_result_id=%s "
+            "segment_index=%s segment_count=%s",
+            normalized_turn_id,
+            normalized_parent_id,
+            normalized_result_id,
+            persona_segment_index,
+            persona_segment_count,
+        )
+        return None
+
+    bindings = work.get("tts_bindings_by_index")
+    if not isinstance(bindings, dict):
+        bindings = {}
+        work["tts_bindings_by_index"] = bindings
+    existing = bindings.get(persona_segment_index)
+    if isinstance(existing, dict):
+        if any(existing.get(key) != value for key, value in expected.items()):
+            logger.warning(
+                "WIRING persona_tts_binding_rejected reason=segment_binding_conflict "
+                "turn_id=%s persona_result_id=%s segment_index=%s message_id=%s",
+                normalized_turn_id,
+                normalized_result_id,
+                persona_segment_index,
+                normalized_message_id,
+            )
+            return None
+        tracked = existing
+    else:
+        if any(
+            isinstance(candidate, dict)
+            and (
+                candidate.get("message_id") == normalized_message_id
+                or candidate.get("tts_request_id") == normalized_request_id
+            )
+            for other_index, candidate in bindings.items()
+            if other_index != persona_segment_index
+        ):
+            logger.warning(
+                "WIRING persona_tts_binding_rejected reason=request_identity_conflict "
+                "turn_id=%s persona_result_id=%s segment_index=%s message_id=%s",
+                normalized_turn_id,
+                normalized_result_id,
+                persona_segment_index,
+                normalized_message_id,
+            )
+            return None
+        tracked = {
+            **expected,
+            "speech": str(speech_segments[persona_segment_index] or ""),
+            "motion_payload": None,
+        }
+        bindings[persona_segment_index] = tracked
+
     mapping[normalized_message_id] = tracked
     event.set_extra("_ag99live_persona_tts_segment_map", mapping)
     return tracked
@@ -592,14 +1042,10 @@ async def _schedule_motion_from_independent_provider(
                 motion_resolution_reason="independent_segment_candidate_unsupported",
             )
         return _schedule_motion_from_independent_provider_per_segment(
-            event,
             view,
-            bundle=bundle,
             phase=phase,
-            assistant_text=assistant_text,
             common=common,
             identity=identity,
-            purpose=purpose,
         )
     if not assistant_text:
         return _MotionScheduleAttempt(
@@ -682,15 +1128,11 @@ async def _schedule_motion_from_independent_provider(
 
 
 def _schedule_motion_from_independent_provider_per_segment(
-    event: Any,
     view: Any,
     *,
-    bundle: _MotionRuntimeBundle,
     phase: str,
-    assistant_text: str,
     common: dict[str, Any],
     identity: _FrontendIdentitySnapshot,
-    purpose: str,
 ) -> _MotionScheduleAttempt:
     speech_segments = tuple(_extract_persona_speech_segments(view))
     if not any(speech.strip() for speech in speech_segments):
@@ -701,80 +1143,26 @@ def _schedule_motion_from_independent_provider_per_segment(
             reason="assistant_text_empty",
             motion_resolution_reason="independent_provider_response_text_missing",
         )
-    batch = take_motion_segment_batch(
-        bundle.runtime_state,
-        turn_id=str(_call_event_method(event, "get_extra", "_turn_id", "") or ""),
-        phase=phase,
-        purpose=purpose,
-        speech_segments=speech_segments,
-    )
-    if batch is None:
-        motion_reason = "independent_segment_result_missing"
-        logger.warning(
-            "WIRING independent_motion.segment_schedule_missing phase=%s "
-            "turn_id=%s speech_segment_count=%s",
-            phase,
-            identity.event_frontend_turn_id or "<missing>",
-            len(speech_segments),
-        )
-        return _MotionScheduleAttempt(
-            **common,
-            source="independent_provider",
-            scheduled=False,
-            reason="motion_payload_missing",
-            motion_payloads_by_segment={},
-            persona_segment_count=len(speech_segments) or None,
-            motion_resolution_reason=motion_reason,
-        )
-
-    payloads_by_segment: dict[int, dict[str, Any]] = {}
-    failures: list[str] = []
-    for segment_index, result in sorted(batch.results_by_index.items()):
-        _record_independent_motion_result(
-            bundle,
-            view=view,
-            identity=identity,
-            phase=phase,
-            assistant_text=result.assistant_text,
-            motion_payload=result.motion_payload,
-            motion_reason=result.reason,
-            image_count=result.image_count,
-            segment_index=segment_index,
-        )
-        if result.motion_payload is None:
-            failures.append(f"{segment_index}:{result.reason}")
-        else:
-            payloads_by_segment[segment_index] = result.motion_payload
-
-    motion_reason = "independent_provider_segments"
-    if failures:
-        motion_reason = _append_resolution_reason(
-            motion_reason,
-            "segment_failures:" + ",".join(failures),
-        )
-    scheduled = bool(payloads_by_segment)
-    _call_event_method(event, "set_extra", "ag99live_split_motion_scheduled", scheduled)
     logger.info(
-        "WIRING independent_motion.segment_schedule_resolved phase=%s "
-        "turn_id=%s input_count=%s payload_count=%s scheduled=%s",
+        "WIRING independent_motion.segment_work_missing phase=%s "
+        "turn_id=%s persona_result_id=%s segment_count=%s",
         phase,
         identity.event_frontend_turn_id or "<missing>",
-        len(batch.results_by_index),
-        len(payloads_by_segment),
-        scheduled,
+        (
+            str(getattr(view, "metadata", {}).get("persona_result_id") or "")
+            if isinstance(getattr(view, "metadata", None), Mapping)
+            else "<missing>"
+        ),
+        len(speech_segments),
     )
     return _MotionScheduleAttempt(
         **common,
         source="independent_provider",
-        scheduled=scheduled,
-        reason=(
-            "independent_provider_segment_motion_payloads"
-            if scheduled
-            else "motion_payload_missing"
-        ),
-        motion_payloads_by_segment=payloads_by_segment,
+        scheduled=False,
+        reason="motion_payload_missing",
+        motion_payloads_by_segment={},
         persona_segment_count=len(speech_segments) or None,
-        motion_resolution_reason=motion_reason,
+        motion_resolution_reason="independent_segment_work_missing",
     )
 
 
