@@ -232,8 +232,8 @@ CONFIG_SCHEMA: tuple[ConfigSection, ...] = (
             ConfigField(
                 key="parallel",
                 kind="bool",
-                label="并行生成动作",
-                description="整条回复模式下，启用时与主回复文本生成并行；逐 speech 段模式下，启用时在 Persona 返回分段后并发生成各段动作，关闭时逐段串行生成。",
+                label="并行请求动作模型",
+                description="整条回复模式下，与主回复文本生成并行；按 speech 分段模式下，Persona 返回分段后，在最大并发数限制内生成各段动作。关闭时串行生成。此开关只控制生成过程；分段播放仍按顺序进行，上一段语音和动作结束后才开始下一段。",
                 default=False,
             ),
             ConfigField(
