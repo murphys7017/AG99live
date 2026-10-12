@@ -9,8 +9,8 @@ flowchart LR
     subgraph SOURCES[当前观察事件来源]
         INPUT[TurnCoordinator<br/>turn.input_received]:::source
         OUTPUT[OutputSegmentCoordinator<br/>turn.assistant_output canonical text]:::source
-        PERSONA[Persona Effect<br/>received / intent_resolved]:::source
-        INDEPENDENT[Independent Motion Provider<br/>reply/segment request + result/failure]:::source
+        PERSONA[Persona Effect（仅关闭 independent_motion）<br/>received / intent_resolved]:::source
+        INDEPENDENT[Independent Motion Provider<br/>整回复/分段 request + result/failure]:::source
         REFERENCES[Prompt references<br/>selected + projected]:::source
         CURVE[Performance Curve<br/>requested / resolved / failed / attached]:::source
         COMPILE[ModelEngine<br/>PerformanceSchedule / compile_failed / transform trace]:::source
@@ -62,7 +62,7 @@ flowchart LR
         ROUTE[source_route / phase / event_type]:::storage
         MODEL[model_name / profile_id / revision]:::storage
         TEXT[user_text / canonical assistant_text]:::storage
-        PAYLOAD[intent / CompiledSemanticMotion<br/>parameter plan / trace / terminal]:::storage
+        PAYLOAD[动作来源 + intent / CompiledSemanticMotion<br/>parameter plan / trace / terminal]:::storage
     end
 
     OBS --> IDS

@@ -145,19 +145,14 @@ const promptAxes = computed(() => {
 });
 const recentSemanticRecords = computed(() =>
   {
-    const profile = currentProfile.value;
-    if (!profile) {
-      return [];
-    }
     return props.motionPlaybackRecords
       .filter(isSemanticMotionPlaybackRecord)
-      .filter((record) => record.plan.model_id === profile.model_id)
-      .filter((record) => record.plan.profile_id === profile.profile_id)
       .slice(0, RECENT_RECORD_LIMIT);
   },
 );
 const historyDraftSources = computed<MotionDraftSource[]>(() =>
-  recentSemanticRecords.value.map(buildHistoryDraftSource),
+  recentSemanticRecords.value.map((record) =>
+    buildHistoryDraftSource(record, currentProfile.value)),
 );
 const llmReferenceSampleCount = computed(() =>
   llmReferenceEntries.value.filter((entry) => entry.enabled).length,
@@ -361,7 +356,16 @@ function resetDraftAxes(source: MotionDraftSource | null): void {
   }
 }
 
-function buildHistoryDraftSource(record: SemanticMotionPlaybackRecord): MotionDraftSource {
+function buildHistoryDraftSource(
+  record: SemanticMotionPlaybackRecord,
+  profile: SemanticAxisProfile | null,
+): MotionDraftSource {
+  const profileMatches = Boolean(
+    profile
+    && record.plan.model_id === profile.model_id
+    && record.plan.profile_id === profile.profile_id
+    && record.plan.profile_revision === profile.revision,
+  );
   const base = {
     id: `record:${record.id}`,
     sourceRecordId: record.id,
@@ -371,9 +375,16 @@ function buildHistoryDraftSource(record: SemanticMotionPlaybackRecord): MotionDr
     emotionLabel: record.emotionLabel || "motion",
     assistantText: record.assistantText || record.startReason,
     createdAt: record.createdAt,
-    sourceLabel: "历史动作",
+    sourceLabel: profileMatches
+      ? (record.source || "历史动作")
+      : `历史动作 · 档案不匹配 (${record.source || "unknown"})`,
     durationMs: record.plan.timing.duration_ms,
     record,
+    ...(!profileMatches
+      ? { error: profile
+          ? "motion_tuning_history_profile_mismatch"
+          : "motion_tuning_current_profile_unavailable" }
+      : {}),
   } as const;
   const semanticMotion = record.semanticMotion;
   if (semanticMotion.kind === "sequence") {
@@ -1028,7 +1039,7 @@ function normalizeEmotionKey(value: string): string {
       </li>
     </ul>
 
-    <template v-if="currentProfile && (historyDraftSources.length || savedDraftSources.length)">
+    <template v-if="historyDraftSources.length || (currentProfile && savedDraftSources.length)">
       <div class="motion-tuning__layout">
         <aside class="motion-tuning__records">
           <div class="motion-tuning__tabs" role="tablist" aria-label="动作样本来源">
