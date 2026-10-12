@@ -1,0 +1,31 @@
+sequenceDiagram
+    autonumber
+    participant U as 用户
+    participant Core as AG99 Core / Persona
+    participant Hook as Persona 结果钩子
+    participant Adapter as AG99live Adapter
+    participant Motion as 独立动作 Provider
+    participant TTS as Core TTS
+    participant Finalizer as 输出物料化 finalizer
+    participant Segments as OutputSegmentCoordinator
+    participant Frontend as AG99live 前端
+
+    U->>Core: 输入并建立 turn_id
+    Core->>Core: Persona 生成 segments[].speech
+    Core-->>Hook: Persona 结果 + persona_result_id
+    Hook->>Adapter: 记录 (turn_id, persona_result_id, segment indexes)
+    par 分段动作生成
+        Hook-)Motion: 为每个非空 speech 启动动作请求
+        Motion-->>Adapter: payload 或该段的失败结果
+    and Core 回复物料化
+        Core->>TTS: 按 Core TTS 生命周期合成 speech
+        TTS-->>Adapter: message_id + tts_request_id + segment index
+    end
+    Adapter->>Adapter: 校验身份并按 index 绑定动作与 TTS 段
+    Adapter->>Finalizer: 注册 post-materialization finalizer
+    Finalizer->>Adapter: 汇合动作任务（受 Core 超时约束）
+    Finalizer-->>Core: 结果物料化完成
+    Core->>Segments: 交付文本、TTS 与对应动作
+    Segments->>Segments: 按 turn_id/message_id 聚合，按 sequence 排序
+    Segments-->>Frontend: output.segment (schema v5)
+    Frontend->>Frontend: 播放音频、字幕、动作和口型

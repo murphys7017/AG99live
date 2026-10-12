@@ -31,6 +31,8 @@ python scripts/check_protocol_schema_manifest.py
 
 `output.segment` 消息是回复播放的唯一入站业务单元，其 Payload Schema 为 `output.segment.v5`。它携带段归属和顺序，以及文本、音频状态、动作意图、speech cues 和需要的展示资料。Adapter 只在逻辑消息已满足可发送条件后提交该段；前端先严格解析全部 slot，再写入 SessionStore 并启动段任务。
 
+协议的可选 `speech` slot 表示前端表演用的 speech cues；当前 Adapter 构造 `output.segment` 时将其设为 `absent`。AstrBot Persona 的 `segments[].speech` 是上游文本/TTS 分段输入，由 Adapter 在后端用于逐段动作绑定，不会因此变成协议 speech cues。两者名称相近但契约和生命周期不同。
+
 不允许把文本、动作和音频拆成互相猜测归属的多个独立事件。重复、晚到或不符合当前生命周期的段会被拒绝或稳定地忽略，不能把 WebSocket 处理器带入致命状态。
 
 ## 音频输入

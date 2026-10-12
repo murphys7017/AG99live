@@ -6,20 +6,23 @@ flowchart TD
     classDef runtime fill:#e8edf7,stroke:#3e5f93,color:#1d3154
     classDef failure fill:#fde7e3,stroke:#b33a2b,color:#681d14
 
-    subgraph PROMPT[1. Persona Prompt 构建]
+    subgraph PROMPT[1. 动作输入来源与上下文]
         SYS[System Mount<br/>控制 Live2D 角色的任务与选择原则]:::prompt
         CAP[Capability Mount<br/>当前模型轴定义 / -4..4 等级语义<br/>typed resources / 参考样本]:::prompt
         CTX[Context Mount<br/>本轮对话 / 回复用途<br/>上一动作关键轴等级]:::prompt
-        SCHEMA[Persona Effect Schema<br/>ag99live.motion]:::contract
-        SYS --> REQUEST[主模型一次推理]:::prompt
+        SCHEMA[Persona Effect Schema<br/>仅独立动作关闭时注册]:::contract
+        ROUTE{independent_motion.enabled?}:::contract
+        SYS --> REQUEST[Persona 主模型输出回复/分段]:::prompt
         CAP --> REQUEST
         CTX --> REQUEST
-        SCHEMA --> REQUEST
+        REQUEST --> ROUTE
+        ROUTE -->|关闭| SCHEMA
+        ROUTE -->|开启| PROVIDER[独立动作 Provider<br/>JSON 动作意图]:::prompt
     end
 
     subgraph OUTPUT[2. 模型结构化输出]
         REPLY[spoken_reply]:::contract
-        CALL[effect_calls.ag99live.motion.arguments]:::contract
+        CALL[结构化动作输出<br/>Persona Effect arguments 或 Provider JSON]:::contract
         TAGS[intent_tags<br/>动作语义]:::contract
         CHOICE{动作表示方式}:::contract
         LEVELS[axis_levels<br/>单姿态，-4..4 整数]:::contract
@@ -28,7 +31,8 @@ flowchart TD
         EXP[expression_resource_id<br/>表情层]:::contract
         MOT[motion_resource_id<br/>完整动作层]:::contract
         REQUEST --> REPLY
-        REQUEST --> CALL
+        SCHEMA --> CALL
+        PROVIDER --> CALL
         CALL --> TAGS --> CHOICE
         CHOICE --> LEVELS
         CHOICE --> STEPS

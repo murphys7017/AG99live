@@ -6,6 +6,7 @@ sequenceDiagram
     participant CoreQueue as AstrBot EventBus /<br/>Personal Runtime Queue
     participant Persona as Persona Runtime
     participant LLM as 主模型
+    participant MotionProvider as 独立动作 Provider
     participant Curve as 可选 Performance Curve Provider
     participant CurveCoord as PerformanceCurveCoordinator
     participant TTS as TTS
@@ -47,12 +48,24 @@ sequenceDiagram
     Note over Turn,CoreQueue: 不等待较早 Turn 播放完成，AG99 不维护输入 FIFO
     CoreQueue->>Persona: 按 AstrBot 官方队列调度
     alt 增强版 Core
-        Persona->>Persona: 构建 Prompt、effect schema 与本轮上下文
-        Persona->>LLM: 生成 spoken_reply + effect_calls
-        LLM-->>Persona: spoken_reply + effect_calls
-        Persona->>Adapter: result contributor 生成 motion_intent.v4
-        Adapter->>CurveCoord: 登记当前回复阶段的 pending curve input
-        Adapter->>Segment: 写入 ag99live_motion_schedule<br/>区分未安排、成功和动作失败
+        Persona->>Persona: 构建 Prompt 与本轮上下文
+        Persona->>LLM: 生成 spoken_reply / segments[].speech
+        LLM-->>Persona: Persona 结果
+        alt independent_motion.enabled = false
+            Persona->>Persona: 注册并生成 ag99live.motion effect_calls
+            Persona->>Adapter: Persona Effect result contributor
+            Adapter->>Segment: 写入 ag99live_motion_schedule<br/>区分未安排、成功和动作失败
+        else independent_motion.enabled = true
+            Persona->>Adapter: Persona 结果钩子
+            alt per_speech_segment = true
+                Adapter->>MotionProvider: 按非空 speech 段启动动作请求
+                MotionProvider-->>Adapter: 按段返回动作结果
+            else per_speech_segment = false
+                Adapter->>MotionProvider: 按整条回复启动动作请求
+                MotionProvider-->>Adapter: 返回整回复动作结果
+            end
+            Adapter->>Segment: 暂存独立动作结果并等待输出物料化汇合
+        end
     else 官方 Core
         Persona->>LLM: 生成可见回复
         LLM-->>Persona: 可见回复

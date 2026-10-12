@@ -3,6 +3,8 @@
 状态:设计草案(D3D11 图形后端首片已实现,待视觉验收) · 编写日期:2026-10-01 · 范围:原生侧 Live2D 运行时组件化 + 动作编译器归属
 性质:**边界契约与迁移方案;目前仅 D3D11 透明合成 surface 与 Cubism 绘制器已实现,其余运行时迁移仍属设计。**
 
+当前 Adapter 的 `output.segment.payload.speech` slot 固定为 `absent`；本文对 Native speech cues 的解析与渲染讨论属于协议能力/Native 设计边界，不表示当前 AG99 Persona `segments[].speech` 会作为该 slot 发送。Persona 分段与逐段动作/TTS 关联见[动作生成与 Persona 分段关联](../01-架构与结构/07-动作生成与Persona分段关联.md)。
+
 ---
 
 ## 0. 文档定位与本文不做的事

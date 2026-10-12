@@ -10,6 +10,7 @@ flowchart LR
         INPUT[TurnCoordinator<br/>turn.input_received]:::source
         OUTPUT[OutputSegmentCoordinator<br/>turn.assistant_output canonical text]:::source
         PERSONA[Persona Effect<br/>received / intent_resolved]:::source
+        INDEPENDENT[Independent Motion Provider<br/>reply/segment request + result/failure]:::source
         REFERENCES[Prompt references<br/>selected + projected]:::source
         CURVE[Performance Curve<br/>requested / resolved / failed / attached]:::source
         COMPILE[ModelEngine<br/>PerformanceSchedule / compile_failed / transform trace]:::source
@@ -44,6 +45,7 @@ flowchart LR
         INPUT --> OBS
         OUTPUT --> OBS
         PERSONA --> OBS
+        INDEPENDENT --> OBS
         REFERENCES --> OBS
         CURVE --> OBS
         SEND --> WS --> OBS

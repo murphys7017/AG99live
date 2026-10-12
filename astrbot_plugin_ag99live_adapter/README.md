@@ -1,6 +1,6 @@
 # AG99live Adapter
 
-AG99 插件 `astrbot_plugin_ag99live_adapter` 将 AG99 的对话、TTS 和 Persona Effect 接入 AG99live 桌面端。当前版本为 **1.1.0**，协议版本以 `protocol/schema_manifest.json` 为准。本版本与 AG99live 桌面端 `0.1.0` 安装包配套。
+AG99 插件 `astrbot_plugin_ag99live_adapter` 将 AG99 的对话、TTS 和动作结果接入 AG99live 桌面端。动作可由 Persona Effect 或独立 Provider 生成。当前版本为 **1.1.0**，协议版本以 `protocol/schema_manifest.json` 为准。本版本与 AG99live 桌面端 `0.1.0` 安装包配套。
 
 ## 职责
 
@@ -50,11 +50,15 @@ AG99 Persona
 
 动作输入选择 `axis_levels`、稀疏 `motion_steps` 或 `motion_resource_id` 之一。未知轴、非法等级、空 step、形态冲突和无效资源会明确失败；Adapter 不补轴、不改名、不生成 neutral pose。
 
-### 实验性独立动作生成
+### 动作生成模式
 
-`independent_motion.enabled` 默认关闭。启用后，Adapter 使用单独选择的聊天 Provider 生成动作意图，主对话模型不再生成这份动作参数；关闭后继续走 Persona Effect 主路径。`history_turns` 控制附带的最近文本对话轮数（默认 6，范围 0–20），当前轮实际收到的图片会单独传给动作 Provider；要让模型理解照片，请选择支持视觉输入的 Provider。不会把缓存复用的旧桌面截图或历史图片当成本轮图片发送。
+`independent_motion.enabled` 默认关闭。关闭时使用 Persona Effect 为 Persona 回复段生成动作。开启后使用单独选择的聊天 Provider，Persona Effect 动作路径停用；`per_speech_segment` 决定独立 Provider 是每条回复调用一次，还是对 Persona 每个非空 `segments[].speech` 分别调用并绑定到同索引的 TTS/输出段。分段模式保留 Persona 回复和 Core 的 TTS 生命周期。
 
-`parallel` 开启时，动作请求与当前可见回复的 Persona 表达生成并行启动，等两路结果都可用后再进入动作调度；此时动作模型看不到尚未生成的回复文本。关闭时则等回复文本生成后才调用动作 Provider，并把该回复作为动作判断上下文。即时回复和最终回复分别匹配各自的动作结果；两种模式都会在动作结果就绪后再进入当前输出调度。
+`parallel` 在整回复模式中控制动作 Provider 与回复生成并行/串行；在分段模式中控制 Persona 结果到达后各段动作请求并发/串行。分段动作任务会在 Persona 结果钩子中启动，可与 Core 控制的 TTS 合成重叠。TTS 身份到达后 Adapter 按 `turn_id`、`persona_result_id` 和分段索引绑定动作；Core 在输出物料化 finalizer 阶段汇合，然后 Adapter 才提交原子 `output.segment`。段索引决定对应关系，Provider 的返回先后不决定播放顺序。
+
+`history_turns` 控制附带的最近文本对话轮数（默认 6，范围 0–20），当前轮实际收到的图片会单独传给动作 Provider；要让模型理解照片，请选择支持视觉输入的 Provider。不会把缓存复用的旧桌面截图或历史图片当成本轮图片发送。分段模式另有 `max_concurrency`（默认 4，最大 8）和 `segment_timeout_seconds`（默认 5 秒，最大 60 秒；0 表示不限制单段请求），完整 Core 汇合仍受 30 秒上限约束。
+
+Persona `segments[].speech` 是 TTS 文本分段，不是协议中的 speech cues。协议 slot 仍可承载可选 speech cues，但当前 Adapter 输出 `speech: absent`。详见[动作生成与 Persona 分段关联](../docs/01-架构与结构/07-动作生成与Persona分段关联.md)。
 
 ## 音频输入和取消
 

@@ -27,11 +27,12 @@ AG99live 为 AG99 提供一具可见、可听、可持续演出的桌面身体�
 
 ## 从一句话到一段表演
 
-主模型无需了解 `ParamAngleX`、motion 文件路径或底层播放器指令。它只描述角色应该如何表现；AG99live 再根据当前模型的能力档案生成实际的参数计划。
+动作生成模式可由 Persona Effect 提供结构化动作，也可由独立 Provider 按回复或 Persona speech 段生成。无论来源如何，动作输出都不包含 `ParamAngleX`、motion 文件路径或底层播放器指令；AG99live 根据当前模型的能力档案生成实际参数计划。
 
 ```text
 用户输入
-  -> AG99：文本 + TTS + ag99live.motion
+  -> AG99：Persona 回复与 TTS；动作可来自 Persona Effect 或独立动作 Provider
+  -> Adapter：按配置聚合回复级或 Persona 分段级动作
   -> Adapter：output.segment 消息（Payload Schema 为 output.segment.v5）
   -> PlaybackTimeline：同一段时钟和终态
   -> ModelEngine：engine.motion_intent.v4 -> engine.parameter_plan.v3
@@ -139,7 +140,7 @@ npm run build:spout-sender
 
 ## 当前状态与验证范围
 
-截至 **2026 年 9 月 29 日**，源码已包含完整的 Adapter、`output.segment` 消息（Payload Schema 为 `output.segment.v5`）、播放 Timeline、ModelEngine、Live2D runtime 和 Spout2 输出链路。协议版本以 `astrbot_plugin_ag99live_adapter/protocol/schema_manifest.json` 为准。
+截至 **2026 年 10 月 12 日**，源码包含 Adapter、`output.segment` 消息（Payload Schema 为 `output.segment.v5`）、播放 Timeline、ModelEngine、Live2D runtime 和 Spout2 输出链路。动作支持 Persona Effect、独立 Provider 整回复生成，以及独立 Provider 按 Persona speech 段生成并关联动作；具体开关与时序见[动作生成与 Persona 分段关联](docs/01-架构与结构/07-动作生成与Persona分段关联.md)。协议版本以 `astrbot_plugin_ag99live_adapter/protocol/schema_manifest.json` 为准。
 
 真实桌面环境仍需确认以下体验：
 
