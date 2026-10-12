@@ -1,3 +1,19 @@
+persona_action_playback_boundary_fix_20261013:
+  date: '2026-10-13'
+  class: bugfix
+  risk: medium
+  scope: >-
+    Electron releases the first locally unsettled segment and waits for all
+    required timeline sinks, including an audio-backed motion tail. Remove the
+    selector that skipped the tail. Generation and delivery remain concurrent.
+  validation: >-
+    Renderer typecheck and Electron Vite build passed. One source-backed
+    segment-selection smoke holds an audio-completed motion tail and releases
+    the next segment after motion completion. Diff and state YAML checks passed.
+  evidence_gap: >-
+    No live audio/Live2D acceptance. Native host playback is not changed by this
+    Electron fix. Installed desktop restart or deployment remains pending.
+
 persona_segment_ready_delivery_20261013:
   date: '2026-10-13'
   class: feature

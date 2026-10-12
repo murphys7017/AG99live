@@ -1088,12 +1088,11 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
       if (!snapshot || isTimelineTerminalPhase(timeline)) {
         continue;
       }
-      const audioSink = snapshot.sinks.find((sink) => sink.id === AUDIO_TIMELINE_SINK_ID);
-      const blocksRelease = audioSink
-        ? !isTerminalSinkValue(audioSink.terminal)
-        : snapshot.sinks.some(
-            (sink) => sink.required && !isTerminalSinkValue(sink.terminal),
-          );
+      // Audio and motion are one ordered segment. A motion tail must settle
+      // before another segment can start, even after its audio has ended.
+      const blocksRelease = snapshot.sinks.some(
+        (sink) => sink.required && !isTerminalSinkValue(sink.terminal),
+      );
       if (!blocksRelease) {
         continue;
       }

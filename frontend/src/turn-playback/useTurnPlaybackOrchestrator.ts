@@ -5,7 +5,7 @@ import { cloneJson } from "../utils/cloneJson.js";
 import {
   canReleaseAudio,
   canReleaseMotion,
-  getNextPlaybackReleaseSegment,
+  getActivePlaybackSegment,
 } from "./selectors.js";
 import type { TurnPlaybackSegment } from "./session.js";
 import type { PlaybackTimelineRuntime } from "../playback-timeline/playbackTimelineRuntime.js";
@@ -39,7 +39,7 @@ export function useTurnPlaybackOrchestrator(
       if (session.phase === "completed" || session.phase === "failed") {
         continue;
       }
-      segment = getNextPlaybackReleaseSegment(session);
+      segment = getActivePlaybackSegment(session);
       if (segment) {
         break;
       }
