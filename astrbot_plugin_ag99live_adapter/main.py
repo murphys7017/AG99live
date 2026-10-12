@@ -79,7 +79,7 @@ class MyPlugin(Star):
         self._official_core_compatibility = (
             not contributors_registered or not self._llm_response_hook_available
         )
-        logger.info(
+        logger.debug(
             "WIRING interaction.plugin_initialized contributors_registered=%s "
             "llm_response_hook_available=%s official_core_compatibility=%s "
             "context_type=%s",
@@ -115,7 +115,7 @@ class MyPlugin(Star):
             bundle is not None
             and getattr(bundle.runtime_state, "independent_motion_enabled", False)
         )
-        logger.info(
+        logger.debug(
             "WIRING independent_motion.request_hook_entered platform=%s turn_id=%s "
             "bundle_present=%s independent_enabled=%s official_core_compatibility=%s "
             "bypass=%s",
@@ -149,7 +149,7 @@ class MyPlugin(Star):
                 False,
             )
         ):
-            logger.info(
+            logger.debug(
                 "WIRING independent_motion.request_hook mode=per_speech_segment "
                 "turn_id=%s; waiting for Persona speech segments",
                 event.get_extra("_turn_id") or "<missing>",
@@ -169,7 +169,7 @@ class MyPlugin(Star):
             # Let the provider request start while the main model request runs.
             await asyncio.sleep(0)
         else:
-            logger.info(
+            logger.debug(
                 "WIRING independent_motion.request_hook mode=serial "
                 "turn_id=%s provider=%s",
                 event.get_extra("_turn_id") or "<missing>",
@@ -201,7 +201,7 @@ class MyPlugin(Star):
         response_text = str(getattr(response, "completion_text", "") or "").strip()
         result_chain = getattr(response, "result_chain", None)
         chain = getattr(result_chain, "chain", None)
-        logger.info(
+        logger.debug(
             "WIRING independent_motion.response_hook_entered turn_id=%s "
             "bundle_present=%s independent_enabled=%s official_core_compatibility=%s "
             "bypass=%s completion_text_len=%s result_chain_count=%s",
@@ -239,7 +239,7 @@ class MyPlugin(Star):
             )
             return
         if event.get_extra("agent_stop_requested", False):
-            logger.info(
+            logger.debug(
                 "WIRING independent_motion.response_hook_skipped turn_id=%s "
                 "reason=turn_terminated",
                 turn_id or "<missing>",
@@ -282,7 +282,7 @@ class MyPlugin(Star):
         )
         if result is not None:
             if event.get_extra("agent_stop_requested", False):
-                logger.info(
+                logger.debug(
                     "WIRING independent_motion.result_discarded turn_id=%s "
                     "reason=turn_terminated",
                     turn_id or "<missing>",
@@ -297,7 +297,7 @@ class MyPlugin(Star):
                 assistant_text=assistant_text,
             )
             if stored:
-                logger.info(
+                logger.debug(
                     "WIRING independent_motion.result_cached turn_id=%s "
                     "mode=%s payload_present=%s reason=%s image_count=%s "
                     "assistant_text_len=%s",
@@ -365,7 +365,7 @@ class MyPlugin(Star):
         raw_reply_text = "\n".join(original_plain_texts).strip()
         if changed and raw_reply_text:
             event.set_extra("ag99live_raw_reply_text", raw_reply_text)
-            logger.info(
+            logger.debug(
                 "WIRING assistant_output_normalized=true platform=%s raw_len=%s",
                 event.get_platform_name(),
                 len(raw_reply_text),
@@ -418,13 +418,13 @@ class MyPlugin(Star):
 
         from .middleware.interaction_motion.independent import (
             INDEPENDENT_MOTION_RESULT_EXTRA_KEY,
-            IndependentMotionResult,
             PERSONA_RESULT_ID_METADATA_KEY,
+            IndependentMotionResult,
             generate_independent_motion_for_segments,
             is_persona_expression_request,
             persona_expression_intent,
-            store_persona_motion_work,
             store_motion_result_for_turn,
+            store_persona_motion_work,
             track_motion_generation_task,
             untrack_motion_generation_task,
         )
@@ -501,6 +501,10 @@ class MyPlugin(Star):
                             event,
                             bundle,
                             speech_segments=speech_segments,
+                            segment_intents=tuple({
+                                "actions": list(getattr(segment, "actions", ()) or ()),
+                                "tendency": dict(getattr(segment, "tendency", {}) or {}),
+                            } for segment in raw_segments),
                             parallel=bool(
                                 getattr(
                                     bundle.runtime_state,
@@ -511,7 +515,7 @@ class MyPlugin(Star):
                             tasks=self._independent_motion_tasks,
                         )
                         if event.get_extra("agent_stop_requested", False):
-                            logger.info(
+                            logger.debug(
                                 "WIRING independent_motion.segment_results_discarded "
                                 "reason=turn_terminated turn_id=%s persona_result_id=%s",
                                 turn_id,
@@ -575,7 +579,7 @@ class MyPlugin(Star):
                         persona_result_id,
                     )
                     return
-                logger.info(
+                logger.debug(
                     "WIRING independent_motion.segment_generation_started "
                     "turn_id=%s persona_result_id=%s phase=%s segment_count=%s",
                     turn_id,

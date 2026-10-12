@@ -63,13 +63,13 @@
         "default": false
       },
       "provider_id": {
-        "description": "用于生成 Live2D 动作参数的聊天 Provider。启用后必须选择；需要读取图片时请使用支持视觉输入的模型。",
+        "description": "用于生成 Live2D 动作参数的聊天 Provider。启用后必须选择；仅接收文本对话、简单记忆和当前分段表达，不要求视觉能力。",
         "type": "string",
         "default": "",
         "_special": "select_provider"
       },
       "history_turns": {
-        "description": "传给独立模型的历史对话轮数；当前轮图片单独附加。",
+        "description": "传给独立模型的最近纯文本对话轮数，不附加图片或工具消息。",
         "type": "int",
         "default": 6
       },

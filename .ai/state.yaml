@@ -1,3 +1,29 @@
+motion_text_inputs_prompt_logs_20261013:
+  date: '2026-10-13'
+  class: refactor
+  risk: medium
+  scope: >-
+    Independent motion requests no longer send images. Strip desktop context
+    wrappers from current and historic dialogue. Persona segment hooks pass
+    actions and tendency alongside speech. Reuse allowed memory summary fields
+    from the current canonical pack, capped at six unique 240-character entries.
+    Keep legal axes, levels and resource constraints. Retain at most two relevant
+    examples and three recent executions, projected onto the same output contract.
+    Runtime metadata is removed; incompatible or oversized records are omitted. Detailed wiring is DEBUG;
+    segmented generation summary and final delivery remain INFO.
+  validation: >-
+    One request boundary smoke passed for text history, exposed memory summaries,
+    speech/actions/tendency, omitted image inputs, normalized examples/executions
+    and excluded runtime metadata. It uses a stub provider
+    and normalizer and is not evidence of actual model motion quality.
+    Scoped Ruff, Python syntax, JSON/YAML parsing and diff checks performed.
+  evidence_gap: >-
+    No live provider, TTS, Electron or Live2D acceptance. No measured latency
+    improvement yet. Source changes are not yet reloaded into the running host.
+  non_goals: >-
+    Change main reply image handling, capability resolution, thinking settings,
+    parallel generation or output ordering. No host restart.
+
 persona_motion_plain_echo_failure_20261012:
   date: '2026-10-12'
   class: bugfix

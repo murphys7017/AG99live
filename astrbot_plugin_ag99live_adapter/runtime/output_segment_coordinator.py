@@ -129,7 +129,7 @@ class OutputSegmentCoordinator:
             self._require_output_queue_open(normalized_turn_id)
             key = self._segment_key(normalized_turn_id, segment_message_id)
             if key in self._flushed_segment_keys:
-                logger.info(
+                logger.debug(
                     "WIRING output_segment_duplicate_ignored turn_id=%s message_id=%s",
                     normalized_turn_id,
                     segment_message_id,
@@ -149,7 +149,7 @@ class OutputSegmentCoordinator:
                 message_chain,
                 preserve_text_whitespace=persona_segment is not None,
             )
-            logger.info(
+            logger.debug(
                 "WIRING output_parts turn_id=%s message_id=%s text_count=%s "
                 "image_count=%s record_count=%s",
                 normalized_turn_id,
@@ -268,7 +268,7 @@ class OutputSegmentCoordinator:
                 # indexed TTS delivery owns this logical segment's motion state.
                 motion_expected = False
                 motion_failure_reason = ""
-            logger.info(
+            logger.debug(
                 "WIRING output_motion_resolved turn_id=%s message_id=%s "
                 "client_object_count=%s candidate_present=%s expected=%s "
                 "failure=%s schedule_failure=%s",
@@ -396,7 +396,7 @@ class OutputSegmentCoordinator:
                 or "persona_segment_count" in candidate
                 for candidate in candidates
             )
-        logger.info(
+        logger.debug(
             "WIRING output_motion_candidates count=%s persona_segment_index=%s",
             len(candidates),
             persona_segment[0] if persona_segment is not None else "<missing>",
@@ -487,7 +487,7 @@ class OutputSegmentCoordinator:
             audio_slot = {"state": "present", "url": audio_url}
 
         motion_slot = self._build_motion_slot(segment)
-        logger.info(
+        logger.debug(
             "WIRING output_motion_slot_built turn_id=%s message_id=%s "
             "state=%s source=%s schema=%s",
             segment.turn_id,
@@ -650,7 +650,7 @@ class OutputSegmentCoordinator:
             "source": segment.motion_source,
             "payload": payload,
         }
-        logger.info(
+        logger.debug(
             "WIRING output_motion_slot_present turn_id=%s message_id=%s "
             "source=%s schema=%s",
             segment.turn_id,

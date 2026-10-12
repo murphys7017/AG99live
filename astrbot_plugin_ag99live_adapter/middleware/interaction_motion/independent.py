@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
-import json
+from time import perf_counter
 from typing import Any
 
 from astrbot.api import logger
@@ -17,11 +19,14 @@ from .prompt_builder import (
     _build_motion_runtime_payload,
     _build_motion_static_capability_payload,
 )
-from .prompt_context import _record_motion_prompt_reference_observation
+from .prompt_context import (
+    _record_motion_prompt_reference_observation,
+    _resolve_prompt_motion_history,
+)
+from .prompt_references import _project_reference_examples_for_prompt
 from .shared import (
-    _MotionRuntimeBundle,
     _append_resolution_reason,
-    _resolve_frontend_identity_snapshot,
+    _MotionRuntimeBundle,
     _sanitize_reason_fragment,
 )
 
@@ -65,7 +70,7 @@ class IndependentMotionContext:
     """Read-only motion inputs shared by all speech segments in one turn."""
 
     current_user_text: str
-    images: tuple[str, ...]
+    memories: tuple[str, ...]
     contexts: tuple[dict[str, str], ...]
     capability_payload: dict[str, Any]
     runtime_payload: dict[str, Any]
@@ -121,7 +126,7 @@ def store_persona_motion_work(
     work["turn_id"] = normalized_turn_id
     work["persona_result_id"] = normalized_result_id
     works_by_result[normalized_result_id] = work
-    logger.info(
+    logger.debug(
         "WIRING independent_motion.persona_work_stored turn_id=%s "
         "persona_result_id=%s segment_count=%s",
         normalized_turn_id,
@@ -229,10 +234,7 @@ async def _prepare_independent_motion_context(
     bundle: _MotionRuntimeBundle,
 ) -> IndependentMotionContext | None:
     """Build one stable context snapshot for all segments in a turn."""
-    current_user_text = str(getattr(event, "message_str", "") or "").strip()
-    images = tuple(_current_image_urls(event))
-    if not current_user_text and not images:
-        return None
+    current_user_text = _dialogue_text(str(getattr(event, "message_str", "") or ""))
 
     history_turns = max(
         0,
@@ -249,7 +251,7 @@ async def _prepare_independent_motion_context(
             current_user_text=current_user_text,
         )
     )
-    logger.info(
+    logger.debug(
         "WIRING independent_motion.shared_context_prepared turn_id=%s "
         "requested_turns=%s message_count=%s image_count=%s",
         (
@@ -260,7 +262,7 @@ async def _prepare_independent_motion_context(
         or "<missing>",
         history_turns,
         len(contexts),
-        len(images),
+        0,
     )
     capability_payload = _build_motion_static_capability_payload(
         bundle.runtime_state
@@ -279,9 +281,10 @@ async def _prepare_independent_motion_context(
         reference_diagnostics=reference_diagnostics,
         source_route="independent_provider",
     )
+    runtime_payload["recent_executed_motions"] = _resolve_prompt_motion_history(bundle.turn_coordinator)[-3:]
     return IndependentMotionContext(
         current_user_text=current_user_text,
-        images=images,
+        memories=_motion_memory_summaries(event),
         contexts=contexts,
         capability_payload=capability_payload,
         runtime_payload=runtime_payload,
@@ -296,8 +299,10 @@ async def generate_independent_motion_for_segments(
     speech_segments: tuple[str, ...],
     parallel: bool,
     tasks: set[asyncio.Task],
+    segment_intents: tuple[dict[str, Any], ...] = (),
 ) -> dict[int, IndependentMotionResult]:
     """Generate one independent Provider result for each nonempty speech segment."""
+    started = perf_counter()
     inputs = [
         (index, speech)
         for index, speech in enumerate(speech_segments)
@@ -393,6 +398,7 @@ async def generate_independent_motion_for_segments(
                         kwargs: dict[str, Any] = {
                             "provider": provider,
                             "assistant_text": speech,
+                            "segment_intent": segment_intents[index] if index < len(segment_intents) else {},
                         }
                         if shared_context is not None:
                             kwargs["prepared_context"] = shared_context
@@ -457,13 +463,15 @@ async def generate_independent_motion_for_segments(
     logger.info(
         "WIRING independent_motion.segment_generation_completed mode=%s "
         "input_count=%s result_count=%s payload_count=%s max_concurrency=%s "
-        "timeout_seconds=%.2f",
+        "timeout_seconds=%.2f turn_id=%s duration_ms=%.2f",
         "parallel" if parallel else "serial",
         len(inputs),
         len(results),
         sum(result.motion_payload is not None for result in results.values()),
         max_concurrency,
         segment_timeout_seconds,
+        event.get_extra("_turn_id") if callable(getattr(event, "get_extra", None)) else "<missing>",
+        (perf_counter() - started) * 1000,
     )
     return results
 
@@ -498,7 +506,7 @@ def store_motion_result_for_turn(
         del entries[:-8]
     while len(cache) > _MAX_RETAINED_RESULT_TURNS:
         cache.pop(next(iter(cache)))
-    logger.info(
+    logger.debug(
         "WIRING independent_motion.cache_stored turn_id=%s entry_count=%s "
         "assistant_text_len=%s payload_present=%s reason=%s",
         normalized_turn_id,
@@ -564,7 +572,7 @@ def take_motion_result_for_turn(
     selected = entries.pop(selected_index)
     if not entries:
         cache.pop(normalized_turn_id, None)
-    logger.info(
+    logger.debug(
         "WIRING independent_motion.cache_consumed turn_id=%s mode=%s "
         "entries_before=%s entries_after=%s requested_text_len=%s "
         "stored_text_len=%s payload_present=%s reason=%s",
@@ -588,7 +596,7 @@ def start_parallel_motion_generation(
 ) -> asyncio.Task | None:
     existing = event.get_extra(INDEPENDENT_MOTION_TASK_EXTRA_KEY)
     if isinstance(existing, asyncio.Task):
-        logger.info(
+        logger.debug(
             "WIRING independent_motion.task_reused turn_id=%s",
             event.get_extra("_turn_id") or "<missing>",
         )
@@ -614,7 +622,7 @@ def start_parallel_motion_generation(
     tasks.add(task)
     task.add_done_callback(tasks.discard)
     event.set_extra(INDEPENDENT_MOTION_TASK_EXTRA_KEY, task)
-    logger.info(
+    logger.debug(
         "WIRING independent_motion.task_started mode=parallel turn_id=%s "
         "provider=%s",
         event.get_extra("_turn_id") or "<missing>",
@@ -639,7 +647,7 @@ async def resolve_motion_after_llm_response(
                 event.get_extra("_turn_id") or "<missing>",
             )
             return None
-        logger.info(
+        logger.debug(
             "WIRING independent_motion.task_await_started mode=parallel turn_id=%s",
             event.get_extra("_turn_id") or "<missing>",
         )
@@ -668,7 +676,7 @@ async def resolve_motion_after_llm_response(
                 exc_info=True,
             )
             return None
-        logger.info(
+        logger.debug(
             "WIRING independent_motion.task_completed mode=parallel turn_id=%s "
             "payload_present=%s reason=%s image_count=%s",
             event.get_extra("_turn_id") or "<missing>",
@@ -698,14 +706,14 @@ async def resolve_motion_after_llm_response(
     tasks.add(result_task)
     result_task.add_done_callback(tasks.discard)
     event.set_extra(INDEPENDENT_MOTION_TASK_EXTRA_KEY, result_task)
-    logger.info(
+    logger.debug(
         "WIRING independent_motion.task_started mode=serial turn_id=%s provider=%s",
         event.get_extra("_turn_id") or "<missing>",
         getattr(state, "independent_motion_provider_id", "<missing>"),
     )
     try:
         result = await result_task
-        logger.info(
+        logger.debug(
             "WIRING independent_motion.task_completed mode=serial turn_id=%s "
             "payload_present=%s reason=%s image_count=%s",
             event.get_extra("_turn_id") or "<missing>",
@@ -735,12 +743,9 @@ async def generate_independent_motion(
     provider: Any,
     assistant_text: str,
     prepared_context: IndependentMotionContext | None = None,
+    segment_intent: Mapping[str, Any] | None = None,
 ) -> IndependentMotionResult:
-    images = (
-        list(prepared_context.images)
-        if prepared_context is not None
-        else _current_image_urls(event)
-    )
+    images: list[str] = []
     turn_id = event.get_extra("_turn_id") or "<missing>"
     provider_id = getattr(bundle.runtime_state, "independent_motion_provider_id", "<missing>")
     mode = (
@@ -761,7 +766,7 @@ async def generate_independent_motion(
             reason=reason,
             image_count=image_count,
         )
-        logger.info(
+        logger.debug(
             "WIRING independent_motion.generation_completed turn_id=%s "
             "mode=%s provider=%s payload_present=%s reason=%s image_count=%s "
             "assistant_text_len=%s",
@@ -775,7 +780,7 @@ async def generate_independent_motion(
         )
         return result
 
-    logger.info(
+    logger.debug(
         "WIRING independent_motion.generation_started turn_id=%s mode=%s "
         "provider=%s input_text_present=%s image_count=%s",
         turn_id,
@@ -788,9 +793,9 @@ async def generate_independent_motion(
         current_user_text = (
             prepared_context.current_user_text
             if prepared_context is not None
-            else str(getattr(event, "message_str", "") or "").strip()
+            else _dialogue_text(str(getattr(event, "message_str", "") or ""))
         )
-        if not current_user_text and not images:
+        if not current_user_text and not assistant_text.strip():
             return finish(
                 motion_payload=None,
                 reason="current_input_missing",
@@ -817,7 +822,7 @@ async def generate_independent_motion(
                 history_turns=history_turns,
                 current_user_text=current_user_text,
             )
-            logger.info(
+            logger.debug(
                 "WIRING independent_motion.history_loaded turn_id=%s "
                 "requested_turns=%s message_count=%s",
                 turn_id,
@@ -841,6 +846,7 @@ async def generate_independent_motion(
                 reference_diagnostics=reference_diagnostics,
                 source_route="independent_provider",
             )
+            runtime_payload["recent_executed_motions"] = _resolve_prompt_motion_history(bundle.turn_coordinator)[-3:]
         else:
             contexts = prepared_context.contexts
             capability_payload = prepared_context.capability_payload
@@ -849,13 +855,14 @@ async def generate_independent_motion(
         prompt = _build_current_turn_prompt(
             current_user_text=current_user_text,
             assistant_text=assistant_text,
-            image_count=len(images),
+            memories=prepared_context.memories if prepared_context is not None else _motion_memory_summaries(event),
+            segment_intent=segment_intent,
         )
         system_prompt = _build_independent_system_prompt(
             capability_payload=capability_payload,
             runtime_payload=runtime_payload,
         )
-        logger.info(
+        logger.debug(
             "WIRING independent_motion.provider_request_started turn_id=%s "
             "history_message_count=%s image_count=%s prompt_len=%s system_prompt_len=%s",
             turn_id,
@@ -868,10 +875,9 @@ async def generate_independent_motion(
             prompt=prompt,
             system_prompt=system_prompt,
             contexts=contexts or None,
-            image_urls=images or None,
         )
         response_text = str(getattr(response, "completion_text", "") or "").strip()
-        logger.info(
+        logger.debug(
             "WIRING independent_motion.provider_response_received turn_id=%s "
             "response_len=%s",
             turn_id,
@@ -898,7 +904,7 @@ async def generate_independent_motion(
                 image_count=len(images),
             )
         shape_summary = _motion_output_shape_summary(raw_arguments)
-        logger.info(
+        logger.debug(
             "WIRING independent_motion.json_parsed turn_id=%s field_count=%s "
             "shape=%s root_axis_count=%s step_count=%s step_axis_counts=%s "
             "unique_axis_count=%s",
@@ -963,7 +969,7 @@ async def generate_independent_motion(
                 reason=reason,
                 image_count=len(images),
             )
-        logger.info(
+        logger.debug(
             "WIRING independent_motion.normalization_succeeded turn_id=%s "
             "reason=%s",
             turn_id,
@@ -1026,7 +1032,7 @@ async def _load_recent_history(
             if current_round_user == current_user_text:
                 rounds.pop()
         contexts = [message for turn in rounds[-history_turns:] for message in turn]
-        logger.info(
+        logger.debug(
             "WIRING independent_motion.history_resolved turn_id=%s "
             "round_count=%s message_count=%s",
             event.get_extra("_turn_id") or "<missing>",
@@ -1064,7 +1070,7 @@ def _group_history_rounds(history: list[Any]) -> list[list[dict[str, str]]]:
 
 def _history_message_text(value: Any) -> str:
     if isinstance(value, str):
-        return value.strip()
+        return _dialogue_text(value)
     if isinstance(value, list):
         fragments = []
         for part in value:
@@ -1074,44 +1080,65 @@ def _history_message_text(value: Any) -> str:
                 text = part.get("text")
                 if isinstance(text, str) and str(part.get("type") or "text") == "text":
                     fragments.append(text)
-        return "\n".join(fragment.strip() for fragment in fragments if fragment.strip())
+        return _dialogue_text("\n".join(fragment.strip() for fragment in fragments if fragment.strip()))
     return ""
 
 
-def _current_image_urls(event: Any) -> list[str]:
-    message_obj = getattr(event, "message_obj", None)
-    raw_message = getattr(message_obj, "raw_message", None)
-    if not isinstance(raw_message, Mapping):
-        return []
-    if raw_message.get("reused_desktop_snapshot"):
-        return []
-    resolved_images = raw_message.get("resolved_images")
-    if not isinstance(resolved_images, list):
-        return []
-    return [
-        image_url
-        for item in resolved_images
-        if isinstance(item, Mapping)
-        and item.get("type") == "input_image"
-        and isinstance((image_url := item.get("image_url")), str)
-        and image_url.strip()
-    ]
+def _dialogue_text(value: str) -> str:
+    """Remove the platform's screenshot wrapper, retaining dialogue text."""
+    value = re.sub(
+        r"^\s*\[系统上下文\].*?\[/系统上下文\]\s*(?:用户消息：\s*)?",
+        "", value, flags=re.S,
+    )
+    return sanitize_assistant_output_text(value).strip()
+
+
+def _motion_memory_summaries(event: Any) -> tuple[str, ...]:
+    """Reuse exposed memory from this turn, without another retrieval."""
+    state = getattr(event, "_interaction_turn_state", None)
+    material = getattr(state, "context_material", None)
+    pack = getattr(material, "prompt_context_pack", None)
+    summaries: list[str] = []
+    text_keys = {"current_topic", "topic_summary", "short_summary", "active_focus", "summary", "detail_summary"}
+
+    def collect(value: Any, depth: int = 0) -> None:
+        if depth > 6 or len(summaries) >= 6:
+            return
+        if isinstance(value, Mapping):
+            for key, child in value.items():
+                if key in text_keys and isinstance(child, str):
+                    text = _dialogue_text(child)[:240]
+                    if text and text not in summaries and len(summaries) < 6:
+                        summaries.append(text)
+                elif isinstance(child, (Mapping, list, tuple)):
+                    collect(child, depth + 1)
+        elif isinstance(value, (list, tuple)):
+            for child in value:
+                collect(child, depth + 1)
+
+    for slot in getattr(pack, "slots", {}).values():
+        if slot.name.startswith("memory.") and slot.llm_exposure == "allowed":
+            collect(slot.value)
+    return tuple(summaries)
 
 
 def _build_current_turn_prompt(
     *,
     current_user_text: str,
     assistant_text: str,
-    image_count: int,
+    memories: tuple[str, ...] = (),
+    segment_intent: Mapping[str, Any] | None = None,
 ) -> str:
-    current_user_text = current_user_text or "（本轮没有文字输入）"
-    prompt = f"本轮用户输入：\n{current_user_text}"
-    if image_count:
-        prompt += f"\n\n本轮附带了 {image_count} 张图片，请结合图片判断动作。"
-    if assistant_text:
-        prompt += f"\n\n主对话模型本轮回复：\n{assistant_text}"
-    prompt += "\n\n请仅为这轮交互生成一个 Live2D 动作意图。"
-    return prompt
+    intent = segment_intent or {}
+    return json.dumps({
+        "user": current_user_text,
+        "memory": memories,
+        "segment": {
+            "speech": assistant_text,
+            "actions": intent.get("actions", []),
+            "tendency": intent.get("tendency", {}),
+        },
+    }, ensure_ascii=False, separators=(",", ":"))
 
 
 def _build_independent_system_prompt(
@@ -1120,6 +1147,13 @@ def _build_independent_system_prompt(
     runtime_payload: dict[str, Any],
 ) -> str:
     capability = _build_motion_capability_prompt_payload(capability_payload)
+    capability.pop("pose_references", None)
+    axis_keys = {"id", "label", "negative_semantics", "positive_semantics", "available_levels", "usage_notes"}
+    capability["axes"] = [
+        {key: value for key, value in axis.items() if key in axis_keys}
+        for axis in capability.get("axes", [])
+    ]
+    guidance = _motion_guidance_for_prompt(capability, runtime_payload)
     motion_resource = next(
         (
             str(resource.get("resource_id") or "").strip()
@@ -1151,8 +1185,9 @@ def _build_independent_system_prompt(
             contract["axis_levels"] = {str(first_axis["id"]): level}
     return (
         "你负责为 AG99live 的 Live2D 角色生成动作参数。"
-        "根据最近对话、当前用户输入、当前轮图片以及当前回复（如果提供），"
-        "只描述角色本轮应该呈现的动作。"
+        "根据纯文本对话、简短记忆和当前 segment 的 speech、actions、tendency，"
+        "优先落实 actions，以 tendency 调整情绪强度，只描述角色本段应该呈现的动作。"
+        "参考示例的 output 就是输出格式；最近执行动作只用于衔接和避免机械重复，勿照搬。"
         "只输出一个 JSON 对象，不要 Markdown、解释文字、工具调用或额外字段。"
         "必需字段 intent_tags 是 1 到 6 个简短关键词。执行形状必须且只能选择一种："
         "axis_levels（单个姿态）、motion_steps（2 到 4 个动作步骤，每步必须包含 axis_levels 和 1 到 3 的 duration_weight），"
@@ -1166,9 +1201,56 @@ def _build_independent_system_prompt(
         f"JSON 形状示例：{json.dumps(contract, ensure_ascii=False, separators=(',', ':'))}\n\n"
         "Live2D 能力：\n"
         f"{json.dumps(capability, ensure_ascii=False, separators=(',', ':'))}\n\n"
-        "当前动作上下文：\n"
-        f"{json.dumps(runtime_payload, ensure_ascii=False, separators=(',', ':'))}"
+        "精简参考（所有 output 使用同一输出契约）：\n"
+        f"{json.dumps(guidance, ensure_ascii=False, separators=(',', ':'))}"
     )
+
+
+def _motion_guidance_for_prompt(
+    capability: dict[str, Any], runtime: dict[str, Any],
+) -> dict[str, Any]:
+    """Project examples and executions onto the current legal output shape."""
+    levels = {axis["id"]: set(axis.get("available_levels") or []) for axis in capability.get("axes", [])}
+    output_keys = {"intent_tags", "axis_levels", "motion_steps", "duration_hint_ms", "expression_resource_id", "motion_resource_id"}
+
+    def project(items: list[Any], *, executed: bool) -> list[dict[str, Any]]:
+        results = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            raw_output = item if executed else item.get("output")
+            if not isinstance(raw_output, dict):
+                continue
+            # Sequence snapshots also retain their final posture: it is not a second shape.
+            output = {key: value for key, value in raw_output.items() if key in output_keys}
+            for key in ("expression_resource_id", "motion_resource_id", "duration_hint_ms"):
+                if output.get(key) in (None, ""):
+                    output.pop(key, None)
+            if executed and output.get("motion_steps"):
+                output.pop("axis_levels", None)
+            if executed and output.get("motion_resource_id"):
+                output.pop("axis_levels", None)
+                output.pop("motion_steps", None)
+                output.pop("duration_hint_ms", None)
+            input_text = "最近执行动作" if executed else _dialogue_text(str(item.get("input") or item.get("user_text") or ""))[:240]
+            try:
+                projected = _project_reference_examples_for_prompt(
+                    [{"input": input_text, "output": output}],
+                    allowed_axis_ids=set(levels), available_levels_by_axis=levels,
+                    resource_candidates=capability.get("resources", []),
+                )
+            except ValueError:
+                logger.debug("Motion prompt reference omitted: incompatible current output contract")
+                continue
+            # Keep whole JSON records; omit oversized guidance instead of truncating JSON.
+            if projected and len(json.dumps(projected[0], ensure_ascii=False)) <= 2400:
+                results.extend(projected)
+        return results
+
+    return {
+        "examples": project((runtime.get("reference_examples") or [])[:2], executed=False),
+        "recent_executed": project((runtime.get("recent_executed_motions") or [])[-3:], executed=True),
+    }
 
 
 def _parse_motion_json(value: str) -> dict[str, Any]:

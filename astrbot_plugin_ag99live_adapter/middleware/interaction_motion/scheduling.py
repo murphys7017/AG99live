@@ -8,25 +8,6 @@ from typing import Any
 from astrbot.api import logger
 
 from ...core_compatibility import get_interaction_capabilities
-from .effects import (
-    _effect_call_get,
-    _extract_ag99live_motion_effect_arguments,
-    _extract_effect_calls_for_motion,
-    _persona_segment_count,
-    _resolve_persona_effect_motion_payload_with_reason,
-)
-from .shared import (
-    INTERACTION_ROUTE_DECISION_EXTRA_KEY,
-    _FrontendIdentitySnapshot,
-    _MotionRuntimeBundle,
-    _append_resolution_reason,
-    _call_event_method,
-    _normalize_optional_string,
-    _resolve_frontend_identity_snapshot,
-    _resolve_motion_runtime_bundle,
-    _resolve_result_phase,
-    _thaw_snapshot_value,
-)
 from ...motion.motion_intent import resolve_selected_semantic_axis_profile
 from ...motion.observation import record_motion_observation
 from ...motion.output_sanitizer import (
@@ -34,11 +15,30 @@ from ...motion.output_sanitizer import (
     sanitize_assistant_output_segment_text,
     sanitize_assistant_output_text,
 )
+from .effects import (
+    _effect_call_get,
+    _extract_ag99live_motion_effect_arguments,
+    _extract_effect_calls_for_motion,
+    _persona_segment_count,
+    _resolve_persona_effect_motion_payload_with_reason,
+)
 from .independent import (
     IndependentMotionResult,
     get_persona_motion_work,
     remove_persona_motion_work,
     take_motion_result_for_turn,
+)
+from .shared import (
+    INTERACTION_ROUTE_DECISION_EXTRA_KEY,
+    _append_resolution_reason,
+    _call_event_method,
+    _FrontendIdentitySnapshot,
+    _MotionRuntimeBundle,
+    _normalize_optional_string,
+    _resolve_frontend_identity_snapshot,
+    _resolve_motion_runtime_bundle,
+    _resolve_result_phase,
+    _thaw_snapshot_value,
 )
 
 
@@ -144,7 +144,7 @@ class AG99liveMotionResultContributor:
             attempt = None
         else:
             attempt = await _schedule_motion_from_interaction_result(event, view)
-        logger.info(
+        logger.debug(
             "WIRING motion.contributor phase=%s independent_enabled=%s "
             "attempt_present=%s",
             _resolve_result_phase(view),
@@ -167,7 +167,7 @@ class AG99liveMotionResultContributor:
         if persona_speech_segments and not any(
             speech.strip() for speech in persona_speech_segments
         ):
-            logger.info(
+            logger.debug(
                 "WIRING persona_tts_segment_tracking_skipped "
                 "reason=no_nonempty_speech_segments count=%s",
                 persona_segment_count,
@@ -203,7 +203,7 @@ class AG99liveMotionResultContributor:
                 }
             )
             _defer_optional_performance_curve_request(event, attempt=attempt)
-        logger.info(
+        logger.debug(
             "WIRING motion.contributor_result phase=%s "
             "scheduled=%s payload_present=%s source=%s reason=%s "
             "client_object_count=%s",
@@ -326,7 +326,7 @@ class AG99liveMotionResultContributor:
             results_by_index = {}
 
         if event.get_extra("agent_stop_requested", False):
-            logger.info(
+            logger.debug(
                 "WIRING independent_motion.finalization_discarded "
                 "reason=turn_terminated turn_id=%s persona_result_id=%s",
                 turn_id,
@@ -442,7 +442,7 @@ class AG99liveMotionResultContributor:
                             persona_segment_index=segment_index,
                             persona_segment_count=len(speech_segments),
                         )
-                        logger.info(
+                        logger.debug(
                             "WIRING independent_motion.segment_tts_bound "
                             "turn_id=%s parent_message_id=%s persona_result_id=%s "
                             "segment_index=%s message_id=%s tts_request_id=%s",
@@ -470,7 +470,7 @@ class AG99liveMotionResultContributor:
             turn_id=normalized_turn_id,
             persona_result_id=normalized_result_id,
         )
-        logger.info(
+        logger.debug(
             "WIRING independent_motion.segment_finalized turn_id=%s "
             "parent_message_id=%s persona_result_id=%s phase=%s "
             "segment_count=%s payload_count=%s tts_binding_count=%s",
@@ -656,7 +656,7 @@ def start_deferred_performance_curve_request(
         motion_payload=motion_payload,
     )
     if request_id:
-        logger.info(
+        logger.debug(
             "WIRING performance_curve_started turn_id=%s message_id=%s "
             "tts_request_id=%s",
             turn_id,
@@ -971,7 +971,7 @@ async def _schedule_motion_from_independent_provider(
     identity: _FrontendIdentitySnapshot,
     reply_plan: _InteractionReplyPlanSnapshot | None,
 ) -> _MotionScheduleAttempt:
-    logger.info(
+    logger.debug(
         "WIRING independent_motion.schedule_started phase=%s turn_id=%s "
         "assistant_text_len=%s",
         phase,
@@ -1051,7 +1051,7 @@ async def _schedule_motion_from_independent_provider(
         turn_id=str(_call_event_method(event, "get_extra", "_turn_id", "") or ""),
         assistant_text=assistant_text,
     )
-    logger.info(
+    logger.debug(
         "WIRING independent_motion.cache_lookup phase=%s turn_id=%s hit=%s "
         "entries_before=%s requested_text_len=%s",
         phase,
@@ -1095,7 +1095,7 @@ async def _schedule_motion_from_independent_provider(
         )
 
     _call_event_method(event, "set_extra", "ag99live_split_motion_scheduled", True)
-    logger.info(
+    logger.debug(
         "WIRING independent_motion.schedule_succeeded phase=%s turn_id=%s "
         "source=independent_provider payload_present=true reason=%s",
         phase,
@@ -1128,7 +1128,7 @@ def _schedule_motion_from_independent_provider_per_segment(
             reason="assistant_text_empty",
             motion_resolution_reason="independent_provider_response_text_missing",
         )
-    logger.info(
+    logger.debug(
         "WIRING independent_motion.segment_work_missing phase=%s "
         "turn_id=%s persona_result_id=%s segment_count=%s",
         phase,
@@ -1254,7 +1254,7 @@ def _log_persona_effect_motion_resolution(
         payload_expression_resource_id = ",".join(sorted(expression_resource_ids))
         payload_motion_resource_id = ",".join(sorted(motion_resource_ids))
 
-    logger.info(
+    logger.debug(
         "WIRING persona_effect_motion phase=%s payload_present=%s segment_indexes=%s reason=%s "
         "effect_names=%s effect_fields=%s effect_axis_keys=%s effect_intent_tags=%s "
         "effect_expression_resource_id=%s effect_motion_resource_id=%s "

@@ -388,7 +388,7 @@ def test_independent_motion_segment_results_preserve_speech_indexes(
     calls: list[str] = []
     selected_provider = object()
 
-    async def generate(_event, _bundle, *, provider, assistant_text):
+    async def generate(_event, _bundle, *, provider, assistant_text, segment_intent=None):
         assert provider is selected_provider
         calls.append(assistant_text)
         return module.IndependentMotionResult(
@@ -439,7 +439,7 @@ def test_persona_hook_cancellation_reaches_segment_provider_requests(
     runtime_state = SimpleNamespace(selected_independent_motion_provider=object())
     bundle = SimpleNamespace(runtime_state=runtime_state)
 
-    async def generate(_event, _bundle, *, provider, assistant_text):
+    async def generate(_event, _bundle, *, provider, assistant_text, segment_intent=None):
         del provider, assistant_text
         provider_started.set()
         try:
@@ -498,7 +498,7 @@ def test_independent_motion_segment_generation_respects_concurrency_limit(
     active = 0
     max_active = 0
 
-    async def generate(_event, _bundle, *, provider, assistant_text):
+    async def generate(_event, _bundle, *, provider, assistant_text, segment_intent=None):
         nonlocal active, max_active
         assert provider is selected_provider
         active += 1
@@ -546,7 +546,7 @@ def test_independent_motion_segment_timeout_returns_indexed_failure(
     )
     module = importlib.reload(module)
 
-    async def generate(_event, _bundle, *, provider, assistant_text):
+    async def generate(_event, _bundle, *, provider, assistant_text, segment_intent=None):
         del provider, assistant_text
         await asyncio.Future()
 
@@ -724,7 +724,7 @@ def test_independent_motion_result_matches_sanitized_visible_reply(
     assert selected.assistant_text == '已经查到了。<@anim {"motion":"wave"}>'
 
 
-def test_independent_motion_request_uses_prior_text_and_only_current_images(
+def test_independent_motion_request_uses_text_memory_and_segment_without_images(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -759,7 +759,13 @@ def test_independent_motion_request_uses_prior_text_and_only_current_images(
     )
     bundle = types.SimpleNamespace(
         runtime_state=runtime_state,
-        turn_coordinator=object(),
+        turn_coordinator=SimpleNamespace(motion_observations=SimpleNamespace(
+            get_prompt_motion_history=lambda: [{
+                "intent_tags": ["最近点头"], "axis_levels": {"head_roll": 0},
+                "schema_version": "runtime-only", "message_id": "private-runtime-id",
+                "expression_resource_id": "", "motion_resource_id": "",
+            }],
+        )),
     )
     calls: list[dict[str, object]] = []
 
@@ -780,12 +786,14 @@ def test_independent_motion_request_uses_prior_text_and_only_current_images(
     monkeypatch.setattr(
         module,
         "_build_motion_runtime_payload",
-        lambda *args, **kwargs: ({}, []),
+        lambda *args, **kwargs: ({"reference_examples": [{
+            "input": "自然点头", "output": {"intent_tags": ["点头"], "axis_levels": {"head_roll": 0}},
+        }]}, []),
     )
     monkeypatch.setattr(
         module,
         "_build_motion_capability_prompt_payload",
-        lambda _payload: {"axes": [], "resources": []},
+        lambda _payload: {"axes": [{"id": "head_roll", "available_levels": [-1, 0, 1]}], "resources": []},
     )
     monkeypatch.setattr(
         module,
@@ -807,6 +815,12 @@ def test_independent_motion_request_uses_prior_text_and_only_current_images(
             message_str="本轮输入",
             message_obj=types.SimpleNamespace(raw_message=raw_message),
             unified_msg_origin="olv_pet_adapter:FriendMessage:desktop-client",
+            _interaction_turn_state=SimpleNamespace(context_material=SimpleNamespace(
+                prompt_context_pack=SimpleNamespace(slots={"memory.short_term": SimpleNamespace(
+                    name="memory.short_term", llm_exposure="allowed",
+                    value={"short_summary": "喜欢自然点头", "umo": "private-id"},
+                )}),
+            )),
         )
         event.get_extra = lambda key, default=None: extras.get(key, default)
         return event
@@ -824,6 +838,7 @@ def test_independent_motion_request_uses_prior_text_and_only_current_images(
             bundle,
             provider=Provider(),
             assistant_text="回复文本",
+            segment_intent={"actions": ["nod"], "tendency": {"Joy": 4}},
         )
     )
     reused_snapshot_event = build_event(
@@ -844,11 +859,20 @@ def test_independent_motion_request_uses_prior_text_and_only_current_images(
     )
 
     assert current_result.motion_payload is not None
-    assert current_result.image_count == 1
+    assert current_result.image_count == 0
     assert reused_snapshot_result.motion_payload is not None
     assert reused_snapshot_result.image_count == 0
-    assert calls[0]["image_urls"] == ["file:///current.png"]
-    assert calls[1]["image_urls"] is None
+    assert "image_urls" not in calls[0]
+    assert "image_urls" not in calls[1]
+    import json
+    request_input = json.loads(calls[0]["prompt"])
+    assert request_input["memory"] == ["喜欢自然点头"]
+    assert request_input["segment"] == {"speech": "回复文本", "actions": ["nod"], "tendency": {"Joy": 4}}
+    assert "private-id" not in calls[0]["prompt"]
+    assert '"examples":[{"input":"自然点头"' in calls[0]["system_prompt"]
+    assert '"recent_executed":[{"input":"最近执行动作"' in calls[0]["system_prompt"]
+    assert "private-runtime-id" not in calls[0]["system_prompt"]
+    assert "runtime-only" not in calls[0]["system_prompt"]
     expected_history = [
         {"role": "user", "content": "上一轮问题"},
         {"role": "assistant", "content": "上一轮回答"},
