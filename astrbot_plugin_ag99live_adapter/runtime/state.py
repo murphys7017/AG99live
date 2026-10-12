@@ -97,9 +97,7 @@ class RuntimeState:
         self.interaction_contributors_available = supports_interaction_contributors(
             plugin_context
         )
-        self.ag99live_motion_persona_effect_available = (
-            self.interaction_contributors_available
-        )
+        self._registered_persona_effect_enabled: bool | None = None
         self.motion_tuning_fewshot_enabled = True
         self.motion_tuning_fewshot_count = 4
         self.motion_tuning_user_fewshot_count = 3
@@ -199,6 +197,18 @@ class RuntimeState:
         self.independent_motion_enabled = bool(
             get_config_value(independent_motion_config, "enabled", False)
         )
+        persona_effect_enabled = (
+            self.interaction_contributors_available
+            and not self.independent_motion_enabled
+        )
+        if self._registered_persona_effect_enabled != persona_effect_enabled:
+            from ..middleware import set_ag99live_motion_persona_effect_enabled
+
+            set_ag99live_motion_persona_effect_enabled(
+                self.plugin_context,
+                enabled=persona_effect_enabled,
+            )
+            self._registered_persona_effect_enabled = persona_effect_enabled
         self.independent_motion_per_speech_segment = bool(
             get_config_value(
                 independent_motion_config,

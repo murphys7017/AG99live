@@ -160,9 +160,6 @@ class TurnCoordinator:
             performance_curves=self.performance_curves,
             observations=self.motion_observations,
             is_turn_terminal=lambda turn_id: turn_id in self._turn_terminal_results,
-            is_official_inline_anim_compat_enabled=(
-                self._allows_official_inline_anim_compat
-            ),
             finish_turn=self._finish_turn,
             mark_turn_timing=self._mark_turn_timing,
         )
@@ -620,17 +617,6 @@ class TurnCoordinator:
             return stopped_count
         finally:
             self._terminating_turn_ids.discard(resolved_turn_id)
-
-    def _allows_official_inline_anim_compat(self) -> bool:
-        runtime_state = getattr(self, "runtime_state", None)
-        return (
-            getattr(
-                runtime_state,
-                "ag99live_motion_persona_effect_available",
-                True,
-            )
-            is False
-        )
 
     async def _finish_turn(
         self,

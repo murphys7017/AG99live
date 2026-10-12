@@ -46,7 +46,7 @@ AG99 Persona
   -> engine.parameter_plan.v3 或受控资源执行
 ```
 
-增强 Persona Effect 是主路径。缺少 Persona 注入能力的官方 AstrBot 可以使用 `<@anim>` 兼容传输；兼容入口不修复增强路径失败，也不改变 V4 动作输入契约。
+动作生成依赖 AG99 Persona 扩展或兼容的 Persona 生命周期能力；官方 Core 不支持这些扩展时，Adapter 仍可转发对话和 TTS，但不生成动作。
 
 动作输入选择 `axis_levels`、稀疏 `motion_steps` 或 `motion_resource_id` 之一。未知轴、非法等级、空 step、形态冲突和无效资源会明确失败；Adapter 不补轴、不改名、不生成 neutral pose。
 

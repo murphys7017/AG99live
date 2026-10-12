@@ -130,7 +130,9 @@ def test_main_plugin_normalizes_output_and_starts_curve_on_tts_generating(
 
     middleware_module = types.ModuleType("astrbot_plugin_ag99live_adapter.middleware")
     middleware_module.__path__ = []
-    middleware_module.register_ag99live_interaction_contributors = lambda _context: True
+    middleware_module.register_ag99live_interaction_contributors = (
+        lambda _context, **_options: True
+    )
     monkeypatch.setitem(
         sys.modules,
         "astrbot_plugin_ag99live_adapter.middleware",
@@ -176,7 +178,12 @@ def test_main_plugin_normalizes_output_and_starts_curve_on_tts_generating(
 
     class ResultStub:
         def __init__(self) -> None:
-            self.chain = [module.Plain('hello <@anim {"mode":"inline","intent":{}}>')]
+            self.chain = [
+                module.Plain(
+                    'hello <system_reminder>private</system_reminder>'
+                    '<@anim {"mode":"inline","intent":{}}>'
+                )
+            ]
 
     class EventStub:
         def get_platform_name(self) -> str:
@@ -195,8 +202,13 @@ def test_main_plugin_normalizes_output_and_starts_curve_on_tts_generating(
     event.result = ResultStub()
     asyncio.run(plugin.sanitize_hidden_output_markup(event))
 
-    assert extras.get("ag99live_raw_reply_text") == 'hello <@anim {"mode":"inline","intent":{}}>'
-    assert event.result.chain[0].text == "hello"
+    assert extras.get("ag99live_raw_reply_text") == (
+        'hello <system_reminder>private</system_reminder>'
+        '<@anim {"mode":"inline","intent":{}}>'
+    )
+    assert event.result.chain[0].text == (
+        'hello <@anim {"mode":"inline","intent":{}}>'
+    )
 
     asyncio.run(
         plugin.handle_tts_generation_state(event, TTSState(status="requested"))
@@ -245,11 +257,13 @@ def test_main_plugin_registers_interaction_contributors_during_init(
     )
 
     registered_contexts: list[object] = []
+    registered_effect_enabled: list[bool] = []
     middleware_module = types.ModuleType("astrbot_plugin_ag99live_adapter.middleware")
     middleware_module.__path__ = []
 
-    def register_contributors(context) -> bool:
+    def register_contributors(context, *, persona_effect_enabled: bool = True) -> bool:
         registered_contexts.append(context)
+        registered_effect_enabled.append(persona_effect_enabled)
         return True
 
     middleware_module.register_ag99live_interaction_contributors = register_contributors
@@ -270,6 +284,10 @@ def test_main_plugin_registers_interaction_contributors_during_init(
     sys.modules.pop("astrbot_plugin_ag99live_adapter.main", None)
     module = importlib.import_module("astrbot_plugin_ag99live_adapter.main")
     context = module.Context()
-    module.MyPlugin(context=context, config={})
+    module.MyPlugin(
+        context=context,
+        config={"independent_motion": {"enabled": True}},
+    )
 
     assert registered_contexts == [context]
+    assert registered_effect_enabled == [False]

@@ -7,7 +7,6 @@ from typing import Any, Awaitable, Callable
 
 from astrbot.api import logger
 
-from ..motion.inline_motion import extract_official_inline_anim_motion_intent
 from ..motion.motion_intent import normalize_motion_intent_payload
 from ..motion.output_sanitizer import (
     sanitize_assistant_output_segment_text,
@@ -17,7 +16,6 @@ from ..motion.payload_dispatch import (
     resolve_engine_motion_message_type,
     resolve_motion_payload_schema_version,
 )
-from ..motion.payload_validation import validate_normalized_motion_intent_payload
 from ..motion.resource_catalog import ModelInfoRuntimeContext
 from ..protocol.builder import (
     build_control_error,
@@ -50,7 +48,6 @@ class OutputSegmentCoordinator:
         performance_curves: PerformanceCurveCoordinator,
         observations: MotionObservationRecorder,
         is_turn_terminal: Callable[[str], bool],
-        is_official_inline_anim_compat_enabled: Callable[[], bool],
         finish_turn: Callable[..., Awaitable[None]],
         mark_turn_timing: Callable[[str, str], None],
     ) -> None:
@@ -62,9 +59,6 @@ class OutputSegmentCoordinator:
         self.performance_curves = performance_curves
         self.observations = observations
         self._is_turn_terminal = is_turn_terminal
-        self._is_official_inline_anim_compat_enabled = (
-            is_official_inline_anim_compat_enabled
-        )
         self._finish_turn = finish_turn
         self._mark_turn_timing = mark_turn_timing
         self._pending_segments: dict[str, PendingOutputSegment] = {}
@@ -260,7 +254,6 @@ class OutputSegmentCoordinator:
             else:
                 motion_candidate, motion_resolution_failure = self._resolve_motion(
                     platform_extras=extras,
-                    raw_reply_text=raw_reply_text,
                 )
             if turn_level_independent_motion and not motion_disabled and not persona_plain_echo:
                 if normalized_turn_id in self._turn_level_motion_consumed:
@@ -388,7 +381,6 @@ class OutputSegmentCoordinator:
         self,
         *,
         platform_extras: dict[str, Any],
-        raw_reply_text: str,
     ) -> tuple[dict[str, Any] | None, str]:
         candidates = iter_platform_motion_client_objects(platform_extras)
         persona_segment = _extract_persona_segment(platform_extras)
@@ -403,10 +395,8 @@ class OutputSegmentCoordinator:
                 for candidate in candidates
             )
         logger.info(
-            "WIRING output_motion_candidates count=%s official_inline_compat=%s "
-            "persona_segment_index=%s",
+            "WIRING output_motion_candidates count=%s persona_segment_index=%s",
             len(candidates),
-            self._is_official_inline_anim_compat_enabled(),
             persona_segment[0] if persona_segment is not None else "<missing>",
         )
         if persona_segmented:
@@ -481,26 +471,7 @@ class OutputSegmentCoordinator:
                 "mode": str(motion_object.get("mode") or "preview"),
                 "source": str(motion_object.get("source") or "platform_extras"),
             }, ""
-
-        if not self._is_official_inline_anim_compat_enabled():
-            return None, ""
-        payload, reason = extract_official_inline_anim_motion_intent(raw_reply_text)
-        if payload is None:
-            if reason != "inline_anim_missing":
-                return None, f"official_inline_anim_compat_rejected:{reason}"
-            return None, ""
-        payload, validation_reason = validate_normalized_motion_intent_payload(
-            payload,
-            self.runtime_state,
-            base_reason=reason,
-        )
-        if payload is None:
-            return None, f"official_inline_anim_compat_rejected:{validation_reason}"
-        return {
-            "payload": payload,
-            "mode": "preview",
-            "source": "official_inline_anim_compat",
-        }, ""
+        return None, ""
 
     async def _flush_segment(self, segment: PendingOutputSegment) -> None:
         if segment.sequence is None:

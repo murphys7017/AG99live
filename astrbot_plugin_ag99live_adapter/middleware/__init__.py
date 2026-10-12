@@ -9,9 +9,14 @@ from ..core_compatibility import (
 )
 
 
-def register_ag99live_interaction_contributors(context: Any) -> bool:
+def register_ag99live_interaction_contributors(
+    context: Any,
+    *,
+    persona_effect_enabled: bool = True,
+) -> bool:
     supported = supports_interaction_contributors(context)
     if not supported:
+        set_ag99live_motion_persona_effect_enabled(context, enabled=False)
         required_methods = (
             "register_persona_effect",
             "register_prompt_extension_collector",
@@ -39,13 +44,28 @@ def register_ag99live_interaction_contributors(context: Any) -> bool:
     )
 
     _remove_existing_ag99live_interaction_contributors(context)
-    _register_motion_contributors(context)
+    _register_motion_contributors(
+        context,
+        persona_effect_enabled=persona_effect_enabled,
+    )
     logger.info(
         "WIRING interaction.contributors_registered context_type=%s "
         "capabilities_available=true",
         type(context).__name__,
     )
     return True
+
+
+def set_ag99live_motion_persona_effect_enabled(
+    context: Any,
+    *,
+    enabled: bool,
+) -> bool:
+    from .interaction_motion.effects import (
+        _register_ag99live_motion_persona_effect,
+    )
+
+    return _register_ag99live_motion_persona_effect(context, enabled=enabled)
 
 
 def _remove_existing_ag99live_interaction_contributors(context: Any) -> None:
@@ -71,4 +91,7 @@ def _registration_module_prefixes() -> tuple[str, ...]:
     return tuple(dict.fromkeys(prefix for prefix in candidates if prefix))
 
 
-__all__ = ["register_ag99live_interaction_contributors"]
+__all__ = [
+    "register_ag99live_interaction_contributors",
+    "set_ag99live_motion_persona_effect_enabled",
+]

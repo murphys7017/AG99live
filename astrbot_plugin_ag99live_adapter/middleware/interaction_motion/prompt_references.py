@@ -9,7 +9,6 @@ from ...motion.payload_validation import (
     build_prompt_axis_lookup,
 )
 from ...motion.resource_catalog import validate_motion_resource_id
-from ...protocol.schema_versions import MOTION_INTENT_V4_SCHEMA_VERSION
 
 
 def _project_reference_examples_for_prompt(
@@ -249,54 +248,6 @@ def _select_prompt_resource_candidates(
         counts[resource_type] += 1
         selected.append(item)
     return selected
-
-def _build_official_inline_motion_intent_example(
-    capability_payload: dict[str, Any],
-) -> dict[str, Any]:
-    semantic_profile = capability_payload.get("semantic_profile")
-    intent: dict[str, Any] = {
-        "schema_version": MOTION_INTENT_V4_SCHEMA_VERSION,
-        "profile_id": "",
-        "profile_revision": 1,
-        "model_id": "",
-        "mode": "expressive",
-        "intent_tags": ["语气关键词", "姿态关键词", "场景关键词"],
-        "duration_hint_ms": 1000,
-        "axis_levels": {},
-    }
-    if isinstance(semantic_profile, dict):
-        intent["profile_id"] = str(semantic_profile.get("profile_id") or "")
-        profile_revision = semantic_profile.get("profile_revision")
-        if isinstance(profile_revision, int) and profile_revision > 0:
-            intent["profile_revision"] = profile_revision
-        intent["model_id"] = str(semantic_profile.get("model_id") or "")
-    if isinstance(semantic_profile, dict):
-        prompt_axes = semantic_profile.get("prompt_axes")
-        if isinstance(prompt_axes, list):
-            intent["axis_levels"] = {
-                str(axis.get("id") or "").strip(): _resolve_axis_example_level(
-                    axis,
-                    index=index,
-                )
-                for index, axis in enumerate(
-                    _select_motion_format_example_axes(prompt_axes, limit=5)
-                )
-                if isinstance(axis, dict) and str(axis.get("id") or "").strip()
-            }
-    return intent
-
-def _resolve_axis_example_level(axis: dict[str, Any], *, index: int) -> int:
-    raw_levels = axis.get("available_levels")
-    available_levels = {
-        level
-        for level in raw_levels
-        if isinstance(level, int) and not isinstance(level, bool) and -4 <= level <= 4
-    } if isinstance(raw_levels, list) else set(range(-4, 5))
-    preferred = (3, -3, 2, -2, 1, -1, 0) if index % 2 == 0 else (-3, 3, -2, 2, -1, 1, 0)
-    for level in preferred:
-        if level in available_levels:
-            return level
-    raise ValueError("official_inline_example_axis_has_no_available_level")
 
 def _build_prompt_pose_reference_candidates(
     pose_reference_candidates: list[dict[str, Any]],

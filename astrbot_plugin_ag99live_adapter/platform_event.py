@@ -272,18 +272,6 @@ class OLVPetPlatformEvent(AstrMessageEvent):
             sequence = self._allocate_logical_segment_index()
             self._logical_segment_indexes[message_id] = sequence
         resolved_platform_extras["logical_segment_index"] = sequence
-        if bool(self.get_extra("_ag99live_official_inline_motion_expected", False)):
-            metadata = resolved_platform_extras.get("metadata")
-            resolved_metadata = dict(metadata) if isinstance(metadata, dict) else {}
-            resolved_metadata.setdefault(
-                "ag99live_motion_schedule",
-                {
-                    "scheduled": True,
-                    "source": "official_inline_anim_compat",
-                    "reason": "official_core_inline_motion_requested",
-                },
-            )
-            resolved_platform_extras["metadata"] = resolved_metadata
         await self.adapter.emit_message_chain(
             message_chain=message,
             turn_id=turn_id,

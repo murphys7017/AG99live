@@ -1,10 +1,6 @@
 from __future__ import annotations
 
-import json
-from typing import Any
-
 from ...core_compatibility import get_interaction_capabilities
-from .companion import append_official_companion_prompt
 from .prompt_builder import (
     _build_motion_capability_prompt_payload,
     _build_motion_decision_contract_text,
@@ -97,46 +93,3 @@ class AG99liveMotionPromptContributor:
                 )
             )
         return extensions
-
-def append_official_inline_motion_prompt(event: Any, request: Any) -> bool:
-    bundle = _resolve_motion_runtime_bundle(event)
-    if bundle is None:
-        return False
-
-    capability_payload = _build_motion_static_capability_payload(bundle.runtime_state)
-    runtime_payload, reference_diagnostics = _build_motion_runtime_payload(
-        event,
-        bundle.turn_coordinator,
-        bundle.runtime_state,
-        capability_payload=capability_payload,
-    )
-    _record_motion_prompt_reference_observation(
-        bundle=bundle,
-        event=event,
-        capability_payload=capability_payload,
-        runtime_payload=runtime_payload,
-        reference_diagnostics=reference_diagnostics,
-        source_route="official_inline_anim_compat",
-    )
-
-    sections = [
-        "Live2D Motion Decision:\n" + _build_motion_decision_contract_text(capability_payload),
-        "Live2D Motion Capability:\n"
-        + json.dumps(
-            _build_motion_capability_prompt_payload(capability_payload),
-            ensure_ascii=False,
-            separators=(",", ":"),
-        ),
-    ]
-    if runtime_payload:
-        sections.append(
-            "Live2D Motion Context:\n"
-            + json.dumps(runtime_payload, ensure_ascii=False, separators=(",", ":"))
-        )
-    append_official_companion_prompt(request)
-    current_system_prompt = str(getattr(request, "system_prompt", "") or "").rstrip()
-    request.system_prompt = "\n\n".join(
-        part for part in (current_system_prompt, *sections) if part
-    )
-    event.set_extra("_ag99live_official_inline_motion_expected", True)
-    return True

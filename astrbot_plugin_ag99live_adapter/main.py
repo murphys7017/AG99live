@@ -65,7 +65,16 @@ class MyPlugin(Star):
 
         from .platform_adapter import OLVPetPlatformAdapter  # noqa: F401
 
-        contributors_registered = register_ag99live_interaction_contributors(context)
+        independent_motion_config = self.config.get("independent_motion", {})
+        independent_motion_enabled = bool(
+            independent_motion_config.get("enabled", False)
+            if isinstance(independent_motion_config, dict)
+            else False
+        )
+        contributors_registered = register_ag99live_interaction_contributors(
+            context,
+            persona_effect_enabled=not independent_motion_enabled,
+        )
         self._llm_response_hook_available = supports_llm_response_hook()
         self._official_core_compatibility = (
             not contributors_registered or not self._llm_response_hook_available
@@ -84,18 +93,17 @@ class MyPlugin(Star):
         self._web_control_page_registered = register_web_control_page(context, self)
         if self._official_core_compatibility:
             logger.info(
-                "AG99live official AstrBot compatibility enabled: "
-                "Persona Effect and TTS lifecycle hooks are unavailable; "
-                "using <@anim> V4 and final Record audio facts; "
-                "optional performance curve generation is disabled."
+                "AG99live enhanced interaction is unavailable; "
+                "motion generation and performance curves are disabled."
             )
 
     @filter.on_llm_request()
-    async def append_official_inline_motion_prompt(
+    async def start_independent_motion_generation(
         self,
         event: AstrMessageEvent,
         request: ProviderRequest,
     ) -> None:
+        del request
         from .middleware.interaction_motion.shared import (
             _resolve_motion_runtime_bundle,
         )
@@ -118,79 +126,59 @@ class MyPlugin(Star):
             self._official_core_compatibility,
             bool(event.get_extra("_interaction_protocol_core_bypass")),
         )
-        if (
-            bundle is not None
-            and bool(getattr(bundle.runtime_state, "independent_motion_enabled", False))
-            and not self._official_core_compatibility
-        ):
-            if bool(
-                getattr(
-                    bundle.runtime_state,
-                    "independent_motion_per_speech_segment",
-                    False,
-                )
-            ):
-                logger.info(
-                    "WIRING independent_motion.request_hook mode=per_speech_segment "
-                    "turn_id=%s; waiting for Persona speech segments",
-                    event.get_extra("_turn_id") or "<missing>",
-                )
-                return
-            if bool(
-                getattr(bundle.runtime_state, "independent_motion_parallel", False)
-            ):
-                from .middleware.interaction_motion.independent import (
-                    start_parallel_motion_generation,
-                )
-
-                start_parallel_motion_generation(
-                    event,
-                    bundle,
-                    tasks=self._independent_motion_tasks,
-                )
-                # create_task() only queues the coroutine. Yield once so its
-                # prompt preparation and provider request can overlap the main
-                # model request instead of waiting for the next hook boundary.
-                await asyncio.sleep(0)
-            else:
-                logger.info(
-                    "WIRING independent_motion.request_hook mode=serial "
-                    "turn_id=%s provider=%s",
-                    event.get_extra("_turn_id") or "<missing>",
-                    getattr(
-                        bundle.runtime_state,
-                        "independent_motion_provider_id",
-                        "<missing>",
-                    ),
-                )
+        if bundle is None or not independent_enabled:
             return
-        if independent_enabled and self._official_core_compatibility:
+
+        if self._official_core_compatibility:
             reason = (
                 "llm_response_hook_unavailable"
                 if not self._llm_response_hook_available
                 else "interaction_contributors_unavailable"
             )
             logger.warning(
-                "WIRING independent_motion.disabled reason=%s; "
-                "using_official_inline_motion turn_id=%s",
+                "WIRING independent_motion.disabled reason=%s turn_id=%s",
                 reason,
-                turn_id or "<missing>",
-            )
-
-        if not self._official_core_compatibility:
-            logger.debug(
-                "WIRING official_inline_motion.request_hook_skipped reason="
-                "enhanced_interaction_available platform=%s turn_id=%s",
-                platform_name or "<missing>",
                 turn_id or "<missing>",
             )
             return
 
-        from .middleware.interaction_motion import (
-            append_official_inline_motion_prompt as append_prompt,
-        )
+        if bool(
+            getattr(
+                bundle.runtime_state,
+                "independent_motion_per_speech_segment",
+                False,
+            )
+        ):
+            logger.info(
+                "WIRING independent_motion.request_hook mode=per_speech_segment "
+                "turn_id=%s; waiting for Persona speech segments",
+                event.get_extra("_turn_id") or "<missing>",
+            )
+            return
 
-        append_prompt(event, request)
+        if bool(getattr(bundle.runtime_state, "independent_motion_parallel", False)):
+            from .middleware.interaction_motion.independent import (
+                start_parallel_motion_generation,
+            )
+
+            start_parallel_motion_generation(
+                event,
+                bundle,
+                tasks=self._independent_motion_tasks,
+            )
+            # Let the provider request start while the main model request runs.
+            await asyncio.sleep(0)
+        else:
+            logger.info(
+                "WIRING independent_motion.request_hook mode=serial "
+                "turn_id=%s provider=%s",
+                event.get_extra("_turn_id") or "<missing>",
+                getattr(
+                    bundle.runtime_state,
+                    "independent_motion_provider_id",
+                    "<missing>",
+                ),
+            )
 
     @_optional_llm_response_hook()
     async def resolve_independent_motion_after_llm_response(

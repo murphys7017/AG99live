@@ -52,13 +52,12 @@ sequenceDiagram
         LLM-->>Persona: spoken_reply + effect_calls
         Persona->>Adapter: result contributor 生成 motion_intent.v4
         Adapter->>CurveCoord: 登记当前回复阶段的 pending curve input
+        Adapter->>Segment: 写入 ag99live_motion_schedule<br/>区分未安排、成功和动作失败
     else 官方 Core
-        Persona->>Persona: on_llm_request 注入同一能力与 &lt;@anim&gt; V4 契约
-        Persona->>LLM: 生成可见回复 + &lt;@anim&gt; V4
-        LLM-->>Persona: 可见回复 + inline intent
-        Note over Adapter,TTS: 官方无 TTSState；不启动可选曲线，不伪造 request ID
+        Persona->>LLM: 生成可见回复
+        LLM-->>Persona: 可见回复
+        Note over Adapter,TTS: 官方 Core 不注入动作能力；不启动动作与可选曲线
     end
-    Adapter->>Segment: 写入 ag99live_motion_schedule<br/>区分未安排、成功和动作解析失败
     Adapter->>Adapter: 输出规范化阶段清洗隐藏传输标记
     Persona->>TTS: materialize spoken_reply
     opt 增强版 Core

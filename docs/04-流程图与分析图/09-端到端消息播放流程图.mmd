@@ -29,11 +29,9 @@ flowchart TD
         START[control.turn_started]:::protocol
         COREMODE{Core 能力}:::backend
         PERSONA[增强版 Persona Runtime<br/>Prompt + effect schema]:::backend
-        OFFICIAL[官方 on_llm_request<br/>同一能力 + &lt;@anim&gt; V4]:::backend
+        OFFICIAL[官方 Core<br/>不注入动作能力]:::backend
         LLMENH[增强版主模型<br/>spoken_reply + effect_calls]:::backend
-        LLMOFF[官方主模型<br/>可见回复 + &lt;@anim&gt; V4]:::backend
         EFFECT[result contributor<br/>motion_intent.v4]:::backend
-        INLINE[inline_motion.py<br/>解析并校验 V4 intent]:::backend
         SCHEDULE[ag99live_motion_schedule<br/>动作预期与解析结果]:::backend
         CURVEPENDING[登记当前回复阶段的<br/>pending curve input]:::backend
         NORMALIZE[输出规范化<br/>清洗隐藏传输标记]:::backend
@@ -56,20 +54,16 @@ flowchart TD
         TURN -->|立即 commit_event，不等待旧轮播放| COREQUEUE
         COREQUEUE --> COREMODE
         COREMODE -->|Interaction Runtime| PERSONA --> LLMENH
-        COREMODE -->|官方 Core| OFFICIAL --> LLMOFF
+        COREMODE -->|官方 Core| OFFICIAL --> PLAIN
         LLMENH --> EFFECT
         LLMENH --> PLAIN
-        LLMOFF --> INLINE
-        LLMOFF --> PLAIN
         EFFECT --> SCHEDULE
-        INLINE --> SCHEDULE
         EFFECT --> CURVEPENDING
         PLAIN --> NORMALIZE --> TTS
         NORMALIZE -.增强版 generating.-> TTSSTATE
         CURVEPENDING -. 仅随当前阶段 TTS 消费 .-> TTSSTATE
         TTSSTATE -->|tts_request_id| CURVE
         EFFECT --> BUFFER
-        INLINE --> BUFFER
         SCHEDULE --> BUFFER
         TTS --> BUFFER
         PLAIN --> BUFFER

@@ -25,18 +25,25 @@ from .shared import (
 )
 
 
-def _register_ag99live_motion_persona_effect(context: Any) -> None:
-    capabilities = get_interaction_capabilities()
-    if capabilities is None:
-        return
-
+def _register_ag99live_motion_persona_effect(
+    context: Any,
+    *,
+    enabled: bool = True,
+) -> bool:
     unregister_effects = getattr(context, "unregister_persona_effects", None)
     if callable(unregister_effects):
         unregister_effects(plugin_id=AG99LIVE_PLUGIN_ID)
 
+    if not enabled:
+        return False
+
+    capabilities = get_interaction_capabilities()
+    if capabilities is None:
+        return False
+
     register_effect = getattr(context, "register_persona_effect", None)
     if not callable(register_effect):
-        return
+        return False
 
     register_effect(
         capabilities.persona_effect_spec(
@@ -79,6 +86,7 @@ def _register_ag99live_motion_persona_effect(context: Any) -> None:
         ),
         event_filter=_is_ag99live_motion_effect_event,
     )
+    return True
 
 
 def _build_ag99live_motion_effect_parameters(event: Any) -> dict[str, Any]:

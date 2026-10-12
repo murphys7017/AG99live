@@ -6,22 +6,34 @@ from astrbot_plugin_ag99live_adapter.motion.output_sanitizer import (
 )
 
 
-def test_sanitize_assistant_output_text_removes_inline_anim_and_system_reminder() -> None:
+def test_sanitizer_preserves_anim_text_and_removes_system_reminder() -> None:
+    anim_text = (
+        '<@anim {"mode":"inline","plan":'
+        '{"schema_version":"engine.parameter_plan.v1"}}>'
+    )
     text = (
-        "正常回复内容\n\n"
-        "<system_reminder>internal prompt</system_reminder>\n"
-        '<@anim {"mode":"inline","plan":{"schema_version":"engine.parameter_plan.v1"}}>'
+        "正常回复内容"
+        "<system_reminder>internal prompt</system_reminder>"
+        f"{anim_text}"
     )
 
     sanitized = sanitize_assistant_output_text(text)
 
-    assert sanitized == "正常回复内容"
+    assert sanitized == f"正常回复内容{anim_text}"
     assert "<system_reminder>" not in sanitized
-    assert "<@anim" not in sanitized
 
 
-def test_contains_hidden_output_markup_detects_anim_tag() -> None:
-    assert contains_hidden_output_markup('hello <@anim {"mode":"inline"}>') is True
+def test_anim_tag_is_plain_text_not_hidden_output_markup() -> None:
+    text = 'hello <@anim {"mode":"inline"}>'
+
+    assert contains_hidden_output_markup(text) is False
+    assert sanitize_assistant_output_text(text) == text
+
+
+def test_contains_hidden_output_markup_detects_system_reminder() -> None:
+    assert contains_hidden_output_markup(
+        "<system_reminder>internal</system_reminder>"
+    ) is True
     assert contains_hidden_output_markup("just a normal reply") is False
 
 

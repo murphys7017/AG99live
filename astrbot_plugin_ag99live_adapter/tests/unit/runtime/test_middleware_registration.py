@@ -48,7 +48,7 @@ def _install_middleware_astrbot_stubs(install_fake_astrbot, monkeypatch) -> None
     monkeypatch.setitem(sys.modules, "astrbot.core.interaction", interaction_module)
 
 
-def test_register_ag99live_interaction_contributors_keeps_motion_only(
+def test_register_ag99live_interaction_contributors_tracks_persona_effect_mode(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -112,6 +112,17 @@ def test_register_ag99live_interaction_contributors_keeps_motion_only(
     ]
     assert len(prompt_collectors) == 2
     assert len(result_contributors) == 1
+    assert len(persona_effects) == 1
+    assert not module.set_ag99live_motion_persona_effect_enabled(
+        context,
+        enabled=False,
+    )
+    assert persona_effects == []
+
+    assert module.set_ag99live_motion_persona_effect_enabled(
+        context,
+        enabled=True,
+    )
     assert len(persona_effects) == 1
 
 
@@ -256,23 +267,6 @@ def test_companion_identity_prompt_targets_persona(
     assert extension.meta["targets"] == ["persona"]
     assert "AstrBot 在桌面上的身体" in extension.value
     assert "虚拟主播" in extension.value
-
-
-def test_official_companion_identity_prompt_is_appended(
-    install_fake_astrbot,
-    monkeypatch,
-) -> None:
-    _install_middleware_astrbot_stubs(install_fake_astrbot, monkeypatch)
-    module = importlib.import_module(
-        "astrbot_plugin_ag99live_adapter.middleware.interaction_motion.companion"
-    )
-    module = importlib.reload(module)
-    request = types.SimpleNamespace(system_prompt="existing system prompt")
-
-    module.append_official_companion_prompt(request)
-
-    assert request.system_prompt.startswith("existing system prompt\n\n")
-    assert "桌宠式的长期陪伴者" in request.system_prompt
 
 
 def test_enhanced_interaction_requires_dynamic_effect_schema_support(
@@ -722,12 +716,12 @@ def test_independent_motion_result_matches_sanitized_visible_reply(
     selected = module.take_motion_result_for_turn(
         runtime_state,
         turn_id="turn-1",
-        assistant_text="已经查到了。",
+        assistant_text='已经查到了。<@anim {"motion":"wave"}>',
     )
 
     assert selected is not None
     assert selected.motion_payload == result.motion_payload
-    assert selected.assistant_text == "已经查到了。"
+    assert selected.assistant_text == '已经查到了。<@anim {"motion":"wave"}>'
 
 
 def test_independent_motion_request_uses_prior_text_and_only_current_images(

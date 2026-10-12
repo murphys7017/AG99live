@@ -4,18 +4,22 @@ from typing import Any
 
 from .companion import AG99liveCompanionIdentityPromptContributor
 from .effects import _register_ag99live_motion_persona_effect
-from .prompt import (
-    AG99liveMotionPromptContributor,
-    append_official_inline_motion_prompt,
-)
+from .prompt import AG99liveMotionPromptContributor
 from .scheduling import (
     AG99liveMotionResultContributor,
     start_deferred_performance_curve_request,
 )
 
 
-def register_ag99live_interaction_contributors(context: Any) -> None:
-    _register_ag99live_motion_persona_effect(context)
+def register_ag99live_interaction_contributors(
+    context: Any,
+    *,
+    persona_effect_enabled: bool = True,
+) -> None:
+    _register_ag99live_motion_persona_effect(
+        context,
+        enabled=persona_effect_enabled,
+    )
     register_prompt = context.register_prompt_extension_collector
     register_result = context.register_interaction_result_contributor
     register_prompt(AG99liveCompanionIdentityPromptContributor())
@@ -24,7 +28,6 @@ def register_ag99live_interaction_contributors(context: Any) -> None:
 
 
 __all__ = [
-    "append_official_inline_motion_prompt",
     "register_ag99live_interaction_contributors",
     "start_deferred_performance_curve_request",
 ]

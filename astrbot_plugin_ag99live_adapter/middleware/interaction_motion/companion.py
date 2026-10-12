@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Any
-
 from ...core_compatibility import get_interaction_capabilities
 from .shared import _resolve_motion_runtime_bundle
 
@@ -49,10 +47,3 @@ class AG99liveCompanionIdentityPromptContributor:
                 },
             )
         ]
-
-
-def append_official_companion_prompt(request: Any) -> None:
-    current_system_prompt = str(getattr(request, "system_prompt", "") or "").rstrip()
-    request.system_prompt = "\n\n".join(
-        part for part in (current_system_prompt, COMPANION_IDENTITY_PROMPT) if part
-    )

@@ -71,7 +71,7 @@ Windows 桌面端将已经绘制的透明 Live2D canvas 发布为 Spout2 Sender�
 - 可运行的 AG99 环境、对话模型和 TTS Provider。
 - 与 AG99 和插件依赖兼容的 Python 环境。
 
-增强链路以维护者的 [AG99 配套分支](https://github.com/murphys7017/AG99) 为集成目标。官方 AstrBot 可以通过 `<@anim>` 使用兼容传输入口；该入口不承担增强 Persona Effect 的失败降级。
+增强链路以维护者的 [AG99 配套分支](https://github.com/murphys7017/AG99) 为集成目标。
 
 ### 下载预构建版本
 

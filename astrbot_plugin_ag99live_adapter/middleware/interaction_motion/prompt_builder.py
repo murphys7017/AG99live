@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from .prompt_context import (
@@ -9,20 +8,14 @@ from .prompt_context import (
     _summarize_semantic_profile,
 )
 from .prompt_references import (
-    _build_official_inline_motion_intent_example,
     _build_prompt_pose_reference_candidates,
     _select_prompt_resource_candidates,
 )
 from ...motion.pose_reference import build_pose_reference_candidates
 from ...motion.resource_catalog import build_motion_resource_candidates
-from ...protocol.schema_versions import MOTION_INTENT_V4_SCHEMA_VERSION
 
 def _build_motion_static_capability_payload(runtime_state: Any) -> dict[str, Any]:
-    capability_payload: dict[str, Any] = {
-        "persona_effect_available": bool(
-            getattr(runtime_state, "ag99live_motion_persona_effect_available", True)
-        ),
-    }
+    capability_payload: dict[str, Any] = {}
     profile_payload = _summarize_semantic_profile(runtime_state)
     raw_profile = profile_payload.pop("raw_profile", None)
     if not isinstance(raw_profile, dict):
@@ -58,7 +51,6 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
         isinstance(item, dict) and item.get("resource_type") == "motion"
         for item in resource_candidates or []
     )
-    persona_effect_available = bool(capability_payload.get("persona_effect_available", True))
     resource_field_text = (
         "expression_resource_id 表示可与不冲突姿态叠加的表情资源；"
         "motion_resource_id 表示替代普通参数姿态播放的完整动作资源；"
@@ -79,31 +71,12 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
         "按播放顺序输出 2 到 4 个姿态事件；只有一个稳定姿态时使用 axis_levels。"
         "普通短回复、确认和单一情绪优先 axis_levels；不要因为示例出现 sequence 而生成 motion_steps，也不要按词语、停顿或语音节奏拆分 motion_steps。"
     )
-    if persona_effect_available:
-        output_contract_text = (
-            "你正在控制一个 Live2D 模型，并为本轮回复生成可见动作。"
-            "每个回复片段必须且只能调用一次动作效果；"
-            "不要用多个动作调用表达动作序列。"
-            f"{sequence_guidance}"
-        )
-        output_shape_text = ""
-    else:
-        inline_wrapper = {
-            "mode": "inline",
-            "intent": _build_official_inline_motion_intent_example(capability_payload),
-        }
-        inline_json = json.dumps(
-            inline_wrapper,
-            ensure_ascii=False,
-            separators=(",", ":"),
-        )
-        output_contract_text = (
-            "当前 AstrBot 运行环境不支持动作注入函数；请把动作参数放入官方兼容标签 "
-            "<@anim {...}>，并追加在回复末尾。标签外层只作为传输包装，内部 intent "
-            f"字段必须是 {MOTION_INTENT_V4_SCHEMA_VERSION}，且遵循当前动作参数契约。"
-            f"{sequence_guidance}"
-        )
-        output_shape_text = f" 输出标签示例：<@anim {inline_json}>"
+    output_contract_text = (
+        "你正在控制一个 Live2D 模型，并为本轮回复生成可见动作。"
+        "每个回复片段必须且只能调用一次动作效果；"
+        "不要用多个动作调用表达动作序列。"
+        f"{sequence_guidance}"
+    )
 
     axis_instruction = (
         "等级语义是：-4=夸张负、-3=清晰可见负、-2=克制负、-1=细节负、"
@@ -130,7 +103,6 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
         "视线和表情细节使用对应的辅助轴。等级必须从每个轴自己的 available_levels 中选择：优先较强的可用等级，"
         "克制表达选择较小的可用等级，短时夸张才选择最大可用等级。"
         "示例只展示结构和数值，不要照抄示例内容或把示例的动作形状当作本轮必须复用的模板。"
-        f"{output_shape_text}"
     )
 
 def _build_motion_capability_prompt_payload(

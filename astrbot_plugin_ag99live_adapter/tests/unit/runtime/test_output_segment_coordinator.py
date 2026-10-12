@@ -129,7 +129,6 @@ def test_finalized_segments_flush_in_logical_message_order(
         performance_curves=PerformanceCurves(),
         observations=Observations(),
         is_turn_terminal=lambda _turn_id: False,
-        is_official_inline_anim_compat_enabled=lambda: False,
         finish_turn=finish_turn,
         mark_turn_timing=lambda _turn_id, _key: None,
     )
@@ -172,6 +171,17 @@ def test_finalized_segments_flush_in_logical_message_order(
                 "metadata": persona_schedule(),
             },
         )
+        await coordinator.emit_message_chain(
+            [Plain("tagged output")],
+            turn_id="turn-1",
+            raw_reply_text_override=(
+                'tagged output <@anim {"mode":"inline","intent":{}}>'
+            ),
+            platform_extras={
+                "logical_message_id": "segment-3",
+                "logical_segment_index": 3,
+            },
+        )
         await coordinator.finalize_output_segment(
             turn_id="turn-1",
             message_id="segment-2",
@@ -185,6 +195,10 @@ def test_finalized_segments_flush_in_logical_message_order(
             turn_id="turn-1",
             message_id="segment-0",
         )
+        await coordinator.finalize_output_segment(
+            turn_id="turn-1",
+            message_id="segment-3",
+        )
         await coordinator.close_turn_output_queue(turn_id="turn-1")
 
     asyncio.run(run_case())
@@ -193,12 +207,14 @@ def test_finalized_segments_flush_in_logical_message_order(
         "output.segment",
         "output.segment",
         "output.segment",
+        "output.segment",
         "control.synth_finished",
     ]
-    assert [envelope["message_id"] for envelope in emitted[:3]] == [
+    assert [envelope["message_id"] for envelope in emitted[:4]] == [
         "segment-0",
         "segment-1",
         "segment-2",
+        "segment-3",
     ]
     assert emitted[0]["payload"]["motion"] == {"state": "absent"}
     assert emitted[1]["payload"]["motion"]["payload"]["intent_tags"] == ["segment_1"]
@@ -206,6 +222,7 @@ def test_finalized_segments_flush_in_logical_message_order(
         assert emitted[2]["payload"]["motion"]["payload"]["intent_tags"] == ["segment_2"]
     else:
         assert emitted[2]["payload"]["motion"] == {"state": "absent"}
+    assert emitted[3]["payload"]["motion"] == {"state": "absent"}
     assert emitted[0]["payload"]["speech"] == {"state": "absent"}
     coordinator._flushed_segment_keys.add("turn-2|segment-1")
     coordinator.clear_turn("turn-1")
