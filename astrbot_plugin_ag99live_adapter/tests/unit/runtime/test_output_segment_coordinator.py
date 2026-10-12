@@ -31,6 +31,95 @@ def _install_message_component_stubs(monkeypatch):
     return Plain
 
 
+def test_failed_persona_motion_delivers_audio_and_plain_echo(
+    install_fake_astrbot, monkeypatch,
+) -> None:
+    install_fake_astrbot()
+    Plain = _install_message_component_stubs(monkeypatch)
+    Record = sys.modules["astrbot.api.message_components"].Record
+    module = importlib.import_module(
+        "astrbot_plugin_ag99live_adapter.runtime.output_segment_coordinator"
+    )
+    module = importlib.reload(module)
+    emitted = []
+
+    async def send_json(envelope):
+        emitted.append(envelope)
+        return True
+
+    async def finish_turn(**kwargs):
+        pass
+
+    coordinator = module.OutputSegmentCoordinator(
+        runtime_state=types.SimpleNamespace(),
+        media_service=types.SimpleNamespace(
+            cache_audio_file=lambda path: (path, "http://example.test/audio.wav")
+        ),
+        chat_buffer=types.SimpleNamespace(add=lambda *args: None),
+        speaker_name="assistant",
+        send_json=send_json,
+        performance_curves=types.SimpleNamespace(
+            owns_request=lambda **kwargs: False,
+            commit_output_side_effects=lambda *args: None,
+        ),
+        observations=types.SimpleNamespace(
+            record_motion_slot=lambda *args, **kwargs: None,
+            record_motion_lab_raw_event=lambda **kwargs: None,
+            motion_lab_chat_context=lambda: [],
+        ),
+        is_turn_terminal=lambda turn_id: False,
+        finish_turn=finish_turn,
+        mark_turn_timing=lambda *args: None,
+    )
+    extras = {
+        "logical_message_id": "segment-1",
+        "logical_segment_index": 0,
+        "metadata": {
+            "ag99live_motion_schedule": {
+                "scheduled": False,
+                "source": "independent_provider",
+                "persona_segmented": True,
+                "reason": "motion_payload_missing",
+                "motion_resolution_reason": "independent_segment_work_missing",
+            }
+        },
+    }
+
+    async def run_case():
+        await coordinator.emit_message_chain(
+            [Record("audio.wav", "服务暂不可用")],
+            turn_id="turn-1",
+            platform_extras={
+                **extras, "persona_segment_index": 0, "persona_segment_count": 1,
+            },
+        )
+        await coordinator.emit_message_chain(
+            [Plain("服务暂不可用")], turn_id="turn-1", platform_extras=extras,
+        )
+        with pytest.raises(ValueError, match="output_segment_persona_count_conflict"):
+            await coordinator.emit_message_chain(
+                [Plain("服务暂不可用")],
+                turn_id="turn-1",
+                platform_extras={
+                    **extras, "persona_segment_index": 0, "persona_segment_count": 2,
+                },
+            )
+        await coordinator.finalize_output_segment(
+            turn_id="turn-1", message_id="segment-1",
+        )
+
+    asyncio.run(run_case())
+    assert len(emitted) == 1
+    assert emitted[0]["payload"]["text"] == {
+        "state": "present", "content": "服务暂不可用",
+    }
+    assert emitted[0]["payload"]["audio"]["state"] == "present"
+    assert emitted[0]["payload"]["motion"] == {
+        "state": "failed",
+        "reason": "motion_schedule_failed:independent_segment_work_missing",
+    }
+
+
 @pytest.mark.parametrize("segmented_motion", [True, False])
 def test_finalized_segments_flush_in_logical_message_order(
     install_fake_astrbot,

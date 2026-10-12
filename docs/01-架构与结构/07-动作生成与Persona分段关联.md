@@ -62,6 +62,12 @@ sequenceDiagram
 
 独立 Provider 超时、返回空内容、JSON 解析失败或动作校验失败，只影响对应动作结果；分段文本和索引仍保留，段动作按明确失败状态处理，不会挪用其他段动作。Turn 中断会停止/丢弃该 Turn 的在飞生成任务，迟到结果不能重新绑定到后续 Turn。是否满足目标环境中的延迟和恢复体验仍需使用真实 Core、Provider、TTS 和桌面端验收。
 
+动作生成缺失的失败原因统一为 `motion_schedule_failed:<原因>`。Core 双输出的无索引 Plain
+回声不再重复写入动作期望或动作失败状态；同一逻辑段的动作状态由带 Persona 索引的
+TTS 投递负责。动作失败仍以 `motion.state=failed` 随文本、音频一起提交原子段，前端不播放
+该段语义动作，但继续消费文本与音频。身份、段数冲突以及动作成功与失败相互覆盖仍被拒绝；
+不会把失败伪装为默认动作成功。
+
 ## 与 speech cues 的区别
 
 Persona `segments[].speech` 是回复文本和 TTS 的分段输入；它不是 WebSocket `output.segment.payload.speech` 中的 speech cues。协议仍定义可选 speech cues，但当前 Adapter 输出会把该 slot 写为 `absent`。不要把 Persona 分段存在误读成前端收到 speech cues，也不要以旧 `speech_cues` 字段是否存在判断分段动作是否工作。

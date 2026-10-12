@@ -1,3 +1,26 @@
+persona_motion_plain_echo_failure_20261012:
+  date: '2026-10-12'
+  class: bugfix
+  risk: medium
+  scope: >-
+    Unify missing segment motion and schedule failure reasons in the output
+    coordinator. Unindexed Persona Plain echoes do not require or overwrite
+    motion state; failed motion still accompanies delivered text and audio.
+  non_goals: >-
+    Change output.segment.v5, weaken identity or success/failure conflicts,
+    alter frontend playback, change JSON parsing, or restart the running host.
+  verification: >-
+    Three output coordinator boundary smoke checks passed: ordered successful motion
+    and a failed-motion Record plus Plain echo reaching output.segment with
+    text/audio present; conflicting Persona segment counts remain rejected.
+    No-cache Ruff F checks, in-memory Python syntax compilation, YAML parsing,
+    and git diff checks passed. Installed and source coordinators have matching
+    SHA256 hashes. Initial TEMP and Ruff cache permission errors were resolved
+    using an available temporary directory and no-cache checks.
+  evidence_gap: >-
+    No live Provider, Electron/native playback, audio, or Live2D run has
+    verified the change. The running host has not been restarted or reloaded.
+
 native_runtime_turn_playback_ack:
   recorded_at: "2026-10-04"
   reviewed_at: "2026-10-05"

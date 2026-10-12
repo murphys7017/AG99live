@@ -263,7 +263,9 @@ class OutputSegmentCoordinator:
                 else:
                     if motion_candidate is not None or motion_expected:
                         self._turn_level_motion_consumed.add(normalized_turn_id)
-            if motion_disabled:
+            if persona_plain_echo or motion_disabled:
+                # An unindexed Plain echo only contributes visible text. The
+                # indexed TTS delivery owns this logical segment's motion state.
                 motion_expected = False
                 motion_failure_reason = ""
             logger.info(
@@ -430,7 +432,7 @@ class OutputSegmentCoordinator:
                     if isinstance(schedule, dict)
                     else ""
                 ) or "persona_motion_payload_missing"
-                return None, f"persona_motion_segment_missing:{reason}"
+                return None, f"motion_schedule_failed:{reason}"
             candidates = matching
         elif candidates:
             # A Persona-indexed action without matching Record metadata must
