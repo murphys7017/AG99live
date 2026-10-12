@@ -1,3 +1,29 @@
+persona_segment_ready_delivery_20261013:
+  date: '2026-10-13'
+  class: feature
+  risk: high
+  scope: >-
+    Per-segment motion Futures publish individual results before the batch task
+    completes. The motion finalizer opts into segment materialization and waits
+    only for the requested index, retaining work until the last output. OLV
+    accepts incremental Persona parts and flushes ready logical segments without
+    closing their parent or Turn. Existing ID binding and ordered coordinator
+    remain authoritative.
+  verification: >-
+    Public finalizer boundary emits index zero while the full batch is pending,
+    and removes work after index one. Public platform send/flush boundary keeps
+    parent and turn open until completion. Core public delivery smoke also covers
+    early first output, cancellation and a later TTS failure. Real providers,
+    Electron and Live2D playback remain unverified.
+  assumptions: >-
+    Requires the matching AstrBot segment-materialization contribution contract.
+    Current local plugin config changed to parallel=true and max_concurrency=2;
+    installed-source synchronization uses the repository post-commit hook;
+    running host reload remains pending.
+  non_goals: >-
+    No restart. No partial Persona JSON parsing or changes to frontend
+    output.segment wire schema. No effect/tool execution before validation.
+
 motion_text_inputs_prompt_logs_20261013:
   date: '2026-10-13'
   class: refactor

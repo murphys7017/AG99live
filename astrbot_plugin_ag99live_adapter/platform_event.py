@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 from copy import copy
 from typing import Any, Protocol
@@ -127,6 +128,10 @@ class OLVPetPlatformEvent(AstrMessageEvent):
             return
         previous_has_send_oper = self._has_send_oper
         resolved_platform_extras = dict(platform_extras or {})
+        if resolved_platform_extras.pop("persona_incremental_delivery", False):
+            resolved_platform_extras["_ag99live_persona_split_applied"] = True
+            resolved_platform_extras["_ag99live_persona_parent_message_id"] = resolved_platform_extras.pop("persona_delivery_parent_message_id", "")
+            resolved_platform_extras["_ag99live_raw_reply_text_override"] = resolved_platform_extras.get("semantic_text", "")
         split_applied = bool(
             resolved_platform_extras.pop("_ag99live_persona_split_applied", False)
         )
@@ -311,6 +316,17 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         await self.adapter.turn_coordinator.abort_turn_from_backend(
             turn_id=turn_id,
             reason=reason,
+        )
+
+    async def flush_visible_segment(self, *, message_id: str) -> None:
+        """Emit one ready segment without completing its parent or Turn."""
+        if self._is_stop_requested():
+            raise asyncio.CancelledError
+        turn_id = str(self.get_extra("output_correlation_id", "") or "").strip()
+        if not turn_id or not str(message_id or "").strip():
+            raise RuntimeError("output_event_segment_identity_missing")
+        await self.adapter.turn_coordinator.finalize_output_segment(
+            turn_id=turn_id, message_id=message_id,
         )
 
     async def complete_visible_message(self, *, message_id: str) -> None:

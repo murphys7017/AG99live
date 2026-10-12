@@ -492,7 +492,13 @@ class MyPlugin(Star):
                     "phase": phase,
                     "speech_segments": speech_segments,
                     "tts_bindings_by_index": {},
+                    "segment_result_futures": {
+                        index: asyncio.get_running_loop().create_future()
+                        for index, speech in enumerate(speech_segments) if speech.strip()
+                    },
                 }
+                for future in work["segment_result_futures"].values():
+                    future.add_done_callback(lambda result: result.exception() if not result.cancelled() else None)
 
                 async def _generate_for_persona_result():
                     generation_task = asyncio.current_task()
@@ -513,7 +519,11 @@ class MyPlugin(Star):
                                 )
                             ),
                             tasks=self._independent_motion_tasks,
+                            segment_result_futures=work["segment_result_futures"],
                         )
+                        for index, future in work["segment_result_futures"].items():
+                            if not future.done():
+                                future.set_result(result_map.get(index))
                         if event.get_extra("agent_stop_requested", False):
                             logger.debug(
                                 "WIRING independent_motion.segment_results_discarded "
@@ -536,6 +546,9 @@ class MyPlugin(Star):
                         )
                         return {}
                     finally:
+                        for future in work["segment_result_futures"].values():
+                            if not future.done():
+                                future.cancel() if event.get_extra("agent_stop_requested", False) else future.set_result(None)
                         if isinstance(generation_task, asyncio.Task):
                             untrack_motion_generation_task(
                                 bundle.runtime_state,

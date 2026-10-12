@@ -247,6 +247,7 @@ class AG99liveMotionResultContributor:
             priority=self.priority,
         )
         if isinstance(deferred_work, dict):
+            contribution.supports_segment_materialization = True
             finalizers = getattr(contribution, "post_materialization", None)
             if isinstance(finalizers, list):
                 finalizers.append(self.finalize_output)
@@ -276,7 +277,7 @@ class AG99liveMotionResultContributor:
         persona_result_id: str | None,
         materialization: Mapping[str, Any],
     ):
-        del plugin_context, materialization
+        del plugin_context
         normalized_result_id = str(persona_result_id or "").strip()
         normalized_turn_id = str(turn_id or "").strip()
         if not normalized_result_id or not normalized_turn_id:
@@ -310,9 +311,19 @@ class AG99liveMotionResultContributor:
         task = work.get("task")
         if not hasattr(task, "__await__"):
             return None
+        segment_index = materialization.get("persona_segment_index")
+        incremental = isinstance(segment_index, int) and not isinstance(segment_index, bool)
+        last_segment = bool(materialization.get("persona_last_output_segment"))
         try:
-            results_by_index = await asyncio.shield(task)
+            if incremental:
+                future = work.get("segment_result_futures", {}).get(segment_index)
+                result = await asyncio.shield(future) if future is not None else None
+                results_by_index = {segment_index: result}
+            else:
+                results_by_index = await asyncio.shield(task)
         except asyncio.CancelledError:
+            if incremental and last_segment:
+                remove_persona_motion_work(bundle.runtime_state, turn_id=normalized_turn_id, persona_result_id=normalized_result_id)
             raise
         except Exception as exc:  # noqa: BLE001
             logger.warning(
@@ -465,11 +476,12 @@ class AG99liveMotionResultContributor:
                     }
                 )
 
-        remove_persona_motion_work(
-            bundle.runtime_state,
-            turn_id=normalized_turn_id,
-            persona_result_id=normalized_result_id,
-        )
+        if not incremental or last_segment:
+            remove_persona_motion_work(
+                bundle.runtime_state,
+                turn_id=normalized_turn_id,
+                persona_result_id=normalized_result_id,
+            )
         logger.debug(
             "WIRING independent_motion.segment_finalized turn_id=%s "
             "parent_message_id=%s persona_result_id=%s phase=%s "

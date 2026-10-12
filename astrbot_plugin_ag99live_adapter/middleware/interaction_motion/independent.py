@@ -300,6 +300,7 @@ async def generate_independent_motion_for_segments(
     parallel: bool,
     tasks: set[asyncio.Task],
     segment_intents: tuple[dict[str, Any], ...] = (),
+    segment_result_futures: dict[int, asyncio.Future] | None = None,
 ) -> dict[int, IndependentMotionResult]:
     """Generate one independent Provider result for each nonempty speech segment."""
     started = perf_counter()
@@ -441,6 +442,20 @@ async def generate_independent_motion_for_segments(
         )
         tasks.add(task)
         task.add_done_callback(tasks.discard)
+        if segment_result_futures is not None and index in segment_result_futures:
+            future = segment_result_futures[index]
+
+            def publish(completed):
+                if future.done():
+                    return
+                if completed.cancelled():
+                    future.cancel()
+                elif completed.exception() is not None:
+                    future.set_exception(completed.exception())
+                else:
+                    future.set_result(completed.result())
+
+            task.add_done_callback(publish)
         return task
 
     results: dict[int, IndependentMotionResult] = {}

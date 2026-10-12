@@ -130,6 +130,32 @@ def _build_event(module, *, images: list[dict] | None):
     return event
 
 
+def test_incremental_segments_flush_without_closing_parent_turn(
+    install_fake_astrbot, monkeypatch,
+) -> None:
+    _install_platform_event_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    event = _build_event(_load_platform_event_module(), images=[])
+
+    async def run():
+        for index, text in enumerate(("first", "second")):
+            message_id = f"segment-{index}"
+            await event.send_message_with_extras([Plain(text)], platform_extras={
+                "logical_message_id": message_id,
+                "persona_incremental_delivery": True,
+                "persona_delivery_parent_message_id": "parent",
+                "persona_segment_index": index, "persona_segment_count": 2,
+                "semantic_text": text,
+            }, record_send_operation=False)
+            await event.flush_visible_segment(message_id=message_id)
+            assert event.adapter.finalized_segments == [("turn-1", f"segment-{i}") for i in range(index + 1)]
+            assert event.adapter.closed_output_queues == []
+        await event.complete_visible_message(message_id="parent")
+
+    asyncio.run(run())
+    assert [call["message_chain"][0].text for call in event.adapter.emit_calls] == ["first", "second"]
+    assert event.adapter.closed_output_queues == []
+
+
 def test_prompt_annotations_skip_desktop_snapshot_without_screen_image(
     install_fake_astrbot,
     monkeypatch,

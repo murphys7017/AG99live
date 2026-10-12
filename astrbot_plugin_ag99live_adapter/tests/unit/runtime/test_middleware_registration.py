@@ -376,6 +376,61 @@ def test_independent_motion_results_match_each_visible_persona_reply(
     assert runtime_state.independent_motion_result_cache == {}
 
 
+def test_incremental_motion_finalizer_only_waits_for_requested_segment(
+    install_fake_astrbot, monkeypatch,
+) -> None:
+    _install_middleware_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = importlib.reload(importlib.import_module(
+        "astrbot_plugin_ag99live_adapter.middleware.interaction_motion.scheduling"
+    ))
+    independent = importlib.import_module(
+        "astrbot_plugin_ag99live_adapter.middleware.interaction_motion.independent"
+    )
+    state = SimpleNamespace()
+    event = SimpleNamespace(
+        get_platform_id=lambda: "olv_pet_adapter", get_platform_name=lambda: "olv_pet_adapter",
+        get_extra=lambda key, default=None: {"_turn_id": "core-turn"}.get(key, default),
+        adapter=SimpleNamespace(turn_coordinator=SimpleNamespace(runtime_state=state)),
+        message_obj=SimpleNamespace(raw_message={"turn_id": "frontend-turn"}),
+    )
+
+    async def run():
+        loop = asyncio.get_running_loop()
+        futures = {index: loop.create_future() for index in range(2)}
+        first = independent.IndependentMotionResult("first", {"intent_tags": ["first"]}, "ok", 0)
+        second = independent.IndependentMotionResult("second", {"intent_tags": ["second"]}, "ok", 0)
+        futures[0].set_result(first)
+
+        async def all_results():
+            return {0: first, 1: await futures[1]}
+
+        task = asyncio.create_task(all_results())
+        work = {"phase": "immediate", "parent_message_id": "parent",
+                "speech_segments": ("first", "second"), "task": task,
+                "segment_result_futures": futures, "tts_bindings_by_index": {}}
+        assert independent.store_persona_motion_work(state, turn_id="core-turn", persona_result_id="persona", work=work)
+        contributor = module.AG99liveMotionResultContributor()
+        first_output = await asyncio.wait_for(contributor.finalize_output(
+            event, object(), turn_id="core-turn", phase="immediate",
+            parent_message_id="parent", persona_result_id="persona",
+            materialization={"persona_segment_index": 0, "persona_last_output_segment": False},
+        ), timeout=0.2)
+        assert first_output.client_objects[0]["persona_segment_index"] == 0
+        assert not task.done()
+        assert independent.get_persona_motion_work(state, turn_id="core-turn", persona_result_id="persona") is not None
+        futures[1].set_result(second)
+        second_output = await contributor.finalize_output(
+            event, object(), turn_id="core-turn", phase="immediate",
+            parent_message_id="parent", persona_result_id="persona",
+            materialization={"persona_segment_index": 1, "persona_last_output_segment": True},
+        )
+        assert second_output.client_objects[0]["persona_segment_index"] == 1
+        assert independent.get_persona_motion_work(state, turn_id="core-turn", persona_result_id="persona") is None
+        await task
+
+    asyncio.run(run())
+
+
 def test_independent_motion_segment_results_preserve_speech_indexes(
     install_fake_astrbot,
     monkeypatch,
