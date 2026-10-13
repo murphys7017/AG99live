@@ -118,7 +118,11 @@ function applyOutputSegment(
             }
           : payload.audio,
         motion: payload.motion.state === "present"
-          ? { state: "present", payload: normalizedMotion as NormalizedMotionPayload }
+          ? {
+              state: "present",
+              payload: normalizedMotion as NormalizedMotionPayload,
+              source: payload.motion.source,
+            }
           : payload.motion,
         speech: payload.speech,
       };

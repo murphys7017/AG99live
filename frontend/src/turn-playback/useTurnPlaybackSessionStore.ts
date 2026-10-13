@@ -362,6 +362,7 @@ export function useTurnPlaybackSessionStore() {
 
     if (material.motion.state === "present") {
       segment.motion.payload = material.motion.payload;
+      segment.motion.source = material.motion.source;
       segment.motion.receivedAtMs = receivedAtMs;
     } else if (material.motion.state === "absent") {
       segment.motion.absent = true;
@@ -522,6 +523,7 @@ export function useTurnPlaybackSessionStore() {
       return;
     }
     segment.motion.payload = null;
+    segment.motion.source = null;
     segment.motion.receivedAtMs = null;
     segment.motion.absent = true;
     segment.motion.released = false;

@@ -210,6 +210,7 @@ export function executePlaybackTimelineSegmentJob<TMotionPayload>(
           messageId: job.messageId,
           assistantText: job.text.content ?? "",
           speechCues: job.speech.cues,
+          motionSource: job.motion.source,
           receivedAtMs,
           timelineMode,
         },

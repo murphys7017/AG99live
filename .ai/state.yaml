@@ -1,3 +1,23 @@
+neurobrain_persona_result_motion_context_20261013:
+  date: '2026-10-13'
+  class: bugfix
+  risk: high
+  scope: >-
+    Restrict NeuroBrain state enrichment to independent motion generated per
+    Persona speech segment. Pass persona_result_id into the one shared motion
+    context preparation, wait up to one second for that exact update, and omit
+    NeuroBrain state on timeout rather than use a previous cached snapshot.
+    AstrBot remains the only writer, other plugins use its read-only API, and
+    the output.segment.v5 protocol remains unchanged.
+  validation: >-
+    Focused AG99live middleware tests passed (19); focused AstrBot interaction
+    tests passed (52); NeuroBrain WebSocket/API tests passed (11) with uv.
+    AstrBot bridge-hook smoke, plugin structure check, Ruff, Python compilation,
+    scoped diff checks, and a loopback WebSocket authorization/state smoke passed.
+  evidence_gap: >-
+    No live NeuroBrain WebSocket, AstrBot, AG99live, TTS, Electron, and Live2D
+    acceptance. No host restart or commit.
+
 persona_motion_failure_contract_fix_20261013:
   date: '2026-10-13'
   class: bugfix
@@ -16,7 +36,7 @@ persona_motion_failure_contract_fix_20261013:
   evidence_gap: >-
     No live Provider timeout/parser failure or interrupt/reconnect acceptance.
     Hidden-markup segment projection has no live acceptance. No deployment, host
-    restart or commit. Curve enablement and motion Prompt optimization were
+    restart. Curve enablement and motion Prompt optimization were
     reviewed only; no configuration or model input changes.
 
 persona_action_playback_boundary_fix_20261013:

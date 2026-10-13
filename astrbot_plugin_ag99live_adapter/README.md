@@ -58,6 +58,12 @@ AG99 Persona
 
 `history_turns` 控制附带的最近纯文本对话轮数（默认 6，范围 0–20）。动作 Provider 不接收图片、截图上下文说明或工具消息；主回复模型的图片输入不受影响。分段模式输入当前 `speech`、`actions`、`tendency`，并复用本轮已取得、允许模型读取的记忆摘要（最多 6 条，每条 240 字符），不额外检索记忆。Prompt 保留合法轴/等级和资源约束。另保留最多 2 个相关示例和最近 3 个执行动作，全部投影为当前输出契约的 input/output 结构；移除运行标识，跳过不兼容或超过 2400 字符的单条参考，不截断 JSON。当前 actions 优先于参考。分段模式另有 `max_concurrency`（默认 4，最大 8）和 `segment_timeout_seconds`（默认 5 秒，最大 60 秒；0 表示不限制单段请求），完整 Core 汇合仍受 30 秒上限约束。详细 WIRING 过程日志使用 DEBUG，分段生成摘要和最终投递保留 INFO，异常保留 WARN/ERROR。
 
+### NeuroBrain 状态上下文
+
+当同一 AstrBot 进程加载并启用 `astrbot_plugin_neurobrain` 时，按 Persona speech 分段的独立动作链路会通过该插件的只读 API 等待当前 `persona_result_id` 对应的状态更新，最多等待 1 秒。动作 prompt 只接收经过范围校验的 `emotion`、`behavior`、`last_tendency` 和 `step`；对应更新未到达时省略 NeuroBrain 状态，不回退到上一轮缓存。整条回复独立动作链路不读取 NeuroBrain。AG99live 不会直接连接 NeuroBrain WebSocket，也不会推进状态。
+
+NeuroBrain 状态只是动作选择的辅助信号，不是动作命令；动作结果仍必须通过现有校验、`engine.motion_intent.v4` 和 `output.segment.v5` 发送链路。该接入不增加协议字段、不改变段身份、不改变播放时钟。
+
 Persona `segments[].speech` 是 TTS 文本分段，不是协议中的 speech cues。协议 slot 仍可承载可选 speech cues，但当前 Adapter 输出 `speech: absent`。详见[动作生成与 Persona 分段关联](../docs/01-架构与结构/07-动作生成与Persona分段关联.md)。
 
 ## 音频输入和取消

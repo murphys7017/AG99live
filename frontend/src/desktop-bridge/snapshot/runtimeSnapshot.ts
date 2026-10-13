@@ -287,6 +287,7 @@ function cloneMotionPlaybackRecord(
         payloadKind,
         messageId: normalizeText(record.messageId),
         playbackTurnId,
+        motionSource: normalizeOptionalText(record.motionSource),
         emotionLabel: normalizeText(record.emotionLabel) || motion.emotion_label || motion.label || motion.motion_id,
         mode: payloadKind === "semantic_motion_resource" && record.mode === "idle"
           ? "idle"
@@ -330,6 +331,7 @@ function cloneMotionPlaybackRecord(
       payloadKind,
       messageId: normalizeText(record.messageId),
       playbackTurnId,
+      motionSource: normalizeOptionalText(record.motionSource),
       emotionLabel: normalizeText(record.emotionLabel) || plan.emotion_label,
       mode: plan.mode,
       diagnostics: diagnostics as DesktopMotionPlaybackRecord["diagnostics"],

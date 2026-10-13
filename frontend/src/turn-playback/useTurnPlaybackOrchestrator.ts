@@ -163,6 +163,7 @@ export function useTurnPlaybackOrchestrator(
       },
       motion: {
         payload: motionPayload,
+        source: releaseMotion ? segment.motion.source : null,
         receivedAtMs,
       },
       speech: {

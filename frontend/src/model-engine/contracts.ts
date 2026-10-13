@@ -10,6 +10,7 @@ export interface InboundPayloadContext {
   turnId: string | null;
   assistantText: string;
   speechCues: readonly OutputSegmentSpeechCue[];
+  motionSource?: string | null;
   playbackTurnId?: string | null;
   receivedAtMs: number;
   playbackClock?: MotionPlaybackClockContext | null;

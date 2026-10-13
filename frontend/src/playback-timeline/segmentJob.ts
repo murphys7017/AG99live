@@ -16,6 +16,7 @@ export interface PlaybackTimelineSegmentJob<TMotionPayload = unknown> {
   };
   motion: {
     payload: TMotionPayload | null;
+    source: string | null;
     receivedAtMs: number | null;
   };
   speech: {

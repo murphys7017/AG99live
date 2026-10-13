@@ -66,6 +66,9 @@ function testMapsAtomicOutputSegment(): void {
   assert.equal(event.messageId, "message-1");
   assert.equal(event.payload.audio.state, "present");
   assert.equal(event.payload.motion.state, "present");
+  if (event.payload.motion.state === "present") {
+    assert.equal(event.payload.motion.source, "persona_effect");
+  }
   assert.equal(event.payload.speech.state, "present");
 }
 

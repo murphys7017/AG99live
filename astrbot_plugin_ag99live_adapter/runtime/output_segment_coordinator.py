@@ -427,21 +427,15 @@ class OutputSegmentCoordinator:
             if len(matching) > 1:
                 return None, "output_segment_persona_multiple_motion_objects"
             if not matching:
-                failure_reasons = schedule.get("persona_motion_failure_reasons") if isinstance(schedule, dict) else None
-                segment_reason = (
-                    failure_reasons.get(str(persona_segment[0]))
-                    if isinstance(failure_reasons, dict) else None
+                reason = _resolve_persona_segment_failure_reason(
+                    schedule,
+                    segment_index=persona_segment[0],
                 )
-                reason = (
-                    str(segment_reason or schedule.get("motion_resolution_reason") or "").strip()
-                    if isinstance(schedule, dict)
-                    else ""
-                ) or "persona_motion_payload_missing"
                 return None, f"motion_schedule_failed:{reason}"
             candidates = matching
         elif candidates:
-            # A Persona-indexed action without matching Record metadata must
-            # never fall through to the legacy single-action behavior.
+            # An indexed action without matching segment metadata is invalid;
+            # it must not be treated as a turn-level action.
             unindexed_candidates = [
                 candidate
                 for candidate in candidates
@@ -730,6 +724,24 @@ def _extract_motion_schedule(platform_extras: dict[str, Any]) -> dict[str, Any] 
         return None
     schedule = metadata.get("ag99live_motion_schedule")
     return schedule if isinstance(schedule, dict) else None
+
+
+def _resolve_persona_segment_failure_reason(
+    schedule: dict[str, Any] | None,
+    *,
+    segment_index: int,
+) -> str:
+    if not isinstance(schedule, dict):
+        return "persona_motion_payload_missing"
+    failure_reasons = schedule.get("persona_motion_failure_reasons")
+    if isinstance(failure_reasons, dict):
+        segment_reason = str(failure_reasons.get(str(segment_index)) or "").strip()
+        if segment_reason:
+            return segment_reason
+    return (
+        str(schedule.get("motion_resolution_reason") or "").strip()
+        or "persona_motion_payload_missing"
+    )
 
 
 def _extract_platform_tts_delivery_state(

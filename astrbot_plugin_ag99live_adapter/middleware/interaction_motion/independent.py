@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
@@ -44,6 +45,7 @@ _MAX_RETAINED_RESULT_TURNS = 64
 _PARALLEL_MOTION_WAIT_SECONDS = 2.0
 _DEFAULT_SEGMENT_MAX_CONCURRENCY = 4
 _DEFAULT_SEGMENT_TIMEOUT_SECONDS = 5.0
+_NEUROBRAIN_RESULT_WAIT_SECONDS = 1.0
 
 
 def _consume_background_motion_exception(task: asyncio.Task) -> None:
@@ -75,6 +77,116 @@ class IndependentMotionContext:
     capability_payload: dict[str, Any]
     runtime_payload: dict[str, Any]
     reference_diagnostics: tuple[str, ...]
+    neurobrain_state: dict[str, Any] | None = None
+
+
+_NEUROBRAIN_EMOTION_KEYS = (
+    "joy",
+    "trust",
+    "fear",
+    "surprise",
+    "sadness",
+    "disgust",
+    "anger",
+    "anticipation",
+)
+_NEUROBRAIN_BEHAVIOR_KEYS = (
+    "engagement",
+    "avoidance",
+    "expression",
+    "exploration",
+    "initiative",
+    "activation",
+)
+_NEUROBRAIN_TENDENCY_KEYS = (
+    "Joy",
+    "Trust",
+    "Fear",
+    "Surprise",
+    "Sadness",
+    "Disgust",
+    "Anger",
+    "Anticipation",
+)
+
+
+def _project_neurobrain_state(snapshot: Any) -> dict[str, Any] | None:
+    """Keep only bounded numeric state needed by the action generator."""
+
+    if not isinstance(snapshot, Mapping):
+        return None
+
+    def _unit_mapping(value: Any, keys: tuple[str, ...]) -> dict[str, float]:
+        if not isinstance(value, Mapping):
+            return {}
+        result: dict[str, float] = {}
+        for key in keys:
+            raw = value.get(key)
+            if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+                continue
+            number = float(raw)
+            if math.isfinite(number):
+                result[key] = max(0.0, min(1.0, number))
+        return result
+
+    def _tendency_mapping(value: Any) -> dict[str, int]:
+        if not isinstance(value, Mapping):
+            return {}
+        result: dict[str, int] = {}
+        for key in _NEUROBRAIN_TENDENCY_KEYS:
+            raw = value.get(key)
+            if isinstance(raw, bool) or not isinstance(raw, int):
+                continue
+            result[key] = max(0, min(10, raw))
+        return result
+
+    emotion = _unit_mapping(snapshot.get("emotion"), _NEUROBRAIN_EMOTION_KEYS)
+    behavior = _unit_mapping(snapshot.get("behavior"), _NEUROBRAIN_BEHAVIOR_KEYS)
+    tendency = _tendency_mapping(snapshot.get("last_tendency"))
+    if not emotion and not behavior and not tendency:
+        return None
+
+    raw_step = snapshot.get("step")
+    step = raw_step if isinstance(raw_step, int) and not isinstance(raw_step, bool) else 0
+    return {
+        "step": max(0, step),
+        "emotion": emotion,
+        "behavior": behavior,
+        "last_tendency": tendency,
+    }
+
+
+async def _wait_for_neurobrain_state(
+    bundle: _MotionRuntimeBundle,
+    *,
+    persona_result_id: str | None,
+) -> dict[str, Any] | None:
+    """Read the snapshot produced by this Persona result, without advancing it."""
+
+    result_id = str(persona_result_id or "").strip()
+    if not result_id:
+        return None
+    context = getattr(bundle.runtime_state, "plugin_context", None)
+    get_registered_star = getattr(context, "get_registered_star", None)
+    if not callable(get_registered_star):
+        return None
+    try:
+        metadata = get_registered_star("astrbot_plugin_neurobrain")
+        plugin = getattr(metadata, "star_cls", None)
+        if not bool(getattr(plugin, "enabled", True)):
+            return None
+        readonly_api = getattr(plugin, "readonly_api", None)
+        wait_for_result = getattr(readonly_api, "wait_for_persona_result", None)
+        if not callable(wait_for_result):
+            return None
+        snapshot = await wait_for_result(
+            result_id,
+            timeout_seconds=_NEUROBRAIN_RESULT_WAIT_SECONDS,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("NeuroBrain state unavailable to motion provider: %s", exc)
+        return None
+    return _project_neurobrain_state(snapshot)
 
 
 def is_persona_expression_request(request: Any) -> bool:
@@ -232,6 +344,8 @@ def untrack_motion_generation_task(
 async def _prepare_independent_motion_context(
     event: Any,
     bundle: _MotionRuntimeBundle,
+    *,
+    persona_result_id: str | None,
 ) -> IndependentMotionContext | None:
     """Build one stable context snapshot for all segments in a turn."""
     current_user_text = _dialogue_text(str(getattr(event, "message_str", "") or ""))
@@ -282,6 +396,10 @@ async def _prepare_independent_motion_context(
         source_route="independent_provider",
     )
     runtime_payload["recent_executed_motions"] = _resolve_prompt_motion_history(bundle.turn_coordinator)[-3:]
+    neurobrain_state = await _wait_for_neurobrain_state(
+        bundle,
+        persona_result_id=persona_result_id,
+    )
     return IndependentMotionContext(
         current_user_text=current_user_text,
         memories=_motion_memory_summaries(event),
@@ -289,6 +407,7 @@ async def _prepare_independent_motion_context(
         capability_payload=capability_payload,
         runtime_payload=runtime_payload,
         reference_diagnostics=tuple(reference_diagnostics),
+        neurobrain_state=neurobrain_state,
     )
 
 
@@ -299,6 +418,7 @@ async def generate_independent_motion_for_segments(
     speech_segments: tuple[str, ...],
     parallel: bool,
     tasks: set[asyncio.Task],
+    persona_result_id: str | None = None,
     segment_intents: tuple[dict[str, Any], ...] = (),
     segment_result_futures: dict[int, asyncio.Future] | None = None,
 ) -> dict[int, IndependentMotionResult]:
@@ -346,7 +466,11 @@ async def generate_independent_motion_for_segments(
         segment_timeout_seconds = _DEFAULT_SEGMENT_TIMEOUT_SECONDS
 
     try:
-        context_preparation = _prepare_independent_motion_context(event, bundle)
+        context_preparation = _prepare_independent_motion_context(
+            event,
+            bundle,
+            persona_result_id=persona_result_id,
+        )
         if segment_timeout_seconds > 0:
             shared_context = await asyncio.wait_for(
                 context_preparation,
@@ -867,11 +991,18 @@ async def generate_independent_motion(
             capability_payload = prepared_context.capability_payload
             runtime_payload = prepared_context.runtime_payload
 
+        neurobrain_state = (
+            prepared_context.neurobrain_state
+            if prepared_context is not None
+            else None
+        )
+
         prompt = _build_current_turn_prompt(
             current_user_text=current_user_text,
             assistant_text=assistant_text,
             memories=prepared_context.memories if prepared_context is not None else _motion_memory_summaries(event),
             segment_intent=segment_intent,
+            neurobrain_state=neurobrain_state,
         )
         system_prompt = _build_independent_system_prompt(
             capability_payload=capability_payload,
@@ -1143,9 +1274,10 @@ def _build_current_turn_prompt(
     assistant_text: str,
     memories: tuple[str, ...] = (),
     segment_intent: Mapping[str, Any] | None = None,
+    neurobrain_state: Mapping[str, Any] | None = None,
 ) -> str:
     intent = segment_intent or {}
-    return json.dumps({
+    payload: dict[str, Any] = {
         "user": current_user_text,
         "memory": memories,
         "segment": {
@@ -1153,7 +1285,10 @@ def _build_current_turn_prompt(
             "actions": intent.get("actions", []),
             "tendency": intent.get("tendency", {}),
         },
-    }, ensure_ascii=False, separators=(",", ":"))
+    }
+    if isinstance(neurobrain_state, Mapping):
+        payload["neurobrain_state"] = dict(neurobrain_state)
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
 def _build_independent_system_prompt(
@@ -1202,6 +1337,8 @@ def _build_independent_system_prompt(
         "你负责为 AG99live 的 Live2D 角色生成动作参数。"
         "根据纯文本对话、简短记忆和当前 segment 的 speech、actions、tendency，"
         "优先落实 actions，以 tendency 调整情绪强度，只描述角色本段应该呈现的动作。"
+        "如果当前输入包含 neurobrain_state，它只是连续状态的参考，不能当作动作命令；"
+        "不要输出或复述这个字段，也不要因此改变既有 JSON 输出契约。"
         "参考示例的 output 就是输出格式；最近执行动作只用于衔接和避免机械重复，勿照搬。"
         "只输出一个 JSON 对象，不要 Markdown、解释文字、工具调用或额外字段。"
         "必需字段 intent_tags 是 1 到 6 个简短关键词。执行形状必须且只能选择一种："

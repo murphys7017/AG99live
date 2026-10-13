@@ -129,6 +129,7 @@ export interface TurnPlaybackSessionAudio {
  */
 export interface TurnPlaybackSessionMotion {
   payload: NormalizedMotionPayload | null;
+  source: string | null;
   receivedAtMs: number | null;
   released: boolean;
   started: boolean;
@@ -154,7 +155,7 @@ export type OutputSegmentAudioMaterial =
   | { state: "failed"; reason: string };
 
 export type OutputSegmentMotionMaterial =
-  | { state: "present"; payload: NormalizedMotionPayload }
+  | { state: "present"; payload: NormalizedMotionPayload; source: string }
   | { state: "absent" }
   | { state: "failed"; reason: string };
 
@@ -267,6 +268,7 @@ export function createEmptyAudioState(): TurnPlaybackSessionAudio {
 export function createEmptyMotionState(): TurnPlaybackSessionMotion {
   return {
     payload: null,
+    source: null,
     receivedAtMs: null,
     released: false,
     started: false,

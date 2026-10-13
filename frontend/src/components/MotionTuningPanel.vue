@@ -116,7 +116,7 @@ type MotionDraftSource = Readonly<{
 }>;
 
 type SemanticMotionPlaybackRecord = DesktopMotionPlaybackRecord & {
-  payloadKind: "semantic_intent" | "speech_only";
+  payloadKind: "semantic_intent";
   plan: SemanticParameterPlan;
 };
 type MotionVisibilitySummary = Record<string, unknown> & {
@@ -144,11 +144,9 @@ const promptAxes = computed(() => {
   );
 });
 const recentSemanticRecords = computed(() =>
-  {
-    return props.motionPlaybackRecords
-      .filter(isSemanticMotionPlaybackRecord)
-      .slice(0, RECENT_RECORD_LIMIT);
-  },
+  props.motionPlaybackRecords
+    .filter(isSemanticMotionPlaybackRecord)
+    .slice(0, RECENT_RECORD_LIMIT),
 );
 const historyDraftSources = computed<MotionDraftSource[]>(() =>
   recentSemanticRecords.value.map((record) =>
@@ -375,9 +373,11 @@ function buildHistoryDraftSource(
     emotionLabel: record.emotionLabel || "motion",
     assistantText: record.assistantText || record.startReason,
     createdAt: record.createdAt,
-    sourceLabel: profileMatches
-      ? (record.source || "历史动作")
-      : `历史动作 · 档案不匹配 (${record.source || "unknown"})`,
+    sourceLabel: formatMotionSourceLabel(
+      record.motionSource,
+      record.source,
+      profileMatches,
+    ),
     durationMs: record.plan.timing.duration_ms,
     record,
     ...(!profileMatches
@@ -432,10 +432,27 @@ function isSemanticMotionPlaybackRecord(
   record: DesktopMotionPlaybackRecord,
 ): record is SemanticMotionPlaybackRecord {
   return (
-    (record.payloadKind === "semantic_intent" || record.payloadKind === "speech_only")
+    record.payloadKind === "semantic_intent"
     && Boolean(record.plan)
     && record.plan.schema_version === SCHEMA_PARAMETER_PLAN_V3
   );
+}
+
+function formatMotionSourceLabel(
+  motionSource: string | null | undefined,
+  fallbackSource: string,
+  profileMatches: boolean,
+): string {
+  const sourceLabels: Record<string, string> = {
+    persona_effect: "Persona Effect",
+    independent_provider: "独立动作模型",
+  };
+  const sourceLabel = sourceLabels[motionSource || ""]
+    || fallbackSource
+    || "历史动作";
+  return profileMatches
+    ? sourceLabel
+    : `${sourceLabel} · 档案不匹配`;
 }
 
 function updateAxisValue(axis: SemanticAxisDefinition, event: Event): void {

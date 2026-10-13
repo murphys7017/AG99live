@@ -507,6 +507,7 @@ class MyPlugin(Star):
                             event,
                             bundle,
                             speech_segments=speech_segments,
+                            persona_result_id=persona_result_id,
                             segment_intents=tuple({
                                 "actions": list(getattr(segment, "actions", ()) or ()),
                                 "tendency": dict(getattr(segment, "tendency", {}) or {}),

@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import json
 import sys
 import types
 from types import SimpleNamespace
+
+import pytest
 
 
 def _install_middleware_astrbot_stubs(install_fake_astrbot, monkeypatch) -> None:
@@ -376,8 +379,9 @@ def test_independent_motion_results_match_each_visible_persona_reply(
     assert runtime_state.independent_motion_result_cache == {}
 
 
+@pytest.mark.parametrize("first_binding_present", [True, False])
 def test_incremental_motion_finalizer_only_waits_for_requested_segment(
-    install_fake_astrbot, monkeypatch,
+    install_fake_astrbot, monkeypatch, first_binding_present,
 ) -> None:
     _install_middleware_astrbot_stubs(install_fake_astrbot, monkeypatch)
     module = importlib.reload(importlib.import_module(
@@ -387,10 +391,18 @@ def test_incremental_motion_finalizer_only_waits_for_requested_segment(
         "astrbot_plugin_ag99live_adapter.middleware.interaction_motion.independent"
     )
     state = SimpleNamespace()
+    event_extras = {
+        "_turn_id": "core-turn",
+        "_ag99live_persona_tts_segment_map": {},
+    }
     event = SimpleNamespace(
-        get_platform_id=lambda: "olv_pet_adapter", get_platform_name=lambda: "olv_pet_adapter",
-        get_extra=lambda key, default=None: {"_turn_id": "core-turn"}.get(key, default),
-        adapter=SimpleNamespace(turn_coordinator=SimpleNamespace(runtime_state=state)),
+        get_platform_id=lambda: "olv_pet_adapter",
+        get_platform_name=lambda: "olv_pet_adapter",
+        get_extra=lambda key, default=None: event_extras.get(key, default),
+        set_extra=lambda key, value: event_extras.__setitem__(key, value),
+        adapter=SimpleNamespace(
+            turn_coordinator=SimpleNamespace(runtime_state=state)
+        ),
         message_obj=SimpleNamespace(raw_message={"turn_id": "frontend-turn"}),
     )
 
@@ -405,28 +417,85 @@ def test_incremental_motion_finalizer_only_waits_for_requested_segment(
             return {0: first, 1: await futures[1]}
 
         task = asyncio.create_task(all_results())
-        work = {"phase": "immediate", "parent_message_id": "parent",
-                "speech_segments": ("first", "second"), "task": task,
-                "segment_result_futures": futures, "tts_bindings_by_index": {}}
-        assert independent.store_persona_motion_work(state, turn_id="core-turn", persona_result_id="persona", work=work)
+        work = {
+            "phase": "immediate",
+            "parent_message_id": "parent",
+            "speech_segments": ("first", "second"),
+            "task": task,
+            "segment_result_futures": futures,
+            "tts_bindings_by_index": (
+                {
+                    0: {
+                        "turn_id": "core-turn",
+                        "parent_message_id": "parent",
+                        "persona_result_id": "persona",
+                        "persona_segment_index": 0,
+                        "persona_segment_count": 2,
+                        "message_id": "message-0",
+                        "tts_request_id": "tts-0",
+                    },
+                }
+                if first_binding_present
+                else {}
+            ),
+        }
+        assert independent.store_persona_motion_work(
+            state,
+            turn_id="core-turn",
+            persona_result_id="persona",
+            work=work,
+        )
         contributor = module.AG99liveMotionResultContributor()
-        first_output = await asyncio.wait_for(contributor.finalize_output(
-            event, object(), turn_id="core-turn", phase="immediate",
-            parent_message_id="parent", persona_result_id="persona",
-            materialization={"persona_segment_index": 0, "persona_last_output_segment": False},
-        ), timeout=0.2)
-        assert first_output.client_objects[0]["persona_segment_index"] == 0
+        first_output = await asyncio.wait_for(
+            contributor.finalize_output(
+                event,
+                object(),
+                turn_id="core-turn",
+                phase="immediate",
+                parent_message_id="parent",
+                persona_result_id="persona",
+                materialization={
+                    "persona_segment_index": 0,
+                    "persona_last_output_segment": False,
+                },
+            ),
+            timeout=0.2,
+        )
+        if first_binding_present:
+            assert first_output.client_objects[0]["persona_segment_index"] == 0
+        else:
+            assert first_output.client_objects == []
+            assert first_output.metadata["ag99live_motion_schedule"][
+                "persona_motion_failure_reasons"
+            ] == {"0": "tts_binding_missing"}
         assert not task.done()
-        assert independent.get_persona_motion_work(state, turn_id="core-turn", persona_result_id="persona") is not None
+        assert independent.get_persona_motion_work(
+            state,
+            turn_id="core-turn",
+            persona_result_id="persona",
+        ) is not None
         futures[1].set_result(second)
         second_output = await contributor.finalize_output(
-            event, object(), turn_id="core-turn", phase="immediate",
-            parent_message_id="parent", persona_result_id="persona",
-            materialization={"persona_segment_index": 1, "persona_last_output_segment": True},
+            event,
+            object(),
+            turn_id="core-turn",
+            phase="immediate",
+            parent_message_id="parent",
+            persona_result_id="persona",
+            materialization={
+                "persona_segment_index": 1,
+                "persona_last_output_segment": True,
+            },
         )
         assert second_output.client_objects == []
-        assert second_output.metadata["ag99live_motion_schedule"]["persona_motion_failure_reasons"] == {"1": "motion_timeout"}
-        assert independent.get_persona_motion_work(state, turn_id="core-turn", persona_result_id="persona") is None
+        assert second_output.metadata["ag99live_motion_schedule"][
+            "persona_motion_failure_reasons"
+        ] == {"1": "motion_timeout"}
+        assert independent.get_persona_motion_work(
+            state,
+            turn_id="core-turn",
+            persona_result_id="persona",
+        ) is None
         await task
 
     asyncio.run(run())
@@ -479,6 +548,125 @@ def test_independent_motion_segment_results_preserve_speech_indexes(
     assert set(results) == {1, 3}
     assert results[1].assistant_text == "first"
     assert results[3].assistant_text == "third"
+
+
+@pytest.mark.parametrize(
+    ("matched_snapshot", "expected_step"),
+    [
+        (
+            {
+                "step": 7,
+                "emotion": {"joy": 0.7},
+                "behavior": {"engagement": 0.5},
+                "last_tendency": {"Joy": 8},
+            },
+            7,
+        ),
+        (None, None),
+    ],
+)
+def test_segment_motion_uses_only_the_matching_neurobrain_result(
+    install_fake_astrbot,
+    monkeypatch,
+    matched_snapshot,
+    expected_step,
+) -> None:
+    _install_middleware_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = importlib.import_module(
+        "astrbot_plugin_ag99live_adapter.middleware.interaction_motion.independent"
+    )
+    module = importlib.reload(module)
+    wait_calls: list[tuple[str, float]] = []
+    cached_reads: list[str | None] = []
+    prompts: list[dict[str, object]] = []
+
+    class ReadOnlyAPI:
+        async def wait_for_persona_result(
+            self,
+            persona_result_id,
+            *,
+            timeout_seconds,
+        ):
+            wait_calls.append((persona_result_id, timeout_seconds))
+            return matched_snapshot
+
+        def get_state(self, state_key=None):
+            cached_reads.append(state_key)
+            return {"step": 99, "emotion": {"joy": 1.0}}
+
+    class PluginContext:
+        def get_registered_star(self, plugin_id):
+            assert plugin_id == "astrbot_plugin_neurobrain"
+            return SimpleNamespace(
+                star_cls=SimpleNamespace(
+                    enabled=True,
+                    readonly_api=ReadOnlyAPI(),
+                )
+            )
+
+    class Provider:
+        async def text_chat(self, *, prompt, **_kwargs):
+            prompts.append(json.loads(prompt))
+            return SimpleNamespace(completion_text="")
+
+    monkeypatch.setattr(
+        module,
+        "_build_motion_static_capability_payload",
+        lambda _state: {},
+    )
+    monkeypatch.setattr(
+        module,
+        "_build_motion_runtime_payload",
+        lambda *_args, **_kwargs: ({}, []),
+    )
+    monkeypatch.setattr(
+        module,
+        "_record_motion_prompt_reference_observation",
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        module,
+        "_build_motion_capability_prompt_payload",
+        lambda _payload: {},
+    )
+
+    bundle = SimpleNamespace(
+        runtime_state=SimpleNamespace(
+            plugin_context=PluginContext(),
+            selected_independent_motion_provider=Provider(),
+            independent_motion_history_turns=0,
+            independent_motion_segment_timeout_seconds=1,
+            independent_motion_max_concurrency=2,
+        ),
+        turn_coordinator=object(),
+    )
+    event = SimpleNamespace(
+        message_str="hello",
+        get_extra=lambda key, default=None: (
+            "turn-1" if key == "_turn_id" else default
+        ),
+    )
+
+    async def run_generation():
+        return await module.generate_independent_motion_for_segments(
+            event,
+            bundle,
+            speech_segments=("first", "second"),
+            parallel=True,
+            tasks=set(),
+            persona_result_id="result-1",
+        )
+
+    asyncio.run(run_generation())
+
+    assert wait_calls == [("result-1", 1.0)]
+    assert cached_reads == []
+    assert len(prompts) == 2
+    for prompt in prompts:
+        if expected_step is None:
+            assert "neurobrain_state" not in prompt
+        else:
+            assert prompt["neurobrain_state"]["step"] == expected_step
 
 
 def test_persona_hook_cancellation_reaches_segment_provider_requests(

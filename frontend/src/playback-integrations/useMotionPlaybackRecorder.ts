@@ -96,6 +96,7 @@ export function useMotionPlaybackRecorder(options: MotionPlaybackRecorderOptions
       turnId: event.turnId,
       playbackTurnId: event.playbackTurnId,
       modelName: event.model?.name ?? options.motionRecord.getSelectedModel().value?.name ?? "",
+      motionSource: event.motionSource ?? null,
       startReason: event.startReason,
       queuedDelayMs: event.queuedDelayMs,
       assistantText: options.getCanonicalAssistantText(

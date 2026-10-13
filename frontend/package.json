@@ -20,7 +20,7 @@
     "test:inbound-protocol": "tsc -p tsconfig.test.json --outDir .test-out-inbound-protocol && node --experimental-specifier-resolution=node .test-out-inbound-protocol/tests/inboundProtocol.test.js",
     "test:inbound-events": "tsc -p tsconfig.test.json --outDir .test-out-inbound-events && node --experimental-specifier-resolution=node .test-out-inbound-events/tests/inboundEvents.test.js",
     "test:model-engine": "tsc -p tsconfig.test.json --outDir .test-out-model-engine && node --experimental-specifier-resolution=node .test-out-model-engine/tests/modelEngineCompiler.test.js",
-    "test:playback-timeline": "tsc -p tsconfig.test.json --outDir .test-out-playback-timeline && node --experimental-specifier-resolution=node .test-out-playback-timeline/tests/playbackTimelineEngine.test.js",
+    "test:playback-timeline": "tsc -p tsconfig.playback-timeline.test.json --outDir .test-out-playback-timeline && node --experimental-specifier-resolution=node .test-out-playback-timeline/tests/playbackTimelineEngine.test.js && node --experimental-specifier-resolution=node .test-out-playback-timeline/tests/playbackTimelineRuntime.test.js",
     "test:compile": "node scripts/compile-tests.cjs",
     "test": "npm run test:compile && node scripts/run-compiled-tests.cjs",
     "build": "npm run typecheck && electron-vite build",

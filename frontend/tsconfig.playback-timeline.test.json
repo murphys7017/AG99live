@@ -1,0 +1,7 @@
+{
+  "extends": "./tsconfig.test.json",
+  "include": [
+    "tests/playbackTimelineEngine.test.ts",
+    "tests/playbackTimelineRuntime.test.ts"
+  ]
+}

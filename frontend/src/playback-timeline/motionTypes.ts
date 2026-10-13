@@ -6,6 +6,7 @@ export interface PlaybackTimelineMotionContext {
   turnId: string | null;
   assistantText: string;
   speechCues: readonly OutputSegmentSpeechCue[];
+  motionSource?: string | null;
   receivedAtMs: number;
   playbackTimeline?: PlaybackTimelineSnapshot | null;
   timelineMode?: "audio" | "motion_only";

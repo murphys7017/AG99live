@@ -239,6 +239,7 @@ interface DesktopMotionPlaybackRecordBase {
   emotionLabel: string;
   mode: "idle" | "expressive";
   startReason: string;
+  motionSource?: string | null;
   queuedDelayMs: number;
   assistantText: string;
   playerMessage: string;

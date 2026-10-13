@@ -63,6 +63,7 @@ interface ModelEnginePlanStartedEventBase {
   playbackTurnId: string | null;
   playbackOrigin: ModelEnginePlaybackOrigin;
   startReason: string;
+  motionSource?: string | null;
   queuedDelayMs: number;
   payloadKind: NormalizedMotionPayload["kind"] | "speech_only" | "compiled_semantic_motion";
   diagnostics: CompileDiagnostics | null;

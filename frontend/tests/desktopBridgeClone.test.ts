@@ -102,6 +102,7 @@ function testPublishSnapshotStripsUncloneableRuntimeValues(): void {
         turnId: "turn-1",
         playbackTurnId: "turn-1",
         modelName: "model-1",
+        motionSource: "independent_provider",
         emotionLabel: "happy",
         mode: "expressive",
         startReason: "playback_timeline_started",
@@ -224,6 +225,10 @@ function testPublishSnapshotStripsUncloneableRuntimeValues(): void {
     message.snapshot.motionPlaybackRecords[0]?.diagnostics?.transformTrace
       ?.axisSampling?.sampledValues.head_yaw,
     64.2,
+  );
+  assert.equal(
+    message.snapshot.motionPlaybackRecords[0]?.motionSource,
+    "independent_provider",
   );
   assert.equal(message.snapshot.motionPlaybackRecords[1]?.payloadKind, "speech_only");
 
