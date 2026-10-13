@@ -13,7 +13,15 @@ import { LAppAdapter } from "./lappadapter";
 import { LAppGlManager } from "./lappglmanager";
 import { LAppLive2DManager } from "./lapplive2dmanager";
 import {
-  loadModelViewScale, MODEL_VIEW_SCALE_KEY, saveModelViewScale,
+  loadModelViewOffsetX,
+  loadModelViewOffsetY,
+  loadModelViewScale,
+  MODEL_VIEW_OFFSET_X_KEY,
+  MODEL_VIEW_OFFSET_Y_KEY,
+  MODEL_VIEW_SCALE_KEY,
+  saveModelViewOffsetX,
+  saveModelViewOffsetY,
+  saveModelViewScale,
 } from "../../../app/petPreferences";
 import {
   beginLive2DModelLoad,
@@ -27,6 +35,8 @@ let currentInitializationPromise: Promise<void> | null = null;
 let boundPointerTarget: HTMLElement | null = null;
 let boundPointerMoveHandler: ((event: PointerEvent) => void) | null = null;
 let boundPointerDownHandler: ((event: PointerEvent) => void) | null = null;
+let boundPointerUpHandler: ((event: PointerEvent) => void) | null = null;
+let boundPointerCancelHandler: ((event: PointerEvent) => void) | null = null;
 let boundWheelHandler: ((event: WheelEvent) => void) | null = null;
 let boundScaleStorageHandler: ((event: StorageEvent) => void) | null = null;
 let setIgnoreMouseEventsBridge: ((ignore: boolean) => void) | null = null;
@@ -36,6 +46,9 @@ const POINTER_HIT_TEST_INTERVAL_MS = 33;
 const MODEL_SCALE_SAVE_DEBOUNCE_MS = 120;
 let pendingModelViewScale: number | null = null;
 let modelViewScaleSaveTimer: number | null = null;
+let modelPanPointerId: number | null = null;
+let modelPanLastClientX = 0;
+let modelPanLastClientY = 0;
 
 function flushModelViewScaleSave(): void {
   if (modelViewScaleSaveTimer !== null) {
@@ -91,6 +104,43 @@ function getPointerModelCoordinates(event: MouseEvent): { x: number; y: number }
   };
 }
 
+function getPointerDeviceDelta(
+  event: PointerEvent,
+  previousClientX: number,
+  previousClientY: number,
+): { x: number; y: number } | null {
+  const canvas = document.getElementById("canvas") as HTMLCanvasElement | null;
+  const view = LAppDelegate.getInstance().getView();
+  if (!canvas || !view || canvas.clientWidth <= 0 || canvas.clientHeight <= 0) {
+    return null;
+  }
+  const dprX = canvas.width / canvas.clientWidth;
+  const dprY = canvas.height / canvas.clientHeight;
+  const previousX = (previousClientX - canvas.getBoundingClientRect().left) * dprX;
+  const previousY = (previousClientY - canvas.getBoundingClientRect().top) * dprY;
+  const currentX = (event.clientX - canvas.getBoundingClientRect().left) * dprX;
+  const currentY = (event.clientY - canvas.getBoundingClientRect().top) * dprY;
+  return {
+    x: view.transformScreenX(currentX) - view.transformScreenX(previousX),
+    y: view.transformScreenY(currentY) - view.transformScreenY(previousY),
+  };
+}
+
+function isModelPanGesture(event: PointerEvent): boolean {
+  return event.isPrimary && event.button === 0 && event.altKey;
+}
+
+function finishModelPan(): void {
+  if (modelPanPointerId === null) return;
+  const view = LAppDelegate.getInstance().getView();
+  if (view) {
+    saveModelViewOffsetX(view.getViewTranslateX());
+    saveModelViewOffsetY(view.getViewTranslateY());
+  }
+  modelPanPointerId = null;
+  updateMouseIgnoreState(true);
+}
+
 function applyMouseIgnoreState(ignore: boolean): void {
   if (!setIgnoreMouseEventsBridge) {
     return;
@@ -109,6 +159,10 @@ function updateMouseIgnoreState(ignore: boolean): void {
     return;
   }
 
+  if (modelPanPointerId !== null) {
+    return;
+  }
+
   if (lastIgnoreMouseEventsValue === ignore) {
     return;
   }
@@ -118,11 +172,18 @@ function updateMouseIgnoreState(ignore: boolean): void {
 
 function cleanupHitTestPointerHandlers(): void {
   flushModelViewScaleSave();
+  finishModelPan();
   if (boundPointerTarget && boundPointerMoveHandler) {
     boundPointerTarget.removeEventListener("pointermove", boundPointerMoveHandler);
   }
   if (boundPointerTarget && boundPointerDownHandler) {
     boundPointerTarget.removeEventListener("pointerdown", boundPointerDownHandler);
+  }
+  if (boundPointerTarget && boundPointerUpHandler) {
+    boundPointerTarget.removeEventListener("pointerup", boundPointerUpHandler);
+  }
+  if (boundPointerTarget && boundPointerCancelHandler) {
+    boundPointerTarget.removeEventListener("pointercancel", boundPointerCancelHandler);
   }
   if (boundPointerTarget && boundWheelHandler) {
     boundPointerTarget.removeEventListener("wheel", boundWheelHandler);
@@ -134,6 +195,8 @@ function cleanupHitTestPointerHandlers(): void {
   boundPointerTarget = null;
   boundPointerMoveHandler = null;
   boundPointerDownHandler = null;
+  boundPointerUpHandler = null;
+  boundPointerCancelHandler = null;
   boundWheelHandler = null;
   boundScaleStorageHandler = null;
   delete (window as any).__ag99SetPetMouseIgnoreState;
@@ -244,6 +307,15 @@ async function initializeLive2DOnce(): Promise<void> {
     }
 
     boundPointerMoveHandler = (e: PointerEvent) => {
+      if (modelPanPointerId === e.pointerId) {
+        const delta = getPointerDeviceDelta(e, modelPanLastClientX, modelPanLastClientY);
+        if (delta) {
+          LAppDelegate.getInstance().getView()?.adjustViewTranslate(delta.x, delta.y);
+        }
+        modelPanLastClientX = e.clientX;
+        modelPanLastClientY = e.clientY;
+        return;
+      }
       const now = performance.now();
       if (now - lastPointerHitTestAt < POINTER_HIT_TEST_INTERVAL_MS) {
         return;
@@ -271,10 +343,37 @@ async function initializeLive2DOnce(): Promise<void> {
         return;
       }
 
+      if (isModelPanGesture(e) && model?.anyHitTestWithFallback(coordinates.x, coordinates.y)) {
+        modelPanPointerId = e.pointerId;
+        modelPanLastClientX = e.clientX;
+        modelPanLastClientY = e.clientY;
+        boundPointerTarget?.setPointerCapture(e.pointerId);
+        e.preventDefault();
+        e.stopPropagation();
+        applyMouseIgnoreState(false);
+        return;
+      }
+
       // Test hit and log result
       const hitAreaName = model?.anyhitTest(coordinates.x, coordinates.y);
       const isHit = hitAreaName !== null || model?.isHitOnModel(coordinates.x, coordinates.y);
       console.log("Model clicked:", isHit, hitAreaName ? `in area: ${hitAreaName}` : '');
+    };
+
+    boundPointerUpHandler = (e: PointerEvent) => {
+      if (modelPanPointerId !== e.pointerId) return;
+      if (boundPointerTarget?.hasPointerCapture(e.pointerId)) {
+        boundPointerTarget.releasePointerCapture(e.pointerId);
+      }
+      finishModelPan();
+    };
+
+    boundPointerCancelHandler = (e: PointerEvent) => {
+      if (modelPanPointerId !== e.pointerId) return;
+      if (boundPointerTarget?.hasPointerCapture(e.pointerId)) {
+        boundPointerTarget.releasePointerCapture(e.pointerId);
+      }
+      finishModelPan();
     };
 
     boundWheelHandler = (e: WheelEvent) => {
@@ -294,6 +393,12 @@ async function initializeLive2DOnce(): Promise<void> {
       if (e.key === MODEL_VIEW_SCALE_KEY) {
         LAppDelegate.getInstance().getView()?.setViewScale(loadModelViewScale());
       }
+      if (e.key === MODEL_VIEW_OFFSET_X_KEY || e.key === MODEL_VIEW_OFFSET_Y_KEY) {
+        LAppDelegate.getInstance().getView()?.setViewTranslate(
+          loadModelViewOffsetX(),
+          loadModelViewOffsetY(),
+        );
+      }
     };
 
     if (boundPointerTarget && boundPointerMoveHandler) {
@@ -301,6 +406,12 @@ async function initializeLive2DOnce(): Promise<void> {
     }
     if (boundPointerTarget && boundPointerDownHandler) {
       boundPointerTarget.addEventListener("pointerdown", boundPointerDownHandler);
+    }
+    if (boundPointerTarget && boundPointerUpHandler) {
+      boundPointerTarget.addEventListener("pointerup", boundPointerUpHandler);
+    }
+    if (boundPointerTarget && boundPointerCancelHandler) {
+      boundPointerTarget.addEventListener("pointercancel", boundPointerCancelHandler);
     }
     if (boundPointerTarget && boundWheelHandler) {
       boundPointerTarget.addEventListener("wheel", boundWheelHandler, { passive: false });

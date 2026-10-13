@@ -1,7 +1,10 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import {
   loadModelViewScale, loadSpeechVolume, MAX_MODEL_VIEW_SCALE,
-  MIN_MODEL_VIEW_SCALE, MODEL_VIEW_SCALE_KEY, saveModelViewScale,
+  MIN_MODEL_VIEW_SCALE, MODEL_VIEW_OFFSET_X_KEY, MODEL_VIEW_OFFSET_Y_KEY,
+  MODEL_VIEW_SCALE_KEY, MAX_MODEL_VIEW_OFFSET, MIN_MODEL_VIEW_OFFSET,
+  loadModelViewOffsetX, loadModelViewOffsetY, saveModelViewOffsetX,
+  saveModelViewOffsetY, saveModelViewScale,
   saveSpeechVolume, SPEECH_VOLUME_KEY,
 } from "../app/petPreferences";
 import { listMicrophoneInputDevices } from "../adapter-connection/runtime/microphoneDevices";
@@ -48,6 +51,8 @@ export function useSettingsWindow() {
   const microphoneDeviceStatus = ref("");
   const speechVolumePercent = ref(Math.round(loadSpeechVolume() * 100));
   const modelViewScale = ref(loadModelViewScale());
+  const modelViewOffsetX = ref(loadModelViewOffsetX());
+  const modelViewOffsetY = ref(loadModelViewOffsetY());
   const pttModeEnabled = ref(bridge.state.snapshot.pttModeEnabled);
   const pttKeyBinding = ref(
     normalizePttKeyBinding(bridge.state.snapshot.pttKeyBinding),
@@ -225,11 +230,20 @@ export function useSettingsWindow() {
     saveModelViewScale(modelViewScale.value);
   }
 
+  function applyModelViewOffset(): void {
+    saveModelViewOffsetX(modelViewOffsetX.value);
+    saveModelViewOffsetY(modelViewOffsetY.value);
+  }
+
   function onPetPreferenceChanged(event: StorageEvent): void {
     if (event.key === SPEECH_VOLUME_KEY) {
       speechVolumePercent.value = Math.round(loadSpeechVolume() * 100);
     } else if (event.key === MODEL_VIEW_SCALE_KEY) {
       modelViewScale.value = loadModelViewScale();
+    } else if (event.key === MODEL_VIEW_OFFSET_X_KEY) {
+      modelViewOffsetX.value = loadModelViewOffsetX();
+    } else if (event.key === MODEL_VIEW_OFFSET_Y_KEY) {
+      modelViewOffsetY.value = loadModelViewOffsetY();
     }
   }
 
@@ -336,7 +350,10 @@ export function useSettingsWindow() {
     applyLive2dPresentationSettingsSnapshot(live2dPresentationSettings, undefined);
     applyLive2dPresentationSettings();
     modelViewScale.value = 1;
+    modelViewOffsetX.value = 0;
+    modelViewOffsetY.value = 0;
     applyModelViewScale();
+    applyModelViewOffset();
   }
 
   return {
@@ -352,8 +369,12 @@ export function useSettingsWindow() {
     microphoneDeviceStatus,
     speechVolumePercent,
     modelViewScale,
+    modelViewOffsetX,
+    modelViewOffsetY,
     modelViewScaleMin: MIN_MODEL_VIEW_SCALE,
     modelViewScaleMax: MAX_MODEL_VIEW_SCALE,
+    modelViewOffsetMin: MIN_MODEL_VIEW_OFFSET,
+    modelViewOffsetMax: MAX_MODEL_VIEW_OFFSET,
     pttModeEnabled,
     pttKeyBinding,
     pttKeyCaptureActive,
@@ -381,6 +402,7 @@ export function useSettingsWindow() {
     applyMicrophoneDevice,
     applySpeechVolume,
     applyModelViewScale,
+    applyModelViewOffset,
     refreshMicrophoneDevices,
     applyLive2dPresentationSettings,
     applyPttModeEnabled,

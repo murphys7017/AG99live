@@ -49,7 +49,12 @@ export function usePetWindowDrag(): {
   }
 
   function handlePointerDown(event: PointerEvent): void {
-    if (event.button !== 0 || !event.isPrimary || activePointerId.value !== null) {
+    if (
+      event.button !== 0
+      || !event.isPrimary
+      || event.altKey
+      || activePointerId.value !== null
+    ) {
       return;
     }
 

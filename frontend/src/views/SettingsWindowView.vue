@@ -18,8 +18,12 @@ const {
   microphoneDeviceStatus,
   speechVolumePercent,
   modelViewScale,
+  modelViewOffsetX,
+  modelViewOffsetY,
   modelViewScaleMin,
   modelViewScaleMax,
+  modelViewOffsetMin,
+  modelViewOffsetMax,
   pttModeEnabled,
   pttKeyBinding,
   pttKeyCaptureActive,
@@ -47,6 +51,7 @@ const {
   applyMicrophoneDevice,
   applySpeechVolume,
   applyModelViewScale,
+  applyModelViewOffset,
   refreshMicrophoneDevices,
   applyLive2dPresentationSettings,
   applyPttModeEnabled,
@@ -232,6 +237,46 @@ onMounted(() => {
             :max="renderDprCapMax"
             :step="renderDprCapStep"
             @input="applyLive2dPresentationSettings"
+          />
+        </div>
+
+        <div class="settings-slider">
+          <div class="settings-slider__header">
+            <div>
+              <strong>模型水平位置</strong>
+              <p>调整模型在窗口中的左右位置。</p>
+            </div>
+            <span class="settings-slider__value">{{ modelViewOffsetX.toFixed(2) }}</span>
+          </div>
+          <input
+            v-model.number="modelViewOffsetX"
+            class="settings-slider__input"
+            type="range"
+            :min="modelViewOffsetMin"
+            :max="modelViewOffsetMax"
+            step="0.05"
+            aria-label="模型水平位置"
+            @input="applyModelViewOffset"
+          />
+        </div>
+
+        <div class="settings-slider">
+          <div class="settings-slider__header">
+            <div>
+              <strong>模型垂直位置</strong>
+              <p>调整模型在窗口中的上下位置。</p>
+            </div>
+            <span class="settings-slider__value">{{ modelViewOffsetY.toFixed(2) }}</span>
+          </div>
+          <input
+            v-model.number="modelViewOffsetY"
+            class="settings-slider__input"
+            type="range"
+            :min="modelViewOffsetMin"
+            :max="modelViewOffsetMax"
+            step="0.05"
+            aria-label="模型垂直位置"
+            @input="applyModelViewOffset"
           />
         </div>
 

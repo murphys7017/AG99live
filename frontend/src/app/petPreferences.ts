@@ -1,8 +1,13 @@
 export const SPEECH_VOLUME_KEY = "ag99live:speech-volume";
 export const MODEL_VIEW_SCALE_KEY = "ag99live:model-view-scale";
+export const MODEL_VIEW_OFFSET_X_KEY = "ag99live:model-view-offset-x";
+export const MODEL_VIEW_OFFSET_Y_KEY = "ag99live:model-view-offset-y";
 export const MIN_MODEL_VIEW_SCALE = 0.8;
 export const MAX_MODEL_VIEW_SCALE = 2;
 export const DEFAULT_MODEL_VIEW_SCALE = 1;
+export const MIN_MODEL_VIEW_OFFSET = -1.5;
+export const MAX_MODEL_VIEW_OFFSET = 1.5;
+export const DEFAULT_MODEL_VIEW_OFFSET = 0;
 
 function readNumber(key: string, fallback: number, min: number, max: number): number {
   const raw = window.localStorage.getItem(key);
@@ -54,4 +59,41 @@ export function saveModelViewScale(value: number): void {
   if (oldValue !== nextValue) {
     notifyPreferenceChanged(MODEL_VIEW_SCALE_KEY, oldValue, nextValue);
   }
+}
+
+export function loadModelViewOffsetX(): number {
+  return readNumber(
+    MODEL_VIEW_OFFSET_X_KEY,
+    DEFAULT_MODEL_VIEW_OFFSET,
+    MIN_MODEL_VIEW_OFFSET,
+    MAX_MODEL_VIEW_OFFSET,
+  );
+}
+
+export function loadModelViewOffsetY(): number {
+  return readNumber(
+    MODEL_VIEW_OFFSET_Y_KEY,
+    DEFAULT_MODEL_VIEW_OFFSET,
+    MIN_MODEL_VIEW_OFFSET,
+    MAX_MODEL_VIEW_OFFSET,
+  );
+}
+
+function saveModelViewOffset(key: string, value: number): void {
+  const nextValue = String(
+    Math.max(MIN_MODEL_VIEW_OFFSET, Math.min(MAX_MODEL_VIEW_OFFSET, value)),
+  );
+  const oldValue = window.localStorage.getItem(key);
+  window.localStorage.setItem(key, nextValue);
+  if (oldValue !== nextValue) {
+    notifyPreferenceChanged(key, oldValue, nextValue);
+  }
+}
+
+export function saveModelViewOffsetX(value: number): void {
+  saveModelViewOffset(MODEL_VIEW_OFFSET_X_KEY, value);
+}
+
+export function saveModelViewOffsetY(value: number): void {
+  saveModelViewOffset(MODEL_VIEW_OFFSET_Y_KEY, value);
 }

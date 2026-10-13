@@ -15,7 +15,11 @@ import { canvas, gl } from "./lappglmanager";
 import { LAppLive2DManager } from "./lapplive2dmanager";
 import { LAppPal } from "./lapppal";
 import { TouchManager } from "./touchmanager";
-import { loadModelViewScale } from "../../../app/petPreferences";
+import {
+  loadModelViewOffsetX,
+  loadModelViewOffsetY,
+  loadModelViewScale,
+} from "../../../app/petPreferences";
 
 /**
  * 描画クラス。
@@ -91,6 +95,7 @@ export class LAppView {
       LAppDefine.ViewLogicalMaxBottom,
       LAppDefine.ViewLogicalMaxTop
     );
+    this.setViewTranslate(loadModelViewOffsetX(), loadModelViewOffsetY());
   }
 
   /**
@@ -129,6 +134,30 @@ export class LAppView {
     const current = this.getViewScale();
     if (current <= 0) return;
     this._viewMatrix.adjustScale(0, 0, scale / current);
+    // Scaling can invalidate the previous translation against the visible
+    // bounds; run the matrix clamp once more so zooming cannot hide the model.
+    this._viewMatrix.adjustTranslate(0, 0);
+  }
+
+  public getViewTranslateX(): number {
+    return this._viewMatrix.getTranslateX();
+  }
+
+  public getViewTranslateY(): number {
+    return this._viewMatrix.getTranslateY();
+  }
+
+  public adjustViewTranslate(x: number, y: number): void {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    this._viewMatrix.adjustTranslate(x, y);
+  }
+
+  public setViewTranslate(x: number, y: number): void {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    this._viewMatrix.adjustTranslate(
+      x - this.getViewTranslateX(),
+      y - this.getViewTranslateY(),
+    );
   }
 
   /**
