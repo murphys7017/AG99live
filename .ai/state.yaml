@@ -1,3 +1,24 @@
+persona_motion_failure_contract_fix_20261013:
+  date: '2026-10-13'
+  class: bugfix
+  risk: medium
+  scope: >-
+    Declare deferred Persona motion expectation before materialization. Return
+    indexed failure metadata even when no motion payload succeeds, and emit
+    failed motion slots while continuing text/audio. Unfinalized work uses an
+    explicit incomplete reason instead of becoming absent. Hidden-markup text
+    overrides are now projected per original Persona segment before Core accepts
+    the final concatenated text.
+  validation: >-
+    One finalizer boundary smoke and two output-envelope checks passed. The
+    parameterized component fixture was corrected to reload message utilities.
+    Scoped Ruff, diff and state YAML checks passed.
+  evidence_gap: >-
+    No live Provider timeout/parser failure or interrupt/reconnect acceptance.
+    Hidden-markup segment projection has no live acceptance. No deployment, host
+    restart or commit. Curve enablement and motion Prompt optimization were
+    reviewed only; no configuration or model input changes.
+
 persona_action_playback_boundary_fix_20261013:
   date: '2026-10-13'
   class: bugfix

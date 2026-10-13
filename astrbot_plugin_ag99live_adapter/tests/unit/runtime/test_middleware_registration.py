@@ -398,7 +398,7 @@ def test_incremental_motion_finalizer_only_waits_for_requested_segment(
         loop = asyncio.get_running_loop()
         futures = {index: loop.create_future() for index in range(2)}
         first = independent.IndependentMotionResult("first", {"intent_tags": ["first"]}, "ok", 0)
-        second = independent.IndependentMotionResult("second", {"intent_tags": ["second"]}, "ok", 0)
+        second = independent.IndependentMotionResult("second", None, "motion_timeout", 0)
         futures[0].set_result(first)
 
         async def all_results():
@@ -424,7 +424,8 @@ def test_incremental_motion_finalizer_only_waits_for_requested_segment(
             parent_message_id="parent", persona_result_id="persona",
             materialization={"persona_segment_index": 1, "persona_last_output_segment": True},
         )
-        assert second_output.client_objects[0]["persona_segment_index"] == 1
+        assert second_output.client_objects == []
+        assert second_output.metadata["ag99live_motion_schedule"]["persona_motion_failure_reasons"] == {"1": "motion_timeout"}
         assert independent.get_persona_motion_work(state, turn_id="core-turn", persona_result_id="persona") is None
         await task
 

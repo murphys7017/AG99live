@@ -427,8 +427,13 @@ class OutputSegmentCoordinator:
             if len(matching) > 1:
                 return None, "output_segment_persona_multiple_motion_objects"
             if not matching:
+                failure_reasons = schedule.get("persona_motion_failure_reasons") if isinstance(schedule, dict) else None
+                segment_reason = (
+                    failure_reasons.get(str(persona_segment[0]))
+                    if isinstance(failure_reasons, dict) else None
+                )
                 reason = (
-                    str(schedule.get("motion_resolution_reason") or "").strip()
+                    str(segment_reason or schedule.get("motion_resolution_reason") or "").strip()
                     if isinstance(schedule, dict)
                     else ""
                 ) or "persona_motion_payload_missing"

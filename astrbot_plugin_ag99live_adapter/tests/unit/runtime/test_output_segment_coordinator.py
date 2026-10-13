@@ -31,12 +31,16 @@ def _install_message_component_stubs(monkeypatch):
     return Plain
 
 
+@pytest.mark.parametrize("motion_reason", ["independent_segment_work_missing", "motion_timeout"])
 def test_failed_persona_motion_delivers_audio_and_plain_echo(
-    install_fake_astrbot, monkeypatch,
+    install_fake_astrbot, monkeypatch, motion_reason,
 ) -> None:
     install_fake_astrbot()
     Plain = _install_message_component_stubs(monkeypatch)
     Record = sys.modules["astrbot.api.message_components"].Record
+    importlib.reload(importlib.import_module(
+        "astrbot_plugin_ag99live_adapter.runtime.message_utils"
+    ))
     module = importlib.import_module(
         "astrbot_plugin_ag99live_adapter.runtime.output_segment_coordinator"
     )
@@ -85,6 +89,14 @@ def test_failed_persona_motion_delivers_audio_and_plain_echo(
         },
     }
 
+    if motion_reason == "motion_timeout":
+        extras["metadata"]["ag99live_motion_schedule"] = {
+            "scheduled": True,
+            "source": "independent_provider",
+            "persona_segmented": True,
+            "persona_motion_failure_reasons": {"0": motion_reason},
+        }
+
     async def run_case():
         await coordinator.emit_message_chain(
             [Record("audio.wav", "服务暂不可用")],
@@ -116,7 +128,7 @@ def test_failed_persona_motion_delivers_audio_and_plain_echo(
     assert emitted[0]["payload"]["audio"]["state"] == "present"
     assert emitted[0]["payload"]["motion"] == {
         "state": "failed",
-        "reason": "motion_schedule_failed:independent_segment_work_missing",
+        "reason": f"motion_schedule_failed:{motion_reason}",
     }
 
 

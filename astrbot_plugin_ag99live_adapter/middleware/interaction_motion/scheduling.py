@@ -178,7 +178,21 @@ class AG99liveMotionResultContributor:
         final_text_override = None
         if raw_assistant_text and contains_hidden_output_markup(raw_assistant_text):
             event.set_extra("ag99live_raw_reply_text", raw_assistant_text)
-            final_text_override = sanitize_assistant_output_text(raw_assistant_text)
+            raw_persona_speech_segments = _extract_raw_persona_speech_segments(view)
+            if (
+                raw_persona_speech_segments
+                and "".join(raw_persona_speech_segments).strip()
+                == raw_assistant_text
+            ):
+                final_text_override = "".join(persona_speech_segments)
+            elif not raw_persona_speech_segments:
+                final_text_override = sanitize_assistant_output_text(raw_assistant_text)
+            else:
+                logger.warning(
+                    "WIRING persona_speech_sanitization_skipped "
+                    "reason=segment_text_mismatch segment_count=%s",
+                    persona_segment_count,
+                )
         if attempt is not None and attempt.motion_payloads_by_segment is not None:
             for segment_index, motion_payload in sorted(
                 attempt.motion_payloads_by_segment.items()
@@ -239,6 +253,13 @@ class AG99liveMotionResultContributor:
                     {
                         "ag99live_motion_generation_deferred": True,
                         "persona_result_id": persona_result_id,
+                        "ag99live_motion_schedule": {
+                            "scheduled": True,
+                            "source": "independent_provider",
+                            "persona_segmented": True,
+                            "persona_segment_count": persona_segment_count,
+                            "motion_resolution_reason": "motion_finalization_incomplete",
+                        },
                     }
                     if isinstance(deferred_work, dict)
                     else {}
@@ -354,6 +375,17 @@ class AG99liveMotionResultContributor:
         identity = _resolve_frontend_identity_snapshot(event)
         client_objects: list[dict[str, Any]] = []
         tts_binding_metadata: list[dict[str, Any]] = []
+        failure_reasons: dict[str, str] = {}
+        expected_indexes = (
+            [segment_index] if incremental else
+            [index for index, speech in enumerate(speech_segments) if speech.strip()]
+        )
+        for index in expected_indexes:
+            result = results_by_index.get(index) if isinstance(results_by_index, dict) else None
+            if not isinstance(result, IndependentMotionResult):
+                failure_reasons[str(index)] = "motion_result_unavailable"
+            elif result.motion_payload is None:
+                failure_reasons[str(index)] = result.reason or "motion_payload_missing"
         if isinstance(results_by_index, dict):
             for segment_index, result in sorted(results_by_index.items()):
                 if not isinstance(segment_index, int) or not isinstance(
@@ -495,13 +527,20 @@ class AG99liveMotionResultContributor:
             len(tts_binding_metadata),
         )
         capabilities = get_interaction_capabilities()
-        if capabilities is None or not client_objects:
+        if capabilities is None:
             return None
         return capabilities.interaction_result_contribution(
             plugin_id=self.plugin_id,
             client_objects=client_objects,
             metadata={
                 "ag99live_persona_tts_bindings": tts_binding_metadata,
+                "ag99live_motion_schedule": {
+                    "scheduled": True,
+                    "source": "independent_provider",
+                    "persona_segmented": True,
+                    "persona_segment_count": len(speech_segments),
+                    "persona_motion_failure_reasons": failure_reasons,
+                },
             },
             priority=self.priority,
         )
