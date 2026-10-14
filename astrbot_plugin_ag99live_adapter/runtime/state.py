@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Callable
@@ -49,6 +50,28 @@ class RuntimeStateConfigurationError(RuntimeError):
     """Raised when an explicitly enabled runtime capability is misconfigured."""
 
 
+def _bounded_config_number(
+    config: Any,
+    key: str,
+    *,
+    default: int | float,
+    minimum: int | float,
+    maximum: int | float,
+    integer: bool,
+) -> int | float:
+    raw = get_config_value(config, key, default)
+    if isinstance(raw, bool):
+        return default
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return default
+    if not math.isfinite(value):
+        return default
+    bounded = min(max(value, minimum), maximum)
+    return int(bounded) if integer else bounded
+
+
 class RuntimeState:
     def __init__(
         self,
@@ -94,6 +117,13 @@ class RuntimeState:
         self.independent_motion_result_cache: dict[str, list[Any]] = {}
         self.independent_motion_generation_tasks_by_turn: dict[str, set[Any]] = {}
         self.persona_motion_work_by_turn: dict[str, dict[str, Any]] = {}
+        self.passive_behavior_enabled = False
+        self.passive_behavior_provider_id = ""
+        self.passive_behavior_state_key = ""
+        self.passive_behavior_request_interval_ms = 500
+        self.passive_behavior_cooldown_ms = 3000
+        self.passive_behavior_result_ttl_ms = 2500
+        self.passive_behavior_timeout_seconds = 3.0
         self.interaction_contributors_available = supports_interaction_contributors(
             plugin_context
         )
@@ -118,6 +148,7 @@ class RuntimeState:
         self.image_cooldown_seconds = 0
         self.selected_performance_curve_provider: Provider | None = None
         self.selected_independent_motion_provider: Provider | None = None
+        self.selected_passive_behavior_provider: Provider | None = None
         self.performance_curve_runtime = PerformanceCurveRuntime(runtime_state=self)
         self._live2d_runtime_cache_path = (
             self.runtime_cache_dir / "live2d_runtime_cache.json"
@@ -161,6 +192,8 @@ class RuntimeState:
         previous_enable_performance_curve = self.enable_performance_curve
         previous_independent_motion_provider_id = self.independent_motion_provider_id
         previous_independent_motion_enabled = self.independent_motion_enabled
+        previous_passive_behavior_provider_id = self.passive_behavior_provider_id
+        previous_passive_behavior_enabled = self.passive_behavior_enabled
         general_config = get_config_value(self.plugin_config, "general", {})
         live2d_input_config = get_config_value(self.plugin_config, "live2d_input", {})
         performance_curve_config = get_config_value(
@@ -171,6 +204,11 @@ class RuntimeState:
         independent_motion_config = get_config_value(
             self.plugin_config,
             "independent_motion",
+            {},
+        )
+        passive_behavior_config = get_config_value(
+            self.plugin_config,
+            "passive_behavior",
             {},
         )
         vad_config = get_config_value(self.plugin_config, "vad", {})
@@ -219,6 +257,55 @@ class RuntimeState:
         self.independent_motion_provider_id = str(
             get_config_value(independent_motion_config, "provider_id", "") or ""
         ).strip()
+        self.passive_behavior_enabled = bool(
+            get_config_value(passive_behavior_config, "enabled", False)
+        )
+        self.passive_behavior_provider_id = str(
+            get_config_value(passive_behavior_config, "provider_id", "") or ""
+        ).strip()
+        self.passive_behavior_state_key = str(
+            get_config_value(passive_behavior_config, "state_key", "") or ""
+        ).strip()
+        self.passive_behavior_request_interval_ms = int(
+            _bounded_config_number(
+                passive_behavior_config,
+                "request_interval_ms",
+                default=500,
+                minimum=250,
+                maximum=60000,
+                integer=True,
+            )
+        )
+        self.passive_behavior_cooldown_ms = int(
+            _bounded_config_number(
+                passive_behavior_config,
+                "cooldown_ms",
+                default=3000,
+                minimum=0,
+                maximum=120000,
+                integer=True,
+            )
+        )
+        self.passive_behavior_result_ttl_ms = int(
+            _bounded_config_number(
+                passive_behavior_config,
+                "result_ttl_ms",
+                default=2500,
+                minimum=250,
+                maximum=30000,
+                integer=True,
+            )
+        )
+        self.passive_behavior_timeout_seconds = float(
+            _bounded_config_number(
+                passive_behavior_config,
+                "timeout_seconds",
+                default=3.0,
+                minimum=0.5,
+                maximum=30.0,
+                integer=False,
+            )
+        )
         try:
             self.independent_motion_history_turns = max(
                 0,
@@ -334,6 +421,9 @@ class RuntimeState:
             or previous_independent_motion_provider_id
             != self.independent_motion_provider_id
             or previous_independent_motion_enabled != self.independent_motion_enabled
+            or previous_passive_behavior_provider_id
+            != self.passive_behavior_provider_id
+            or previous_passive_behavior_enabled != self.passive_behavior_enabled
         )
         provider_binding_missing = (
             (
@@ -352,6 +442,14 @@ class RuntimeState:
                 not self.independent_motion_enabled
                 and self.selected_independent_motion_provider is not None
             )
+            or (
+                self.passive_behavior_enabled
+                and self.selected_passive_behavior_provider is None
+            )
+            or (
+                not self.passive_behavior_enabled
+                and self.selected_passive_behavior_provider is not None
+            )
         )
         if reload_providers or provider_config_changed or provider_binding_missing:
             logger.info(
@@ -364,6 +462,7 @@ class RuntimeState:
             )
             self.selected_performance_curve_provider = None
             self.selected_independent_motion_provider = None
+            self.selected_passive_behavior_provider = None
             self.load_selected_providers()
 
         return None
@@ -402,6 +501,7 @@ class RuntimeState:
             )
 
         if self.independent_motion_enabled:
+            provider = None
             if self.independent_motion_provider_id:
                 provider = self.plugin_context.get_provider_by_id(
                     self.independent_motion_provider_id
@@ -412,12 +512,33 @@ class RuntimeState:
                         "Loaded independent motion provider from plugin config: %s",
                         self.independent_motion_provider_id,
                     )
-                    return
-            logger.warning(
-                "Independent motion generation is enabled but provider `%s` "
-                "is not available; this turn will not use the independent motion path.",
-                self.independent_motion_provider_id or "<empty>",
+            if not isinstance(provider, Provider):
+                logger.warning(
+                    "Independent motion generation is enabled but provider `%s` "
+                    "is not available; this turn will not use the independent motion path.",
+                    self.independent_motion_provider_id or "<empty>",
+                )
+
+        if self.passive_behavior_enabled:
+            provider = (
+                self.plugin_context.get_provider_by_id(
+                    self.passive_behavior_provider_id
+                )
+                if self.passive_behavior_provider_id
+                else None
             )
+            if isinstance(provider, Provider):
+                self.selected_passive_behavior_provider = provider
+                logger.info(
+                    "Loaded passive behavior streaming provider: %s",
+                    self.passive_behavior_provider_id,
+                )
+            else:
+                logger.warning(
+                    "Passive behavior is enabled but streaming provider `%s` "
+                    "is not available; background actions are paused.",
+                    self.passive_behavior_provider_id or "<empty>",
+                )
 
     def resolve_stt_provider(self) -> STTProvider:
         """Resolve AstrBot's current STT provider for the desktop session.

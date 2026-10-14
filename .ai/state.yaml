@@ -462,3 +462,28 @@ persona_segment_motion_pre_tts_correlation_20261012:
     - "Core allocates parent output message IDs before collecting contributors, then invokes post-materialization finalizers after TTS segments are materialized and before delivery."
   evidence_gap:
     - "A live multi-segment Provider, TTS, Electron, audio, and Live2D run is still required to verify end-to-end timing and visible motion."
+
+neurobrain_passive_behavior_stream_20261014:
+  recorded_at: "2026-10-14"
+  class: feature
+  risk: high
+  status: implemented_pending_live_acceptance
+  scope:
+    - "Add an OLV-only passive NeuroBrain action runtime owned by the AG99live Adapter platform lifecycle."
+    - "Use AstrBot Provider text_chat_stream() and emit each complete NDJSON action as an ordered motion-only output.segment.v5 segment."
+    - "Gate requests on configuration, desktop connection, idle Turn, minimum request interval, cooldown, result TTL, and timeout."
+    - "Validate streamed semantic-axis actions against the active Semantic Axis Profile and read only the NeuroBrain read-only API."
+  architecture:
+    - "Passive playback uses its own passive: Turn identity and existing output.segment.v5 motion slot; no wire schema change."
+    - "Passive motions do not enter chat history, ordinary motion prompt history, Motion Lab conversation samples, or performance-curve state."
+    - "Only actual streamed text chunks are accepted; providers that return a final-only response are skipped without a non-streaming fallback."
+  non_actions:
+    - "Do not change AstrBot core or normal chat, Persona, or TTS generation paths."
+    - "Do not change NeuroBrain state writes or the AG99live WebSocket protocol."
+    - "Do not start or restart AstrBot, Electron, Native Host, or Live2D for this source-level implementation."
+  validation:
+    - "Focused output segment and RuntimeState semantic-profile tests passed: 9 passed."
+    - "Python compileall, Ruff on changed Python files, schema JSON parsing, and git diff --check passed."
+    - "AstrBot plugin structure check completed with 0 errors and 0 warnings."
+  evidence_gap:
+    - "No live AstrBot streaming Provider, NeuroBrain instance, OLV desktop, Electron, or Live2D run has verified incremental timing or visible queued motion."

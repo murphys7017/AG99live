@@ -44,6 +44,7 @@ from .runtime.session_state import SessionState
 from .runtime.turn_identity_map import TurnIdentityMap
 from .transport.websocket_server import WebSocketTransport
 from .runtime.turn_coordinator import TurnCoordinator
+from .runtime.passive_behavior import PassiveBehaviorRuntime
 from .platform_event import OLVPetPlatformEvent
 from .transport.static_resources import StaticResourceServer
 
@@ -227,6 +228,15 @@ class OLVPetPlatformAdapter(Platform):
                 kwargs=self.runtime_state.vad_config,
             ),
         )
+        self.passive_behavior_runtime = PassiveBehaviorRuntime(
+            runtime_state=self.runtime_state,
+            session_state=self.session_state,
+            turn_coordinator=self.turn_coordinator,
+            is_desktop_connected=lambda: self.transport._ws_client is not None,
+        )
+        self.turn_coordinator.set_passive_behavior_interrupt_handler(
+            self.passive_behavior_runtime.interrupt_active_request
+        )
 
         logger.debug(
             "AG99live adapter initialized "
@@ -258,6 +268,7 @@ class OLVPetPlatformAdapter(Platform):
 
     async def run(self):
         self._event_loop = asyncio.get_running_loop()
+        await self.passive_behavior_runtime.start()
         try:
             await self.transport.start()
         except asyncio.CancelledError:
@@ -267,6 +278,7 @@ class OLVPetPlatformAdapter(Platform):
             logger.exception("AG99live adapter failed during run()")
             raise
         finally:
+            await self.passive_behavior_runtime.stop()
             unregister_control_platform(self.platform_id, self)
             self._event_loop = None
 
@@ -424,6 +436,7 @@ class OLVPetPlatformAdapter(Platform):
     async def terminate(self) -> None:
         logger.info("AG99live adapter terminate() called")
         try:
+            await self.passive_behavior_runtime.stop()
             self.desktop_settings_broker.fail_pending("adapter_terminated")
             await self.transport.stop()
         finally:

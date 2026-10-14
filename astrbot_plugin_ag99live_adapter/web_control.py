@@ -259,6 +259,78 @@ CONFIG_SCHEMA: tuple[ConfigSection, ...] = (
         ),
     ),
     ConfigSection(
+        key="passive_behavior",
+        label="NeuroBrain 后台被动动作（实验）",
+        description="OLV 桌宠空闲时读取 NeuroBrain 当前状态，并通过流式 Provider 生成独立动作段；不读取对话或 Persona 内容。",
+        fields=(
+            ConfigField(
+                key="enabled",
+                kind="bool",
+                label="启用后台被动动作",
+                description="开启后，仅在桌面端已连接且没有活动 Turn 时请求动作模型。",
+                default=False,
+            ),
+            ConfigField(
+                key="provider_id",
+                kind="provider",
+                label="流式动作 Provider",
+                description="使用 AstrBot 聊天 Provider 的流式接口输出逐行动作 JSON；启用后必须选择。",
+                default="",
+                max_length=255,
+                required=False,
+                options_from="providers",
+            ),
+            ConfigField(
+                key="state_key",
+                kind="text",
+                label="NeuroBrain 状态键",
+                description="留空时只在 NeuroBrain 存在唯一状态时读取；多状态时请填写明确的状态键。",
+                default="",
+                max_length=255,
+            ),
+            ConfigField(
+                key="request_interval_ms",
+                kind="int",
+                label="最小请求间隔（毫秒）",
+                description="两次后台流式 Provider 请求的最短间隔。",
+                default=500,
+                minimum=250,
+                maximum=60000,
+                step=50,
+            ),
+            ConfigField(
+                key="cooldown_ms",
+                kind="int",
+                label="动作冷却（毫秒）",
+                description="被动动作输出后至少等待的时间；活动播放 Turn 仍会额外阻止新请求。",
+                default=3000,
+                minimum=0,
+                maximum=120000,
+                step=250,
+            ),
+            ConfigField(
+                key="result_ttl_ms",
+                kind="int",
+                label="动作有效期（毫秒）",
+                description="单次 NeuroBrain 状态快照允许生成并进入播放的最长时间；过期流会停止。",
+                default=2500,
+                minimum=250,
+                maximum=30000,
+                step=250,
+            ),
+            ConfigField(
+                key="timeout_seconds",
+                kind="float",
+                label="单次请求超时（秒）",
+                description="一条流式动作生成任务的最长运行时间。",
+                default=3.0,
+                minimum=0.5,
+                maximum=30.0,
+                step=0.5,
+            ),
+        ),
+    ),
+    ConfigSection(
         key="vad",
         label="语音断句",
         description="Silero VAD 判定当前音频帧为语音的阈值，以及开始/结束所需的连续帧数。",
@@ -688,6 +760,16 @@ def _normalize_cross_field(normalized: dict[str, dict[str, Any]]) -> None:
         raise ConfigValidationError(
             "independent_motion_provider_required",
             "independent_motion.provider_id",
+        )
+    passive_behavior = normalized.get("passive_behavior")
+    if (
+        passive_behavior
+        and passive_behavior.get("enabled")
+        and not str(passive_behavior.get("provider_id") or "").strip()
+    ):
+        raise ConfigValidationError(
+            "passive_behavior_provider_required",
+            "passive_behavior.provider_id",
         )
 
 

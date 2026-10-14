@@ -4,6 +4,10 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
 
+
+PASSIVE_BEHAVIOR_MOTION_SOURCE = "neurobrain_passive_stream"
+
+
 class OutputSegmentConflictError(ValueError):
     pass
 

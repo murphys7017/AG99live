@@ -96,6 +96,7 @@ class SpeechIngressService:
         send_json,
         build_message_object,
         on_vad_speech_started,
+        on_vad_speech_ended=None,
     ) -> None:
         self.media_service = media_service
         self.runtime_state = runtime_state
@@ -103,6 +104,7 @@ class SpeechIngressService:
         self._send_json = send_json
         self._build_message_object = build_message_object
         self._on_vad_speech_started = on_vad_speech_started
+        self._on_vad_speech_ended = on_vad_speech_ended
         self._audio_streams: dict[str, AudioStreamState] = {}
         self._pending_temp_audio_files: dict[str, PendingTempAudioFile] = {}
         self._completed_transcription_turns = 0
@@ -309,7 +311,12 @@ class SpeechIngressService:
                     np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
                 )
                 await self.media_service.append_audio_chunk(chunk, segment_id=segment_id)
-                built_message = await self._build_message_from_vad_segment(message)
+                built_message = None
+                try:
+                    built_message = await self._build_message_from_vad_segment(message)
+                finally:
+                    if built_message is None:
+                        await self._notify_vad_speech_ended(message)
                 if built_message is not None:
                     return built_message
         return None
@@ -319,6 +326,14 @@ class SpeechIngressService:
         if not capture_turn_id:
             raise ValueError("vad_speech_started_capture_turn_id_missing")
         await self._on_vad_speech_started(capture_turn_id)
+
+    async def _notify_vad_speech_ended(self, message) -> None:
+        callback = self._on_vad_speech_ended
+        if not callable(callback):
+            return
+        capture_turn_id = str(getattr(message, "turn_id", "") or "").strip()
+        if capture_turn_id:
+            await callback(capture_turn_id)
 
     async def _build_message_from_audio_buffer(
         self,

@@ -217,6 +217,62 @@ def test_handle_manual_binary_audio_stream_chunk_uses_vad_segments(
     assert sent_messages[0]["type"] == "output.transcription"
     assert sent_messages[0]["turn_id"] == "input:manual-binary:vad:1"
 
+
+def test_vad_speech_end_callback_runs_when_transcription_has_no_message(
+    install_fake_astrbot,
+) -> None:
+    install_fake_astrbot()
+    from astrbot_plugin_ag99live_adapter.protocol.binary_audio import BinaryAudioChunkFrame
+    from astrbot_plugin_ag99live_adapter.services.speech_service import SpeechIngressService
+
+    started: list[str] = []
+    ended: list[str] = []
+    pcm = (np.tile(np.array([0.2, -0.2, 0.3], dtype=np.float32), 256) * 32767).astype(
+        np.int16
+    ).tobytes()
+    vad_engine = VadEngineStub([[b"<|PAUSE|>", pcm]])
+
+    async def on_vad_speech_started(capture_turn_id: str) -> None:
+        started.append(capture_turn_id)
+
+    async def on_vad_speech_ended(capture_turn_id: str) -> None:
+        ended.append(capture_turn_id)
+
+    service = SpeechIngressService(
+        media_service=MediaServiceStub(),
+        runtime_state=SimpleNamespace(resolve_stt_provider=lambda: SttProviderStub()),
+        create_vad_engine=lambda: vad_engine,
+        send_json=lambda _message: asyncio.sleep(0),
+        build_message_object=lambda **_kwargs: None,
+        on_vad_speech_started=on_vad_speech_started,
+        on_vad_speech_ended=on_vad_speech_ended,
+    )
+    start_audio_stream(
+        service,
+        turn_id="capture:no-message",
+        stream_id="mic:no-message",
+        capture_mode="manual",
+    )
+
+    result = asyncio.run(
+        service.handle_audio_stream_binary_chunk(
+            BinaryAudioChunkFrame(
+                stream_id="mic:no-message",
+                turn_id="capture:no-message",
+                seq=0,
+                encoding="pcm16le",
+                sample_rate=16000,
+                channels=1,
+                payload=np.array([8192, -8192], dtype=np.int16).tobytes(),
+                metadata={"capture_mode": "manual"},
+            )
+        )
+    )
+
+    assert result is None
+    assert started == ["capture:no-message"]
+    assert ended == ["capture:no-message"]
+
 def test_handle_binary_audio_stream_end_dropped_reports_input_error(
     install_fake_astrbot,
 ) -> None:

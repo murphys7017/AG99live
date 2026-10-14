@@ -30,7 +30,10 @@ from .message_utils import (
     resolve_platform_segment_message_id,
 )
 from .motion_observation_recorder import MotionObservationRecorder
-from .output_segment import PendingOutputSegment
+from .output_segment import (
+    PASSIVE_BEHAVIOR_MOTION_SOURCE,
+    PendingOutputSegment,
+)
 from .performance_curve_coordinator import PerformanceCurveCoordinator
 
 
@@ -306,6 +309,43 @@ class OutputSegmentCoordinator:
             segment.finalize()
             await self._flush_finalized_segments_in_order(normalized_turn_id)
 
+    async def emit_motion_only(
+        self,
+        *,
+        turn_id: str,
+        message_id: str,
+        sequence: int,
+        motion_payload: dict[str, Any],
+        source: str = PASSIVE_BEHAVIOR_MOTION_SOURCE,
+    ) -> None:
+        """Publish one validated motion as an ordered, motion-only segment."""
+        normalized_turn_id = _require_turn_id_value(turn_id)
+        normalized_message_id = _require_message_id_value(message_id)
+        normalized_sequence = _require_segment_sequence(sequence)
+        async with self._get_turn_lock(normalized_turn_id):
+            self._require_output_queue_open(normalized_turn_id)
+            key = self._segment_key(normalized_turn_id, normalized_message_id)
+            if key in self._flushed_segment_keys:
+                return
+            self._register_segment_sequence(
+                turn_id=normalized_turn_id,
+                message_id=normalized_message_id,
+                sequence=normalized_sequence,
+            )
+            segment = self._get_pending_segment(
+                normalized_turn_id,
+                normalized_message_id,
+            )
+            segment.merge_sequence(normalized_sequence)
+            segment.require_motion()
+            segment.merge_motion(
+                payload=motion_payload,
+                mode="preview",
+                source=source,
+            )
+            segment.finalize()
+            await self._flush_finalized_segments_in_order(normalized_turn_id)
+
     async def close_turn_output_queue(self, *, turn_id: str) -> None:
         normalized_turn_id = _require_turn_id_value(turn_id)
         async with self._get_turn_lock(normalized_turn_id):
@@ -541,24 +581,30 @@ class OutputSegmentCoordinator:
         self._flushed_segment_keys.add(key)
         self._emitted_turn_ids.add(segment.turn_id)
 
-        self.performance_curves.commit_output_side_effects(segment, motion_slot)
-        self.observations.record_motion_slot(motion_slot, source=segment.motion_source)
+        is_passive_behavior = segment.motion_source == PASSIVE_BEHAVIOR_MOTION_SOURCE
+        if not is_passive_behavior:
+            self.performance_curves.commit_output_side_effects(segment, motion_slot)
+            self.observations.record_motion_slot(
+                motion_slot,
+                source=segment.motion_source,
+            )
         if segment.text:
             self.chat_buffer.add("assistant", segment.text)
-        self.observations.record_motion_lab_raw_event(
-            event_type="turn.assistant_output",
-            turn_id=segment.turn_id,
-            message_id=segment.message_id,
-            source_route="output.segment",
-            phase="assistant_output",
-            assistant_text=segment.semantic_text,
-            raw={
-                "reply_text": segment.text,
-                "images": list(segment.images),
-                "motion": motion_slot,
-                "chat_context": self.observations.motion_lab_chat_context(),
-            },
-        )
+        if not is_passive_behavior:
+            self.observations.record_motion_lab_raw_event(
+                event_type="turn.assistant_output",
+                turn_id=segment.turn_id,
+                message_id=segment.message_id,
+                source_route="output.segment",
+                phase="assistant_output",
+                assistant_text=segment.semantic_text,
+                raw={
+                    "reply_text": segment.text,
+                    "images": list(segment.images),
+                    "motion": motion_slot,
+                    "chat_context": self.observations.motion_lab_chat_context(),
+                },
+            )
         if audio_slot["state"] == "present":
             self._mark_turn_timing(segment.turn_id, "audio_payload_sent_at")
 

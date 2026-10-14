@@ -184,6 +184,7 @@ def test_disconnect_reset_cancels_orphaned_motion_work(install_fake_astrbot) -> 
             _events_by_turn_id={},
             _turn_terminal_results={},
             _active_vad_turn_by_capture_turn={},
+            _active_speech_capture_turns=set(),
             output_segments=types.SimpleNamespace(
                 tracked_turn_ids=lambda: set(),
                 reset=lambda: None,
@@ -200,4 +201,92 @@ def test_disconnect_reset_cancels_orphaned_motion_work(install_fake_astrbot) -> 
         assert runtime.runtime_state.independent_motion_generation_tasks_by_turn == {}
         assert runtime.runtime_state.persona_motion_work_by_turn == {}
 
+    asyncio.run(run_case())
+
+
+def test_vad_speech_start_interrupts_passive_turn_and_blocks_new_one(
+    install_fake_astrbot,
+) -> None:
+    install_fake_astrbot()
+    from astrbot_plugin_ag99live_adapter.runtime.turn_coordinator import (
+        TurnCoordinator,
+    )
+
+    async def run_case() -> None:
+        interrupted_turns: list[str] = []
+        cancelled_passive_requests: list[bool] = []
+        session_state = types.SimpleNamespace(current_turn_id="passive:turn-1")
+        runtime = types.SimpleNamespace(
+            session_state=session_state,
+            _require_turn_id_value=TurnCoordinator._require_turn_id_value,
+            _active_vad_turn_by_capture_turn={},
+            _events_by_turn_id={},
+            _active_speech_capture_turns=set(),
+            _passive_behavior_interrupt_handler=None,
+        )
+
+        async def interrupt_turn(turn_id: str) -> None:
+            interrupted_turns.append(turn_id)
+            session_state.current_turn_id = None
+
+        async def cancel_passive_request() -> None:
+            cancelled_passive_requests.append(True)
+
+        runtime._turn_lock = asyncio.Lock()
+        runtime._interrupt_passive_work = types.MethodType(
+            TurnCoordinator._interrupt_passive_work, runtime
+        )
+        runtime._handle_interrupt_signal = interrupt_turn
+        runtime._passive_behavior_interrupt_handler = cancel_passive_request
+        await TurnCoordinator._handle_vad_speech_started(runtime, "capture-1")
+
+        assert interrupted_turns == ["passive:turn-1"]
+        assert cancelled_passive_requests == [True]
+        assert runtime._active_speech_capture_turns == {"capture-1"}
+
+        runtime._turn_lock = asyncio.Lock()
+        runtime._begin_proactive_output_turn_locked = lambda _prefix: None
+        assert await TurnCoordinator.begin_passive_output_turn(runtime) is None
+
+        await TurnCoordinator._handle_vad_speech_ended(runtime, "capture-1")
+        assert not runtime._active_speech_capture_turns
+
+    asyncio.run(run_case())
+
+
+def test_ptt_capture_blocks_passive_work_until_stream_end(install_fake_astrbot, monkeypatch):
+    install_fake_astrbot()
+    from astrbot_plugin_ag99live_adapter.runtime import turn_coordinator as module
+
+    async def run_case():
+        calls = []
+        async def start(message):
+            calls.append("start")
+        async def end(message):
+            assert runtime._active_speech_capture_turns == {"capture:ptt"}
+            return None
+        async def interrupt():
+            calls.append("interrupt")
+        runtime = types.SimpleNamespace(
+            _turn_lock=asyncio.Lock(),
+            _active_vad_turn_by_capture_turn={},
+            _active_speech_capture_turns=set(),
+            _require_interactive_turn_id=lambda message: message.turn_id,
+            _interrupt_passive_work=interrupt,
+            speech_ingress=types.SimpleNamespace(
+                handle_audio_stream_start=start, handle_audio_stream_end=end
+            ),
+        )
+        monkeypatch.setattr(module, "parse_inbound_message", lambda message: message)
+        await module.TurnCoordinator.handle_msg(runtime, types.SimpleNamespace(
+            type=module.TYPE_INPUT_AUDIO_STREAM_START,
+            turn_id="capture:ptt", payload={"capture_mode": "ptt"},
+        ))
+        assert calls == ["start", "interrupt"]
+        assert runtime._active_speech_capture_turns == {"capture:ptt"}
+        await module.TurnCoordinator.handle_msg(runtime, types.SimpleNamespace(
+            type=module.TYPE_INPUT_AUDIO_STREAM_END,
+            turn_id="capture:ptt", payload={},
+        ))
+        assert not runtime._active_speech_capture_turns
     asyncio.run(run_case())

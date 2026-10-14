@@ -99,6 +99,56 @@
       }
     }
   },
+  "passive_behavior": {
+    "description": "OLV 桌宠 NeuroBrain 后台被动动作（实验）",
+    "type": "object",
+    "items": {
+      "enabled": {
+        "description": "启用后，OLV 后台任务会读取 NeuroBrain 状态、流式调用指定 Provider，并在桌宠空闲时播放补充动作。",
+        "type": "bool",
+        "default": false
+      },
+      "provider_id": {
+        "description": "后台被动动作使用的 AstrBot 流式聊天 Provider；建议选择响应快、成本低的小模型。",
+        "type": "string",
+        "default": "",
+        "_special": "select_provider"
+      },
+      "state_key": {
+        "description": "读取的 NeuroBrain 状态键。留空时仅在 NeuroBrain 能明确返回唯一状态时使用。",
+        "type": "string",
+        "default": ""
+      },
+      "request_interval_ms": {
+        "description": "两次后台 Provider 请求之间的最短间隔；任务检查频率与请求频率分离。",
+        "type": "int",
+        "default": 500,
+        "minimum": 250,
+        "maximum": 60000
+      },
+      "cooldown_ms": {
+        "description": "一次被动动作播放后的冷却时间。",
+        "type": "int",
+        "default": 3000,
+        "minimum": 0,
+        "maximum": 120000
+      },
+      "result_ttl_ms": {
+        "description": "模型结果允许进入播放队列的最长有效时间；过期结果直接丢弃。",
+        "type": "int",
+        "default": 2500,
+        "minimum": 250,
+        "maximum": 30000
+      },
+      "timeout_seconds": {
+        "description": "单次后台 Provider 请求的超时时间。",
+        "type": "float",
+        "default": 3.0,
+        "minimum": 0.5,
+        "maximum": 30
+      }
+    }
+  },
   "vad": {
     "description": "语音断句",
     "type": "object",

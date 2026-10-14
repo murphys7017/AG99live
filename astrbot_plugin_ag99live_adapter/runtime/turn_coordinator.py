@@ -60,6 +60,7 @@ from .image_diagnostics import (
 )
 from .motion_observation_recorder import MotionObservationRecorder
 from .output_segment_coordinator import OutputSegmentCoordinator
+from .output_segment import PASSIVE_BEHAVIOR_MOTION_SOURCE
 from .performance_curve_coordinator import PerformanceCurveCoordinator
 
 
@@ -126,6 +127,8 @@ class TurnCoordinator:
         self._build_platform_event = build_platform_event
         self._commit_event = commit_event
         self._create_vad_engine = create_vad_engine
+        self._active_speech_capture_turns: set[str] = set()
+        self._passive_behavior_interrupt_handler: Callable[[], Awaitable[None]] | None = None
         self.speech_ingress = SpeechIngressService(
             media_service=self.media_service,
             runtime_state=self.runtime_state,
@@ -133,6 +136,7 @@ class TurnCoordinator:
             send_json=self._send_json,
             build_message_object=self._build_message_object,
             on_vad_speech_started=self._handle_vad_speech_started,
+            on_vad_speech_ended=self._handle_vad_speech_ended,
         )
 
         self._turn_lock = asyncio.Lock()
@@ -199,7 +203,12 @@ class TurnCoordinator:
         try:
             if message.type == TYPE_INPUT_AUDIO_STREAM_START:
                 self._active_vad_turn_by_capture_turn.pop(turn_id, None)
+                self._active_speech_capture_turns.discard(turn_id)
                 await self.speech_ingress.handle_audio_stream_start(message)
+                if message.payload.get("capture_mode", "ptt") == "ptt":
+                    self._active_speech_capture_turns.add(turn_id)
+                    async with self._turn_lock:
+                        await self._interrupt_passive_work()
                 return
 
             if message.type == TYPE_INPUT_AUDIO_STREAM_END:
@@ -209,6 +218,7 @@ class TurnCoordinator:
                         await self._commit_inbound_message(message_obj, turn_id=turn_id)
                 finally:
                     self._active_vad_turn_by_capture_turn.pop(turn_id, None)
+                    self._active_speech_capture_turns.discard(turn_id)
                 return
 
             if message.type == TYPE_INPUT_TEXT:
@@ -294,6 +304,7 @@ class TurnCoordinator:
             self._turn_terminal_results.clear()
             self._events_by_turn_id.clear()
             self._active_vad_turn_by_capture_turn.clear()
+            self._active_speech_capture_turns.clear()
             self.motion_observations.reset()
             cache = getattr(self.runtime_state, "independent_motion_result_cache", None)
             if isinstance(cache, dict):
@@ -339,7 +350,10 @@ class TurnCoordinator:
                 message_obj,
                 capture_turn_id=capture_turn_id,
             )
-            await self._commit_inbound_message(message_obj, turn_id=turn_id)
+            try:
+                await self._commit_inbound_message(message_obj, turn_id=turn_id)
+            finally:
+                self._active_speech_capture_turns.discard(capture_turn_id)
             self._active_vad_turn_by_capture_turn[capture_turn_id] = turn_id
 
     async def emit_message_chain(
@@ -362,21 +376,44 @@ class TurnCoordinator:
     async def begin_proactive_output_turn(self) -> str:
         """Create and announce a frontend turn for an AstrBot proactive send."""
         async with self._turn_lock:
-            turn_id = f"proactive:{uuid4().hex}"
-            current_turn_id = self.session_state.begin_turn("", turn_id=turn_id)
-            self.turn_identity_map.register_frontend_turn(current_turn_id)
-            self._begin_turn_timing(current_turn_id, "")
-            sent = await self._send_json(
-                build_control_turn_started(turn_id=current_turn_id)
-            )
-            if sent:
-                return current_turn_id
+            return await self._begin_proactive_output_turn_locked("proactive")
 
-            self.turn_identity_map.clear_frontend_turn(current_turn_id)
-            self._turn_timings.pop(current_turn_id, None)
-            if self.session_state.current_turn_id == current_turn_id:
-                self.session_state.reset_to_idle()
-            raise RuntimeError(f"turn_started_send_failed:{current_turn_id}")
+    async def begin_passive_output_turn(self) -> str | None:
+        """Start a passive playback Turn only while the OLV session is idle."""
+        async with self._turn_lock:
+            if (
+                self.session_state.current_turn_id is not None
+                or self._active_speech_capture_turns
+            ):
+                return None
+            return await self._begin_proactive_output_turn_locked("passive")
+
+    @property
+    def has_active_speech_input(self) -> bool:
+        return bool(self._active_speech_capture_turns)
+
+    def set_passive_behavior_interrupt_handler(
+        self,
+        handler: Callable[[], Awaitable[None]] | None,
+    ) -> None:
+        self._passive_behavior_interrupt_handler = handler
+
+    async def _begin_proactive_output_turn_locked(self, prefix: str) -> str:
+        turn_id = f"{prefix}:{uuid4().hex}"
+        current_turn_id = self.session_state.begin_turn("", turn_id=turn_id)
+        self.turn_identity_map.register_frontend_turn(current_turn_id)
+        self._begin_turn_timing(current_turn_id, "")
+        sent = await self._send_json(
+            build_control_turn_started(turn_id=current_turn_id)
+        )
+        if sent:
+            return current_turn_id
+
+        self.turn_identity_map.clear_frontend_turn(current_turn_id)
+        self._turn_timings.pop(current_turn_id, None)
+        if self.session_state.current_turn_id == current_turn_id:
+            self.session_state.reset_to_idle()
+        raise RuntimeError(f"turn_started_send_failed:{current_turn_id}")
 
     async def fail_proactive_output_turn(self, *, turn_id: str, reason: str) -> None:
         """Publish a failed proactive turn and discard its connection-owned state."""
@@ -389,6 +426,24 @@ class TurnCoordinator:
     async def close_turn_output_queue(self, *, turn_id: str) -> None:
         """Forward output closure to the segment owner."""
         await self.output_segments.close_turn_output_queue(turn_id=turn_id)
+
+    async def emit_passive_motion_segment(
+        self,
+        *,
+        turn_id: str,
+        message_id: str,
+        sequence: int,
+        motion_payload: dict[str, Any],
+    ) -> None:
+        if self.session_state.current_turn_id != turn_id:
+            raise RuntimeError(f"passive_output_turn_interrupted:{turn_id}")
+        await self.output_segments.emit_motion_only(
+            turn_id=turn_id,
+            message_id=message_id,
+            sequence=sequence,
+            motion_payload=motion_payload,
+            source=PASSIVE_BEHAVIOR_MOTION_SOURCE,
+        )
 
     async def finalize_output_segment(
         self,
@@ -453,6 +508,7 @@ class TurnCoordinator:
     async def _commit_inbound_message(self, message_obj, *, turn_id: str | None = None) -> None:
         async with self._turn_lock:
             normalized_turn_id = self._require_turn_id_value(turn_id)
+            await self._interrupt_passive_work()
             await self._abort_active_frontend_turn_before_new_input(
                 next_turn_id=normalized_turn_id,
             )
@@ -802,15 +858,33 @@ class TurnCoordinator:
 
     async def _handle_vad_speech_started(self, capture_turn_id: str) -> None:
         normalized_capture_turn_id = self._require_turn_id_value(capture_turn_id)
+        self._active_speech_capture_turns.add(normalized_capture_turn_id)
         active_turn_id = self._active_vad_turn_by_capture_turn.get(
             normalized_capture_turn_id
         )
-        if not active_turn_id:
-            return
-        if active_turn_id not in self._events_by_turn_id:
-            self._active_vad_turn_by_capture_turn.pop(normalized_capture_turn_id, None)
-            return
-        await self._handle_interrupt_signal(active_turn_id)
+        if active_turn_id:
+            if active_turn_id in self._events_by_turn_id:
+                await self._handle_interrupt_signal(active_turn_id)
+            else:
+                self._active_vad_turn_by_capture_turn.pop(
+                    normalized_capture_turn_id,
+                    None,
+                )
+
+        async with self._turn_lock:
+            await self._interrupt_passive_work()
+
+    async def _interrupt_passive_work(self) -> None:
+        current_turn_id = getattr(self.session_state, "current_turn_id", None)
+        if isinstance(current_turn_id, str) and current_turn_id.startswith("passive:"):
+            await self._handle_interrupt_signal(current_turn_id)
+        interrupt_handler = self._passive_behavior_interrupt_handler
+        if callable(interrupt_handler):
+            await interrupt_handler()
+
+    async def _handle_vad_speech_ended(self, capture_turn_id: str) -> None:
+        normalized_capture_turn_id = self._require_turn_id_value(capture_turn_id)
+        self._active_speech_capture_turns.discard(normalized_capture_turn_id)
 
     def _require_vad_child_turn_id(
         self,
