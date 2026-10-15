@@ -62,6 +62,17 @@ def _optional_persona_segment_ready_hook():
     return _identity
 
 
+def _optional_persona_segment_intent_ready_hook():
+    hook = getattr(filter, "on_persona_expression_segment_intent_ready", None)
+    if callable(hook):
+        return hook(persona_segment_stream_safe=True)
+
+    def _identity(handler):
+        return handler
+
+    return _identity
+
+
 def _optional_llm_response_hook():
     hook = getattr(filter, "on_llm_response", None)
     if callable(hook):
@@ -439,6 +450,168 @@ class MyPlugin(Star):
             persona_segment_count=getattr(state, "persona_segment_count", None),
         )
 
+    @_optional_persona_segment_intent_ready_hook()
+    async def handle_persona_expression_segment_intent_ready(
+        self,
+        event: AstrMessageEvent,
+        *,
+        turn_id: str,
+        persona_result_id: str,
+        segment_index: int,
+        message_id: str,
+        actions: Any,
+        tendency: Any,
+        turn_action: Any = None,
+        execution_surface: str | None = None,
+    ) -> None:
+        del turn_action, execution_surface
+        if (
+            self._official_core_compatibility
+            or str(event.get_platform_name() or "").strip() != "olv_pet_adapter"
+            or not event.get_extra("_interaction_persona_segment_stream_active", False)
+            or event.get_extra("agent_stop_requested", False)
+        ):
+            return
+        from .middleware.interaction_motion.independent import (
+            IndependentMotionResult,
+            generate_independent_motion,
+            is_persona_expression_request,
+            persona_expression_intent,
+            track_motion_generation_task,
+            untrack_motion_generation_task,
+        )
+        from .middleware.interaction_motion.shared import _resolve_motion_runtime_bundle
+
+        bundle = _resolve_motion_runtime_bundle(event)
+        if (
+            bundle is None
+            or not bool(getattr(bundle.runtime_state, "independent_motion_enabled", False))
+            or not bool(getattr(bundle.runtime_state, "independent_motion_per_speech_segment", False))
+        ):
+            return
+        request = event.get_extra("provider_request")
+        intent = persona_expression_intent(request)
+        if (
+            not is_persona_expression_request(request)
+            or intent is None
+            or str(intent.get("phase") or "").strip() not in {"immediate", "final"}
+            or str(intent.get("kind") or "").strip() != "reply"
+        ):
+            return
+        normalized_turn_id = str(turn_id or "").strip()
+        normalized_result_id = str(persona_result_id or "").strip()
+        normalized_parent_id = str(message_id or "").strip()
+        if (
+            not normalized_turn_id
+            or normalized_turn_id != str(event.get_extra("_turn_id") or "").strip()
+            or not normalized_result_id
+            or not normalized_parent_id
+            or type(segment_index) is not int
+            or segment_index < 0
+        ):
+            return
+
+        registry = bundle.runtime_state.persona_stream_motion
+        work = registry.get(normalized_turn_id)
+        if work is None:
+            try:
+                max_concurrency = max(
+                    1,
+                    min(int(getattr(bundle.runtime_state, "independent_motion_max_concurrency", 4)), 8),
+                )
+            except (TypeError, ValueError):
+                max_concurrency = 4
+            work = {
+                "turn_id": normalized_turn_id,
+                "persona_result_id": normalized_result_id,
+                "parent_message_id": normalized_parent_id,
+                "phase": str(intent.get("phase") or "").strip(),
+                "next_segment_index": 0,
+                "segment_result_futures": {},
+                "segment_intents_by_index": {},
+                "preview_tasks": {},
+                "speech_segments": [],
+                "tasks": set(),
+                "context_task": None,
+                "concurrency_gate": asyncio.Semaphore(max_concurrency),
+                "parallel": True,
+            }
+            registry.register(normalized_turn_id, work)
+        if (
+            work.get("persona_result_id") != normalized_result_id
+            or work.get("parent_message_id") != normalized_parent_id
+            or segment_index != len(work.get("segment_intents_by_index", {}))
+        ):
+            return
+        result_future = asyncio.get_running_loop().create_future()
+        work["segment_result_futures"][segment_index] = result_future
+        work["segment_intents_by_index"][segment_index] = {
+            "actions": list(actions) if isinstance(actions, (list, tuple)) else [],
+            "tendency": dict(tendency) if isinstance(tendency, Mapping) else {},
+        }
+
+        async def _generate_preview() -> None:
+            current_task = asyncio.current_task()
+            result: IndependentMotionResult | None = None
+            try:
+                provider = getattr(bundle.runtime_state, "selected_independent_motion_provider", None)
+                if provider is None:
+                    result = IndependentMotionResult("", None, "provider_unavailable", 0)
+                else:
+                    try:
+                        timeout_seconds = min(
+                            max(
+                                0.0,
+                                float(
+                                    getattr(
+                                        bundle.runtime_state,
+                                        "independent_motion_segment_timeout_seconds",
+                                        5.0,
+                                    )
+                                ),
+                            ),
+                            0.75,
+                        )
+                    except (TypeError, ValueError):
+                        timeout_seconds = 0.75
+                    call = generate_independent_motion(
+                        event,
+                        bundle,
+                        provider=provider,
+                        assistant_text="",
+                        segment_intent=work["segment_intents_by_index"][segment_index],
+                    )
+                    result = await asyncio.wait_for(call, timeout=timeout_seconds) if timeout_seconds else await call
+            except asyncio.TimeoutError:
+                result = IndependentMotionResult("", None, "motion_timeout", 0)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("WIRING independent_motion.intent_preview_failed error=%s", exc, exc_info=True)
+                result = IndependentMotionResult("", None, "segment_generation_failed", 0)
+            finally:
+                if result is not None and not result_future.done():
+                    result_future.set_result(result)
+                if isinstance(current_task, asyncio.Task):
+                    untrack_motion_generation_task(
+                        bundle.runtime_state,
+                        turn_id=normalized_turn_id,
+                        task=current_task,
+                    )
+
+        preview_task = asyncio.create_task(
+            _generate_preview(),
+            name=f"ag99live-persona-stream-intent-{normalized_result_id[:10]}-{segment_index}",
+        )
+        work["preview_tasks"][segment_index] = preview_task
+        work["tasks"].add(preview_task)
+        self._independent_motion_tasks.add(preview_task)
+        preview_task.add_done_callback(work["tasks"].discard)
+        preview_task.add_done_callback(self._independent_motion_tasks.discard)
+        track_motion_generation_task(
+            bundle.runtime_state,
+            turn_id=normalized_turn_id,
+            task=preview_task,
+        )
+
     @_optional_persona_segment_ready_hook()
     async def handle_persona_expression_segment_ready(
         self,
@@ -605,11 +778,28 @@ class MyPlugin(Star):
             event.stop_event()
             return
         work["next_segment_index"] += 1
+        work.setdefault("segment_intents_by_index", {})[segment_index] = {
+            "actions": actions,
+            "tendency": tendency,
+        }
+        speech_segments = list(work.get("speech_segments") or [])
+        while len(speech_segments) <= segment_index:
+            speech_segments.append("")
+        speech_segments[segment_index] = speech
+        work["speech_segments"] = speech_segments
         if not speech.strip():
             return
 
-        result_future = asyncio.get_running_loop().create_future()
-        work["segment_result_futures"][segment_index] = result_future
+        result_future = work["segment_result_futures"].get(segment_index)
+        if not isinstance(result_future, asyncio.Future):
+            result_future = asyncio.get_running_loop().create_future()
+            work["segment_result_futures"][segment_index] = result_future
+        preview_tasks = work.get("preview_tasks")
+        if isinstance(preview_tasks, dict) and segment_index in preview_tasks:
+            # The intent hook already started the action request before speech
+            # generation reached segment_end. Keep that early result and let
+            # TTS join it by the same segment future.
+            return
         context_task = work.get("context_task")
         if not isinstance(context_task, asyncio.Task):
             async def _prepare_context():

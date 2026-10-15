@@ -46,6 +46,11 @@ _PARALLEL_MOTION_WAIT_SECONDS = 2.0
 _DEFAULT_SEGMENT_MAX_CONCURRENCY = 4
 _DEFAULT_SEGMENT_TIMEOUT_SECONDS = 5.0
 _NEUROBRAIN_RESULT_WAIT_SECONDS = 1.0
+# OLV audio is the primary response.  A slow optional motion Provider must not
+# turn a streamed segment into a full-response wait; within this budget motion
+# is included, otherwise the segment is delivered with an explicit motion
+# failure state and the dialogue continues.
+_STREAM_SEGMENT_TIMEOUT_SECONDS = 0.75
 
 
 def _consume_background_motion_exception(task: asyncio.Task) -> None:
@@ -477,6 +482,28 @@ async def generate_independent_motion_for_segments(
         )
     except (TypeError, ValueError):
         segment_timeout_seconds = _DEFAULT_SEGMENT_TIMEOUT_SECONDS
+    get_extra = getattr(event, "get_extra", None)
+    stream_active = bool(
+        get_extra("_interaction_persona_segment_stream_active", False)
+        if callable(get_extra)
+        else False
+    )
+    if stream_active and segment_timeout_seconds > 0:
+        configured_timeout = segment_timeout_seconds
+        segment_timeout_seconds = min(
+            segment_timeout_seconds,
+            _STREAM_SEGMENT_TIMEOUT_SECONDS,
+        )
+        if segment_timeout_seconds < configured_timeout:
+            logger.debug(
+                "WIRING independent_motion.stream_timeout_capped "
+                "turn_id=%s configured_seconds=%.2f effective_seconds=%.2f",
+                get_extra("_turn_id", "<missing>")
+                if callable(get_extra)
+                else "<missing>",
+                configured_timeout,
+                segment_timeout_seconds,
+            )
 
     shared_context = prepared_context
     if shared_context is None:
