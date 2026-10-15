@@ -1,17 +1,17 @@
 # OLV 全生命周期流式实施计划
 
-> **状态：2026-10-15 实施顺序确认稿。**本文描述拟实施路线，不代表相关能力已经进入源码。范围覆盖 AstrBot Core、AG99live Adapter Python 后端和 TypeScript 桌面前端；不涉及 C++。
+> **状态：2026-10-15 实施顺序与基线采样更新。**本文描述拟实施路线，不代表相关能力已经进入源码。范围覆盖 AstrBot Core、AG99live Adapter Python 后端和 TypeScript 桌面前端；不涉及 C++。
 
 ## 当前进度
 
-- **阶段 0 观测点：已接入，待真实采样。**现有语音路径现在记录 PTT 采集结束、转写开始/完成、Persona 完整结果或校验 segment、TTS 完整物料就绪、Adapter `output.segment.v5` 发送和桌面实际音频起播。浏览器侧 PTT→实际起播使用同一 `performance.now()` 时钟；进程间阶段同时记录 epoch 时间戳，并按 `turn_id` / segment 身份关联。
-- **阶段 0 基线：初步服务端样本已取得，完整基线未完成。**2026-10-15 的服务端日志中有 3 条到达首个 `output_segment_sent` 的语音输入链路；从 `transcription_started` 到首个 `output_segment_sent` 分别为 5.673 s、4.908 s、5.466 s。该区间不等于用户停止说话至桌面实际起播，不能替代计划指标，也不足以建立稳定 p50/p95。流式入口仍保持关闭，未改变当前交互路径。
-- **阶段 0 采样取数：**Core/Adapter 服务端 `DIAG latency.*` 记录从 `data/logs/astrbot.log` 按 `turn_id` 关联；Electron renderer 的 PTT capture end 与 audio playback started 现在还会经受限 IPC 写入 `app.getPath("logs")/ag99live/olv-latency-YYYY-MM-DD.jsonl`，只包含时间、Turn/stream 身份和采集状态，不含对话正文。桌面源码构建和类型检查已通过；运行中的客户端需更新到新构建并重启后，才会生成这些记录。
-- **部署检查（2026-10-15）：**首次检查时 AstrBot 进程早于诊断提交启动，计时标记为 0；用户手动重启后已采到上述 3 条服务端链路记录。
+- **阶段 0 观测点：已接入并完成首次桌面关联采样。**现有语音路径记录 PTT 采集结束、转写开始/完成、Persona 完整结果或校验 segment、TTS 完整物料就绪、Adapter `output.segment.v5` 发送和桌面实际音频起播。浏览器侧 PTT→实际起播使用同一 `performance.now()` 时钟；进程间阶段同时记录 epoch 时间戳，并按 `turn_id` / segment 身份关联。
+- **阶段 0 基线：已建立初步端到端基线，分布仍待补充。**2026-10-15 19:25、19:26 两轮普通 OLV PTT 对话的 PTT 松开→桌面首个实际起播分别为 **6.514 s**、**5.741 s**；PTT 松开→首次服务端 `output_segment_sent` 分别为 5.937 s、5.534 s。首个输出提交→桌面起播分别为 0.577 s、0.207 s。对应 ASR 完成耗时分别为 0.784 s、1.110 s（从服务端 `transcription_started` 起算）。两条真实端到端记录满足开始阶段 1 的基线前置条件，但样本量不足以报告稳定 p50/p95；后续联调期间继续采样。此前另有 3 条服务端样本，从 `transcription_started` 到首个 `output_segment_sent` 为 5.673 s、4.908 s、5.466 s；该指标不能替代 PTT→桌面起播。流式入口仍保持关闭，未改变当前交互路径。
+- **阶段 0 采样取数：**Core/Adapter 服务端 `DIAG latency.*` 从 `data/logs/astrbot.log` 按 `turn_id` 关联；Electron renderer 的 PTT capture end 与 audio playback started 经受限 IPC 写入 `app.getPath("logs")/ag99live/olv-latency-YYYY-MM-DD.jsonl`，只包含时间、Turn/stream 身份和采集状态，不含对话正文。已从 2026-10-15 的桌面 JSONL 成功关联两轮记录。
+- **部署与样本备注（2026-10-15）：**用户更新并运行桌面端后，Electron JSONL 与 AstrBot 服务端日志已按两条 `input:turn_id` / `stream_id` 成功关联。第一轮 segment 0 的动作终态为 failed，日志原因为 `motion_step_duration_weight_invalid:0`；该轮音频首响时间仍可用于音频延迟观察，但动作同步表现异常，第二轮动作正常。继续采样时需同时观察动作终态，不能只看首响数值。
 - **阶段 1 前置准备：已提交，尚未启用流。**Core 的 result contributor 注册现支持可选 `event_filter`；AG99live 在 Core 支持时注册带过滤器的 motion contributor，在旧签名 Core 上沿用原注册调用，因此普通 Turn 的 interaction contributors 和 Persona effect 不因该可选参数缺失而被关闭。Adapter 单独记录 `interaction_result_event_filter_available`；没有该能力的 Core 不满足后续 OLV 流入口条件，入口实现必须消费此标记。当前没有设置 OLV 流式入口。相关基础提交：AstrBot `839afa045`、AG99live `fb61dd9`。
-- **阶段 1：未开始。**完成真实基线采样后，再实施 Core segment-ready Hook、Adapter 逐段动作关联、未知总段数处理和 v5 首段提前起播的完整竖切片。
+- **阶段 1：前置条件满足，可开始实施；代码尚未开始。**首批应实现未知总段数期间的 segment 身份、动作 Future 与完整 TTS 物料关联，并让 `output.segment.v5` 在不伪造最终 count 的前提下提前交付；入口保持关闭，直到整条竖切片通过真实联调。
 
-上一轮复核发现并修复了兼容门过宽的问题：基础 interaction contributor 支持现与 `event_filter` 流式能力分开判断，旧签名 Core 继续注册普通路径 contributor。过滤能力标记已加入运行状态，但流式入口尚未实现对该标记的准入检查。当前验证覆盖新旧注册签名的边界测试和静态检查；尚无已重载配套运行时后的普通 Turn 或 OLV 实测。
+上一轮复核发现并修复了兼容门过宽的问题：基础 interaction contributor 支持现与 `event_filter` 流式能力分开判断，旧签名 Core 继续注册普通路径 contributor。过滤能力标记已加入运行状态，但流式入口尚未实现对该标记的准入检查。当前验证覆盖新旧注册签名的边界测试和静态检查；配套运行时已完成两轮流式关闭的普通 OLV 对话，OLV Persona 流式路径仍未进行真实联调。
 
 ## 本轮复核结论
 
