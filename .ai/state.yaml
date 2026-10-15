@@ -509,6 +509,7 @@ olv_stream_review_fixes_20261015:
     - "Core physical delivery fixes preserve state-only indices, use per-part output identity, and avoid orphan TTS metadata in no-TTS output. Actual parser/Core/OLV/Adapter boundary smoke passed without a real Provider, motion generation, audio device or model."
     - "Plan now lists concrete manual phase-1 connection, early playback, interruption/reconnect, failure and gate-off acceptance checks."
     - "Core 673175355 commits only the physical-delivery hunks; the user's contributor-compatibility change remains uncommitted. Ruff, AST, YAML and diff checks passed."
+    - "Live 00:59/01:00 logs identify disabled AngelHeart output-Hook false rejection and missing coordinated pre-publication failure closure. Core 38404d16f selects only admitted Hooks and aborts an unrouted failed stream explicitly; real admission/abort boundaries passed. NeuroBrain is not modified."
 
 olv_stream_setting_desktop_ownership_20261015:
   recorded_at: "2026-10-15"
