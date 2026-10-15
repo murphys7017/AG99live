@@ -185,6 +185,9 @@ export function usePlaybackCompletionCoordinator(
 function resolvePlaybackFailureReason(
   session: DeepReadonly<TurnPlaybackSession>,
 ): string | null {
+  if (session.backend.synthesisFailureReason) {
+    return session.backend.synthesisFailureReason;
+  }
   for (const segmentId of session.segmentOrder) {
     const segment = session.segments.get(segmentId);
     if (!segment) {

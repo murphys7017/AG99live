@@ -426,9 +426,13 @@ class TurnCoordinator:
             reason=reason,
         )
 
-    async def close_turn_output_queue(self, *, turn_id: str) -> None:
+    async def close_turn_output_queue(
+        self, *, turn_id: str, failure_reason: str | None = None
+    ) -> None:
         """Forward output closure to the segment owner."""
-        await self.output_segments.close_turn_output_queue(turn_id=turn_id)
+        await self.output_segments.close_turn_output_queue(
+            turn_id=turn_id, failure_reason=failure_reason
+        )
 
     async def emit_passive_motion_segment(
         self,
@@ -482,6 +486,11 @@ class TurnCoordinator:
         resolved_turn_id = self._normalize_optional_turn_value(turn_id)
         if not resolved_turn_id:
             raise ValueError("playback_finished_turn_id_missing")
+
+        output_failure = self.output_segments.output_failure_reason(resolved_turn_id)
+        if output_failure:
+            success = False
+            reason = output_failure
 
         self._mark_turn_timing(resolved_turn_id, "playback_completed_at")
         playback_ms = self._elapsed_ms(

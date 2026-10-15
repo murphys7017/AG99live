@@ -774,6 +774,7 @@ class MyPlugin(Star):
                 message_id=message_id,
                 segment_count=segment_count,
                 status=status,
+                failure_reason=failure_reason,
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning(
@@ -788,7 +789,9 @@ class MyPlugin(Star):
                 failure_reason or "<none>",
                 exc_info=True,
             )
-            event.stop_event()
+            # Closing delivery must still run so the desktop receives a failure
+            # terminal while retaining the segments it has already accepted.
+            event.record_persona_stream_failure(f"persona_stream_terminal_rejected:{exc}")
         finally:
             registry = getattr(
                 getattr(getattr(event, "adapter", None), "runtime_state", None),

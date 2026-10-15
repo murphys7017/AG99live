@@ -30,7 +30,7 @@ export interface InboundRuntimeDispatchDeps {
   sessionStore: {
     setActiveSession: (turnId: string | null) => void;
     markTurnStarted: (turnId: string) => void;
-    markSynthFinished: (turnId: string | null) => void;
+    markSynthFinished: (turnId: string | null, success: boolean, reason: string) => void;
     markTurnFinished: (turnId: string | null, success: boolean, reason?: string) => boolean;
     markInterrupt: (turnId: string | null) => boolean;
     assertOutputSegmentsResolved: (turnId: string | null) => void;
@@ -190,11 +190,17 @@ function applySynthFinished(
   const s = deps.state;
   try {
     deps.sessionStore.assertOutputSegmentsResolved(event.turnId);
-    deps.sessionStore.markSynthFinished(event.turnId);
+    deps.sessionStore.markSynthFinished(event.turnId, event.success, event.reason);
   } catch (error) {
     deps.reportRuntimeProtocolViolation(
       error instanceof Error ? error.message : "synth_finished arrived for invalid session.",
     );
+    return;
+  }
+  if (!event.success) {
+    s.lastError = event.reason;
+    s.statusMessage = `回复生成未完成：${event.reason}；已收到的内容将继续播放。`;
+    deps.pushHistory("error", s.statusMessage);
     return;
   }
   const activeAudioSegment = deps.findActiveAudioSegment();

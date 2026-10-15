@@ -300,7 +300,7 @@ export function parseOutputTranscriptionPayload(
   return text.ok ? { ok: true, payload: { text: text.payload } } : text;
 }
 
-export function parseControlTurnFinishedPayload(
+export function parseControlCompletionPayload(
   envelope: ProtocolEnvelope<unknown>,
 ): PayloadParseResult<ControlTurnFinishedPayload> {
   const record = parseObjectPayload(envelope);
@@ -310,6 +310,13 @@ export function parseControlTurnFinishedPayload(
   const reason = record.payload.reason;
   if (reason !== undefined && typeof reason !== "string") {
     return invalidPayload(envelope.type, "payload.reason", "string | undefined");
+  }
+  if (
+    envelope.type === "control.synth_finished"
+    && !success.payload
+    && (typeof reason !== "string" || !reason.trim())
+  ) {
+    return invalidPayload(envelope.type, "payload.reason", "nonempty string on failure");
   }
   return {
     ok: true,

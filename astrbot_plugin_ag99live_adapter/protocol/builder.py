@@ -342,12 +342,14 @@ def build_control_interrupt(
 def build_control_synth_finished(
     *,
     turn_id: str | None,
+    success: bool = True,
+    reason: str | None = None,
 ) -> dict[str, Any]:
     return build_message_envelope(
         TYPE_CONTROL_SYNTH_FINISHED,
         turn_id=turn_id,
         source=SOURCE_ADAPTER,
-        payload={},
+        payload={"success": success, "reason": reason or ""},
     )
 
 

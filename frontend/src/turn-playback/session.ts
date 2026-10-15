@@ -194,6 +194,7 @@ export type OutputSegmentCommitResult =
 export interface TurnPlaybackSessionBackend {
   turnStarted: boolean;
   synthFinished: boolean;
+  synthesisFailureReason: string | null;
   turnFinished: boolean;
   success: boolean | null;
   reason: string;
@@ -326,6 +327,7 @@ export function createTurnPlaybackSession(
     backend: {
       turnStarted: false,
       synthFinished: false,
+      synthesisFailureReason: null,
       turnFinished: false,
       success: null,
       reason: "",

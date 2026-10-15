@@ -641,8 +641,21 @@ export function useTurnPlaybackSessionStore() {
 
   function markSynthFinished(
     turnId: string | null,
+    success: boolean,
+    reason: string,
   ): void {
     const session = requireSession(turnId);
+    const failureReason = success ? null : reason.trim();
+    if (!success && !failureReason) {
+      throw new Error("synthesis_failure_reason_missing");
+    }
+    if (session.backend.synthFinished) {
+      if (session.backend.synthesisFailureReason !== failureReason) {
+        throw new Error("synthesis_terminal_rewrite");
+      }
+      return;
+    }
+    session.backend.synthesisFailureReason = failureReason;
     session.backend.synthFinished = true;
   }
 

@@ -98,7 +98,9 @@ class AdapterStub:
     async def emit_message_chain(self, **kwargs) -> None:
         self.emit_calls.append(kwargs)
 
-    async def _close_turn_output_queue(self, *, turn_id: str) -> None:
+    async def _close_turn_output_queue(
+        self, *, turn_id: str, failure_reason: str | None = None
+    ) -> None:
         self.closed_output_queues.append(turn_id)
 
     async def _finalize_output_segment(self, *, turn_id: str, message_id: str) -> None:

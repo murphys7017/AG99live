@@ -14,6 +14,7 @@
 
 import type {
   ControlErrorPayload,
+  ControlSynthFinishedPayload,
   ControlTurnFinishedPayload,
   OutputSegmentPayload,
   OutputTranscriptionPayload,
@@ -34,7 +35,7 @@ import { INBOUND_MESSAGE_TYPES } from "../core/protocolMessageTypes.js";
 import {
   type PayloadParseError,
   parseControlErrorPayload,
-  parseControlTurnFinishedPayload,
+  parseControlCompletionPayload,
   parseHistoryCreatedPayload,
   parseHistoryDataPayload,
   parseHistoryDeletedPayload,
@@ -172,7 +173,9 @@ export type InboundAdapterEvent =
   | {
     kind: "synth_finished";
     turnId: string | null;
-    envelope: ProtocolEnvelope<unknown>;
+    success: boolean;
+    reason: string;
+    envelope: ProtocolEnvelope<ControlSynthFinishedPayload>;
   }
   ;
 
@@ -341,7 +344,7 @@ export function mapInboundEnvelopeToEvent(
       };
     }
     case INBOUND_MESSAGE_TYPES.CONTROL_TURN_FINISHED: {
-      const parsed = parseControlTurnFinishedPayload(envelope);
+      const parsed = parseControlCompletionPayload(envelope);
       if (!parsed.ok) {
         return protocolPayloadError(envelope, parsed.error);
       }
@@ -377,6 +380,10 @@ export function mapInboundEnvelopeToEvent(
       };
     case INBOUND_MESSAGE_TYPES.CONTROL_SYNTH_FINISHED:
       {
+        const parsed = parseControlCompletionPayload(envelope);
+        if (!parsed.ok) {
+          return protocolPayloadError(envelope, parsed.error);
+        }
         const turnId = requireTurnId(envelope);
         if (!turnId.ok) {
           return turnId.event;
@@ -384,7 +391,9 @@ export function mapInboundEnvelopeToEvent(
         return {
           kind: "synth_finished",
           turnId: turnId.turnId,
-          envelope,
+          success: parsed.payload.success,
+          reason: parsed.payload.reason?.trim() ?? "",
+          envelope: withPayload(envelope, parsed.payload),
         };
       }
     case INBOUND_MESSAGE_TYPES.CONTROL_ERROR: {

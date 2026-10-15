@@ -111,6 +111,11 @@ export interface ControlTurnFinishedPayload {
   reason?: string;
 }
 
+export interface ControlSynthFinishedPayload {
+  success: boolean;
+  reason?: string;
+}
+
 export interface ControlErrorPayload {
   message: string;
 }

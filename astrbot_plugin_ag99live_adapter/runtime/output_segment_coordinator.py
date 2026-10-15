@@ -73,6 +73,7 @@ class OutputSegmentCoordinator:
         self._closing_turn_ids: set[str] = set()
         self._closed_turn_ids: set[str] = set()
         self._emitted_turn_ids: set[str] = set()
+        self._output_failures: dict[str, str] = {}
         self._turn_level_motion_consumed: set[str] = set()
 
     def reset(self) -> None:
@@ -84,6 +85,7 @@ class OutputSegmentCoordinator:
         self._closing_turn_ids.clear()
         self._closed_turn_ids.clear()
         self._emitted_turn_ids.clear()
+        self._output_failures.clear()
         self._turn_level_motion_consumed.clear()
 
     def tracked_turn_ids(self) -> set[str]:
@@ -99,6 +101,7 @@ class OutputSegmentCoordinator:
         return bool(segment is not None and segment.persona_segment_index is not None)
 
     def clear_turn(self, turn_id: str) -> None:
+        self._output_failures.pop(turn_id, None)
         prefix = f"{turn_id}|"
         for key in tuple(self._pending_segments):
             if key.startswith(prefix):
@@ -347,7 +350,12 @@ class OutputSegmentCoordinator:
             segment.finalize()
             await self._flush_finalized_segments_in_order(normalized_turn_id)
 
-    async def close_turn_output_queue(self, *, turn_id: str) -> None:
+    def output_failure_reason(self, turn_id: str) -> str | None:
+        return self._output_failures.get(turn_id)
+
+    async def close_turn_output_queue(
+        self, *, turn_id: str, failure_reason: str | None = None
+    ) -> None:
         normalized_turn_id = _require_turn_id_value(turn_id)
         async with self._get_turn_lock(normalized_turn_id):
             if normalized_turn_id in self._closed_turn_ids:
@@ -355,6 +363,8 @@ class OutputSegmentCoordinator:
             if normalized_turn_id in self._closing_turn_ids:
                 return
             self._closing_turn_ids.add(normalized_turn_id)
+            if failure_reason:
+                self._output_failures[normalized_turn_id] = failure_reason
             try:
                 pending_segment = self._first_pending_segment(normalized_turn_id)
                 if pending_segment is not None:
@@ -389,7 +399,11 @@ class OutputSegmentCoordinator:
                     )
                     return
                 sent = await self._send_json(
-                    build_control_synth_finished(turn_id=normalized_turn_id)
+                    build_control_synth_finished(
+                        turn_id=normalized_turn_id,
+                        success=normalized_turn_id not in self._output_failures,
+                        reason=self._output_failures.get(normalized_turn_id),
+                    )
                 )
                 if not sent:
                     raise RuntimeError(f"synth_finished_send_failed:{normalized_turn_id}")

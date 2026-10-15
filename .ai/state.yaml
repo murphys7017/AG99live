@@ -491,13 +491,17 @@ neurobrain_passive_behavior_stream_20261014:
 olv_stream_review_fixes_20261015:
   class: bugfix
   risk: high
-  status: in_progress
+  status: source_validated_pending_live_acceptance
   scope:
     - "Fix Adapter Hook admission, lifecycle-isolated motion work, active flag scope, and desktop stream failure termination in separate commits."
   validation:
     - "Prior review reproduced unsafe Adapter Hook admission and sibling-task invisibility of lifecycle-local extras using actual AstrBot APIs."
     - "Step 1: actual AstrBot registration confirms all four Adapter legacy Hooks declare stream safety; Ruff and diff checks passed."
     - "Step 2: real AstrBot lifecycle and OLV send boundary confirms runtime-owned work survives request scope and attaches the matching motion; cleanup removes the registry entry."
+    - "Step 3: Core 75012004d clears stream activity in finally; AST, Ruff and diff checks passed while preserving unrelated Core edits."
+    - "Step 4: actual segment/Turn protocol boundaries preserve an accepted prefix, publish failed synthesis and prevent a successful playback acknowledgement from overriding generation failure."
+    - "Frontend protocol/Session/completion boundary preserves the prefix until settlement, then emits a failed acknowledgement; missing failure reason is rejected. Renderer typecheck passed."
+    - "Electron production build, changed-file Ruff/AST checks, protocol manifest validation, plugin structure check (0 errors, 0 warnings), state YAML and diff checks passed."
   evidence_gap:
     - "Other installed plugin Hooks still require independent compatibility review; no live stream acceptance or application restart is authorized."
 

@@ -51,6 +51,10 @@ python scripts/check_protocol_schema_manifest.py
 
 协议层给出明确拒绝原因，不补字段、不重命名参数，也不生成默认动作。动作输入来自 Persona Effect 或独立动作 Provider，并统一校验为当前 V4 动作契约；协议不从对话文本标签解析动作。
 
+`control.synth_finished` 关闭该 Turn 的输出队列，payload 必须包含布尔值 `success`，失败时必须带非空 `reason`。生成失败不会删除已经接受的原子段，也不会立刻把播放 Session 置为失败；这些段仍按原顺序播放。桌面在本地播放收口后发送 `control.playback_finished`，生成失败或本地播放失败时其 `success` 为 false。Adapter 保留生成失败原因，不能被客户端的成功回执覆盖，最终通过 `control.turn_finished` 返回失败。
+
+本次契约要求配套更新 Adapter 与桌面客户端；旧的空 payload 不再是有效的 `synth_finished`。`output.segment.v5` 保持不变。
+
 ## 代码位置
 
 - Schema 清单：`astrbot_plugin_ag99live_adapter/protocol/schema_manifest.json`

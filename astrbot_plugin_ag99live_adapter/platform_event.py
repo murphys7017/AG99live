@@ -22,7 +22,9 @@ class OutputSegmentDeliveryPort(Protocol):
 
     def has_pending_persona_segment(self, *, turn_id: str, message_id: str) -> bool: ...
 
-    async def close_turn_output_queue(self, *, turn_id: str) -> None: ...
+    async def close_turn_output_queue(
+        self, *, turn_id: str, failure_reason: str | None = None
+    ) -> None: ...
 
     async def abort_turn_from_backend(self, *, turn_id: str, reason: str) -> int: ...
 
@@ -135,6 +137,7 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         self._message_children: dict[str, list[str]] = {}
         self._active_persona_delivery_parent: dict[str, str] = {}
         self._persona_segment_delivery_state: dict[str, dict[str, Any]] = {}
+        self._persona_stream_failure_reason: str | None = None
         self._attach_prompt_annotations(message_obj=message_obj)
 
     async def send(self, message):
@@ -418,6 +421,10 @@ class OLVPetPlatformEvent(AstrMessageEvent):
             self._persona_segment_delivery_state.pop(state_key, None)
         self.set_extra("_ag99live_persona_tts_segment_map", {})
 
+    def record_persona_stream_failure(self, reason: str) -> None:
+        if self._persona_stream_failure_reason is None:
+            self._persona_stream_failure_reason = reason
+
     def mark_persona_stream_finished(
         self,
         *,
@@ -426,7 +433,12 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         message_id: str,
         segment_count: int,
         status: str,
+        failure_reason: str | None = None,
     ) -> None:
+        if status != "completed":
+            self.record_persona_stream_failure(
+                str(failure_reason or "").strip() or f"persona_segment_stream_{status}"
+            )
         event_turn_id = str(self.get_extra("_turn_id", "") or "").strip()
         delivery_turn_id = str(
             self.get_extra("output_correlation_id", "") or ""
@@ -508,7 +520,9 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         turn_id = str(self.get_extra("output_correlation_id", "") or "").strip()
         if not turn_id:
             raise RuntimeError("output_event_turn_id_missing")
-        await self.adapter.turn_coordinator.close_turn_output_queue(turn_id=turn_id)
+        await self.adapter.turn_coordinator.close_turn_output_queue(
+            turn_id=turn_id, failure_reason=self._persona_stream_failure_reason
+        )
 
     def _is_stop_requested(self) -> bool:
         return bool(self.get_extra("agent_stop_requested", False))

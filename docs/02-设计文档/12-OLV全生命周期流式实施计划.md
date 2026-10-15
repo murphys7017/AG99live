@@ -1,10 +1,12 @@
 # OLV 全生命周期流式实施计划
 
-> **状态：2026-10-15 阶段 1 代码接入，待真实联调。**当前入口仍默认关闭；本文同时记录源码状态和未完成的运行验收。范围覆盖 AstrBot Core、AG99live Adapter Python 后端和 TypeScript 桌面前端；不涉及 C++。
+> **状态：2026-10-16 阶段 1 复核问题已修复，待真实联调。**入口配置的默认值仍为关闭；本文同时记录源码状态和未完成的运行验收。范围覆盖 AstrBot Core、AG99live Adapter Python 后端和 TypeScript 桌面前端；不涉及 C++。
 
 ## 当前进度
 
-- **整体复核修复中：**已为 Adapter 的请求、响应、结果修饰和完整 Persona 结果 Hook 声明流式安全。逐 speech 模式下请求/响应 Hook 不启动旧动作任务；完整结果 Hook 在流式期间只记录观测，结果修饰仍逐段执行。动作 Future、并发任务和共享上下文现由 Adapter RuntimeState 的 `PersonaStreamMotionRegistry` 按后端 Turn 保存，交付侧不再读取隔离的 event extras；流终态、打断和断线使用同一所有者取消并清理。真实 AstrBot 生命周期和 OLV 发送边界检查已确认隔离 Hook 登记的动作能在交付侧汇合。其他插件（包括当前 NeuroBrain）的 Hook 必须单独满足 Core 的安全准入，不能只给 Adapter 加声明后就视为全部兼容。待修复项：同轮普通最终回复被流式标记误伤、失败终态传递到桌面。
+- **2026-10-16 整体复核修复：**Adapter 的请求、响应、结果修饰和完整 Persona 结果 Hook 已声明流式安全。动作 Future、并发任务和共享上下文现由 RuntimeState 的 `PersonaStreamMotionRegistry` 按后端 Turn 保存；交付、终态、打断及断线共享同一所有者，避免隔离 event extras 读不到任务。Core 在每次流式 Persona 调用结束（含异常和取消）后清除 `active`，`delegate` 后的普通 Core-final 回复恢复原有动作 Hook/contributor。流失败经 `control.synth_finished.success/reason` 传到桌面；已接受前缀继续播放，最终播放回执及 `turn_finished` 保留失败。相关基础提交：Adapter `f11a86c`、`fe4d1b1`，Core `75012004d`。
+- **复核验证边界：**真实 AstrBot 生命周期及 OLV 发送检查已确认跨上下文动作汇合；真实段输出和协议回执边界已确认保留前缀、失败关闭、成功客户端回执不能覆盖生成失败。前端协议→Session→完成回执检查确认前缀结算前不回执、结算后回失败，并拒绝缺少原因的失败终态。上述检查未调用真实 Provider、音频设备或 Live2D，不替代首响、取消及委派最终回复的现场验收。
+- **联调前仍需处理的兼容限制：**其他插件（包括当前 NeuroBrain）的 Hook 必须单独满足 Core 的流式安全准入，不能只给 Adapter 加声明后就视为全部兼容。当前 NeuroBrain 仍在完整结果后更新状态，其结果 Hook 未声明流式安全，保留启用该 Hook 时可能阻止进入流式；本轮未修改该插件或放宽 Core 检查。必须配套加载新版 Core、Adapter 和桌面端，不能把源码部署等同于运行时生效。
 
 - **阶段 0 观测点：已接入并完成首次桌面关联采样。**现有语音路径记录 PTT 采集结束、转写开始/完成、Persona 完整结果或校验 segment、TTS 完整物料就绪、Adapter `output.segment.v5` 发送和桌面实际音频起播。浏览器侧 PTT→实际起播使用同一 `performance.now()` 时钟；进程间阶段同时记录 epoch 时间戳，并按 `turn_id` / segment 身份关联。
 - **阶段 0 基线：已建立初步端到端基线，分布仍待补充。**2026-10-15 19:25、19:26 两轮普通 OLV PTT 对话的 PTT 松开→桌面首个实际起播分别为 **6.514 s**、**5.741 s**；PTT 松开→首次服务端 `output_segment_sent` 分别为 5.937 s、5.534 s。首个输出提交→桌面起播分别为 0.577 s、0.207 s。对应 ASR 完成耗时分别为 0.784 s、1.110 s（从服务端 `transcription_started` 起算）。两条真实端到端记录满足开始阶段 1 的基线前置条件，但样本量不足以报告稳定 p50/p95；后续联调期间继续采样。此前另有 3 条服务端样本，从 `transcription_started` 到首个 `output_segment_sent` 为 5.673 s、4.908 s、5.466 s；该指标不能替代 PTT→桌面起播。流式入口仍保持关闭，未改变当前交互路径。
@@ -68,10 +70,10 @@ PCM 麦克风帧
 | --- | --- | --- |
 | 麦克风上行 | TS 已分块发送 PCM，Adapter 已解析带序号的二进制输入帧；VAD 可逐帧检测。 | PTT 会缓存到音频结束；VAD 也在完整语音段形成后才调用 STT。 |
 | ASR | AstrBot `STTProvider.get_text(audio_url)` 和文件型 STT 实现可用于最终识别。 | 没有统一的音频会话/增量识别接口；当前 MiniMax STT 适配器上传完整文件并读取完整文本。 |
-| Persona | Core 已有 `segment_stream_v1` 的模型流读取、结构化解析和 `OnPersonaExpressionSegmentReadyEvent` 发布点；OLV 输出会抑制未闭合的 `speech_delta`。 | AG99live 没有设置 OLV 流式入口标记；流式模式还受特定输出格式、全局钩子/贡献者和 Persona effect 限制。 |
-| 分段动作与输出 | Adapter 已有 Turn、顺序、动作 Future、逐段 flush 和晚到结果清理机制；`passive_behavior` 有可复用的增量读取/即时提交骨架。 | Persona 动作当前从完整结果钩子启动；旧绑定器要求 index/count 成对，不能直接处理流结束前未知总数。 |
+| Persona | Core 已接入 OLV immediate Persona 的 `segment_stream_v1` 读取、结构校验及 segment-ready/stream-finished Hooks；Adapter 通过双开关准入，未闭合 delta 不外发。 | 尚未真实验收；其他插件 Hook/effect 和输出格式限制仍有效。委派后的 Core-final 仍走普通完整结果路径，本轮仅修复其动作回归，不宣称该路径也已模型流式化。 |
+| 分段动作与输出 | segment-ready 启动动作 Future，运行时注册表跨任务保存；逐段完整 TTS 到达后汇合，未知总数流在终态校验。普通路径继续使用原绑定器。 | 待真实双段、动作超时、后段失败、打断及断线验收；不能仅凭边界检查认定端到端时序正确。 |
 | TTS | `TTSProvider` 已定义 `get_audio_stream()`；Agent 路径已有流式 TTS 消费代码，部分 Provider 内部使用上游流接口。 | Persona 通用语音服务仍调用 `get_audio()` 并物化完整文件；基类 `get_audio_stream()` 默认会先累积完整文本再生成整段音频，必须确认选定 Provider 真正支持音频分块；现有字节格式也不足以直接充当桌面连续音频协议。 |
-| 桌面下行与播放 | WebSocket 已支持双向消息循环；TS 有原子 `output.segment.v5`、播放时间线和口型同步。 | Adapter 出站抽象目前只发送 JSON；TS 播放器按完整音频 URL 创建 `HTMLAudioElement`，没有接收音频帧、有限缓冲、stream end 或音频播放回执状态。 |
+| 桌面下行与播放 | TS 按完整 `output.segment.v5` 在 synth-finished 前起播，并拥有播放时间线、口型及播放完成回执；生成失败终态保留已接受前缀并影响最终回执。 | 仍以完整音频 URL 播放，没有音频 chunk 下行协议、连续解码 sink 或对应背压；这些属于阶段 2。 |
 
 现有 `independent_motion` 的 `per_speech_segment` 路径提供业务关联、动作 Future、TTS 身份绑定和按段输出的基础；`passive_behavior` 的 NDJSON 动作流提供 Provider 流读取、校验、序号、取消、TTL、背压和 Turn 收口的运行时参考。新链路复用两者的对应部分，不复制后台触发条件或独立 motion-only Turn。
 
@@ -141,11 +143,11 @@ PCM 麦克风帧
 | 现有实现 | 可以复用的部分 | 需要改造的部分 |
 | --- | --- | --- |
 | `runtime/passive_behavior.py` | 流读取、逐条解析、TTL、取消、序号和即时提交的运行骨架 | 去掉后台 motion-only Turn，改为绑定正常 Persona Turn 和 segment 身份 |
-| `runtime/turn_coordinator.py` / `output_segment_coordinator.py` | Turn 锁、顺序 flush、迟到拒绝、动作/输出终态 | 增加未知总数的 stream assembler 和音频帧发送状态 |
-| `platform_event.py` | `send_message_with_extras()`、`flush_visible_segment()`、`complete_visible_message()` 和输出身份管理 | 设置 OLV 流式入口；不要让旧的完整结果拆分逻辑成为新链路首段前置条件 |
-| `main.py` Persona hook | 旧完整结果链路、动作 Provider 和取消清理 | 增加 segment-ready/stream-finished 处理，按段启动动作，不再等待完整 Persona 结果 |
-| TS `TurnPlaybackSessionStore` / `TurnPlaybackOrchestrator` | 事实状态、顺序选择、Timeline 和播放完成回执 | 增加 stream 事实模型和音频 chunk 缓冲；去掉新链路对 `synth_finished` 的首响依赖 |
-| AstrBot Core `segment_stream_v1` | 模型流解析、segment 校验、逐段 ready hook | 接入真实 OLV 入口、逐段 TTS/物料事件和终态协议；保留 WebChat 专属输出路径不变 |
+| `runtime/turn_coordinator.py` / `output_segment_coordinator.py` | Turn 锁、顺序 flush、迟到拒绝、失败终态及回执收口；未知总数由平台事件校验 | 阶段 2 增加音频帧发送、容量和背压状态 |
+| `platform_event.py` | 双开关准入、逐段发送/flush、未知总数终态校验、运行时动作汇合 | 真实联调确认首段提前交付和取消；阶段 2 增加音频流生命周期 |
+| `main.py` Persona hook | segment-ready 启动动作、stream-finished 清理、普通完整结果路径 | 其他插件 Hook 兼容审计与真实 Provider 验收 |
+| TS `TurnPlaybackSessionStore` / `TurnPlaybackOrchestrator` | 已就绪原子段起播不等待 synth-finished；生成失败保留前缀并反馈失败 | 阶段 2 增加音频 stream 事实模型和 chunk 缓冲 |
+| AstrBot Core `segment_stream_v1` | OLV immediate 入口、逐段校验、完整 TTS/物料交付、流终态及调用级 active 标记 | 实测当前竖切片；Core-final 模型流及真实音频流不在本次修复中 |
 
 ## 实施闸门
 
