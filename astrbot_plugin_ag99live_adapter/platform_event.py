@@ -90,6 +90,43 @@ class OLVPetPlatformEvent(AstrMessageEvent):
                 "personal_expression" if per_speech_segment else "core",
                 getattr(runtime_state, "independent_motion_provider_id", "<missing>"),
             )
+        if bool(
+            getattr(
+                runtime_state,
+                "independent_motion_segment_stream_enabled",
+                False,
+            )
+        ):
+            gate_failure = None
+            if not bool(getattr(runtime_state, "independent_motion_enabled", False)):
+                gate_failure = "independent_motion_disabled"
+            elif not bool(
+                getattr(runtime_state, "independent_motion_per_speech_segment", False)
+            ):
+                gate_failure = "per_speech_segment_disabled"
+            elif not bool(
+                getattr(runtime_state, "interaction_result_event_filter_available", False)
+            ):
+                gate_failure = "result_event_filter_unavailable"
+            elif not bool(
+                getattr(runtime_state, "persona_segment_stream_hooks_available", False)
+            ):
+                gate_failure = "persona_segment_stream_hooks_unavailable"
+            if gate_failure:
+                logger.warning(
+                    "WIRING interaction.persona_segment_stream_request_skipped "
+                    "reason=%s",
+                    gate_failure,
+                )
+            else:
+                self.set_extra(
+                    "_interaction_persona_segment_stream_requested",
+                    True,
+                )
+                logger.info(
+                    "WIRING interaction.persona_segment_stream_requested "
+                    "independent_motion=true per_speech_segment=true"
+                )
         self._standard_output_platform_extras = {
             "logical_message_id": "standard_reply",
         }

@@ -412,7 +412,7 @@ def test_persona_segment_ready_starts_motion_future_for_that_index(
     bundle = types.SimpleNamespace(runtime_state=runtime_state)
     extras = {
         "_turn_id": "turn-1",
-        "_interaction_persona_segment_stream_requested": True,
+        "_interaction_persona_segment_stream_active": True,
         "provider_request": object(),
     }
 

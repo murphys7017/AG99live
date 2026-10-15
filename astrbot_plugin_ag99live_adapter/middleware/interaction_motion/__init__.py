@@ -37,7 +37,7 @@ def register_ag99live_interaction_contributors(
 
 def _include_legacy_motion_result_contributor(event: Any) -> bool:
     return not bool(
-        event.get_extra("_interaction_persona_segment_stream_requested", False)
+        event.get_extra("_interaction_persona_segment_stream_active", False)
     )
 
 

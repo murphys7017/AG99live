@@ -364,6 +364,59 @@ def test_prompt_annotations_skip_desktop_snapshot_without_screen_image(
     assert "message.1" not in annotations
 
 
+def test_persona_segment_stream_request_requires_explicit_compatible_gates(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_platform_event_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_platform_event_module()
+
+    def build_event(**runtime_options):
+        adapter = AdapterStub()
+        state = {
+            "independent_motion_enabled": True,
+            "independent_motion_per_speech_segment": True,
+            "independent_motion_segment_stream_enabled": False,
+            "interaction_result_event_filter_available": True,
+            "persona_segment_stream_hooks_available": True,
+            "independent_motion_provider_id": "motion-provider",
+        }
+        state.update(runtime_options)
+        adapter.runtime_state = types.SimpleNamespace(**state)
+        message_obj = type(
+            "MessageObjectStub",
+            (),
+            {"message": [Plain("hello")], "raw_message": {"payload": {"text": "hello"}}},
+        )()
+        return module.OLVPetPlatformEvent(
+            "hello",
+            message_obj,
+            {},
+            "desktop-client",
+            adapter,
+        )
+
+    default_event = build_event()
+    assert default_event.get_extra(
+        "_interaction_persona_segment_stream_requested"
+    ) is None
+
+    incompatible_event = build_event(
+        independent_motion_segment_stream_enabled=True,
+        interaction_result_event_filter_available=False,
+    )
+    assert incompatible_event.get_extra(
+        "_interaction_persona_segment_stream_requested"
+    ) is None
+
+    enabled_event = build_event(
+        independent_motion_segment_stream_enabled=True,
+    )
+    assert enabled_event.get_extra(
+        "_interaction_persona_segment_stream_requested"
+    ) is True
+
+
 def test_prompt_annotations_skip_non_screen_image(
     install_fake_astrbot,
     monkeypatch,

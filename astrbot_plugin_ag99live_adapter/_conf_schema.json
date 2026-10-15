@@ -78,6 +78,11 @@
         "type": "bool",
         "default": false
       },
+      "segment_stream_enabled": {
+        "description": "实验性：请求 OLV Persona 校验段流。默认关闭；需要 AstrBot 全局 Persona 段流开关、逐 speech 段动作模式及兼容的 Core Hook。",
+        "type": "bool",
+        "default": false
+      },
       "parallel": {
         "description": "整条回复模式下，与主回复文本生成并行；按 speech 分段模式下，Persona 返回分段后，在最大并发数限制内生成各段动作。关闭时串行生成。此开关只控制生成过程；分段播放仍按顺序进行，上一段语音和动作结束后才开始下一段。",
         "type": "bool",

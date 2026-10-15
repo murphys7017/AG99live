@@ -15,6 +15,7 @@ from astrbot.core.platform.message_type import MessageType
 from ..core_compatibility import (
     supports_interaction_contributors,
     supports_interaction_result_event_filter,
+    supports_persona_segment_stream_hooks,
 )
 from .client_profile import (
     DEFAULT_CLIENT_NICKNAME,
@@ -112,6 +113,7 @@ class RuntimeState:
         self.enable_performance_curve = False
         self.independent_motion_enabled = False
         self.independent_motion_per_speech_segment = False
+        self.independent_motion_segment_stream_enabled = False
         self.independent_motion_provider_id = ""
         self.independent_motion_history_turns = 6
         self.independent_motion_parallel = False
@@ -132,6 +134,9 @@ class RuntimeState:
         )
         self.interaction_result_event_filter_available = (
             supports_interaction_result_event_filter(plugin_context)
+        )
+        self.persona_segment_stream_hooks_available = (
+            supports_persona_segment_stream_hooks()
         )
         self._registered_persona_effect_enabled: bool | None = None
         self.motion_tuning_fewshot_enabled = True
@@ -257,6 +262,13 @@ class RuntimeState:
             get_config_value(
                 independent_motion_config,
                 "per_speech_segment",
+                False,
+            )
+        )
+        self.independent_motion_segment_stream_enabled = bool(
+            get_config_value(
+                independent_motion_config,
+                "segment_stream_enabled",
                 False,
             )
         )

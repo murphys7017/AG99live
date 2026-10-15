@@ -125,11 +125,17 @@ def test_register_ag99live_interaction_contributors_tracks_persona_effect_mode(
     assert callable(result_event_filters[0])
     stream_event = SimpleNamespace(
         get_extra=lambda key, default=None: (
+            True if key == "_interaction_persona_segment_stream_active" else default
+        )
+    )
+    request_only_event = SimpleNamespace(
+        get_extra=lambda key, default=None: (
             True if key == "_interaction_persona_segment_stream_requested" else default
         )
     )
     ordinary_event = SimpleNamespace(get_extra=lambda _key, default=None: default)
     assert result_event_filters[0](stream_event) is False
+    assert result_event_filters[0](request_only_event) is True
     assert result_event_filters[0](ordinary_event) is True
     assert len(persona_effects) == 1
     assert not module.set_ag99live_motion_persona_effect_enabled(

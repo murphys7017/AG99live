@@ -488,7 +488,7 @@ class MyPlugin(Star):
             self._official_core_compatibility
             or str(event.get_platform_name() or "").strip() != "olv_pet_adapter"
             or not event.get_extra(
-                "_interaction_persona_segment_stream_requested",
+                "_interaction_persona_segment_stream_active",
                 False,
             )
         ):
@@ -860,7 +860,7 @@ class MyPlugin(Star):
             )
 
         if event.get_extra(
-            "_interaction_persona_segment_stream_requested",
+            "_interaction_persona_segment_stream_active",
             False,
         ):
             return

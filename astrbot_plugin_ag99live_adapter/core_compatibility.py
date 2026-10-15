@@ -119,6 +119,18 @@ def supports_interaction_result_event_filter(context: Any) -> bool:
     )
 
 
+def supports_persona_segment_stream_hooks() -> bool:
+    try:
+        from astrbot.api.event import filter
+    except (ImportError, ModuleNotFoundError):
+        return False
+    return callable(
+        getattr(filter, "on_persona_expression_segment_ready", None)
+    ) and callable(
+        getattr(filter, "on_persona_expression_stream_finished", None)
+    )
+
+
 def _supports_keyword_argument(function: Any, argument_name: str) -> bool:
     try:
         parameters = inspect.signature(function).parameters
