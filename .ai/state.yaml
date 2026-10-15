@@ -504,6 +504,11 @@ olv_stream_review_fixes_20261015:
     - "Electron production build, changed-file Ruff/AST checks, protocol manifest validation, plugin structure check (0 errors, 0 warnings), state YAML and diff checks passed."
   evidence_gap:
     - "Other installed plugin Hooks still require independent compatibility review; no live stream acceptance or application restart is authorized."
+    - "2026-10-16 user steering: do not require NeuroBrain integration work to continue the plan; retain existing Core admission checks and document that an admitted unsafe Hook can still block streaming."
+  followup_review:
+    - "Core physical delivery fixes preserve state-only indices, use per-part output identity, and avoid orphan TTS metadata in no-TTS output. Actual parser/Core/OLV/Adapter boundary smoke passed without a real Provider, motion generation, audio device or model."
+    - "Plan now lists concrete manual phase-1 connection, early playback, interruption/reconnect, failure and gate-off acceptance checks."
+    - "Core 673175355 commits only the physical-delivery hunks; the user's contributor-compatibility change remains uncommitted. Ruff, AST, YAML and diff checks passed."
 
 olv_stream_setting_desktop_ownership_20261015:
   recorded_at: "2026-10-15"

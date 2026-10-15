@@ -7,6 +7,7 @@
 - **2026-10-16 整体复核修复：**Adapter 的请求、响应、结果修饰和完整 Persona 结果 Hook 已声明流式安全。动作 Future、并发任务和共享上下文现由 RuntimeState 的 `PersonaStreamMotionRegistry` 按后端 Turn 保存；交付、终态、打断及断线共享同一所有者，避免隔离 event extras 读不到任务。Core 在每次流式 Persona 调用结束（含异常和取消）后清除 `active`，`delegate` 后的普通 Core-final 回复恢复原有动作 Hook/contributor。流失败经 `control.synth_finished.success/reason` 传到桌面；已接受前缀继续播放，最终播放回执及 `turn_finished` 保留失败。相关基础提交：Adapter `f11a86c`、`fe4d1b1`，Core `75012004d`。
 - **复核验证边界：**真实 AstrBot 生命周期及 OLV 发送检查已确认跨上下文动作汇合；真实段输出和协议回执边界已确认保留前缀、失败关闭、成功客户端回执不能覆盖生成失败。前端协议→Session→完成回执检查确认前缀结算前不回执、结算后回失败，并拒绝缺少原因的失败终态。上述检查未调用真实 Provider、音频设备或 Live2D，不替代首响、取消及委派最终回复的现场验收。
 - **联调前仍需处理的兼容限制：**其他插件（包括当前 NeuroBrain）的 Hook 必须单独满足 Core 的流式安全准入，不能只给 Adapter 加声明后就视为全部兼容。当前 NeuroBrain 仍在完整结果后更新状态，其结果 Hook 未声明流式安全，保留启用该 Hook 时可能阻止进入流式；本轮未修改该插件或放宽 Core 检查。必须配套加载新版 Core、Adapter 和桌面端，不能把源码部署等同于运行时生效。
+- **2026-10-16 二次审阅：**前三个修复提交和失败终态链路继续保留。真实解析→Core 交付→OLV 事件→Adapter 输出边界检查额外发现并修复非 TTS 分支：状态段不能跳过已分配的 Persona 索引；逐段物理交付必须使用该段 ID，不能复用父 ID；没有 TTS 物料时不能发送要求 TTS 身份元数据的 `audio_attachment`。修复后状态段及后续文本段按 sequence 0、1 完成交付。该检查未生成真实动作或音频，不能作为表演效果或端到端验收依据。按用户要求，NeuroBrain 兼容改造不作为本轮继续推进的必选项；它的现有准入限制仍有效。
 
 - **阶段 0 观测点：已接入并完成首次桌面关联采样。**现有语音路径记录 PTT 采集结束、转写开始/完成、Persona 完整结果或校验 segment、TTS 完整物料就绪、Adapter `output.segment.v5` 发送和桌面实际音频起播。浏览器侧 PTT→实际起播使用同一 `performance.now()` 时钟；进程间阶段同时记录 epoch 时间戳，并按 `turn_id` / segment 身份关联。
 - **阶段 0 基线：已建立初步端到端基线，分布仍待补充。**2026-10-15 19:25、19:26 两轮普通 OLV PTT 对话的 PTT 松开→桌面首个实际起播分别为 **6.514 s**、**5.741 s**；PTT 松开→首次服务端 `output_segment_sent` 分别为 5.937 s、5.534 s。首个输出提交→桌面起播分别为 0.577 s、0.207 s。对应 ASR 完成耗时分别为 0.784 s、1.110 s（从服务端 `transcription_started` 起算）。两条真实端到端记录满足开始阶段 1 的基线前置条件，但样本量不足以报告稳定 p50/p95；后续联调期间继续采样。此前另有 3 条服务端样本，从 `transcription_started` 到首个 `output_segment_sent` 为 5.673 s、4.908 s、5.466 s；该指标不能替代 PTT→桌面起播。流式入口仍保持关闭，未改变当前交互路径。
@@ -19,6 +20,16 @@
 上一轮复核发现并修复了兼容门过宽的问题：基础 interaction contributor 支持现与 `event_filter` 流式能力分开判断，旧签名 Core 继续注册普通路径 contributor。阶段 1 当前 Adapter 准入/动作/输出定向测试 43 项通过，Core 流式准入路径测试 60 项通过；Adapter Python 编译、插件结构检查（0 错误、0 警告）、配置 Schema 解析和两仓库 `git diff --check` 通过。上述测试为先前实现的定向验证；本次设置迁移通过 Renderer 类型检查、设置 responder 和门控边界检查，以及 Electron 与隔离输出的控制页生产构建。真实 `handle_msg` 边界检查确认布尔同步可直接控制下一轮 OLV 准入，字符串值被拒绝且不改变开关。运行中的前端及 Adapter 尚未加载本次迁移，真实流式首响验收仍待完成。
 
 ## 方案边界与初版复核依据
+
+当前下一步是阶段 1 的配套版本真实验收，阶段 2/3 尚未进入实现。手动加载新版 Core、Adapter 和桌面端后，按以下顺序取证；本轮不自动重启应用或启用开关。
+
+| 检查 | 通过依据 |
+| --- | --- |
+| 连接及开关 | 桌面开启“OLV Persona 分段流式”、Core 总开关及逐 speech 独立动作后，连接日志出现 `desktop_runtime_settings_synced persona_segment_stream_enabled=True`，下一轮出现 `persona_segment_stream_requested`。若被其他 Hook/effect 拒绝，记录具体拒绝原因，不宣称已进入流式。 |
+| 双段首响 | 请求明确分成两段回复；关联 Core segment-ready、Adapter `output_segment_sent` 和桌面 `audio_playback_started`。段 0 必须在整轮 Persona/合成结束前实际起播，段 1 按序播放。只有文本先显示不算通过。 |
+| 中断及重连 | 第一段播放期间 PTT 打断，再断线重连；旧段、旧动作不能进入新 Turn，重连自动同步本机开关。 |
+| 后段失败 | 在可控环境让 Provider 后段失败；已接受前缀保留，关闭队列消息带失败原因，本地播完后回失败，最终 `turn_finished` 不得成功。 |
+| 关闭开关 | 分别关闭桌面入口和 Core 总开关，再进行普通对话，完整回复及动作路径必须仍可用。 |
 
 本文把“第三条链路”拆成两个层次：业务链路指现有三种动作路径中的 `independent_motion.enabled=true` 且 `per_speech_segment=true`，它保留 Persona 回复并按 speech 段绑定独立动作；实现层的流式运行骨架借鉴 `passive_behavior` 的异步读取、逐条校验、序号分配、取消、TTL、Turn 收口和即时提交方式。不能复制 `passive_behavior` 的独立后台 Turn、motion-only `output.segment.v5` 语义，也不能让新链路绕开正常 Persona 会话、TTS、动作和播放生命周期。
 

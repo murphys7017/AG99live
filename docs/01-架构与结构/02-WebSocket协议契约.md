@@ -41,6 +41,8 @@ python scripts/check_protocol_schema_manifest.py
 
 不允许把文本、动作和音频拆成互相猜测归属的多个独立事件。重复、晚到或不符合当前生命周期的段会被拒绝或稳定地忽略，不能把 WebSocket 处理器带入致命状态。
 
+没有进行 TTS 物料化的纯文本或状态段，Core→Adapter 的进程内 extras 不发送 `audio_attachment`，该字段须与完整的 TTS 身份元数据一起使用。Adapter 根据无音频物料生成协议的 `audio: { state: "absent" }`。状态段仍占用已校验的 Persona 索引，并以独立物理消息 ID 交付，不能跳号或复用父消息 ID。
+
 ## 音频输入
 
 音频采集会话由 `input.audio_stream_start`、连续二进制 PCM16LE chunk 和 `input.audio_stream_end` 组成。它们共享 capture 身份；后端按 `stream_id` 汇总并校验顺序、模式和结束状态。`dropped: true` 表示前端因积压主动放弃该段，后端不会再转写它。
