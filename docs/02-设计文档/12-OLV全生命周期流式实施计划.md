@@ -6,8 +6,10 @@
 
 - **阶段 0 观测点：已接入，待真实采样。**现有语音路径现在记录 PTT 采集结束、转写开始/完成、Persona 完整结果或校验 segment、TTS 完整物料就绪、Adapter `output.segment.v5` 发送和桌面实际音频起播。浏览器侧 PTT→实际起播使用同一 `performance.now()` 时钟；进程间阶段同时记录 epoch 时间戳，并按 `turn_id` / segment 身份关联。
 - **阶段 0 基线：未完成。**尚未使用真实聊天 Provider、STT、TTS 和桌面播放采集 p50/p95；流式入口仍保持关闭，未改变当前交互路径。
-- **阶段 1 前置准备：已提交，尚未启用流。**Core 的 result contributor 注册现支持可选 `event_filter`；AG99live motion result contributor 已配置为在 `_interaction_persona_segment_stream_requested=True` 时不参与旧的完整结果收口，并检查 Core 是否支持该注册参数。普通 Turn 仍走现有 contributor；此准备没有设置 OLV 流式入口，也没有改变当前运行路径。对应提交：AstrBot `839afa045`、AG99live `fb61dd9`。
+- **阶段 1 前置准备：已提交，尚未启用流。**Core 的 result contributor 注册现支持可选 `event_filter`；AG99live motion result contributor 已配置为在 `_interaction_persona_segment_stream_requested=True` 时不参与旧的完整结果收口，并检查 Core 是否支持该注册参数。配套 Core 支持该参数时，普通 Turn 仍走现有 contributor；缺少该参数时，AG99live 会将整组 enhanced interaction contributors 判为不可用并关闭 Persona effect，因此部署必须包含 Core 提交 `839afa045`。此准备没有设置 OLV 流式入口。对应提交：AstrBot `839afa045`、AG99live `fb61dd9`。
 - **阶段 1：未开始。**完成真实基线采样后，再实施 Core segment-ready Hook、Adapter 逐段动作关联、未知总段数处理和 v5 首段提前起播的完整竖切片。
+
+本轮提交复核确认上述 API 与 Adapter 过滤条件在源码和边界测试中一致；兼容门的影响范围是全部 enhanced interaction contributors，而不只是 OLV 流式路径。验证目前限于 Core 公开列表边界测试、Adapter 注册过滤测试和静态检查；尚无已重载配套运行时后的普通 Turn 或 OLV 实测。
 
 ## 本轮复核结论
 
