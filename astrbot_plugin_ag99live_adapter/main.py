@@ -743,8 +743,9 @@ class MyPlugin(Star):
         self._independent_motion_tasks.add(generation_task)
         generation_task.add_done_callback(work["tasks"].discard)
         generation_task.add_done_callback(self._independent_motion_tasks.discard)
-        # Let the task reach the independent Provider call before returning
-        # control to Core's segment delivery/TTS consumer.
+        # Let the generation task get scheduled before returning control to
+        # Core's segment delivery/TTS consumer.  The task still waits for the
+        # shared context snapshot before entering the Provider call.
         await asyncio.sleep(0)
 
     @_optional_persona_stream_finished_hook()
