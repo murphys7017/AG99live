@@ -61,6 +61,7 @@ def test_register_ag99live_interaction_contributors_tracks_persona_effect_mode(
 
     prompt_collectors: list[object] = []
     result_contributors: list[object] = []
+    result_event_filters: list[object] = []
     persona_effects: list[object] = []
     removed_extension_prefixes: list[str] = []
     removed_result_prefixes: list[str] = []
@@ -92,8 +93,14 @@ def test_register_ag99live_interaction_contributors_tracks_persona_effect_mode(
         def register_prompt_extension_collector(self, collector: object) -> None:
             prompt_collectors.append(collector)
 
-        def register_interaction_result_contributor(self, contributor: object) -> None:
+        def register_interaction_result_contributor(
+            self,
+            contributor: object,
+            *,
+            event_filter=None,
+        ) -> None:
             result_contributors.append(contributor)
+            result_event_filters.append(event_filter)
 
         def register_persona_effect(self, effect: object, **kwargs) -> None:
             del kwargs
@@ -115,6 +122,15 @@ def test_register_ag99live_interaction_contributors_tracks_persona_effect_mode(
     ]
     assert len(prompt_collectors) == 2
     assert len(result_contributors) == 1
+    assert callable(result_event_filters[0])
+    stream_event = SimpleNamespace(
+        get_extra=lambda key, default=None: (
+            True if key == "_interaction_persona_segment_stream_requested" else default
+        )
+    )
+    ordinary_event = SimpleNamespace(get_extra=lambda _key, default=None: default)
+    assert result_event_filters[0](stream_event) is False
+    assert result_event_filters[0](ordinary_event) is True
     assert len(persona_effects) == 1
     assert not module.set_ag99live_motion_persona_effect_enabled(
         context,
@@ -314,6 +330,27 @@ def test_enhanced_interaction_requires_llm_response_hook(
 
     assert not module.supports_llm_response_hook()
     assert not module.supports_interaction_contributors(context)
+
+
+def test_interaction_contributor_support_requires_event_filter_keyword(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_middleware_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = importlib.import_module("astrbot_plugin_ag99live_adapter.core_compatibility")
+    module = importlib.reload(module)
+    context = types.SimpleNamespace(
+        register_persona_effect=lambda *_args, **_kwargs: None,
+        register_prompt_extension_collector=lambda *_args, **_kwargs: None,
+        register_interaction_result_contributor=lambda _contributor: None,
+        remove_prompt_extension_collectors_by_module_prefix=lambda *_args: None,
+        remove_interaction_result_contributors_by_module_prefix=lambda *_args: None,
+        unregister_persona_effects=lambda *_args, **_kwargs: None,
+    )
+
+    assert not module.supports_interaction_contributors(context)
+    context.register_interaction_result_contributor = lambda *_args, **_kwargs: None
+    assert module.supports_interaction_contributors(context)
 
 
 def test_independent_motion_results_match_each_visible_persona_reply(

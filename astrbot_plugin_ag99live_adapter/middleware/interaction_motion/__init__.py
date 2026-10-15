@@ -24,7 +24,16 @@ def register_ag99live_interaction_contributors(
     register_result = context.register_interaction_result_contributor
     register_prompt(AG99liveCompanionIdentityPromptContributor())
     register_prompt(AG99liveMotionPromptContributor())
-    register_result(AG99liveMotionResultContributor())
+    register_result(
+        AG99liveMotionResultContributor(),
+        event_filter=_include_legacy_motion_result_contributor,
+    )
+
+
+def _include_legacy_motion_result_contributor(event: Any) -> bool:
+    return not bool(
+        event.get_extra("_interaction_persona_segment_stream_requested", False)
+    )
 
 
 __all__ = [

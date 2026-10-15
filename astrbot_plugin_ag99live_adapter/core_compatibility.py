@@ -84,6 +84,11 @@ def _persona_effect_supports_dynamic_parameters(effect_type: type[Any]) -> bool:
 
 
 def supports_interaction_contributors(context: Any) -> bool:
+    result_contributor_registration = getattr(
+        context,
+        "register_interaction_result_contributor",
+        None,
+    )
     return (
         get_interaction_capabilities() is not None
         and supports_llm_response_hook()
@@ -91,8 +96,10 @@ def supports_interaction_contributors(context: Any) -> bool:
         and callable(
             getattr(context, "register_prompt_extension_collector", None)
         )
-        and callable(
-            getattr(context, "register_interaction_result_contributor", None)
+        and callable(result_contributor_registration)
+        and _supports_keyword_argument(
+            result_contributor_registration,
+            "event_filter",
         )
         and callable(
             getattr(context, "remove_prompt_extension_collectors_by_module_prefix", None)
@@ -101,6 +108,18 @@ def supports_interaction_contributors(context: Any) -> bool:
             getattr(context, "remove_interaction_result_contributors_by_module_prefix", None)
         )
         and callable(getattr(context, "unregister_persona_effects", None))
+    )
+
+
+def _supports_keyword_argument(function: Any, argument_name: str) -> bool:
+    try:
+        parameters = inspect.signature(function).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    return any(
+        parameter.name == argument_name
+        or parameter.kind is inspect.Parameter.VAR_KEYWORD
+        for parameter in parameters
     )
 
 
