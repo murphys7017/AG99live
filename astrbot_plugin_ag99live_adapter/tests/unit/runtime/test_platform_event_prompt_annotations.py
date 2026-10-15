@@ -5,6 +5,8 @@ import importlib
 import sys
 import types
 
+import pytest
+
 
 def _install_platform_event_astrbot_stubs(install_fake_astrbot, monkeypatch) -> None:
     install_fake_astrbot()
@@ -154,6 +156,144 @@ def test_incremental_segments_flush_without_closing_parent_turn(
     asyncio.run(run())
     assert [call["message_chain"][0].text for call in event.adapter.emit_calls] == ["first", "second"]
     assert event.adapter.closed_output_queues == []
+
+
+def test_streaming_segments_allow_unknown_count_until_terminal_hook(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_platform_event_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    event = _build_event(_load_platform_event_module(), images=[])
+    event.set_extra("_turn_id", "backend-turn-1")
+
+    async def run() -> None:
+        for index, text in enumerate(("first", "second")):
+            message_id = f"stream-segment-{index}"
+            await event.send_message_with_extras(
+                [Plain(text)],
+                platform_extras={
+                    "logical_message_id": message_id,
+                    "persona_incremental_delivery": True,
+                    "persona_delivery_parent_message_id": "stream-parent",
+                    "persona_result_id": "persona-result-1",
+                    "persona_segment_index": index,
+                    "persona_streaming": True,
+                    "semantic_text": text,
+                },
+                record_send_operation=False,
+            )
+            await event.flush_visible_segment(message_id=message_id)
+
+        await event.complete_visible_message(message_id="stream-parent")
+        event.mark_persona_stream_finished(
+            turn_id="backend-turn-1",
+            persona_result_id="persona-result-1",
+            message_id="stream-parent",
+            segment_count=2,
+            status="completed",
+        )
+
+    asyncio.run(run())
+    assert [
+        call["platform_extras"]["persona_segment_index"]
+        for call in event.adapter.emit_calls
+    ] == [0, 1]
+    assert all(
+        "persona_segment_count" not in call["platform_extras"]
+        for call in event.adapter.emit_calls
+    )
+    assert set(event.adapter.finalized_segments) == {
+        ("turn-1", "stream-segment-0"),
+        ("turn-1", "stream-segment-1"),
+    }
+
+
+def test_streaming_terminal_rejects_missing_completed_segment(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_platform_event_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    event = _build_event(_load_platform_event_module(), images=[])
+    event.set_extra("_turn_id", "backend-turn-1")
+
+    async def run() -> None:
+        await event.send_message_with_extras(
+            [Plain("first")],
+            platform_extras={
+                "logical_message_id": "stream-segment-0",
+                "persona_incremental_delivery": True,
+                "persona_delivery_parent_message_id": "stream-parent",
+                "persona_result_id": "persona-result-1",
+                "persona_segment_index": 0,
+                "persona_streaming": True,
+                "semantic_text": "first",
+            },
+            record_send_operation=False,
+        )
+        event.mark_persona_stream_finished(
+            turn_id="backend-turn-1",
+            persona_result_id="persona-result-1",
+            message_id="stream-parent",
+            segment_count=2,
+            status="completed",
+        )
+        with pytest.raises(RuntimeError, match="persona_stream_segment_coverage_incomplete"):
+            await event.complete_visible_message(message_id="stream-parent")
+
+    asyncio.run(run())
+
+
+def test_regular_persona_segment_still_requires_final_count(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_platform_event_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    event = _build_event(_load_platform_event_module(), images=[])
+
+    async def run() -> None:
+        with pytest.raises(RuntimeError, match="persona_segment_count_invalid"):
+            await event.send_message_with_extras(
+                [Plain("ordinary")],
+                platform_extras={
+                    "logical_message_id": "ordinary-segment-0",
+                    "persona_incremental_delivery": True,
+                    "persona_delivery_parent_message_id": "ordinary-parent",
+                    "persona_segment_index": 0,
+                    "semantic_text": "ordinary",
+                },
+                record_send_operation=False,
+            )
+
+    asyncio.run(run())
+
+
+def test_streaming_segments_reject_nonsequential_index(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_platform_event_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    event = _build_event(_load_platform_event_module(), images=[])
+
+    async def run() -> None:
+        with pytest.raises(
+            RuntimeError,
+            match="persona_stream_segment_index_nonsequential",
+        ):
+            await event.send_message_with_extras(
+                [Plain("second")],
+                platform_extras={
+                    "logical_message_id": "stream-segment-1",
+                    "persona_incremental_delivery": True,
+                    "persona_delivery_parent_message_id": "stream-parent",
+                    "persona_result_id": "persona-result-1",
+                    "persona_segment_index": 1,
+                    "persona_streaming": True,
+                    "semantic_text": "second",
+                },
+                record_send_operation=False,
+            )
+
+    asyncio.run(run())
 
 
 def test_prompt_annotations_skip_desktop_snapshot_without_screen_image(

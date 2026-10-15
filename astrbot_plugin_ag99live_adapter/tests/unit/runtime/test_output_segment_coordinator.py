@@ -119,9 +119,30 @@ def test_failed_persona_motion_delivers_audio_and_plain_echo(
         await coordinator.finalize_output_segment(
             turn_id="turn-1", message_id="segment-1",
         )
+        await coordinator.emit_message_chain(
+            [Plain("streamed")],
+            turn_id="turn-2",
+            platform_extras={
+                "logical_message_id": "stream-segment-0",
+                "logical_segment_index": 0,
+                "persona_segment_index": 0,
+                "persona_streaming": True,
+                "metadata": {
+                    "ag99live_motion_schedule": {
+                        "scheduled": True,
+                        "source": "independent_provider",
+                        "persona_segmented": True,
+                        "persona_motion_failure_reasons": {"0": "motion_timeout"},
+                    }
+                },
+            },
+        )
+        await coordinator.finalize_output_segment(
+            turn_id="turn-2", message_id="stream-segment-0",
+        )
 
     asyncio.run(run_case())
-    assert len(emitted) == 1
+    assert len(emitted) == 2
     assert emitted[0]["payload"]["text"] == {
         "state": "present", "content": "服务暂不可用",
     }
@@ -129,6 +150,13 @@ def test_failed_persona_motion_delivers_audio_and_plain_echo(
     assert emitted[0]["payload"]["motion"] == {
         "state": "failed",
         "reason": f"motion_schedule_failed:{motion_reason}",
+    }
+    assert emitted[1]["payload"]["text"] == {
+        "state": "present", "content": "streamed",
+    }
+    assert emitted[1]["payload"]["motion"] == {
+        "state": "failed",
+        "reason": "motion_schedule_failed:motion_timeout",
     }
 
 

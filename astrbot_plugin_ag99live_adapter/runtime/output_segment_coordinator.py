@@ -448,20 +448,33 @@ class OutputSegmentCoordinator:
                 # visible text only and must not consume any segment action.
                 return None, "persona_segment_index_missing"
             matching: list[dict[str, Any]] = []
+            persona_streaming = platform_extras.get("persona_streaming") is True
             for candidate in candidates:
                 candidate_index = candidate.get("persona_segment_index")
                 candidate_count = candidate.get("persona_segment_count")
                 if (
                     isinstance(candidate_index, bool)
                     or not isinstance(candidate_index, int)
-                    or isinstance(candidate_count, bool)
-                    or not isinstance(candidate_count, int)
                     or candidate_index < 0
-                    or candidate_count <= 0
-                    or candidate_index >= candidate_count
+                    or (
+                        candidate_count is None
+                        and not persona_streaming
+                    )
+                    or (
+                        candidate_count is not None
+                        and (
+                            isinstance(candidate_count, bool)
+                            or not isinstance(candidate_count, int)
+                            or candidate_count <= 0
+                            or candidate_index >= candidate_count
+                        )
+                    )
                 ):
                     return None, "output_segment_persona_motion_index_invalid"
-                if candidate_count != persona_segment[1]:
+                if (
+                    persona_segment[1] is not None
+                    and candidate_count != persona_segment[1]
+                ):
                     return None, "output_segment_persona_motion_count_mismatch"
                 if candidate_index == persona_segment[0]:
                     matching.append(candidate)
@@ -752,13 +765,15 @@ def _resolve_canonical_assistant_text(
 
 def _extract_persona_segment(
     platform_extras: dict[str, Any],
-) -> tuple[int, int] | None:
+) -> tuple[int, int | None] | None:
     if "persona_segment_index" not in platform_extras and "persona_segment_count" not in platform_extras:
         return None
     index = platform_extras.get("persona_segment_index")
     count = platform_extras.get("persona_segment_count")
     if isinstance(index, bool) or not isinstance(index, int) or index < 0:
         raise ValueError("output_segment_persona_index_invalid")
+    if count is None and platform_extras.get("persona_streaming") is True:
+        return index, None
     if isinstance(count, bool) or not isinstance(count, int) or count <= 0:
         raise ValueError("output_segment_persona_count_invalid")
     if index >= count:

@@ -64,13 +64,14 @@ class PendingOutputSegment:
             strip=not preserve_whitespace,
         )
 
-    def merge_persona_segment(self, *, index: int, count: int) -> None:
+    def merge_persona_segment(self, *, index: int, count: int | None) -> None:
         if isinstance(index, bool) or not isinstance(index, int) or index < 0:
             raise ValueError(f"output_segment_persona_index_invalid:{self.message_id}")
-        if isinstance(count, bool) or not isinstance(count, int) or count <= 0:
-            raise ValueError(f"output_segment_persona_count_invalid:{self.message_id}")
-        if index >= count:
-            raise ValueError(f"output_segment_persona_index_out_of_range:{self.message_id}")
+        if count is not None:
+            if isinstance(count, bool) or not isinstance(count, int) or count <= 0:
+                raise ValueError(f"output_segment_persona_count_invalid:{self.message_id}")
+            if index >= count:
+                raise ValueError(f"output_segment_persona_index_out_of_range:{self.message_id}")
         if (
             self.persona_segment_index is not None
             and self.persona_segment_index != index
@@ -79,14 +80,16 @@ class PendingOutputSegment:
                 f"output_segment_persona_index_conflict:{self.message_id}"
             )
         if (
-            self.persona_segment_count is not None
+            count is not None
+            and self.persona_segment_count is not None
             and self.persona_segment_count != count
         ):
             raise OutputSegmentConflictError(
                 f"output_segment_persona_count_conflict:{self.message_id}"
             )
         self.persona_segment_index = index
-        self.persona_segment_count = count
+        if count is not None:
+            self.persona_segment_count = count
 
     def merge_audio(self, *, path: str) -> None:
         if self.audio_failure_reason:

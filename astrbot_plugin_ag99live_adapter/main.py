@@ -40,6 +40,17 @@ def _optional_persona_expression_hook():
     return _identity
 
 
+def _optional_persona_stream_finished_hook():
+    hook = getattr(filter, "on_persona_expression_stream_finished", None)
+    if callable(hook):
+        return hook()
+
+    def _identity(handler):
+        return handler
+
+    return _identity
+
+
 def _optional_llm_response_hook():
     hook = getattr(filter, "on_llm_response", None)
     if callable(hook):
@@ -416,6 +427,52 @@ class MyPlugin(Star):
             persona_segment_index=getattr(state, "persona_segment_index", None),
             persona_segment_count=getattr(state, "persona_segment_count", None),
         )
+
+    @_optional_persona_stream_finished_hook()
+    async def handle_persona_expression_stream_finished(
+        self,
+        event: AstrMessageEvent,
+        *,
+        turn_id: str,
+        persona_result_id: str,
+        message_id: str,
+        segment_count: int,
+        status: str,
+        failure_reason: str | None = None,
+    ) -> None:
+        if str(event.get_platform_name() or "").strip() != "olv_pet_adapter":
+            return
+        mark_finished = getattr(event, "mark_persona_stream_finished", None)
+        if not callable(mark_finished):
+            logger.warning(
+                "WIRING persona_stream_terminal_unavailable turn_id=%s "
+                "persona_result_id=%s",
+                turn_id or "<missing>",
+                persona_result_id or "<missing>",
+            )
+            return
+        try:
+            mark_finished(
+                turn_id=turn_id,
+                persona_result_id=persona_result_id,
+                message_id=message_id,
+                segment_count=segment_count,
+                status=status,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "WIRING persona_stream_terminal_rejected turn_id=%s "
+                "persona_result_id=%s segment_count=%s status=%s reason=%s "
+                "failure_reason=%s",
+                turn_id or "<missing>",
+                persona_result_id or "<missing>",
+                segment_count,
+                status,
+                exc,
+                failure_reason or "<none>",
+                exc_info=True,
+            )
+            event.stop_event()
 
     @_optional_persona_expression_hook()
     async def handle_persona_expression_result(

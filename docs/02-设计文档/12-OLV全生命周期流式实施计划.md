@@ -9,9 +9,9 @@
 - **阶段 0 采样取数：**Core/Adapter 服务端 `DIAG latency.*` 从 `data/logs/astrbot.log` 按 `turn_id` 关联；Electron renderer 的 PTT capture end 与 audio playback started 经受限 IPC 写入 `app.getPath("logs")/ag99live/olv-latency-YYYY-MM-DD.jsonl`，只包含时间、Turn/stream 身份和采集状态，不含对话正文。已从 2026-10-15 的桌面 JSONL 成功关联两轮记录。
 - **部署与样本备注（2026-10-15）：**用户更新并运行桌面端后，Electron JSONL 与 AstrBot 服务端日志已按两条 `input:turn_id` / `stream_id` 成功关联。第一轮 segment 0 的动作终态为 failed，日志原因为 `motion_step_duration_weight_invalid:0`；该轮音频首响时间仍可用于音频延迟观察，但动作同步表现异常，第二轮动作正常。继续采样时需同时观察动作终态，不能只看首响数值。
 - **阶段 1 前置准备：已提交，尚未启用流。**Core 的 result contributor 注册现支持可选 `event_filter`；AG99live 在 Core 支持时注册带过滤器的 motion contributor，在旧签名 Core 上沿用原注册调用，因此普通 Turn 的 interaction contributors 和 Persona effect 不因该可选参数缺失而被关闭。Adapter 单独记录 `interaction_result_event_filter_available`；没有该能力的 Core 不满足后续 OLV 流入口条件，入口实现必须消费此标记。当前没有设置 OLV 流式入口。相关基础提交：AstrBot `839afa045`、AG99live `fb61dd9`。
-- **阶段 1：前置条件满足，可开始实施；代码尚未开始。**首批应实现未知总段数期间的 segment 身份、动作 Future 与完整 TTS 物料关联，并让 `output.segment.v5` 在不伪造最终 count 的前提下提前交付；入口保持关闭，直到整条竖切片通过真实联调。
+- **阶段 1：Adapter 未知总段数契约首批已实现；入口仍关闭。**流式段可先按单调 `persona_segment_index` 进入 Adapter，不要求伪造 `persona_segment_count`；Core stream-finished Hook 到达后，Adapter 按最终 count 校验成功流完整覆盖或失败流连续前缀。Core 实际先完成 OLV 输出交付、再通知 stream-finished，因此 Adapter 延后终态校验到两者都到达后执行。当前尚未接入 segment-ready 动作 Future，也未开放入口；后续继续完成动作与完整 TTS 汇合、首段提前交付及真实联调。
 
-上一轮复核发现并修复了兼容门过宽的问题：基础 interaction contributor 支持现与 `event_filter` 流式能力分开判断，旧签名 Core 继续注册普通路径 contributor。过滤能力标记已加入运行状态，但流式入口尚未实现对该标记的准入检查。当前验证覆盖新旧注册签名的边界测试和静态检查；配套运行时已完成两轮流式关闭的普通 OLV 对话，OLV Persona 流式路径仍未进行真实联调。
+上一轮复核发现并修复了兼容门过宽的问题：基础 interaction contributor 支持现与 `event_filter` 流式能力分开判断，旧签名 Core 继续注册普通路径 contributor。过滤能力标记已加入运行状态，但流式入口尚未实现对该标记的准入检查。当前 Adapter 未知 count、索引顺序、终态覆盖/连续前缀边界测试通过（22 项定向测试），Python 编译及 `git diff --check` 通过；尚无 OLV Persona 流式路径真实联调。
 
 ## 本轮复核结论
 

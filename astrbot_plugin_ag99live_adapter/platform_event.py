@@ -240,7 +240,11 @@ class OLVPetPlatformEvent(AstrMessageEvent):
             else self._resolve_parent_message_id(resolved_platform_extras)
         )
         output_segment = resolved_platform_extras.get("output_segment")
-        if persona_segment is not None and isinstance(output_segment, dict):
+        if (
+            persona_segment is not None
+            and persona_segment[1] is not None
+            and isinstance(output_segment, dict)
+        ):
             await self._emit_missing_persona_tts_segments_before(
                 turn_id=turn_id,
                 parent_message_id=parent_message_id,
@@ -262,8 +266,12 @@ class OLVPetPlatformEvent(AstrMessageEvent):
             self._remember_persona_segment(
                 turn_id=turn_id,
                 parent_message_id=parent_message_id,
+                persona_result_id=str(
+                    resolved_platform_extras.get("persona_result_id") or ""
+                ).strip() or None,
                 segment_index=persona_segment[0],
                 segment_count=persona_segment[1],
+                streaming=bool(resolved_platform_extras.get("persona_streaming")),
                 template_extras=(
                     resolved_platform_extras
                     if isinstance(output_segment, dict)
@@ -339,6 +347,18 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         normalized_message_id = str(message_id or "").strip()
         if not normalized_message_id:
             raise RuntimeError("output_event_segment_message_id_missing")
+        state_key = self._persona_delivery_state_key(
+            turn_id=turn_id,
+            parent_message_id=normalized_message_id,
+        )
+        state = self._persona_segment_delivery_state.get(state_key)
+        is_streaming = isinstance(state, dict) and state.get("streaming") is True
+        terminal_received = self._validate_persona_stream_completion(
+            turn_id=turn_id,
+            parent_message_id=normalized_message_id,
+        )
+        if is_streaming and not terminal_received:
+            state["delivery_completed"] = True
         await self._emit_remaining_persona_tts_segments(
             turn_id=turn_id,
             parent_message_id=normalized_message_id,
@@ -353,11 +373,95 @@ class OLVPetPlatformEvent(AstrMessageEvent):
                 message_id=child_message_id,
             )
         self._active_persona_delivery_parent.pop(turn_id, None)
-        self._persona_segment_delivery_state.pop(
-            self._persona_delivery_state_key(turn_id, normalized_message_id),
-            None,
-        )
+        if not is_streaming or terminal_received:
+            self._persona_segment_delivery_state.pop(state_key, None)
         self.set_extra("_ag99live_persona_tts_segment_map", {})
+
+    def mark_persona_stream_finished(
+        self,
+        *,
+        turn_id: str,
+        persona_result_id: str,
+        message_id: str,
+        segment_count: int,
+        status: str,
+    ) -> None:
+        event_turn_id = str(self.get_extra("_turn_id", "") or "").strip()
+        delivery_turn_id = str(
+            self.get_extra("output_correlation_id", "") or ""
+        ).strip()
+        normalized_turn_id = str(turn_id or "").strip()
+        normalized_result_id = str(persona_result_id or "").strip()
+        normalized_parent_id = str(message_id or "").strip()
+        normalized_status = str(status or "").strip().lower()
+        if (
+            not normalized_turn_id
+            or normalized_turn_id != event_turn_id
+            or not delivery_turn_id
+            or not normalized_result_id
+            or not normalized_parent_id
+            or type(segment_count) is not int
+            or segment_count < 0
+            or normalized_status not in {"completed", "incomplete", "failed", "cancelled"}
+        ):
+            raise RuntimeError("persona_stream_terminal_identity_invalid")
+        key = self._persona_delivery_state_key(
+            delivery_turn_id,
+            normalized_parent_id,
+        )
+        state = self._persona_segment_delivery_state.setdefault(
+            key,
+            {
+                "segment_count": None,
+                "indexes": set(),
+                "template": None,
+                "persona_result_id": normalized_result_id,
+                "streaming": True,
+            },
+        )
+        if (
+            state.get("persona_result_id") not in {None, normalized_result_id}
+            or state.get("segment_count") not in {None, segment_count}
+        ):
+            raise RuntimeError("persona_stream_terminal_identity_conflict")
+        state["segment_count"] = segment_count
+        state["persona_result_id"] = normalized_result_id
+        state["streaming"] = True
+        state["terminal_status"] = normalized_status
+        if state.get("delivery_completed"):
+            try:
+                self._validate_persona_stream_completion(
+                    turn_id=delivery_turn_id,
+                    parent_message_id=normalized_parent_id,
+                )
+            finally:
+                self._persona_segment_delivery_state.pop(key, None)
+
+    def _validate_persona_stream_completion(
+        self,
+        *,
+        turn_id: str,
+        parent_message_id: str,
+    ) -> bool:
+        state = self._persona_segment_delivery_state.get(
+            self._persona_delivery_state_key(turn_id, parent_message_id)
+        )
+        if not isinstance(state, dict) or state.get("streaming") is not True:
+            return True
+        segment_count = state.get("segment_count")
+        status = state.get("terminal_status")
+        indexes = state.get("indexes")
+        if type(segment_count) is not int or not isinstance(status, str):
+            return False
+        if not isinstance(indexes, set):
+            raise RuntimeError("persona_stream_segment_state_invalid")
+        if any(type(index) is not int or index < 0 or index >= segment_count for index in indexes):
+            raise RuntimeError("persona_stream_segment_index_out_of_range")
+        if status == "completed" and indexes != set(range(segment_count)):
+            raise RuntimeError("persona_stream_segment_coverage_incomplete")
+        if status != "completed" and indexes != set(range(len(indexes))):
+            raise RuntimeError("persona_stream_segment_prefix_invalid")
+        return True
 
     async def _close_frontend_turn_output_queue(self) -> None:
         turn_id = str(self.get_extra("output_correlation_id", "") or "").strip()
@@ -612,18 +716,48 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         *,
         turn_id: str,
         parent_message_id: str,
+        persona_result_id: str | None,
         segment_index: int,
-        segment_count: int,
+        segment_count: int | None,
+        streaming: bool,
         template_extras: dict[str, Any] | None,
     ) -> None:
         key = self._persona_delivery_state_key(turn_id, parent_message_id)
         state = self._persona_segment_delivery_state.setdefault(
             key,
-            {"segment_count": segment_count, "indexes": set(), "template": None},
+            {
+                "segment_count": segment_count,
+                "indexes": set(),
+                "template": None,
+                "persona_result_id": persona_result_id,
+                "streaming": streaming,
+            },
         )
-        if state["segment_count"] != segment_count:
+        existing_count = state.get("segment_count")
+        if (
+            existing_count is not None
+            and segment_count is not None
+            and existing_count != segment_count
+        ):
             raise RuntimeError("persona_segment_count_conflict")
-        state["indexes"].add(segment_index)
+        existing_result_id = state.get("persona_result_id")
+        if (
+            existing_result_id
+            and persona_result_id
+            and existing_result_id != persona_result_id
+        ):
+            raise RuntimeError("persona_result_id_conflict")
+        indexes = state["indexes"]
+        if streaming and segment_index in indexes:
+            raise RuntimeError("persona_stream_segment_index_duplicate")
+        if streaming and segment_index != len(indexes):
+            raise RuntimeError("persona_stream_segment_index_nonsequential")
+        if segment_count is not None and segment_index >= segment_count:
+            raise RuntimeError("persona_segment_index_out_of_range")
+        state["segment_count"] = segment_count if segment_count is not None else existing_count
+        state["persona_result_id"] = persona_result_id or existing_result_id
+        state["streaming"] = bool(state.get("streaming") or streaming)
+        indexes.add(segment_index)
         if template_extras is not None:
             template = dict(template_extras)
             for field in (
@@ -654,6 +788,8 @@ class OLVPetPlatformEvent(AstrMessageEvent):
     ) -> None:
         key = self._persona_delivery_state_key(turn_id, parent_message_id)
         state = self._persona_segment_delivery_state.get(key)
+        if isinstance(state, dict) and state.get("streaming") is True:
+            return
         if state is not None and state["segment_count"] != segment_count:
             raise RuntimeError("persona_segment_count_conflict")
         seen = state["indexes"] if state is not None else set()
@@ -677,6 +813,8 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         key = self._persona_delivery_state_key(turn_id, parent_message_id)
         state = self._persona_segment_delivery_state.get(key)
         if not isinstance(state, dict) or not isinstance(state.get("template"), dict):
+            return
+        if state.get("streaming") is True:
             return
         segment_count = state.get("segment_count")
         seen = state.get("indexes")
@@ -866,15 +1004,21 @@ def _derive_message_chain(message: Any, components: list[Any]) -> Any:
 
 def _extract_persona_segment_metadata(
     platform_extras: dict[str, Any],
-) -> tuple[int, int] | None:
+) -> tuple[int, int | None] | None:
     index = platform_extras.get("persona_segment_index")
     count = platform_extras.get("persona_segment_count")
     if isinstance(index, bool) or not isinstance(index, int):
-        return None
+        if count is None:
+            return None
+        raise RuntimeError("persona_segment_index_invalid")
+    if count is None and platform_extras.get("persona_streaming") is True:
+        if index < 0:
+            raise RuntimeError("persona_segment_index_invalid")
+        return index, None
     if isinstance(count, bool) or not isinstance(count, int):
-        return None
+        raise RuntimeError("persona_segment_count_invalid")
     if index < 0 or count <= 0 or index >= count:
-        return None
+        raise RuntimeError("persona_segment_metadata_invalid")
     return index, count
 
 
