@@ -12,6 +12,7 @@ import type { SystemServerInfoPayload } from "../../types/protocol.js";
 import type { MicrophoneDeviceInfo } from "../runtime/microphoneDevices.js";
 import {
   loadDesktopScreenshotOnSendEnabled,
+  loadPersonaSegmentStreamEnabled,
   loadStoredAdapterAddress,
   loadStoredMicrophoneDeviceId,
   loadStoredPttKeyBinding,
@@ -34,6 +35,7 @@ export function createAdapterConnectionState() {
   return reactive({
     address: loadStoredAdapterAddress(),
     desktopScreenshotOnSendEnabled: loadDesktopScreenshotOnSendEnabled(),
+    personaSegmentStreamEnabled: loadPersonaSegmentStreamEnabled(),
     microphoneDeviceId: loadStoredMicrophoneDeviceId(),
     microphoneDevices: [] as MicrophoneDeviceInfo[],
     status: "disconnected" as ConnectionStatus,

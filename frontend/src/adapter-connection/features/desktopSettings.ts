@@ -79,6 +79,8 @@ export interface DesktopSettingAccess {
   applyAdapterAddress: (address: string) => void;
   currentDesktopScreenshotOnSendEnabled: () => boolean;
   applyDesktopScreenshotOnSendEnabled: (enabled: boolean) => void;
+  currentPersonaSegmentStreamEnabled: () => boolean;
+  applyPersonaSegmentStreamEnabled: (enabled: boolean) => void;
   currentPttModeEnabled: () => boolean;
   applyPttModeEnabled: (enabled: boolean) => void;
   currentPttKeyBinding: () => DesktopPttKeyBinding;
@@ -532,6 +534,10 @@ const DESKTOP_SETTING_HANDLERS: Record<
   desktop_screenshot_on_send: (access) => booleanSettingHandler(
     access.currentDesktopScreenshotOnSendEnabled,
     access.applyDesktopScreenshotOnSendEnabled,
+  ),
+  persona_segment_stream_enabled: (access) => booleanSettingHandler(
+    access.currentPersonaSegmentStreamEnabled,
+    access.applyPersonaSegmentStreamEnabled,
   ),
   ptt_mode_enabled: (access) => booleanSettingHandler(
     access.currentPttModeEnabled,

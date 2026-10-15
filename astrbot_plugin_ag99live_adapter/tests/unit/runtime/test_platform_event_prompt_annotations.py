@@ -371,12 +371,12 @@ def test_persona_segment_stream_request_requires_explicit_compatible_gates(
     _install_platform_event_astrbot_stubs(install_fake_astrbot, monkeypatch)
     module = _load_platform_event_module()
 
-    def build_event(**runtime_options):
+    def build_event(*, desktop_stream_enabled=False, **runtime_options):
         adapter = AdapterStub()
+        adapter.desktop_persona_segment_stream_enabled = desktop_stream_enabled
         state = {
             "independent_motion_enabled": True,
             "independent_motion_per_speech_segment": True,
-            "independent_motion_segment_stream_enabled": False,
             "interaction_result_event_filter_available": True,
             "persona_segment_stream_hooks_available": True,
             "independent_motion_provider_id": "motion-provider",
@@ -402,7 +402,7 @@ def test_persona_segment_stream_request_requires_explicit_compatible_gates(
     ) is None
 
     incompatible_event = build_event(
-        independent_motion_segment_stream_enabled=True,
+        desktop_stream_enabled=True,
         interaction_result_event_filter_available=False,
     )
     assert incompatible_event.get_extra(
@@ -410,7 +410,7 @@ def test_persona_segment_stream_request_requires_explicit_compatible_gates(
     ) is None
 
     enabled_event = build_event(
-        independent_motion_segment_stream_enabled=True,
+        desktop_stream_enabled=True,
     )
     assert enabled_event.get_extra(
         "_interaction_persona_segment_stream_requested"

@@ -121,6 +121,11 @@ export interface SystemMotionLabRawEventRecordedPayload {
 
 export type DesktopSettingsAction = "list" | "set";
 
+/** Desktop-owned runtime choices sent on connection and whenever they change. */
+export interface SystemDesktopRuntimeSettingsPayload {
+  persona_segment_stream_enabled: boolean;
+}
+
 /**
  * Adapter asks the desktop for a machine-local setting. `list` fetches the
  * current value together with the options this desktop actually offers;

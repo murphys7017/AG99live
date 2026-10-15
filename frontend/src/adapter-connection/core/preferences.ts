@@ -7,6 +7,7 @@ import type { DesktopPttKeyBinding } from "../../types/desktop.js";
 
 const ADDRESS_STORAGE_KEY = "ag99live.adapter.address";
 const DESKTOP_SCREENSHOT_ON_SEND_STORAGE_KEY = "ag99live.desktop.capture_on_send";
+const PERSONA_SEGMENT_STREAM_ENABLED_STORAGE_KEY = "ag99live.desktop.persona_segment_stream_enabled";
 const MICROPHONE_DEVICE_ID_STORAGE_KEY = "ag99live.microphone.device_id";
 const PTT_KEY_BINDING_STORAGE_KEY = "ag99live.microphone.ptt_key_binding";
 const PTT_MODE_ENABLED_STORAGE_KEY = "ag99live.microphone.ptt_mode_enabled";
@@ -73,6 +74,33 @@ export function saveDesktopScreenshotOnSendEnabled(enabled: boolean): void {
     );
   } catch (error) {
     console.warn("[AdapterPreferences] Failed to persist desktop screenshot preference.", error);
+  }
+}
+
+export function loadPersonaSegmentStreamEnabled(): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  try {
+    return window.localStorage.getItem(PERSONA_SEGMENT_STREAM_ENABLED_STORAGE_KEY) === "true";
+  } catch (error) {
+    console.warn("[AdapterPreferences] Failed to load Persona segment stream preference.", error);
+    return false;
+  }
+}
+
+export function savePersonaSegmentStreamEnabled(enabled: boolean): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    window.localStorage.setItem(
+      PERSONA_SEGMENT_STREAM_ENABLED_STORAGE_KEY,
+      enabled ? "true" : "false",
+    );
+  } catch (error) {
+    console.warn("[AdapterPreferences] Failed to persist Persona segment stream preference.", error);
   }
 }
 

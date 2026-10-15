@@ -1,6 +1,6 @@
 # OLV 全生命周期流式实施计划
 
-> **状态：2026-10-15 实施顺序与基线采样更新。**本文描述拟实施路线，不代表相关能力已经进入源码。范围覆盖 AstrBot Core、AG99live Adapter Python 后端和 TypeScript 桌面前端；不涉及 C++。
+> **状态：2026-10-15 阶段 1 代码接入，待真实联调。**当前入口仍默认关闭；本文同时记录源码状态和未完成的运行验收。范围覆盖 AstrBot Core、AG99live Adapter Python 后端和 TypeScript 桌面前端；不涉及 C++。
 
 ## 当前进度
 
@@ -8,16 +8,17 @@
 - **阶段 0 基线：已建立初步端到端基线，分布仍待补充。**2026-10-15 19:25、19:26 两轮普通 OLV PTT 对话的 PTT 松开→桌面首个实际起播分别为 **6.514 s**、**5.741 s**；PTT 松开→首次服务端 `output_segment_sent` 分别为 5.937 s、5.534 s。首个输出提交→桌面起播分别为 0.577 s、0.207 s。对应 ASR 完成耗时分别为 0.784 s、1.110 s（从服务端 `transcription_started` 起算）。两条真实端到端记录满足开始阶段 1 的基线前置条件，但样本量不足以报告稳定 p50/p95；后续联调期间继续采样。此前另有 3 条服务端样本，从 `transcription_started` 到首个 `output_segment_sent` 为 5.673 s、4.908 s、5.466 s；该指标不能替代 PTT→桌面起播。流式入口仍保持关闭，未改变当前交互路径。
 - **阶段 0 采样取数：**Core/Adapter 服务端 `DIAG latency.*` 从 `data/logs/astrbot.log` 按 `turn_id` 关联；Electron renderer 的 PTT capture end 与 audio playback started 经受限 IPC 写入 `app.getPath("logs")/ag99live/olv-latency-YYYY-MM-DD.jsonl`，只包含时间、Turn/stream 身份和采集状态，不含对话正文。已从 2026-10-15 的桌面 JSONL 成功关联两轮记录。
 - **部署与样本备注（2026-10-15）：**用户更新并运行桌面端后，Electron JSONL 与 AstrBot 服务端日志已按两条 `input:turn_id` / `stream_id` 成功关联。第一轮 segment 0 的动作终态为 failed，日志原因为 `motion_step_duration_weight_invalid:0`；该轮音频首响时间仍可用于音频延迟观察，但动作同步表现异常，第二轮动作正常。继续采样时需同时观察动作终态，不能只看首响数值。
-- **阶段 1 前置准备：已提交，尚未启用流。**Core 的 result contributor 注册现支持可选 `event_filter`；AG99live 在 Core 支持时注册带过滤器的 motion contributor，在旧签名 Core 上沿用原注册调用，因此普通 Turn 的 interaction contributors 和 Persona effect 不因该可选参数缺失而被关闭。Adapter 单独记录 `interaction_result_event_filter_available`；没有该能力的 Core 不满足后续 OLV 流入口条件，入口实现必须消费此标记。当前没有设置 OLV 流式入口。相关基础提交：AstrBot `839afa045`、AG99live `fb61dd9`。
-- **阶段 1：Adapter 流式段身份、未知总数、动作 Future 汇合和默认关闭准入已接入；未做真实联调。**流式段可先按单调 `persona_segment_index` 进入 Adapter，不要求伪造 `persona_segment_count`；Core stream-finished Hook 到达后，Adapter 按最终 count 校验成功流完整覆盖或失败流连续前缀。Core 在校验段 ready 时启动对应动作 Future；同段完整 TTS 物料到达 Adapter 后，输出路径等待并附加对应动作，完整结果 Hook 不再重复启动整批动作生成。准入需同时满足 Adapter `independent_motion.segment_stream_enabled=true`、逐 speech 段动作模式、Core contributor event-filter 和 Persona stream hooks；Core 自身 `persona_segment_stream_enabled` 仍是第二道全局门。两处开关任一关闭均不进入流式路径；Core 记录实际 active 状态，使关闭时仍保留普通完整 Persona/动作流程。Core 实际先完成 OLV 输出交付、再通知 stream-finished，因此 Adapter 延后终态校验到两者都到达后执行。当前没有启用开关，也未做 OLV 流式 live 联调；下一步验证首段提前交付、双开关启停和取消/迟到拒绝。
+- **阶段 1 前置准备：已提交。**Core 的 result contributor 注册现支持可选 `event_filter`；AG99live 在 Core 支持时注册带过滤器的 motion contributor。Adapter 单独检查该能力，没有该能力的 Core 不满足 OLV 流入口条件。相关基础提交：AstrBot `839afa045`、AG99live `fb61dd9`。
+- **阶段 1：Adapter 流式段身份、未知总数、动作 Future 汇合和默认关闭准入已接入；真实联调未通过。**流式段按单调 `persona_segment_index` 进入 Adapter；Core stream-finished Hook 到达后，Adapter 按最终 count 校验完整流或失败前缀。Core 在 segment-ready 时启动对应动作 Future；同段完整 TTS 物料到达 Adapter 后再汇合，完整结果 Hook 不重复启动整批动作。Adapter 侧开关现由前端“桌面端本机配置”中的 `persona_segment_stream_enabled` 持久化，每次连接建立与设置变更时通过 `system.desktop_runtime_settings` 主动同步到 Adapter；Adapter 按连接保存最新值、断线时重置关闭，每轮 OLV 事件读取当前连接状态；它默认关闭，不再位于 Adapter 插件配置。准入还要求 Adapter 独立动作、`per_speech_segment`、Core contributor event-filter 和 Persona stream hooks；AstrBot Core 的 `interaction_middleware.persona_segment_stream_enabled` 是第二道总开关。任一开关关闭都保留普通完整 Persona/动作流程。Core 会先完成 OLV 输出交付、再通知 stream-finished，因此 Adapter 在两者都到达后做终态校验。
+- **2026-10-15 21:48 两轮日志复核：未进入流式入口。**Core 与 Adapter 配置文件中的旧开关值为 true，Persona 路径及逐段动作路由正常，但没有 `persona_segment_stream_requested` / `request_skipped` 记录；两个 Turn 均在完整 Persona 结果到达后输出一个候选段。由于设置与 Adapter 重载发生在同一秒，日志不能确定运行时是否读取到新值。Adapter 侧准入值已迁移到前端桌面本机配置，并扩展每轮日志以显式记录 `persona_segment_stream_enabled`。审阅还发现 Broker 快照只在控制页查询后才更新，会让重载后的已保存开关失效；已改为连接及设置变更时主动同步，不再以页面缓存决定运行准入。下一步需部署更新后的前端和 Adapter，在桌面设置页启用该项，再验证首段提前交付、双开关启停及取消/迟到拒绝。
 
-上一轮复核发现并修复了兼容门过宽的问题：基础 interaction contributor 支持现与 `event_filter` 流式能力分开判断，旧签名 Core 继续注册普通路径 contributor。阶段 1 当前 Adapter 准入/动作/输出定向测试 43 项通过，Core 流式准入路径测试 60 项通过；Adapter Python 编译、插件结构检查（0 错误、0 警告）、配置 Schema 解析和两仓库 `git diff --check` 通过。用户运行环境尚未重载这些提交，OLV Persona 流式路径仍未做真实联调。
+上一轮复核发现并修复了兼容门过宽的问题：基础 interaction contributor 支持现与 `event_filter` 流式能力分开判断，旧签名 Core 继续注册普通路径 contributor。阶段 1 当前 Adapter 准入/动作/输出定向测试 43 项通过，Core 流式准入路径测试 60 项通过；Adapter Python 编译、插件结构检查（0 错误、0 警告）、配置 Schema 解析和两仓库 `git diff --check` 通过。上述测试为先前实现的定向验证；本次设置迁移通过 Renderer 类型检查、设置 responder 和门控边界检查，以及 Electron 与隔离输出的控制页生产构建。真实 `handle_msg` 边界检查确认布尔同步可直接控制下一轮 OLV 准入，字符串值被拒绝且不改变开关。运行中的前端及 Adapter 尚未加载本次迁移，真实流式首响验收仍待完成。
 
-## 本轮复核结论
+## 方案边界与初版复核依据
 
 本文把“第三条链路”拆成两个层次：业务链路指现有三种动作路径中的 `independent_motion.enabled=true` 且 `per_speech_segment=true`，它保留 Persona 回复并按 speech 段绑定独立动作；实现层的流式运行骨架借鉴 `passive_behavior` 的异步读取、逐条校验、序号分配、取消、TTL、Turn 收口和即时提交方式。不能复制 `passive_behavior` 的独立后台 Turn、motion-only `output.segment.v5` 语义，也不能让新链路绕开正常 Persona 会话、TTS、动作和播放生命周期。
 
-当前真实状态有六个阻断点：
+以下六项记录的是阶段 1 实施前的阻断点；当前状态以“当前进度”中的阶段 1 记录为准：
 
 1. **OLV 流式入口还没有接通。** AstrBot Core 的 OLV Persona 流路径要求事件设置 `_interaction_persona_segment_stream_requested=True`，而 AG99live 当前 `OLVPetPlatformEvent` 没有设置它；因此真实 OLV Turn 不会自动进入 Core 的 OLV 分段流路径。
 2. **AG99live 仍以完整 Persona 结果为动作入口。** `main.py` 当前主要依赖 `OnPersonaExpressionResultEvent` 读取完整 `result.segments` 后再启动动作任务；没有把 `OnPersonaExpressionSegmentReadyEvent` 接成逐段动作入口。仅声明 `persona_segment_stream_safe` 不能替代这次迁移。
@@ -89,7 +90,7 @@ PCM 麦克风帧
 1. 为当前原子段路径记录“输入语音段结束、Persona 首段校验、首段 TTS 物料完成、Adapter flush、桌面实际起播”时间，建立首响基线；同时确认第一竖切片使用的聊天 Provider 与 TTS 配置。
 2. 冻结进程内 Core→Adapter 契约：`OnPersonaExpressionSegmentReadyEvent`、stream-finished Hook、OLV 平台物料交付的身份字段、调用先后、失败/取消语义；明确不把未校验的 `speech_delta` 发给 OLV。
 3. 冻结未知总段数规则：流中只接受单调且唯一的 `segment_index`；最终 `segment_count` 只由 stream-finished 提供；Adapter 只在流终态校验完整覆盖或失败前缀。现有要求 index/count 成对出现的普通路径继续保持原契约。
-4. 确认第一竖切片仍用 `output.segment.v5` 交付完整段，不新增桌面网络协议；入口标记 `_interaction_persona_segment_stream_requested` 默认关闭，直到 Core、Adapter、TS 与真实首响验收全部通过才允许开启。
+4. 确认第一竖切片仍用 `output.segment.v5` 交付完整段，输出段协议保持不变，另以 `system.desktop_runtime_settings` 同步桌面运行设置；AstrBot Core 总开关和前端桌面设置中的 Adapter 入口开关均默认关闭，直到 Core、Adapter、TS 与真实首响验收全部通过才允许正式启用。
 5. 将 segment 级文本清理、动作登记、TTS 物料登记和终态收口纳入同一逐段契约；确认 Persona effect、全局 hook、result contributor 在该模式下的支持条件和明确拒绝原因。
 6. 固定单段 TTS 只能由 Core 调用一次。阶段 1 继续使用完整音频物料；另行确认未来流式 Provider 是否能在完整合成前产出可播放首块，Provider 选择与音频格式冻结推迟到阶段 2。
 

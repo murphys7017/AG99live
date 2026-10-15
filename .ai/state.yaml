@@ -487,3 +487,27 @@ neurobrain_passive_behavior_stream_20261014:
     - "AstrBot plugin structure check completed with 0 errors and 0 warnings."
   evidence_gap:
     - "No live AstrBot streaming Provider, NeuroBrain instance, OLV desktop, Electron, or Live2D run has verified incremental timing or visible queued motion."
+
+olv_stream_setting_desktop_ownership_20261015:
+  recorded_at: "2026-10-15"
+  class: feature
+  risk: high
+  status: implemented_pending_live_acceptance
+  scope:
+    - "Move the Adapter OLV Persona segment-stream gate from plugin configuration to the frontend-owned Desktop Settings panel."
+    - "Persist the desktop-local value and push system.desktop_runtime_settings on every connection and setting change; use the current connection's value for each OLV event."
+    - "Log the effective desktop setting on each independent-motion route and update the OLV streaming plan with the 2026-10-15 21:48 log review."
+  architecture:
+    - "The desktop app owns the Adapter-side stream opt-in and persists it in localStorage; Broker queries serve the settings UI only. The Adapter resets the runtime opt-in on disconnect and receives a fresh snapshot on reconnect."
+    - "AstrBot Core's persona_segment_stream_enabled remains an independent global gate."
+  non_actions:
+    - "Do not change the Core global stream setting, independent-motion enablement, or per_speech_segment plugin settings."
+    - "User requested review and commit; retain the existing post-commit Adapter file deployment hook. Do not restart or reload AstrBot, Electron, or the Adapter."
+  validation:
+    - "Focused Adapter platform-event gate test passed: 1 passed."
+    - "Source-backed handle_msg boundary smoke accepts boolean runtime sync, changes the next OLV event's gate without a Broker, and rejects string values without changing the gate."
+    - "Frontend desktop settings responder test passed; renderer typecheck, Electron production build, and isolated Web control panel production build passed."
+    - "Ruff on changed Adapter Python files, Adapter JSON schema parsing, state YAML parsing, plugin structure check (0 errors and 0 warnings), and git diff --check passed."
+  evidence_gap:
+    - "A test-project TypeScript compile is blocked by existing Live2D SDK type errors; the targeted desktop-settings test compiled and passed independently."
+    - "The updated desktop frontend and Adapter have not been loaded by the running applications; post-commit file deployment alone does not establish runtime activation or live OLV stream acceptance."

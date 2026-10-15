@@ -9,6 +9,7 @@ import type {
 } from "../types/desktop";
 import type {
   ProtocolEnvelope,
+  SystemDesktopRuntimeSettingsPayload,
   SystemSemanticAxisProfileSavePayload,
 } from "../types/protocol";
 import {
@@ -51,6 +52,7 @@ import {
 import {
   loadStoredAdapterAddress,
   normalizeAdapterAddressSetting,
+  savePersonaSegmentStreamEnabled,
   saveDesktopScreenshotOnSendEnabled,
   saveStoredAdapterAddress,
 } from "./core/preferences.js";
@@ -355,6 +357,8 @@ export function createAdapterConnection(
       applyAdapterAddress: persistAddress,
       currentDesktopScreenshotOnSendEnabled: () => state.desktopScreenshotOnSendEnabled,
       applyDesktopScreenshotOnSendEnabled: setDesktopScreenshotOnSendEnabled,
+      currentPersonaSegmentStreamEnabled: () => state.personaSegmentStreamEnabled,
+      applyPersonaSegmentStreamEnabled: setPersonaSegmentStreamEnabled,
       currentPttModeEnabled: () => state.pttModeEnabled,
       applyPttModeEnabled: setPttMode,
       currentPttKeyBinding: () => ({ ...state.pttKeyBinding }),
@@ -453,6 +457,24 @@ export function createAdapterConnection(
   function setDesktopScreenshotOnSendEnabled(enabled: boolean): void {
     state.desktopScreenshotOnSendEnabled = enabled;
     saveDesktopScreenshotOnSendEnabled(enabled);
+  }
+
+  function setPersonaSegmentStreamEnabled(enabled: boolean): void {
+    state.personaSegmentStreamEnabled = enabled;
+    savePersonaSegmentStreamEnabled(enabled);
+    if (outboundClient.canSend()) {
+      syncDesktopRuntimeSettings();
+    }
+  }
+
+  function syncDesktopRuntimeSettings(): void {
+    const payload: SystemDesktopRuntimeSettingsPayload = {
+      persona_segment_stream_enabled: state.personaSegmentStreamEnabled,
+    };
+    if (!outboundClient.send(OUTBOUND_MESSAGE_TYPES.SYSTEM_DESKTOP_RUNTIME_SETTINGS, payload)) {
+      socket?.close();
+      throw new Error("desktop_runtime_settings_sync_failed");
+    }
   }
 
   function setAddress(nextAddress: string): void {
@@ -662,6 +684,13 @@ export function createAdapterConnection(
           return;
         }
 
+        try {
+          syncDesktopRuntimeSettings();
+        } catch (error) {
+          projectLifecycleFailure("桌面运行设置同步", error);
+          nextSocket.close();
+          return;
+        }
         persistAddress(state.address);
         state.activeWsAddress = targetAddress;
         state.status = "connected";

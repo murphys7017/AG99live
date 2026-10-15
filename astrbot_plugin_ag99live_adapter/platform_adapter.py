@@ -38,7 +38,10 @@ from .runtime.plugin_runtime import (
 )
 from .runtime.state import RuntimeState
 from .protocol.builder import build_system_motion_tuning_samples_state
-from .protocol.constants import TYPE_SYSTEM_DESKTOP_SETTINGS_RESULT
+from .protocol.constants import (
+    TYPE_SYSTEM_DESKTOP_RUNTIME_SETTINGS,
+    TYPE_SYSTEM_DESKTOP_SETTINGS_RESULT,
+)
 from .runtime.desktop_settings_broker import DesktopSettingsBroker
 from .runtime.session_state import SessionState
 from .runtime.turn_identity_map import TurnIdentityMap
@@ -116,6 +119,7 @@ class OLVPetPlatformAdapter(Platform):
         self.http_port = int(get_config_value(self.config, "http_port", 12397))
         self.speaker_name = get_config_value(self.config, "speaker_name", "AstrBot")
         self.auto_start_mic = bool(get_config_value(self.config, "auto_start_mic", False))
+        self.desktop_persona_segment_stream_enabled = False
         self._event_loop: asyncio.AbstractEventLoop | None = None
 
         self._plugin_context = get_plugin_context()
@@ -424,6 +428,16 @@ class OLVPetPlatformAdapter(Platform):
 
     async def _handle_frontend_system(self, message: Any) -> None:
         # TurnCoordinator hands over a parsed ProtocolMessage, not the raw dict.
+        if message.type == TYPE_SYSTEM_DESKTOP_RUNTIME_SETTINGS:
+            self.desktop_persona_segment_stream_enabled = message.payload[
+                "persona_segment_stream_enabled"
+            ]
+            logger.info(
+                "WIRING interaction.desktop_runtime_settings_synced "
+                "persona_segment_stream_enabled=%s",
+                self.desktop_persona_segment_stream_enabled,
+            )
+            return
         if message.type == TYPE_SYSTEM_DESKTOP_SETTINGS_RESULT:
             self.desktop_settings_broker.resolve(message.payload)
             return
@@ -458,6 +472,7 @@ class OLVPetPlatformAdapter(Platform):
         后续所有者清理。全部尝试结束后再把失败汇总交回 transport。
         """
         cleanup_failures: list[tuple[str, Exception]] = []
+        self.desktop_persona_segment_stream_enabled = False
 
         try:
             self.desktop_settings_broker.fail_pending("desktop_client_offline")

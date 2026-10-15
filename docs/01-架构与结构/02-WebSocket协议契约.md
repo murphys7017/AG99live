@@ -27,6 +27,12 @@ python scripts/check_protocol_schema_manifest.py
 | `control.*` | 双向 | 连接、Turn 开始/结束、中断、模型同步与播放完成等生命周期信号。 |
 | `system.*` | 双向 | 模型、profile、设置和动作实验室等系统资料。 |
 
+## 桌面运行设置同步
+
+桌面端在每次 WebSocket 连接建立时首先发送 `system.desktop_runtime_settings`，随后在设置变更时再次发送；`turn_id` 为 `null`，payload 必须包含布尔值 `persona_segment_stream_enabled`。Adapter 保存该连接的最新值，在构造 OLV 事件时决定是否请求 Persona 段流，并在断线时重置为关闭。设置写入后，同步消息先于桌面设置结果应答发送；普通文本及音频输入按同一 WebSocket 的顺序使用更新后的状态。
+
+桌面端在本机持久化该选项，默认关闭。此同步不依赖 Web 控制页面是否打开，也不读取 Desktop Settings Broker 为页面展示缓存的最后已知值。Core 的 Persona 段流总开关、逐 speech 段独立动作及能力检查仍参与准入。部署时需配套更新桌面端和 Adapter。
+
 ## 原子输出段
 
 `output.segment` 消息是回复播放的唯一入站业务单元，其 Payload Schema 为 `output.segment.v5`。它携带段归属和顺序，以及文本、音频状态、动作意图、speech cues 和需要的展示资料。Adapter 只在逻辑消息已满足可发送条件后提交该段；前端先严格解析全部 slot，再写入 SessionStore 并启动段任务。

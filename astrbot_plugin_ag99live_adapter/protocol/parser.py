@@ -26,6 +26,7 @@ from .constants import (
     TYPE_INPUT_AUDIO_STREAM_END,
     TYPE_INPUT_AUDIO_STREAM_START,
     TYPE_INPUT_TEXT,
+    TYPE_SYSTEM_DESKTOP_RUNTIME_SETTINGS,
     TYPE_SYSTEM_DESKTOP_SETTINGS_RESULT,
     TYPE_SYSTEM_HISTORY_DELETE,
     TYPE_SYSTEM_HISTORY_LOAD,
@@ -153,6 +154,14 @@ def build_message_envelope(
 
 
 def _validate_payload(message_type: str, payload: dict[str, Any]) -> None:
+    if message_type == TYPE_SYSTEM_DESKTOP_RUNTIME_SETTINGS:
+        if not isinstance(payload.get("persona_segment_stream_enabled"), bool):
+            raise ProtocolError(
+                f"`{message_type}` requires `payload.persona_segment_stream_enabled` "
+                "to be a boolean."
+            )
+        return
+
     if message_type == TYPE_INPUT_TEXT:
         text = payload.get("text")
         if not isinstance(text, str) or not text.strip():

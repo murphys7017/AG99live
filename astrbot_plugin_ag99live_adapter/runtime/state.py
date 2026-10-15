@@ -17,17 +17,6 @@ from ..core_compatibility import (
     supports_interaction_result_event_filter,
     supports_persona_segment_stream_hooks,
 )
-from .client_profile import (
-    DEFAULT_CLIENT_NICKNAME,
-    DEFAULT_CLIENT_UID,
-    normalize_client_nickname,
-    normalize_client_uid,
-)
-from ..motion.performance_curve import PerformanceCurveRuntime
-from ..prompts.motion_selector import (
-    MotionReferenceExamplesResolution,
-    resolve_motion_reference_examples,
-)
 from ..live2d.cache.runtime_cache import (
     build_live2d_directory_md5,
     load_live2d_runtime_cache,
@@ -41,11 +30,22 @@ from ..live2d.semantic_axis_profile import (
     ensure_semantic_axis_profile,
     save_semantic_axis_profile,
 )
+from ..motion.performance_curve import PerformanceCurveRuntime
+from ..prompts.motion_selector import (
+    MotionReferenceExamplesResolution,
+    resolve_motion_reference_examples,
+)
 from ..protocol.builder import build_system_model_sync
 from ..protocol.schema_versions import MODEL_INFO_SCHEMA_VERSION
-from .plugin_runtime import PluginConfigSnapshot, get_config_value
-from .motion_state import MotionTuningStore
+from .client_profile import (
+    DEFAULT_CLIENT_NICKNAME,
+    DEFAULT_CLIENT_UID,
+    normalize_client_nickname,
+    normalize_client_uid,
+)
 from .motion_lab import MotionLabRawEventStore, MotionLabRecorder
+from .motion_state import MotionTuningStore
+from .plugin_runtime import PluginConfigSnapshot, get_config_value
 
 LIVE2D_SCAN_CACHE_VERSION = "live2d_scan_cache.v3"
 
@@ -113,7 +113,6 @@ class RuntimeState:
         self.enable_performance_curve = False
         self.independent_motion_enabled = False
         self.independent_motion_per_speech_segment = False
-        self.independent_motion_segment_stream_enabled = False
         self.independent_motion_provider_id = ""
         self.independent_motion_history_turns = 6
         self.independent_motion_parallel = False
@@ -262,13 +261,6 @@ class RuntimeState:
             get_config_value(
                 independent_motion_config,
                 "per_speech_segment",
-                False,
-            )
-        )
-        self.independent_motion_segment_stream_enabled = bool(
-            get_config_value(
-                independent_motion_config,
-                "segment_stream_enabled",
                 False,
             )
         )

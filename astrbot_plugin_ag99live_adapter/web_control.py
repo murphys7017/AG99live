@@ -8,8 +8,9 @@ from math import isfinite
 from typing import Any, Literal
 from uuid import uuid4
 
-from astrbot.api import logger
 from quart import g, jsonify, request
+
+from astrbot.api import logger
 
 from .live2d.semantic_axis_profile import (
     SemanticAxisProfileError,
@@ -432,6 +433,12 @@ DESKTOP_SETTINGS_SPEC: tuple[DesktopSetting, ...] = (
         key="desktop_screenshot_on_send",
         label="发送消息时附带桌面截图",
         description="发送文本或按键说话时附带当前桌面截图，帮助模型理解屏幕内容。",
+        kind="toggle",
+    ),
+    DesktopSetting(
+        key="persona_segment_stream_enabled",
+        label="OLV Persona 分段流式",
+        description="实验性：允许兼容的 AstrBot Core 在 OLV 对话中逐段校验并交付 Persona。还需开启 AstrBot 的 Persona 分段流式总开关及逐 speech 段独立动作。",
         kind="toggle",
     ),
     DesktopSetting(

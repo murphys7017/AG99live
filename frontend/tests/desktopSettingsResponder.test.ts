@@ -38,6 +38,7 @@ async function run(): Promise<void> {
   const scalarSettings = {
     adapterAddress: "http://127.0.0.1:9527",
     screenshotOnSend: true,
+    personaSegmentStreamEnabled: false,
     pttModeEnabled: false,
     pttKeyBinding: {
       code: "ControlLeft",
@@ -65,6 +66,10 @@ async function run(): Promise<void> {
     currentDesktopScreenshotOnSendEnabled: () => scalarSettings.screenshotOnSend,
     applyDesktopScreenshotOnSendEnabled: (enabled: boolean) => {
       scalarSettings.screenshotOnSend = enabled;
+    },
+    currentPersonaSegmentStreamEnabled: () => scalarSettings.personaSegmentStreamEnabled,
+    applyPersonaSegmentStreamEnabled: (enabled: boolean) => {
+      scalarSettings.personaSegmentStreamEnabled = enabled;
     },
     currentPttModeEnabled: () => scalarSettings.pttModeEnabled,
     applyPttModeEnabled: (enabled: boolean) => {
@@ -127,6 +132,11 @@ async function run(): Promise<void> {
   await responder(queryEnvelope("desktop_screenshot_on_send", "set", "false"));
   assert.equal(scalarSettings.screenshotOnSend, false);
   assert.equal(replies.at(-1)?.value, "false");
+  await responder(queryEnvelope("persona_segment_stream_enabled", "list"));
+  assert.equal(replies.at(-1)?.value, "false");
+  await responder(queryEnvelope("persona_segment_stream_enabled", "set", "true"));
+  assert.equal(scalarSettings.personaSegmentStreamEnabled, true);
+  assert.equal(replies.at(-1)?.value, "true");
   await responder(queryEnvelope("adapter_connected", "set", "false"));
   assert.equal(replies.at(-1)?.ok, false);
   assert.equal(replies.at(-1)?.error, "desktop_setting_unsupported");

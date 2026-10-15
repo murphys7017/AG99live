@@ -47,6 +47,9 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         super().__init__(message_str, message_obj, platform_meta, session_id)
         self.adapter = adapter
         runtime_state = getattr(adapter, "runtime_state", None)
+        persona_segment_stream_enabled = (
+            getattr(adapter, "desktop_persona_segment_stream_enabled", False) is True
+        )
         if bool(getattr(runtime_state, "independent_motion_enabled", False)):
             per_speech_segment = bool(
                 getattr(
@@ -70,7 +73,8 @@ class OLVPetPlatformEvent(AstrMessageEvent):
                 )
             logger.info(
                 "WIRING interaction.independent_motion_route "
-                "mode=%s core_bypass=%s plugin_target=%s provider=%s",
+                "mode=%s core_bypass=%s plugin_target=%s provider=%s "
+                "persona_segment_stream_enabled=%s",
                 (
                     "per_speech_segment"
                     if per_speech_segment
@@ -89,14 +93,9 @@ class OLVPetPlatformEvent(AstrMessageEvent):
                 not per_speech_segment,
                 "personal_expression" if per_speech_segment else "core",
                 getattr(runtime_state, "independent_motion_provider_id", "<missing>"),
+                persona_segment_stream_enabled,
             )
-        if bool(
-            getattr(
-                runtime_state,
-                "independent_motion_segment_stream_enabled",
-                False,
-            )
-        ):
+        if persona_segment_stream_enabled:
             gate_failure = None
             if not bool(getattr(runtime_state, "independent_motion_enabled", False)):
                 gate_failure = "independent_motion_disabled"

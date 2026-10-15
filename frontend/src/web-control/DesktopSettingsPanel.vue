@@ -22,7 +22,7 @@ const SETTING_GROUPS: DesktopSettingGroup[] = [
     key: "appearance",
     label: "模型与交互",
     description: "Live2D 显示、待机动作、鼠标凝视与语音播放体验。",
-    keys: ["model_view_scale", "speech_volume", "live2d_ambient_motion_enabled", "cursor_gaze_enabled", "cursor_gaze_poll_interval_ms", "cursor_gaze_dwell_ms", "cursor_gaze_stationary_distance_px"],
+    keys: ["model_view_scale", "speech_volume", "live2d_ambient_motion_enabled", "persona_segment_stream_enabled", "cursor_gaze_enabled", "cursor_gaze_poll_interval_ms", "cursor_gaze_dwell_ms", "cursor_gaze_stationary_distance_px"],
   },
   {
     key: "performance",
