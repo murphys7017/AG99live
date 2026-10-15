@@ -1,4 +1,5 @@
 import { app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, screen, session } from "electron";
+import { appendDesktopLatencyEvent } from "./desktop-latency-log";
 import { MenuManager } from "./menu-manager";
 import { WindowManager } from "./window-manager";
 import { WebControlLauncher } from "./web-control-launcher";
@@ -550,6 +551,16 @@ function setupIpc(): void {
     } else {
       stopGlobalPttHook();
     }
+  });
+
+  ipcMain.on("desktop:latency-event", (event, payload: unknown) => {
+    const petWindow = windowManager.getWindow("pet");
+    if (!petWindow || petWindow.isDestroyed() || petWindow.webContents !== event.sender) {
+      return;
+    }
+    void appendDesktopLatencyEvent(payload).catch((error: unknown) => {
+      console.warn("[Latency] failed to persist desktop timing event.", error);
+    });
   });
 
   ipcMain.handle("desktop:get-ptt-hook-status", async () => lastPttHookStatus);

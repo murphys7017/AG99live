@@ -4,6 +4,7 @@ import type {
 } from "./bilibili-live";
 import type {
   DesktopAuxWindowRole,
+  DesktopLatencyEvent,
   DesktopMicrophoneAudioChunk,
   DesktopMicrophoneDevice,
   DesktopPttEventAck,
@@ -55,6 +56,7 @@ export interface Ag99DesktopApi {
   closeCurrentWindow: () => void;
   minimizeCurrentWindow: () => void;
   setPttMode: (enabled: boolean, binding?: DesktopPttKeyBinding) => void;
+  reportLatencyEvent?: (event: DesktopLatencyEvent) => void;
   getPttHookStatus: () => Promise<DesktopPttHookStatus>;
   reportPttEventAck: (ack: DesktopPttEventAck) => void;
   sendRuntimeBridgeMessage: (payload: unknown) => void;

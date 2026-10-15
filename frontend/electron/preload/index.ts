@@ -6,6 +6,7 @@ import type {
 } from "../../src/types/bilibili-live";
 import type {
   DesktopAuxWindowRole,
+  DesktopLatencyEvent,
   DesktopMicrophoneAudioChunk,
   DesktopMicrophoneDevice,
   DesktopPttEventAck,
@@ -117,6 +118,9 @@ const api = {
   },
   setPttMode: (enabled: boolean, binding?: DesktopPttKeyBinding) => {
     ipcRenderer.send("desktop:set-ptt-mode", enabled, binding);
+  },
+  reportLatencyEvent: (event: DesktopLatencyEvent) => {
+    ipcRenderer.send("desktop:latency-event", event);
   },
   getPttHookStatus: () => {
     return ipcRenderer.invoke("desktop:get-ptt-hook-status") as Promise<DesktopPttHookStatus>;

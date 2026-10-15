@@ -442,7 +442,8 @@ export function createAdapterMicrophoneRuntime(
               },
               inputTurnId,
             )));
-            console.info("[Connection] audio capture ended.", {
+            const latencyEvent = {
+              type: "audio_capture_ended" as const,
               turnId: inputTurnId,
               streamId: inputStreamId,
               captureMode: inputCaptureMode,
@@ -450,7 +451,9 @@ export function createAdapterMicrophoneRuntime(
               dropped: inputSequenceBroken,
               captureEndedAtMonotonicMs,
               timestampEpochMs: Date.now(),
-            });
+            };
+            console.info("[Connection] audio capture ended.", latencyEvent);
+            window.ag99desktop?.reportLatencyEvent?.(latencyEvent);
           });
         } catch (error) {
           protocolError = error;

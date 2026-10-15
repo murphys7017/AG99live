@@ -1013,12 +1013,15 @@ export function createAdapterConnection(
       reportAudioPlaybackStarted: (turnId, durationMs) => {
         state.isPlayingAudio = true;
         state.statusMessage = "收到语音回复，正在播放。";
-        console.info("[Connection] audio playback started.", {
+        const latencyEvent = {
+          type: "audio_playback_started" as const,
           turnId,
           durationMs,
           startedAtMonotonicMs: performance.now(),
           timestampEpochMs: Date.now(),
-        });
+        };
+        console.info("[Connection] audio playback started.", latencyEvent);
+        window.ag99desktop?.reportLatencyEvent?.(latencyEvent);
       },
       reportAudioPlaybackEnded: () => {
         state.isPlayingAudio = false;

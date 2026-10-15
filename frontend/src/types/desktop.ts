@@ -445,6 +445,25 @@ export interface DesktopPttEventAck {
   timestamp: string;
 }
 
+export type DesktopLatencyEvent =
+  | {
+      type: "audio_capture_ended";
+      turnId: string;
+      streamId: string;
+      captureMode: string;
+      reason: string;
+      dropped: boolean;
+      captureEndedAtMonotonicMs: number;
+      timestampEpochMs: number;
+    }
+  | {
+      type: "audio_playback_started";
+      turnId: string | null;
+      durationMs: number | null;
+      startedAtMonotonicMs: number;
+      timestampEpochMs: number;
+    };
+
 export interface DesktopMotionTuningSamplesStatus {
   rootError: string;
   loadError: string;

@@ -6,7 +6,7 @@
 
 - **阶段 0 观测点：已接入，待真实采样。**现有语音路径现在记录 PTT 采集结束、转写开始/完成、Persona 完整结果或校验 segment、TTS 完整物料就绪、Adapter `output.segment.v5` 发送和桌面实际音频起播。浏览器侧 PTT→实际起播使用同一 `performance.now()` 时钟；进程间阶段同时记录 epoch 时间戳，并按 `turn_id` / segment 身份关联。
 - **阶段 0 基线：初步服务端样本已取得，完整基线未完成。**2026-10-15 的服务端日志中有 3 条到达首个 `output_segment_sent` 的语音输入链路；从 `transcription_started` 到首个 `output_segment_sent` 分别为 5.673 s、4.908 s、5.466 s。该区间不等于用户停止说话至桌面实际起播，不能替代计划指标，也不足以建立稳定 p50/p95。流式入口仍保持关闭，未改变当前交互路径。
-- **阶段 0 采样取数：**Core/Adapter 服务端 `DIAG latency.*` 记录从 `data/logs/astrbot.log` 按 `turn_id` 关联；PTT capture end 与桌面 playback started 目前只写入前端 renderer `console.info`，不会进入该服务端日志。完整采样还需运行包含当前诊断改动的桌面前端，并捕获 renderer 控制台；打包 Electron 版屏蔽 F12 DevTools 快捷键，建议用开发版采集或另备可用的 renderer 日志出口。
+- **阶段 0 采样取数：**Core/Adapter 服务端 `DIAG latency.*` 记录从 `data/logs/astrbot.log` 按 `turn_id` 关联；Electron renderer 的 PTT capture end 与 audio playback started 现在还会经受限 IPC 写入 `app.getPath("logs")/ag99live/olv-latency-YYYY-MM-DD.jsonl`，只包含时间、Turn/stream 身份和采集状态，不含对话正文。桌面源码构建和类型检查已通过；运行中的客户端需更新到新构建并重启后，才会生成这些记录。
 - **部署检查（2026-10-15）：**首次检查时 AstrBot 进程早于诊断提交启动，计时标记为 0；用户手动重启后已采到上述 3 条服务端链路记录。
 - **阶段 1 前置准备：已提交，尚未启用流。**Core 的 result contributor 注册现支持可选 `event_filter`；AG99live 在 Core 支持时注册带过滤器的 motion contributor，在旧签名 Core 上沿用原注册调用，因此普通 Turn 的 interaction contributors 和 Persona effect 不因该可选参数缺失而被关闭。Adapter 单独记录 `interaction_result_event_filter_available`；没有该能力的 Core 不满足后续 OLV 流入口条件，入口实现必须消费此标记。当前没有设置 OLV 流式入口。相关基础提交：AstrBot `839afa045`、AG99live `fb61dd9`。
 - **阶段 1：未开始。**完成真实基线采样后，再实施 Core segment-ready Hook、Adapter 逐段动作关联、未知总段数处理和 v5 首段提前起播的完整竖切片。
