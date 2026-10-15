@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ...core_compatibility import supports_interaction_result_event_filter
 from .companion import AG99liveCompanionIdentityPromptContributor
 from .effects import _register_ag99live_motion_persona_effect
 from .prompt import AG99liveMotionPromptContributor
@@ -24,10 +25,14 @@ def register_ag99live_interaction_contributors(
     register_result = context.register_interaction_result_contributor
     register_prompt(AG99liveCompanionIdentityPromptContributor())
     register_prompt(AG99liveMotionPromptContributor())
-    register_result(
-        AG99liveMotionResultContributor(),
-        event_filter=_include_legacy_motion_result_contributor,
-    )
+    result_contributor = AG99liveMotionResultContributor()
+    if supports_interaction_result_event_filter(context):
+        register_result(
+            result_contributor,
+            event_filter=_include_legacy_motion_result_contributor,
+        )
+    else:
+        register_result(result_contributor)
 
 
 def _include_legacy_motion_result_contributor(event: Any) -> bool:

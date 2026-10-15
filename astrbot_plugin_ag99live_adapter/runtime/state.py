@@ -12,7 +12,10 @@ from astrbot.api.provider import Provider, STTProvider
 from astrbot.core.platform.message_session import MessageSession
 from astrbot.core.platform.message_type import MessageType
 
-from ..core_compatibility import supports_interaction_contributors
+from ..core_compatibility import (
+    supports_interaction_contributors,
+    supports_interaction_result_event_filter,
+)
 from .client_profile import (
     DEFAULT_CLIENT_NICKNAME,
     DEFAULT_CLIENT_UID,
@@ -126,6 +129,9 @@ class RuntimeState:
         self.passive_behavior_timeout_seconds = 3.0
         self.interaction_contributors_available = supports_interaction_contributors(
             plugin_context
+        )
+        self.interaction_result_event_filter_available = (
+            supports_interaction_result_event_filter(plugin_context)
         )
         self._registered_persona_effect_enabled: bool | None = None
         self.motion_tuning_fewshot_enabled = True

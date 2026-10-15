@@ -332,7 +332,7 @@ def test_enhanced_interaction_requires_llm_response_hook(
     assert not module.supports_interaction_contributors(context)
 
 
-def test_interaction_contributor_support_requires_event_filter_keyword(
+def test_interaction_contributor_and_stream_filter_support_are_separate(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -348,9 +348,59 @@ def test_interaction_contributor_support_requires_event_filter_keyword(
         unregister_persona_effects=lambda *_args, **_kwargs: None,
     )
 
-    assert not module.supports_interaction_contributors(context)
+    assert module.supports_interaction_contributors(context)
+    assert not module.supports_interaction_result_event_filter(context)
     context.register_interaction_result_contributor = lambda *_args, **_kwargs: None
     assert module.supports_interaction_contributors(context)
+    assert module.supports_interaction_result_event_filter(context)
+
+    def positional_only(_contributor, event_filter, /):
+        del event_filter
+
+    def positional_only_with_kwargs(_contributor, event_filter, /, **kwargs):
+        del event_filter, kwargs
+
+    context.register_interaction_result_contributor = positional_only
+    assert not module.supports_interaction_result_event_filter(context)
+    context.register_interaction_result_contributor = positional_only_with_kwargs
+    assert module.supports_interaction_result_event_filter(context)
+
+
+def test_interaction_registration_keeps_legacy_core_contributor_api(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_middleware_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = importlib.import_module("astrbot_plugin_ag99live_adapter.middleware")
+    module = importlib.reload(module)
+    result_contributors: list[object] = []
+
+    class LegacyContext:
+        def register_persona_effect(self, effect: object, **_kwargs) -> None:
+            del effect
+
+        def register_prompt_extension_collector(self, _collector: object) -> None:
+            pass
+
+        def register_interaction_result_contributor(self, contributor: object) -> None:
+            result_contributors.append(contributor)
+
+        def remove_prompt_extension_collectors_by_module_prefix(self, _prefix: str) -> None:
+            pass
+
+        def remove_interaction_result_contributors_by_module_prefix(
+            self,
+            _prefix: str,
+        ) -> None:
+            pass
+
+        def unregister_persona_effects(self, **_kwargs) -> None:
+            pass
+
+    assert module.register_ag99live_interaction_contributors(LegacyContext())
+    assert [item.plugin_id for item in result_contributors] == [
+        "ag99live.motion.result",
+    ]
 
 
 def test_independent_motion_results_match_each_visible_persona_reply(

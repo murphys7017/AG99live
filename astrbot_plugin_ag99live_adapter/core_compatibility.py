@@ -97,10 +97,6 @@ def supports_interaction_contributors(context: Any) -> bool:
             getattr(context, "register_prompt_extension_collector", None)
         )
         and callable(result_contributor_registration)
-        and _supports_keyword_argument(
-            result_contributor_registration,
-            "event_filter",
-        )
         and callable(
             getattr(context, "remove_prompt_extension_collectors_by_module_prefix", None)
         )
@@ -111,15 +107,32 @@ def supports_interaction_contributors(context: Any) -> bool:
     )
 
 
+def supports_interaction_result_event_filter(context: Any) -> bool:
+    register_contributor = getattr(
+        context,
+        "register_interaction_result_contributor",
+        None,
+    )
+    return callable(register_contributor) and _supports_keyword_argument(
+        register_contributor,
+        "event_filter",
+    )
+
+
 def _supports_keyword_argument(function: Any, argument_name: str) -> bool:
     try:
-        parameters = inspect.signature(function).parameters.values()
+        parameters = inspect.signature(function).parameters
     except (TypeError, ValueError):
         return False
+    parameter = parameters.get(argument_name)
+    if parameter is not None and parameter.kind in {
+        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        inspect.Parameter.KEYWORD_ONLY,
+    }:
+        return True
     return any(
-        parameter.name == argument_name
-        or parameter.kind is inspect.Parameter.VAR_KEYWORD
-        for parameter in parameters
+        candidate.kind is inspect.Parameter.VAR_KEYWORD
+        for candidate in parameters.values()
     )
 
 
