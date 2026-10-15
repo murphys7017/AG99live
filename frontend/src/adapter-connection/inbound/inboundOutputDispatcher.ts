@@ -181,6 +181,12 @@ function applyOutputTranscription(
   if (!text) {
     return;
   }
+  console.info("[InboundOutputDispatcher] transcription received.", {
+    turnId: envelope.turn_id,
+    textLength: text.length,
+    receivedAtMonotonicMs: performance.now(),
+    timestampEpochMs: Date.now(),
+  });
   deps.state.lastTranscription = text;
   deps.state.statusMessage = "已收到语音转写。";
   deps.pushHistory("transcription", text);

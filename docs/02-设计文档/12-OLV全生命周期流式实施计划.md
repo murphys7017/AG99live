@@ -2,6 +2,12 @@
 
 > **状态：2026-10-15 实施顺序确认稿。**本文描述拟实施路线，不代表相关能力已经进入源码。范围覆盖 AstrBot Core、AG99live Adapter Python 后端和 TypeScript 桌面前端；不涉及 C++。
 
+## 当前进度
+
+- **阶段 0 观测点：已接入，待真实采样。**现有语音路径现在记录 PTT 采集结束、转写开始/完成、Persona 完整结果或校验 segment、TTS 完整物料就绪、Adapter `output.segment.v5` 发送和桌面实际音频起播。浏览器侧 PTT→实际起播使用同一 `performance.now()` 时钟；进程间阶段同时记录 epoch 时间戳，并按 `turn_id` / segment 身份关联。
+- **阶段 0 基线：未完成。**尚未使用真实聊天 Provider、STT、TTS 和桌面播放采集 p50/p95；流式入口仍保持关闭，未改变当前交互路径。
+- **阶段 1：未开始。**下一步在完成实际基线采样后，实施 Core segment-ready Hook、Adapter 逐段动作关联、未知总段数处理和 v5 首段提前起播的完整竖切片。
+
 ## 本轮复核结论
 
 本文把“第三条链路”拆成两个层次：业务链路指现有三种动作路径中的 `independent_motion.enabled=true` 且 `per_speech_segment=true`，它保留 Persona 回复并按 speech 段绑定独立动作；实现层的流式运行骨架借鉴 `passive_behavior` 的异步读取、逐条校验、序号分配、取消、TTL、Turn 收口和即时提交方式。不能复制 `passive_behavior` 的独立后台 Turn、motion-only `output.segment.v5` 语义，也不能让新链路绕开正常 Persona 会话、TTS、动作和播放生命周期。

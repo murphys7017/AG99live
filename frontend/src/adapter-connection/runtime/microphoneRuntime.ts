@@ -382,6 +382,7 @@ export function createAdapterMicrophoneRuntime(
     reason = "manual_stop",
     releaseRuntime = !deps.state.pttModeEnabled,
   ): Promise<boolean> {
+    const captureEndedAtMonotonicMs = performance.now();
     deps.state.micCapturing = false;
     const inputTurnId = activeMicTurnId ?? createRootInputTurnId();
     const inputStreamId = activeMicStreamId;
@@ -441,6 +442,15 @@ export function createAdapterMicrophoneRuntime(
               },
               inputTurnId,
             )));
+            console.info("[Connection] audio capture ended.", {
+              turnId: inputTurnId,
+              streamId: inputStreamId,
+              captureMode: inputCaptureMode,
+              reason,
+              dropped: inputSequenceBroken,
+              captureEndedAtMonotonicMs,
+              timestampEpochMs: Date.now(),
+            });
           });
         } catch (error) {
           protocolError = error;

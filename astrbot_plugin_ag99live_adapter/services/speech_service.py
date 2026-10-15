@@ -13,6 +13,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 import os
 import re
+import time
 from typing import Any
 
 import numpy as np
@@ -344,15 +345,43 @@ class SpeechIngressService:
         sample_rate: int = 16000,
         stream_id: str | None = None,
     ):
+        transcription_started_at = time.perf_counter()
+        logger.info(
+            "DIAG latency.transcription_started turn_id=%s stream_id=%s "
+            "sample_count=%s sample_rate=%s timestamp_epoch_ms=%s",
+            turn_id or "<missing>",
+            stream_id or "<missing>",
+            int(audio_buffer.size),
+            sample_rate,
+            time.time_ns() // 1_000_000,
+        )
         try:
             text = (await self._transcribe_audio(audio_buffer, sample_rate=sample_rate)).strip()
         except Exception:
+            logger.info(
+                "DIAG latency.transcription_failed turn_id=%s stream_id=%s "
+                "elapsed_ms=%.1f timestamp_epoch_ms=%s",
+                turn_id or "<missing>",
+                stream_id or "<missing>",
+                (time.perf_counter() - transcription_started_at) * 1000,
+                time.time_ns() // 1_000_000,
+            )
             logger.exception("Audio transcription failed")
             await self._emit_input_error(
                 turn_id=turn_id,
                 error_message="Audio transcription failed.",
             )
             return None
+
+        logger.info(
+            "DIAG latency.transcription_ready turn_id=%s stream_id=%s "
+            "elapsed_ms=%.1f text_length=%s timestamp_epoch_ms=%s",
+            turn_id or "<missing>",
+            stream_id or "<missing>",
+            (time.perf_counter() - transcription_started_at) * 1000,
+            len(text),
+            time.time_ns() // 1_000_000,
+        )
 
         if not text:
             await self._emit_input_error(

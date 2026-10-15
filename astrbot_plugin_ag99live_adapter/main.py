@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 from typing import Any
 
 from astrbot.api import logger
@@ -381,10 +382,21 @@ class MyPlugin(Star):
             return
         if str(event.get_platform_name() or "").strip() != "olv_pet_adapter":
             return
-        if (
-            state.stage != "interaction.outbound_tts"
-            or state.status not in {"requested", "generating"}
-        ):
+        if state.stage != "interaction.outbound_tts":
+            return
+        if state.status == "succeeded":
+            logger.info(
+                "DIAG latency.tts_material_ready turn_id=%s persona_result_id=%s "
+                "segment_index=%s message_id=%s tts_request_id=%s timestamp_epoch_ms=%s",
+                state.turn_id or "<missing>",
+                getattr(state, "persona_result_id", None) or "<missing>",
+                getattr(state, "persona_segment_index", None),
+                state.message_id or "<missing>",
+                state.tts_request_id or "<missing>",
+                time.time_ns() // 1_000_000,
+            )
+            return
+        if state.status not in {"requested", "generating"}:
             return
 
         from .middleware.interaction_motion import (
@@ -417,8 +429,28 @@ class MyPlugin(Star):
             return
 
         from .middleware.interaction_motion.independent import (
-            INDEPENDENT_MOTION_RESULT_EXTRA_KEY,
             PERSONA_RESULT_ID_METADATA_KEY,
+        )
+
+        result_metadata = getattr(result, "metadata", None)
+        persona_result_id = str(
+            result_metadata.get(PERSONA_RESULT_ID_METADATA_KEY)
+            if isinstance(result_metadata, dict)
+            else ""
+        ).strip()
+        raw_segments = getattr(result, "segments", ())
+        if persona_result_id:
+            logger.info(
+                "DIAG latency.persona_result_ready turn_id=%s persona_result_id=%s "
+                "segment_count=%s timestamp_epoch_ms=%s",
+                str(event.get_extra("_turn_id") or "<missing>"),
+                persona_result_id,
+                len(raw_segments),
+                time.time_ns() // 1_000_000,
+            )
+
+        from .middleware.interaction_motion.independent import (
+            INDEPENDENT_MOTION_RESULT_EXTRA_KEY,
             IndependentMotionResult,
             generate_independent_motion_for_segments,
             is_persona_expression_request,
@@ -465,12 +497,6 @@ class MyPlugin(Star):
                 ):
                     return
                 phase = str(intent.get("phase") or "").strip()
-                result_metadata = getattr(result, "metadata", None)
-                persona_result_id = str(
-                    result_metadata.get(PERSONA_RESULT_ID_METADATA_KEY)
-                    if isinstance(result_metadata, dict)
-                    else ""
-                ).strip()
                 if not persona_result_id:
                     logger.warning(
                         "WIRING independent_motion.segment_generation_skipped "
@@ -478,7 +504,6 @@ class MyPlugin(Star):
                         turn_id,
                     )
                     return
-                raw_segments = getattr(result, "segments", ())
                 speech_segments = tuple(
                     sanitize_assistant_output_segment_text(
                         str(getattr(segment, "speech", "") or "")

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import Any, Awaitable, Callable
 
 from astrbot.api import logger
@@ -568,12 +569,13 @@ class OutputSegmentCoordinator:
             raise RuntimeError(f"output_segment_send_failed:{segment.message_id}")
         logger.info(
             "WIRING output_segment_sent turn_id=%s message_id=%s sequence=%s "
-            "motion_state=%s motion_source=%s",
+            "motion_state=%s motion_source=%s timestamp_epoch_ms=%s",
             segment.turn_id,
             segment.message_id,
             segment.sequence,
             motion_slot.get("state"),
             motion_slot.get("source") or "<none>",
+            time.time_ns() // 1_000_000,
         )
 
         key = self._segment_key(segment.turn_id, segment.message_id)

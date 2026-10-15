@@ -1013,12 +1013,12 @@ export function createAdapterConnection(
       reportAudioPlaybackStarted: (turnId, durationMs) => {
         state.isPlayingAudio = true;
         state.statusMessage = "收到语音回复，正在播放。";
-        console.info(
-          "[Connection] audio playback started. turn_id=",
+        console.info("[Connection] audio playback started.", {
           turnId,
-          "duration_ms=",
           durationMs,
-        );
+          startedAtMonotonicMs: performance.now(),
+          timestampEpochMs: Date.now(),
+        });
       },
       reportAudioPlaybackEnded: () => {
         state.isPlayingAudio = false;
