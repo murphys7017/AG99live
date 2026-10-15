@@ -488,6 +488,18 @@ neurobrain_passive_behavior_stream_20261014:
   evidence_gap:
     - "No live AstrBot streaming Provider, NeuroBrain instance, OLV desktop, Electron, or Live2D run has verified incremental timing or visible queued motion."
 
+olv_stream_review_fixes_20261015:
+  class: bugfix
+  risk: high
+  status: in_progress
+  scope:
+    - "Fix Adapter Hook admission, lifecycle-isolated motion work, active flag scope, and desktop stream failure termination in separate commits."
+  validation:
+    - "Prior review reproduced unsafe Adapter Hook admission and sibling-task invisibility of lifecycle-local extras using actual AstrBot APIs."
+    - "Step 1: actual AstrBot registration confirms all four Adapter legacy Hooks declare stream safety; Ruff and diff checks passed."
+  evidence_gap:
+    - "Other installed plugin Hooks still require independent compatibility review; no live stream acceptance or application restart is authorized."
+
 olv_stream_setting_desktop_ownership_20261015:
   recorded_at: "2026-10-15"
   class: feature

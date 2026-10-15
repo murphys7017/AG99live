@@ -35,7 +35,7 @@ def _optional_tts_state_hook():
 def _optional_persona_expression_hook():
     hook = getattr(filter, "on_persona_expression_result", None)
     if callable(hook):
-        return hook()
+        return hook(persona_segment_stream_safe=True)
 
     def _identity(handler):
         return handler
@@ -96,7 +96,7 @@ def _clear_persona_stream_motion_work(
 def _optional_llm_response_hook():
     hook = getattr(filter, "on_llm_response", None)
     if callable(hook):
-        return hook()
+        return hook(persona_segment_stream_safe=True)
 
     def _identity(handler):
         return handler
@@ -151,7 +151,7 @@ class MyPlugin(Star):
                 "motion generation and performance curves are disabled."
             )
 
-    @filter.on_llm_request()
+    @filter.on_llm_request(persona_segment_stream_safe=True)
     async def start_independent_motion_generation(
         self,
         event: AstrMessageEvent,
@@ -390,7 +390,7 @@ class MyPlugin(Star):
                 len(assistant_text),
             )
 
-    @filter.on_decorating_result()
+    @filter.on_decorating_result(persona_segment_stream_safe=True)
     async def sanitize_hidden_output_markup(
         self,
         event: AstrMessageEvent,
