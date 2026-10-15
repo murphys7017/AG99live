@@ -285,6 +285,11 @@ class OLVPetPlatformEvent(AstrMessageEvent):
             sequence = self._allocate_logical_segment_index()
             self._logical_segment_indexes[message_id] = sequence
         resolved_platform_extras["logical_segment_index"] = sequence
+        await self._attach_persona_stream_motion(
+            resolved_platform_extras,
+            turn_id=turn_id,
+            parent_message_id=explicit_parent_id or parent_message_id,
+        )
         await self.adapter.emit_message_chain(
             message_chain=message,
             turn_id=turn_id,
@@ -471,6 +476,107 @@ class OLVPetPlatformEvent(AstrMessageEvent):
 
     def _is_stop_requested(self) -> bool:
         return bool(self.get_extra("agent_stop_requested", False))
+
+    async def _attach_persona_stream_motion(
+        self,
+        platform_extras: dict[str, Any],
+        *,
+        turn_id: str,
+        parent_message_id: str,
+    ) -> None:
+        if platform_extras.get("persona_streaming") is not True:
+            return
+        segment_index = platform_extras.get("persona_segment_index")
+        persona_result_id = str(
+            platform_extras.get("persona_result_id") or ""
+        ).strip()
+        semantic_text = str(platform_extras.get("semantic_text") or "")
+        if (
+            isinstance(segment_index, bool)
+            or not isinstance(segment_index, int)
+            or segment_index < 0
+            or not persona_result_id
+        ):
+            raise RuntimeError("persona_stream_motion_identity_invalid")
+        if platform_extras.get("persona_motion_only") or not semantic_text.strip():
+            platform_extras["_ag99live_motion_disabled"] = True
+            return
+
+        work = self.get_extra("_ag99live_persona_stream_motion_work")
+        result = None
+        failure_reason = "independent_segment_work_missing"
+        if (
+            isinstance(work, dict)
+            and work.get("turn_id") == str(self.get_extra("_turn_id") or "").strip()
+            and work.get("persona_result_id") == persona_result_id
+            and work.get("parent_message_id") == parent_message_id
+        ):
+            futures = work.get("segment_result_futures")
+            future = futures.get(segment_index) if isinstance(futures, dict) else None
+            if hasattr(future, "__await__"):
+                result = await asyncio.shield(future)
+                if self._is_stop_requested():
+                    raise asyncio.CancelledError
+                failure_reason = str(getattr(result, "reason", "") or "")
+
+        motion_payload = getattr(result, "motion_payload", None)
+        if not isinstance(motion_payload, dict):
+            motion_payload = None
+        client_objects = platform_extras.get("client_objects")
+        resolved_objects = (
+            list(client_objects) if isinstance(client_objects, list) else []
+        )
+        resolved_objects = [
+            candidate
+            for candidate in resolved_objects
+            if not (
+                isinstance(candidate, dict)
+                and candidate.get("type") == "ag99live.motion_payload"
+                and candidate.get("persona_segment_index") == segment_index
+            )
+        ]
+        if motion_payload is not None:
+            resolved_objects.append(
+                {
+                    "type": "ag99live.motion_payload",
+                    "motion_payload": motion_payload,
+                    "mode": "preview",
+                    "source": "independent_provider",
+                    "persona_segment_index": segment_index,
+                }
+            )
+        platform_extras["client_objects"] = resolved_objects
+
+        metadata = platform_extras.get("metadata")
+        resolved_metadata = dict(metadata) if isinstance(metadata, dict) else {}
+        schedule = resolved_metadata.get("ag99live_motion_schedule")
+        resolved_schedule = dict(schedule) if isinstance(schedule, dict) else {}
+        resolved_schedule.update(
+            {
+                "scheduled": True,
+                "source": "independent_provider",
+                "persona_segmented": True,
+                "reason": (
+                    "independent_provider"
+                    if motion_payload is not None
+                    else failure_reason or "independent_segment_work_missing"
+                ),
+            }
+        )
+        failure_reasons = resolved_schedule.get("persona_motion_failure_reasons")
+        failure_reasons = dict(failure_reasons) if isinstance(failure_reasons, dict) else {}
+        if motion_payload is None:
+            failure_reasons[str(segment_index)] = (
+                failure_reason or "independent_segment_work_missing"
+            )
+        else:
+            failure_reasons.pop(str(segment_index), None)
+        if failure_reasons:
+            resolved_schedule["persona_motion_failure_reasons"] = failure_reasons
+        else:
+            resolved_schedule.pop("persona_motion_failure_reasons", None)
+        resolved_metadata["ag99live_motion_schedule"] = resolved_schedule
+        platform_extras["metadata"] = resolved_metadata
 
     def _allocate_logical_segment_index(self) -> int:
         index = self._next_logical_segment_index

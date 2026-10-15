@@ -208,6 +208,60 @@ def test_streaming_segments_allow_unknown_count_until_terminal_hook(
     }
 
 
+def test_streaming_output_joins_motion_future_by_segment_identity(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_platform_event_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    event = _build_event(_load_platform_event_module(), images=[])
+    event.set_extra("_turn_id", "backend-turn-1")
+
+    async def run() -> None:
+        future = asyncio.get_running_loop().create_future()
+        future.set_result(
+            types.SimpleNamespace(
+                motion_payload={"axis_levels": {"Joy": 0.8}},
+                reason="independent_provider",
+            )
+        )
+        event.set_extra(
+            "_ag99live_persona_stream_motion_work",
+            {
+                "turn_id": "backend-turn-1",
+                "persona_result_id": "persona-result-1",
+                "parent_message_id": "stream-parent",
+                "segment_result_futures": {0: future},
+            },
+        )
+        await event.send_message_with_extras(
+            [Plain("spoken")],
+            platform_extras={
+                "logical_message_id": "stream-segment-0",
+                "persona_incremental_delivery": True,
+                "persona_delivery_parent_message_id": "stream-parent",
+                "persona_result_id": "persona-result-1",
+                "persona_segment_index": 0,
+                "persona_streaming": True,
+                "semantic_text": "spoken",
+            },
+            record_send_operation=False,
+        )
+
+    asyncio.run(run())
+    extras = event.adapter.emit_calls[0]["platform_extras"]
+    assert extras["client_objects"] == [
+        {
+            "type": "ag99live.motion_payload",
+            "motion_payload": {"axis_levels": {"Joy": 0.8}},
+            "mode": "preview",
+            "source": "independent_provider",
+            "persona_segment_index": 0,
+        }
+    ]
+    assert extras["metadata"]["ag99live_motion_schedule"]["persona_segmented"] is True
+    assert "persona_segment_count" not in extras
+
+
 def test_streaming_terminal_rejects_missing_completed_segment(
     install_fake_astrbot,
     monkeypatch,

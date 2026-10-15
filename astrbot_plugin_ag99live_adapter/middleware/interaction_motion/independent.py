@@ -421,6 +421,7 @@ async def generate_independent_motion_for_segments(
     persona_result_id: str | None = None,
     segment_intents: tuple[dict[str, Any], ...] = (),
     segment_result_futures: dict[int, asyncio.Future] | None = None,
+    prepared_context: IndependentMotionContext | None = None,
 ) -> dict[int, IndependentMotionResult]:
     """Generate one independent Provider result for each nonempty speech segment."""
     started = perf_counter()
@@ -465,34 +466,36 @@ async def generate_independent_motion_for_segments(
     except (TypeError, ValueError):
         segment_timeout_seconds = _DEFAULT_SEGMENT_TIMEOUT_SECONDS
 
-    try:
-        context_preparation = _prepare_independent_motion_context(
-            event,
-            bundle,
-            persona_result_id=persona_result_id,
-        )
-        if segment_timeout_seconds > 0:
-            shared_context = await asyncio.wait_for(
-                context_preparation,
-                timeout=segment_timeout_seconds,
+    shared_context = prepared_context
+    if shared_context is None:
+        try:
+            context_preparation = _prepare_independent_motion_context(
+                event,
+                bundle,
+                persona_result_id=persona_result_id,
             )
-        else:
-            shared_context = await context_preparation
-    except Exception as exc:  # noqa: BLE001
-        get_extra = getattr(event, "get_extra", None)
-        turn_id = (
-            get_extra("_turn_id")
-            if callable(get_extra)
-            else "<missing>"
-        )
-        logger.warning(
-            "WIRING independent_motion.shared_context_unavailable turn_id=%s "
-            "error=%s; falling back to per-segment preparation",
-            turn_id or "<missing>",
-            exc,
-            exc_info=True,
-        )
-        shared_context = None
+            if segment_timeout_seconds > 0:
+                shared_context = await asyncio.wait_for(
+                    context_preparation,
+                    timeout=segment_timeout_seconds,
+                )
+            else:
+                shared_context = await context_preparation
+        except Exception as exc:  # noqa: BLE001
+            get_extra = getattr(event, "get_extra", None)
+            turn_id = (
+                get_extra("_turn_id")
+                if callable(get_extra)
+                else "<missing>"
+            )
+            logger.warning(
+                "WIRING independent_motion.shared_context_unavailable turn_id=%s "
+                "error=%s; falling back to per-segment preparation",
+                turn_id or "<missing>",
+                exc,
+                exc_info=True,
+            )
+            shared_context = None
 
     try:
         max_concurrency = max(

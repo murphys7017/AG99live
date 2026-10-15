@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import time
+from collections.abc import Mapping
 from typing import Any
 
 from astrbot.api import logger
@@ -16,6 +17,8 @@ from .motion.output_sanitizer import (
     sanitize_assistant_output_segment_text,
     sanitize_assistant_output_text,
 )
+
+_PERSONA_STREAM_MOTION_WORK_EXTRA_KEY = "_ag99live_persona_stream_motion_work"
 
 
 def _optional_tts_state_hook():
@@ -49,6 +52,45 @@ def _optional_persona_stream_finished_hook():
         return handler
 
     return _identity
+
+
+def _optional_persona_segment_ready_hook():
+    hook = getattr(filter, "on_persona_expression_segment_ready", None)
+    if callable(hook):
+        return hook()
+
+    def _identity(handler):
+        return handler
+
+    return _identity
+
+
+def _clear_persona_stream_motion_work(
+    event: Any,
+    *,
+    turn_id: str,
+    persona_result_id: str,
+    message_id: str,
+) -> None:
+    work = event.get_extra(_PERSONA_STREAM_MOTION_WORK_EXTRA_KEY)
+    if not isinstance(work, dict) or any(
+        work.get(key) != value
+        for key, value in (
+            ("turn_id", turn_id),
+            ("persona_result_id", persona_result_id),
+            ("parent_message_id", message_id),
+        )
+    ):
+        return
+    tasks = work.get("tasks")
+    if isinstance(tasks, set):
+        for task in tuple(tasks):
+            if isinstance(task, asyncio.Task) and not task.done():
+                task.cancel()
+    context_task = work.get("context_task")
+    if isinstance(context_task, asyncio.Task) and not context_task.done():
+        context_task.cancel()
+    event.set_extra(_PERSONA_STREAM_MOTION_WORK_EXTRA_KEY, None)
 
 
 def _optional_llm_response_hook():
@@ -428,6 +470,310 @@ class MyPlugin(Star):
             persona_segment_count=getattr(state, "persona_segment_count", None),
         )
 
+    @_optional_persona_segment_ready_hook()
+    async def handle_persona_expression_segment_ready(
+        self,
+        event: AstrMessageEvent,
+        *,
+        turn_id: str,
+        persona_result_id: str,
+        segment_index: int,
+        message_id: str,
+        segment: Any,
+        turn_action: Any = None,
+        execution_surface: str | None = None,
+    ) -> None:
+        del turn_action, execution_surface
+        if (
+            self._official_core_compatibility
+            or str(event.get_platform_name() or "").strip() != "olv_pet_adapter"
+            or not event.get_extra(
+                "_interaction_persona_segment_stream_requested",
+                False,
+            )
+        ):
+            return
+        if event.get_extra("agent_stop_requested", False):
+            return
+
+        from .middleware.interaction_motion.independent import (
+            IndependentMotionResult,
+            _prepare_independent_motion_context,
+            generate_independent_motion_for_segments,
+            is_persona_expression_request,
+            persona_expression_intent,
+            track_motion_generation_task,
+            untrack_motion_generation_task,
+        )
+        from .middleware.interaction_motion.shared import (
+            _resolve_motion_runtime_bundle,
+        )
+
+        bundle = _resolve_motion_runtime_bundle(event)
+        if (
+            bundle is None
+            or not bool(
+                getattr(bundle.runtime_state, "independent_motion_enabled", False)
+            )
+            or not bool(
+                getattr(
+                    bundle.runtime_state,
+                    "independent_motion_per_speech_segment",
+                    False,
+                )
+            )
+        ):
+            return
+        normalized_turn_id = str(turn_id or "").strip()
+        normalized_result_id = str(persona_result_id or "").strip()
+        normalized_parent_id = str(message_id or "").strip()
+        if (
+            not normalized_turn_id
+            or normalized_turn_id != str(event.get_extra("_turn_id") or "").strip()
+            or not normalized_result_id
+            or not normalized_parent_id
+            or type(segment_index) is not int
+            or segment_index < 0
+        ):
+            logger.warning(
+                "WIRING independent_motion.stream_segment_rejected "
+                "reason=identity_invalid turn_id=%s persona_result_id=%s "
+                "segment_index=%s",
+                normalized_turn_id or "<missing>",
+                normalized_result_id or "<missing>",
+                segment_index,
+            )
+            event.stop_event()
+            return
+
+        request = event.get_extra("provider_request")
+        intent = persona_expression_intent(request)
+        if (
+            not is_persona_expression_request(request)
+            or intent is None
+            or str(intent.get("phase") or "").strip() not in {"immediate", "final"}
+            or str(intent.get("kind") or "").strip() != "reply"
+        ):
+            return
+        phase = str(intent.get("phase") or "").strip()
+        if isinstance(segment, Mapping):
+            speech = str(segment.get("speech") or "")
+            raw_actions = segment.get("actions")
+            raw_tendency = segment.get("tendency")
+        else:
+            speech = str(getattr(segment, "speech", "") or "")
+            raw_actions = getattr(segment, "actions", ())
+            raw_tendency = getattr(segment, "tendency", {})
+        speech = sanitize_assistant_output_segment_text(speech)
+        actions = list(raw_actions) if isinstance(raw_actions, (list, tuple)) else []
+        tendency = dict(raw_tendency) if isinstance(raw_tendency, Mapping) else {}
+
+        work = event.get_extra(_PERSONA_STREAM_MOTION_WORK_EXTRA_KEY)
+        if work is None:
+            parallel = bool(
+                getattr(bundle.runtime_state, "independent_motion_parallel", False)
+            )
+            try:
+                max_concurrency = max(
+                    1,
+                    min(
+                        int(
+                            getattr(
+                                bundle.runtime_state,
+                                "independent_motion_max_concurrency",
+                                4,
+                            )
+                        ),
+                        8,
+                    ),
+                )
+            except (TypeError, ValueError):
+                max_concurrency = 4
+            work = {
+                "turn_id": normalized_turn_id,
+                "persona_result_id": normalized_result_id,
+                "parent_message_id": normalized_parent_id,
+                "phase": phase,
+                "next_segment_index": 0,
+                "segment_result_futures": {},
+                "tasks": set(),
+                "context_task": None,
+                "concurrency_gate": asyncio.Semaphore(
+                    max_concurrency if parallel else 1
+                ),
+                "parallel": parallel,
+            }
+            event.set_extra(_PERSONA_STREAM_MOTION_WORK_EXTRA_KEY, work)
+        elif (
+            not isinstance(work, dict)
+            or work.get("turn_id") != normalized_turn_id
+            or work.get("persona_result_id") != normalized_result_id
+            or work.get("parent_message_id") != normalized_parent_id
+            or work.get("phase") != phase
+        ):
+            logger.warning(
+                "WIRING independent_motion.stream_segment_rejected "
+                "reason=stream_identity_conflict turn_id=%s "
+                "persona_result_id=%s segment_index=%s",
+                normalized_turn_id,
+                normalized_result_id,
+                segment_index,
+            )
+            event.stop_event()
+            return
+
+        if segment_index != work["next_segment_index"]:
+            logger.warning(
+                "WIRING independent_motion.stream_segment_rejected "
+                "reason=segment_index_nonsequential turn_id=%s "
+                "persona_result_id=%s segment_index=%s expected_index=%s",
+                normalized_turn_id,
+                normalized_result_id,
+                segment_index,
+                work["next_segment_index"],
+            )
+            event.stop_event()
+            return
+        work["next_segment_index"] += 1
+        if not speech.strip():
+            return
+
+        result_future = asyncio.get_running_loop().create_future()
+        work["segment_result_futures"][segment_index] = result_future
+        context_task = work.get("context_task")
+        if not isinstance(context_task, asyncio.Task):
+            async def _prepare_context():
+                try:
+                    context_preparation = _prepare_independent_motion_context(
+                        event, bundle, persona_result_id=normalized_result_id
+                    )
+                    try:
+                        context_timeout = max(
+                            0.0,
+                            min(
+                                float(
+                                    getattr(
+                                        bundle.runtime_state,
+                                        "independent_motion_segment_timeout_seconds",
+                                        5.0,
+                                    )
+                                ),
+                                60.0,
+                            ),
+                        )
+                    except (TypeError, ValueError):
+                        context_timeout = 5.0
+                    if context_timeout > 0:
+                        return await asyncio.wait_for(
+                            context_preparation,
+                            timeout=context_timeout,
+                        )
+                    return await context_preparation
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "WIRING independent_motion.stream_context_unavailable "
+                        "turn_id=%s persona_result_id=%s error=%s",
+                        normalized_turn_id,
+                        normalized_result_id,
+                        exc,
+                        exc_info=True,
+                    )
+                    return None
+
+            context_task = asyncio.create_task(
+                _prepare_context(),
+                name=f"ag99live-persona-stream-context-{normalized_result_id[:12]}",
+            )
+            work["context_task"] = context_task
+
+        segment_intent = {"actions": actions, "tendency": tendency}
+
+        async def _generate_segment() -> None:
+            current_task = asyncio.current_task()
+            result = None
+            try:
+                async with work["concurrency_gate"]:
+                    try:
+                        prepared_context = await asyncio.shield(context_task)
+                    except Exception:  # noqa: BLE001
+                        prepared_context = None
+                    result_map = await generate_independent_motion_for_segments(
+                        event,
+                        bundle,
+                        speech_segments=("",) * segment_index + (speech,),
+                        segment_intents=({},) * segment_index + (segment_intent,),
+                        parallel=bool(work["parallel"]),
+                        tasks=self._independent_motion_tasks,
+                        persona_result_id=normalized_result_id,
+                        segment_result_futures={segment_index: result_future},
+                        prepared_context=prepared_context,
+                    )
+                    result = result_map.get(segment_index)
+                    if result is None:
+                        result = IndependentMotionResult(
+                            assistant_text=speech,
+                            motion_payload=None,
+                            reason="independent_segment_result_missing",
+                            image_count=0,
+                        )
+            except asyncio.CancelledError:
+                if not result_future.done():
+                    result_future.cancel()
+                raise
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "WIRING independent_motion.stream_segment_failed "
+                    "turn_id=%s persona_result_id=%s segment_index=%s error=%s",
+                    normalized_turn_id,
+                    normalized_result_id,
+                    segment_index,
+                    exc,
+                    exc_info=True,
+                )
+                result = IndependentMotionResult(
+                    assistant_text=speech,
+                    motion_payload=None,
+                    reason="segment_generation_failed",
+                    image_count=0,
+                )
+            finally:
+                if result is not None and not result_future.done():
+                    result_future.set_result(result)
+                if isinstance(current_task, asyncio.Task):
+                    untrack_motion_generation_task(
+                        bundle.runtime_state,
+                        turn_id=normalized_turn_id,
+                        task=current_task,
+                    )
+
+        generation_task = asyncio.create_task(
+            _generate_segment(),
+            name=(
+                f"ag99live-persona-stream-motion-{normalized_result_id[:10]}-"
+                f"{segment_index}"
+            ),
+        )
+        if not track_motion_generation_task(
+            bundle.runtime_state,
+            turn_id=normalized_turn_id,
+            task=generation_task,
+        ):
+            generation_task.cancel()
+            if not result_future.done():
+                result_future.set_result(
+                    IndependentMotionResult(
+                        assistant_text=speech,
+                        motion_payload=None,
+                        reason="task_tracking_unavailable",
+                        image_count=0,
+                    )
+                )
+            return
+        work["tasks"].add(generation_task)
+        self._independent_motion_tasks.add(generation_task)
+        generation_task.add_done_callback(work["tasks"].discard)
+        generation_task.add_done_callback(self._independent_motion_tasks.discard)
+
     @_optional_persona_stream_finished_hook()
     async def handle_persona_expression_stream_finished(
         self,
@@ -473,6 +819,13 @@ class MyPlugin(Star):
                 exc_info=True,
             )
             event.stop_event()
+        finally:
+            _clear_persona_stream_motion_work(
+                event,
+                turn_id=turn_id,
+                persona_result_id=persona_result_id,
+                message_id=message_id,
+            )
 
     @_optional_persona_expression_hook()
     async def handle_persona_expression_result(
@@ -505,6 +858,12 @@ class MyPlugin(Star):
                 len(raw_segments),
                 time.time_ns() // 1_000_000,
             )
+
+        if event.get_extra(
+            "_interaction_persona_segment_stream_requested",
+            False,
+        ):
+            return
 
         from .middleware.interaction_motion.independent import (
             INDEPENDENT_MOTION_RESULT_EXTRA_KEY,

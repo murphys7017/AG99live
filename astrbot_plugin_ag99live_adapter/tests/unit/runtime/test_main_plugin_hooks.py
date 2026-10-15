@@ -291,3 +291,176 @@ def test_main_plugin_registers_interaction_contributors_during_init(
 
     assert registered_contexts == [context]
     assert registered_effect_enabled == [False]
+
+
+def test_persona_segment_ready_starts_motion_future_for_that_index(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_main_astrbot_stubs(install_fake_astrbot, monkeypatch)
+
+    plugin_runtime = types.ModuleType("astrbot_plugin_ag99live_adapter.runtime.plugin_runtime")
+    plugin_runtime.ADAPTER_DISPLAY_NAME = "AG99live 桌宠适配器"
+    plugin_runtime.ADAPTER_PLATFORM_NAME = "olv_pet_adapter"
+    plugin_runtime.get_live_control_platform = lambda *_args: None
+    plugin_runtime.get_plugin_context = lambda: None
+    plugin_runtime.reconcile_control_platforms = lambda _context: []
+    plugin_runtime.set_plugin_config = lambda _config: None
+    plugin_runtime.set_plugin_context = lambda _context: None
+    monkeypatch.setitem(
+        sys.modules,
+        "astrbot_plugin_ag99live_adapter.runtime.plugin_runtime",
+        plugin_runtime,
+    )
+
+    middleware_module = types.ModuleType("astrbot_plugin_ag99live_adapter.middleware")
+    middleware_module.__path__ = []
+    middleware_module.register_ag99live_interaction_contributors = (
+        lambda *_args, **_kwargs: True
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "astrbot_plugin_ag99live_adapter.middleware",
+        middleware_module,
+    )
+    motion_package = types.ModuleType(
+        "astrbot_plugin_ag99live_adapter.middleware.interaction_motion"
+    )
+    motion_package.__path__ = []
+    monkeypatch.setitem(
+        sys.modules,
+        "astrbot_plugin_ag99live_adapter.middleware.interaction_motion",
+        motion_package,
+    )
+
+    result = types.SimpleNamespace(
+        assistant_text="hello",
+        motion_payload={"axis_levels": {"Joy": 0.8}},
+        reason="independent_provider",
+        image_count=0,
+    )
+    prepared_context = object()
+    generation_calls: list[dict] = []
+
+    class IndependentMotionResult:
+        def __init__(self, **kwargs) -> None:
+            self.__dict__.update(kwargs)
+
+    async def prepare_context(event, bundle, *, persona_result_id):
+        del event, bundle, persona_result_id
+        return prepared_context
+
+    async def generate_for_segments(event, bundle, **kwargs):
+        del event, bundle
+        generation_calls.append(kwargs)
+        return {0: result}
+
+    independent_module = types.ModuleType(
+        "astrbot_plugin_ag99live_adapter.middleware.interaction_motion.independent"
+    )
+    independent_module.PERSONA_RESULT_ID_METADATA_KEY = (
+        "interaction.persona_result_id"
+    )
+    independent_module.IndependentMotionResult = IndependentMotionResult
+    independent_module._prepare_independent_motion_context = prepare_context
+    independent_module.generate_independent_motion_for_segments = generate_for_segments
+    independent_module.is_persona_expression_request = lambda _request: True
+    independent_module.persona_expression_intent = lambda _request: {
+        "phase": "immediate",
+        "kind": "reply",
+    }
+    independent_module.track_motion_generation_task = lambda *_args, **_kwargs: True
+    independent_module.untrack_motion_generation_task = lambda *_args, **_kwargs: None
+    monkeypatch.setitem(
+        sys.modules,
+        "astrbot_plugin_ag99live_adapter.middleware.interaction_motion.independent",
+        independent_module,
+    )
+    shared_module = types.ModuleType(
+        "astrbot_plugin_ag99live_adapter.middleware.interaction_motion.shared"
+    )
+    shared_module._resolve_motion_runtime_bundle = lambda _event: bundle
+    monkeypatch.setitem(
+        sys.modules,
+        "astrbot_plugin_ag99live_adapter.middleware.interaction_motion.shared",
+        shared_module,
+    )
+
+    platform_adapter_module = types.ModuleType(
+        "astrbot_plugin_ag99live_adapter.platform_adapter"
+    )
+    platform_adapter_module.OLVPetPlatformAdapter = object
+    monkeypatch.setitem(
+        sys.modules,
+        "astrbot_plugin_ag99live_adapter.platform_adapter",
+        platform_adapter_module,
+    )
+
+    sys.modules.pop("astrbot_plugin_ag99live_adapter.main", None)
+    module = importlib.import_module("astrbot_plugin_ag99live_adapter.main")
+    plugin = module.MyPlugin.__new__(module.MyPlugin)
+    plugin._official_core_compatibility = False
+    plugin._independent_motion_tasks = set()
+
+    runtime_state = types.SimpleNamespace(
+        independent_motion_enabled=True,
+        independent_motion_per_speech_segment=True,
+        independent_motion_parallel=False,
+        independent_motion_max_concurrency=2,
+        independent_motion_segment_timeout_seconds=5,
+    )
+    bundle = types.SimpleNamespace(runtime_state=runtime_state)
+    extras = {
+        "_turn_id": "turn-1",
+        "_interaction_persona_segment_stream_requested": True,
+        "provider_request": object(),
+    }
+
+    class EventStub:
+        def get_platform_name(self) -> str:
+            return "olv_pet_adapter"
+
+        def get_extra(self, key: str, default=None):
+            return extras.get(key, default)
+
+        def set_extra(self, key: str, value) -> None:
+            extras[key] = value
+
+        def stop_event(self) -> None:
+            extras["stopped"] = True
+
+    event = EventStub()
+
+    async def run() -> None:
+        await plugin.handle_persona_expression_segment_ready(
+            event,
+            turn_id="turn-1",
+            persona_result_id="result-1",
+            segment_index=0,
+            message_id="stream-parent",
+            segment={
+                "speech": " hello ",
+                "actions": [{"name": "blink"}],
+                "tendency": {"Joy": 0.2},
+            },
+        )
+        work = event.get_extra("_ag99live_persona_stream_motion_work")
+        motion = await work["segment_result_futures"][0]
+        await asyncio.gather(*tuple(work["tasks"]))
+        assert motion is result
+        await plugin.handle_persona_expression_result(
+            event,
+            types.SimpleNamespace(
+                metadata={"interaction.persona_result_id": "result-1"},
+                segments=[{"speech": "hello"}],
+            ),
+        )
+
+    asyncio.run(run())
+    assert generation_calls[0]["speech_segments"] == (" hello ",)
+    assert generation_calls[0]["segment_intents"] == (
+        {"actions": [{"name": "blink"}], "tendency": {"Joy": 0.2}},
+    )
+    assert generation_calls[0]["prepared_context"] is prepared_context
+    assert len(generation_calls) == 1
+    assert not extras.get("stopped", False)
