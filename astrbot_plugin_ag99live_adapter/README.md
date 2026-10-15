@@ -60,7 +60,7 @@ AG99 Persona
 
 ### NeuroBrain 状态上下文
 
-当同一 AstrBot 进程加载并启用 `astrbot_plugin_neurobrain` 时，按 Persona speech 分段的独立动作链路会通过该插件的只读 API 等待当前 `persona_result_id` 对应的状态更新，最多等待 1 秒。动作 prompt 只接收经过范围校验的 `emotion`、`behavior`、`last_tendency` 和 `step`；对应更新未到达时省略 NeuroBrain 状态，不回退到上一轮缓存。整条回复独立动作链路不读取 NeuroBrain。AG99live 不会直接连接 NeuroBrain WebSocket，也不会推进状态。
+当同一 AstrBot 进程加载并启用 `astrbot_plugin_neurobrain` 时，普通完整结果路径中按 Persona speech 分段的独立动作会等待当前 `persona_result_id` 对应的状态更新，最多等待 1 秒。OLV 分段流式路径直接使用当前段的 `speech`、`actions`、`tendency`，省略 NeuroBrain 终态快照：该快照只在整轮结果完成后更新，等待它会推迟首段动作及语音。动作 prompt 中的 NeuroBrain 数据仅包含经过范围校验的 `emotion`、`behavior`、`last_tendency` 和 `step`；未取得对应更新时省略，不回退到上一轮缓存。整条回复独立动作链路不读取 NeuroBrain。AG99live 不会直接连接 NeuroBrain WebSocket，也不会推进状态。
 
 NeuroBrain 状态只是动作选择的辅助信号，不是动作命令；动作结果仍必须通过现有校验、`engine.motion_intent.v4` 和 `output.segment.v5` 发送链路。该接入不增加协议字段、不改变段身份、不改变播放时钟。
 

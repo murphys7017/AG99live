@@ -396,10 +396,22 @@ async def _prepare_independent_motion_context(
         source_route="independent_provider",
     )
     runtime_payload["recent_executed_motions"] = _resolve_prompt_motion_history(bundle.turn_coordinator)[-3:]
-    neurobrain_state = await _wait_for_neurobrain_state(
-        bundle,
-        persona_result_id=persona_result_id,
-    )
+    if event.get_extra("_interaction_persona_segment_stream_active", False):
+        # NeuroBrain advances only at the terminal result. Waiting here makes
+        # early segments depend on the complete model response (up to 1s).
+        # Stream motion already has this segment's tendency; omit the optional
+        # terminal snapshot rather than reading stale state or delaying speech.
+        neurobrain_state = None
+        logger.debug(
+            "WIRING independent_motion.neurobrain_state_omitted "
+            "turn_id=%s reason=stream_segment_precedes_terminal_state",
+            event.get_extra("_turn_id", "<missing>"),
+        )
+    else:
+        neurobrain_state = await _wait_for_neurobrain_state(
+            bundle,
+            persona_result_id=persona_result_id,
+        )
     return IndependentMotionContext(
         current_user_text=current_user_text,
         memories=_motion_memory_summaries(event),
@@ -515,58 +527,62 @@ async def generate_independent_motion_for_segments(
         max_concurrency = _DEFAULT_SEGMENT_MAX_CONCURRENCY
     concurrency_gate = asyncio.Semaphore(max_concurrency if parallel else 1)
 
+    async def _run_one(
+        index: int,
+        speech: str,
+    ) -> IndependentMotionResult:
+        async with concurrency_gate:
+            try:
+                async def _call_provider() -> IndependentMotionResult:
+                    kwargs: dict[str, Any] = {
+                        "provider": provider,
+                        "assistant_text": speech,
+                        "segment_intent": segment_intents[index] if index < len(segment_intents) else {},
+                    }
+                    if shared_context is not None:
+                        kwargs["prepared_context"] = shared_context
+                    return await generate_independent_motion(
+                        event,
+                        bundle,
+                        **kwargs,
+                    )
+
+                if segment_timeout_seconds > 0:
+                    return await asyncio.wait_for(
+                        _call_provider(),
+                        timeout=segment_timeout_seconds,
+                    )
+                return await _call_provider()
+            except asyncio.TimeoutError:
+                get_extra = getattr(event, "get_extra", None)
+                turn_id = (
+                    get_extra("_turn_id")
+                    if callable(get_extra)
+                    else "<missing>"
+                )
+                logger.warning(
+                    "WIRING independent_motion.segment_timeout turn_id=%s "
+                    "segment_index=%s timeout_seconds=%.2f",
+                    turn_id or "<missing>",
+                    index,
+                    segment_timeout_seconds,
+                )
+                return IndependentMotionResult(
+                    assistant_text=speech,
+                    motion_payload=None,
+                    reason="motion_timeout",
+                    image_count=0,
+                )
+
     def _create_one(
         index: int,
         speech: str,
     ) -> asyncio.Task[IndependentMotionResult]:
-        async def _run() -> IndependentMotionResult:
-            async with concurrency_gate:
-                try:
-                    async def _call_provider() -> IndependentMotionResult:
-                        kwargs: dict[str, Any] = {
-                            "provider": provider,
-                            "assistant_text": speech,
-                            "segment_intent": segment_intents[index] if index < len(segment_intents) else {},
-                        }
-                        if shared_context is not None:
-                            kwargs["prepared_context"] = shared_context
-                        return await generate_independent_motion(
-                            event,
-                            bundle,
-                            **kwargs,
-                        )
-
-                    if segment_timeout_seconds > 0:
-                        return await asyncio.wait_for(
-                            _call_provider(),
-                            timeout=segment_timeout_seconds,
-                        )
-                    return await _call_provider()
-                except asyncio.TimeoutError:
-                    get_extra = getattr(event, "get_extra", None)
-                    turn_id = (
-                        get_extra("_turn_id")
-                        if callable(get_extra)
-                        else "<missing>"
-                    )
-                    logger.warning(
-                        "WIRING independent_motion.segment_timeout turn_id=%s "
-                        "segment_index=%s timeout_seconds=%.2f",
-                        turn_id or "<missing>",
-                        index,
-                        segment_timeout_seconds,
-                    )
-                    return IndependentMotionResult(
-                        assistant_text=speech,
-                        motion_payload=None,
-                        reason="motion_timeout",
-                        image_count=0,
-                    )
-
         task = asyncio.create_task(
-            _run(),
+            _run_one(index, speech),
             name=f"ag99live-independent-motion-segment-{index}",
         )
+
         tasks.add(task)
         task.add_done_callback(tasks.discard)
         if segment_result_futures is not None and index in segment_result_futures:
@@ -586,7 +602,14 @@ async def generate_independent_motion_for_segments(
         return task
 
     results: dict[int, IndependentMotionResult] = {}
-    if parallel:
+    # A streamed Persona segment is submitted as a one-item batch with a
+    # prepared context.  Running that item inline avoids an extra task hop
+    # between the segment-ready hook and the Provider request.  That hop can
+    # otherwise lose the event-loop race to full-file TTS materialization.
+    if len(inputs) == 1 and shared_context is not None:
+        index, speech = inputs[0]
+        results[index] = await _run_one(index, speech)
+    elif parallel:
         indexed_tasks = [
             (index, _create_one(index, speech))
             for index, speech in inputs

@@ -341,6 +341,7 @@ def test_persona_segment_ready_starts_motion_future_for_that_index(
     )
     prepared_context = object()
     generation_calls: list[dict] = []
+    generation_started = asyncio.Event()
 
     class IndependentMotionResult:
         def __init__(self, **kwargs) -> None:
@@ -352,6 +353,7 @@ def test_persona_segment_ready_starts_motion_future_for_that_index(
 
     async def generate_for_segments(event, bundle, **kwargs):
         del event, bundle
+        generation_started.set()
         generation_calls.append(kwargs)
         return {0: result}
 
@@ -448,6 +450,7 @@ def test_persona_segment_ready_starts_motion_future_for_that_index(
                 "tendency": {"Joy": 0.2},
             },
         )
+        assert generation_started.is_set()
         work = runtime_state.persona_stream_motion.get("turn-1")
         motion = await work["segment_result_futures"][0]
         await asyncio.gather(*tuple(work["tasks"]))

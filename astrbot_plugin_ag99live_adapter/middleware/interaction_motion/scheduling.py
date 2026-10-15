@@ -725,6 +725,16 @@ def start_deferred_performance_curve_request(
     if stage != "interaction.outbound_tts":
         return None
 
+    if event.get_extra("_interaction_persona_segment_stream_active", False):
+        # Stream delivery binds each TTS part to its runtime-owned motion Future.
+        # The legacy full-result binding below requires a known final count.
+        logger.debug(
+            "WIRING performance_curve.skipped turn_id=%s "
+            "reason=persona_stream_delivery_owns_binding",
+            turn_id or "<missing>",
+        )
+        return None
+
     has_persona_identity = bool(
         str(persona_result_id or "").strip()
         or persona_segment_index is not None

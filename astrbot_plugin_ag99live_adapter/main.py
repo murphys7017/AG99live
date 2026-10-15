@@ -743,6 +743,9 @@ class MyPlugin(Star):
         self._independent_motion_tasks.add(generation_task)
         generation_task.add_done_callback(work["tasks"].discard)
         generation_task.add_done_callback(self._independent_motion_tasks.discard)
+        # Let the task reach the independent Provider call before returning
+        # control to Core's segment delivery/TTS consumer.
+        await asyncio.sleep(0)
 
     @_optional_persona_stream_finished_hook()
     async def handle_persona_expression_stream_finished(
