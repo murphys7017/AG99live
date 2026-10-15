@@ -13,7 +13,7 @@ def _install_main_astrbot_stubs(install_fake_astrbot, monkeypatch) -> None:
 
     class _Filter:
         @staticmethod
-        def on_decorating_result():
+        def on_decorating_result(**_kwargs):
             def decorator(fn):
                 return fn
 
@@ -27,14 +27,14 @@ def _install_main_astrbot_stubs(install_fake_astrbot, monkeypatch) -> None:
             return decorator
 
         @staticmethod
-        def on_llm_request():
+        def on_llm_request(**_kwargs):
             def decorator(fn):
                 return fn
 
             return decorator
 
         @staticmethod
-        def on_llm_response():
+        def on_llm_response(**_kwargs):
             def decorator(fn):
                 return fn
 
@@ -409,6 +409,10 @@ def test_persona_segment_ready_starts_motion_future_for_that_index(
         independent_motion_max_concurrency=2,
         independent_motion_segment_timeout_seconds=5,
     )
+    from astrbot_plugin_ag99live_adapter.runtime.persona_stream_motion import (
+        PersonaStreamMotionRegistry,
+    )
+    runtime_state.persona_stream_motion = PersonaStreamMotionRegistry()
     bundle = types.SimpleNamespace(runtime_state=runtime_state)
     extras = {
         "_turn_id": "turn-1",
@@ -444,7 +448,7 @@ def test_persona_segment_ready_starts_motion_future_for_that_index(
                 "tendency": {"Joy": 0.2},
             },
         )
-        work = event.get_extra("_ag99live_persona_stream_motion_work")
+        work = runtime_state.persona_stream_motion.get("turn-1")
         motion = await work["segment_result_futures"][0]
         await asyncio.gather(*tuple(work["tasks"]))
         assert motion is result

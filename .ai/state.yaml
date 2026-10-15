@@ -497,6 +497,7 @@ olv_stream_review_fixes_20261015:
   validation:
     - "Prior review reproduced unsafe Adapter Hook admission and sibling-task invisibility of lifecycle-local extras using actual AstrBot APIs."
     - "Step 1: actual AstrBot registration confirms all four Adapter legacy Hooks declare stream safety; Ruff and diff checks passed."
+    - "Step 2: real AstrBot lifecycle and OLV send boundary confirms runtime-owned work survives request scope and attaches the matching motion; cleanup removes the registry entry."
   evidence_gap:
     - "Other installed plugin Hooks still require independent compatibility review; no live stream acceptance or application restart is authorized."
 

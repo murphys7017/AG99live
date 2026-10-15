@@ -18,9 +18,6 @@ from .motion.output_sanitizer import (
     sanitize_assistant_output_text,
 )
 
-_PERSONA_STREAM_MOTION_WORK_EXTRA_KEY = "_ag99live_persona_stream_motion_work"
-
-
 def _optional_tts_state_hook():
     hook = getattr(filter, "on_tts_state_changed", None)
     if callable(hook):
@@ -63,34 +60,6 @@ def _optional_persona_segment_ready_hook():
         return handler
 
     return _identity
-
-
-def _clear_persona_stream_motion_work(
-    event: Any,
-    *,
-    turn_id: str,
-    persona_result_id: str,
-    message_id: str,
-) -> None:
-    work = event.get_extra(_PERSONA_STREAM_MOTION_WORK_EXTRA_KEY)
-    if not isinstance(work, dict) or any(
-        work.get(key) != value
-        for key, value in (
-            ("turn_id", turn_id),
-            ("persona_result_id", persona_result_id),
-            ("parent_message_id", message_id),
-        )
-    ):
-        return
-    tasks = work.get("tasks")
-    if isinstance(tasks, set):
-        for task in tuple(tasks):
-            if isinstance(task, asyncio.Task) and not task.done():
-                task.cancel()
-    context_task = work.get("context_task")
-    if isinstance(context_task, asyncio.Task) and not context_task.done():
-        context_task.cancel()
-    event.set_extra(_PERSONA_STREAM_MOTION_WORK_EXTRA_KEY, None)
 
 
 def _optional_llm_response_hook():
@@ -568,7 +537,8 @@ class MyPlugin(Star):
         actions = list(raw_actions) if isinstance(raw_actions, (list, tuple)) else []
         tendency = dict(raw_tendency) if isinstance(raw_tendency, Mapping) else {}
 
-        work = event.get_extra(_PERSONA_STREAM_MOTION_WORK_EXTRA_KEY)
+        registry = bundle.runtime_state.persona_stream_motion
+        work = registry.get(normalized_turn_id)
         if work is None:
             parallel = bool(
                 getattr(bundle.runtime_state, "independent_motion_parallel", False)
@@ -603,7 +573,7 @@ class MyPlugin(Star):
                 ),
                 "parallel": parallel,
             }
-            event.set_extra(_PERSONA_STREAM_MOTION_WORK_EXTRA_KEY, work)
+            registry.register(normalized_turn_id, work)
         elif (
             not isinstance(work, dict)
             or work.get("turn_id") != normalized_turn_id
@@ -820,12 +790,17 @@ class MyPlugin(Star):
             )
             event.stop_event()
         finally:
-            _clear_persona_stream_motion_work(
-                event,
-                turn_id=turn_id,
-                persona_result_id=persona_result_id,
-                message_id=message_id,
+            registry = getattr(
+                getattr(getattr(event, "adapter", None), "runtime_state", None),
+                "persona_stream_motion",
+                None,
             )
+            if registry is not None:
+                registry.clear(
+                    turn_id,
+                    persona_result_id=persona_result_id,
+                    parent_message_id=message_id,
+                )
 
     @_optional_persona_expression_hook()
     async def handle_persona_expression_result(

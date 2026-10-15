@@ -300,6 +300,9 @@ class TurnCoordinator:
             )
         finally:
             self._turn_timings.clear()
+            registry = getattr(self.runtime_state, "persona_stream_motion", None)
+            if registry is not None:
+                registry.reset()
             self.output_segments.reset()
             self._turn_terminal_results.clear()
             self._events_by_turn_id.clear()
@@ -781,6 +784,9 @@ class TurnCoordinator:
         get_extra = getattr(event, "get_extra", None)
         set_extra = getattr(event, "set_extra", None)
         motion_work_turn_id = _resolve_motion_work_turn_id(event, turn_id)
+        registry = getattr(self.runtime_state, "persona_stream_motion", None)
+        if registry is not None:
+            registry.clear(motion_work_turn_id)
         tasks: set[asyncio.Task] = set()
         if callable(get_extra):
             try:

@@ -224,8 +224,13 @@ def test_streaming_output_joins_motion_future_by_segment_identity(
                 reason="independent_provider",
             )
         )
-        event.set_extra(
-            "_ag99live_persona_stream_motion_work",
+        from astrbot_plugin_ag99live_adapter.runtime.persona_stream_motion import (
+            PersonaStreamMotionRegistry,
+        )
+        registry = PersonaStreamMotionRegistry()
+        event.adapter.runtime_state = types.SimpleNamespace(persona_stream_motion=registry)
+        registry.register(
+            "backend-turn-1",
             {
                 "turn_id": "backend-turn-1",
                 "persona_result_id": "persona-result-1",

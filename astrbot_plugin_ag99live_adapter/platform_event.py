@@ -538,7 +538,14 @@ class OLVPetPlatformEvent(AstrMessageEvent):
             platform_extras["_ag99live_motion_disabled"] = True
             return
 
-        work = self.get_extra("_ag99live_persona_stream_motion_work")
+        registry = getattr(
+            getattr(self.adapter, "runtime_state", None), "persona_stream_motion", None
+        )
+        work = (
+            registry.get(str(self.get_extra("_turn_id") or "").strip())
+            if registry is not None
+            else None
+        )
         result = None
         failure_reason = "independent_segment_work_missing"
         if (
