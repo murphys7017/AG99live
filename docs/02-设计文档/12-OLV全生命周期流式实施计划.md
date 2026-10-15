@@ -6,10 +6,12 @@
 
 - **2026-10-16 整体复核修复：**Adapter 的请求、响应、结果修饰和完整 Persona 结果 Hook 已声明流式安全。动作 Future、并发任务和共享上下文现由 RuntimeState 的 `PersonaStreamMotionRegistry` 按后端 Turn 保存；交付、终态、打断及断线共享同一所有者，避免隔离 event extras 读不到任务。Core 在每次流式 Persona 调用结束（含异常和取消）后清除 `active`，`delegate` 后的普通 Core-final 回复恢复原有动作 Hook/contributor。流失败经 `control.synth_finished.success/reason` 传到桌面；已接受前缀继续播放，最终播放回执及 `turn_finished` 保留失败。相关基础提交：Adapter `f11a86c`、`fe4d1b1`，Core `75012004d`。
 - **复核验证边界：**真实 AstrBot 生命周期及 OLV 发送检查已确认跨上下文动作汇合；真实段输出和协议回执边界已确认保留前缀、失败关闭、成功客户端回执不能覆盖生成失败。前端协议→Session→完成回执检查确认前缀结算前不回执、结算后回失败，并拒绝缺少原因的失败终态。上述检查未调用真实 Provider、音频设备或 Live2D，不替代首响、取消及委派最终回复的现场验收。
-- **联调前仍需处理的兼容限制：**其他插件的 Hook 必须单独满足 Core 的流式安全准入，不能只给 Adapter 加声明后就视为全部兼容。NeuroBrain 结果 Hook 经源码复核只观察完整终态、异步提交状态，不改写已发布段或停止事件，现已补充对应安全声明；仍不提供逐段状态更新。必须配套加载新版 Core、Adapter、NeuroBrain 插件和桌面端，不能把源码部署等同于运行时生效。
+- **联调前仍需处理的兼容限制：**按用户最新要求，OLV 核心对话优先：未声明流式安全的旧 Hook 在该次流式调用中跳过并记录原因，不能因其存在而拒绝整轮；旧完整结果 contributor 和当前不支持的 Persona effect 同样排除。已适配 Hook 正常执行，不能把跳过说成插件已兼容。NeuroBrain 结果 Hook 经源码复核只观察完整终态、异步提交状态，不改写已发布段或停止事件，现已补充对应安全声明；仍不提供逐段状态更新。必须配套加载新版 Core、Adapter、NeuroBrain 插件和桌面端，不能把源码部署等同于运行时生效。
 - **2026-10-16 二次审阅：**前三个修复提交和失败终态链路继续保留。真实解析→Core 交付→OLV 事件→Adapter 输出边界检查额外发现并修复非 TTS 分支：状态段不能跳过已分配的 Persona 索引；逐段物理交付必须使用该段 ID，不能复用父 ID；没有 TTS 物料时不能发送要求 TTS 身份元数据的 `audio_attachment`。修复后状态段及后续文本段按 sequence 0、1 完成交付。该检查未生成真实动作或音频，不能作为表演效果或端到端验收依据。按用户要求，NeuroBrain 兼容改造不作为本轮继续推进的必选项；它的现有准入限制仍有效。
-- **2026-10-16 00:59–01:00 现场失败：**两次 OLV 输入均完成转写并请求流式，随后在模型调用前被 `persona_stream_output_hooks_unsupported` 拒绝；并行控制再抛出 `Parallel Interaction control resolved without route`，未向桌面收口。桌面仅有 capture-end，无 playback-start。根因是预检查统计了全局已停用的 AngelHeart 输出 Hook，且发布前失败未被并行无路由分支消费。Core 现按实际 capability/runtime-target 准入选择参与兼容检查的 Hook，并记录具体不兼容 handler；发布前失败会直接 abort OLV Turn 并传递原始错误。启用中的不安全 Hook 仍会明确拒绝，不静默绕过。现场没有进入 NeuroBrain 回调，不能把这两轮失败归因于 NeuroBrain。
+- **2026-10-16 00:59–01:00 现场失败：**两次 OLV 输入均完成转写并请求流式，随后在模型调用前被 `persona_stream_output_hooks_unsupported` 拒绝；并行控制再抛出 `Parallel Interaction control resolved without route`，未向桌面收口。桌面仅有 capture-end，无 playback-start。根因是预检查统计了全局已停用的 AngelHeart 输出 Hook，且发布前失败未被并行无路由分支消费。Core 现按实际 capability/runtime-target 准入选择参与兼容检查的 Hook，并记录具体不兼容 handler；发布前失败会直接 abort OLV Turn 并传递原始错误。此前对启用中不安全 Hook 的整轮拒绝策略，已由后续“核心对话优先”的调用期隔离策略取代。现场没有进入 NeuroBrain 回调，不能把这两轮失败归因于 NeuroBrain。
 - **2026-10-16 根因复核补充：**撤回临时停用 NeuroBrain 的联调建议。其终态结果 Hook 缺少安全声明是修正输出预检查后可预见的下一处准入问题，已按实际语义补齐，而非跳过回调或放宽 Core 规则。源码仓库及已部署插件分别验证真实注册元数据和终态回调：声明存在、结果不被改写、事件不被停止；无 checkpoint 的提交按现有逻辑完成。未调用真实模型推理或验证播放。部署目录另有既存加载/Persona 解析改动，保留原样，仅同步本次声明。动作链等候对应终态状态最多 1 秒，流结束前可能取不到状态，是首段延迟及状态可用性限制，不是本次无限思考的根因。下一步手动重启 AstrBot，保持 NeuroBrain 启用，验证正常输出、失败终态及首段播放时序。
+
+- **2026-10-16 用户确认核心对话优先：**Core 不再因可选插件未适配而停止 OLV 流式对话。实际 lifecycle/decorating 调用点执行统一安全声明筛选，未适配 Hook 不会在预检查放行后再次执行；旧完整结果 contributor、Persona effect 在筛选或解析参数前排除。每次流式调用开始重置跳过记录，日志输出 `DIAG persona_stream.plugin_skipped` 及具体能力，调用结束清除 active，普通回复与委派 Core-final 恢复既有行为。两项公开边界检查及真实解析→Core→OLV→Adapter 段交付检查通过；无真实模型、TTS 或播放验收。
 
 - **阶段 0 观测点：已接入并完成首次桌面关联采样。**现有语音路径记录 PTT 采集结束、转写开始/完成、Persona 完整结果或校验 segment、TTS 完整物料就绪、Adapter `output.segment.v5` 发送和桌面实际音频起播。浏览器侧 PTT→实际起播使用同一 `performance.now()` 时钟；进程间阶段同时记录 epoch 时间戳，并按 `turn_id` / segment 身份关联。
 - **阶段 0 基线：已建立初步端到端基线，分布仍待补充。**2026-10-15 19:25、19:26 两轮普通 OLV PTT 对话的 PTT 松开→桌面首个实际起播分别为 **6.514 s**、**5.741 s**；PTT 松开→首次服务端 `output_segment_sent` 分别为 5.937 s、5.534 s。首个输出提交→桌面起播分别为 0.577 s、0.207 s。对应 ASR 完成耗时分别为 0.784 s、1.110 s（从服务端 `transcription_started` 起算）。两条真实端到端记录满足开始阶段 1 的基线前置条件，但样本量不足以报告稳定 p50/p95；后续联调期间继续采样。此前另有 3 条服务端样本，从 `transcription_started` 到首个 `output_segment_sent` 为 5.673 s、4.908 s、5.466 s；该指标不能替代 PTT→桌面起播。流式入口仍保持关闭，未改变当前交互路径。
@@ -27,7 +29,7 @@
 
 | 检查 | 通过依据 |
 | --- | --- |
-| 连接及开关 | 桌面开启“OLV Persona 分段流式”、Core 总开关及逐 speech 独立动作后，连接日志出现 `desktop_runtime_settings_synced persona_segment_stream_enabled=True`，下一轮出现 `persona_segment_stream_requested`。若被其他 Hook/effect 拒绝，记录具体拒绝原因，不宣称已进入流式。 |
+| 连接及开关 | 桌面开启“OLV Persona 分段流式”、Core 总开关及逐 speech 独立动作后，连接日志出现 `desktop_runtime_settings_synced persona_segment_stream_enabled=True`，下一轮出现 `persona_segment_stream_requested`。不兼容 Hook/contributor/effect 应出现 `persona_stream.plugin_skipped` 并继续生成、交付和结束；已适配动作 Hook 正常运行，不能再因旧插件存在而拒绝整轮。 |
 | 双段首响 | 请求明确分成两段回复；关联 Core segment-ready、Adapter `output_segment_sent` 和桌面 `audio_playback_started`。段 0 必须在整轮 Persona/合成结束前实际起播，段 1 按序播放。只有文本先显示不算通过。 |
 | 中断及重连 | 第一段播放期间 PTT 打断，再断线重连；旧段、旧动作不能进入新 Turn，重连自动同步本机开关。 |
 | 后段失败 | 在可控环境让 Provider 后段失败；已接受前缀保留，关闭队列消息带失败原因，本地播完后回失败，最终 `turn_finished` 不得成功。 |
@@ -83,7 +85,7 @@ PCM 麦克风帧
 | --- | --- | --- |
 | 麦克风上行 | TS 已分块发送 PCM，Adapter 已解析带序号的二进制输入帧；VAD 可逐帧检测。 | PTT 会缓存到音频结束；VAD 也在完整语音段形成后才调用 STT。 |
 | ASR | AstrBot `STTProvider.get_text(audio_url)` 和文件型 STT 实现可用于最终识别。 | 没有统一的音频会话/增量识别接口；当前 MiniMax STT 适配器上传完整文件并读取完整文本。 |
-| Persona | Core 已接入 OLV immediate Persona 的 `segment_stream_v1` 读取、结构校验及 segment-ready/stream-finished Hooks；Adapter 通过双开关准入，未闭合 delta 不外发。 | 尚未真实验收；其他插件 Hook/effect 和输出格式限制仍有效。委派后的 Core-final 仍走普通完整结果路径，本轮仅修复其动作回归，不宣称该路径也已模型流式化。 |
+| Persona | Core 已接入 OLV immediate Persona 的 `segment_stream_v1` 读取、结构校验及 segment-ready/stream-finished Hooks；Adapter 通过双开关准入，未闭合 delta 不外发。 | 尚未真实验收；不兼容插件能力按当前调用隔离并记录，Core 输出格式及交付校验仍有效。委派后的 Core-final 仍走普通完整结果路径，本轮仅修复其动作回归，不宣称该路径也已模型流式化。 |
 | 分段动作与输出 | segment-ready 启动动作 Future，运行时注册表跨任务保存；逐段完整 TTS 到达后汇合，未知总数流在终态校验。普通路径继续使用原绑定器。 | 待真实双段、动作超时、后段失败、打断及断线验收；不能仅凭边界检查认定端到端时序正确。 |
 | TTS | `TTSProvider` 已定义 `get_audio_stream()`；Agent 路径已有流式 TTS 消费代码，部分 Provider 内部使用上游流接口。 | Persona 通用语音服务仍调用 `get_audio()` 并物化完整文件；基类 `get_audio_stream()` 默认会先累积完整文本再生成整段音频，必须确认选定 Provider 真正支持音频分块；现有字节格式也不足以直接充当桌面连续音频协议。 |
 | 桌面下行与播放 | TS 按完整 `output.segment.v5` 在 synth-finished 前起播，并拥有播放时间线、口型及播放完成回执；生成失败终态保留已接受前缀并影响最终回执。 | 仍以完整音频 URL 播放，没有音频 chunk 下行协议、连续解码 sink 或对应背压；这些属于阶段 2。 |
@@ -108,7 +110,7 @@ PCM 麦克风帧
 2. 冻结进程内 Core→Adapter 契约：`OnPersonaExpressionSegmentReadyEvent`、stream-finished Hook、OLV 平台物料交付的身份字段、调用先后、失败/取消语义；明确不把未校验的 `speech_delta` 发给 OLV。
 3. 冻结未知总段数规则：流中只接受单调且唯一的 `segment_index`；最终 `segment_count` 只由 stream-finished 提供；Adapter 只在流终态校验完整覆盖或失败前缀。现有要求 index/count 成对出现的普通路径继续保持原契约。
 4. 确认第一竖切片仍用 `output.segment.v5` 交付完整段，输出段协议保持不变，另以 `system.desktop_runtime_settings` 同步桌面运行设置；AstrBot Core 总开关和前端桌面设置中的 Adapter 入口开关均默认关闭，直到 Core、Adapter、TS 与真实首响验收全部通过才允许正式启用。
-5. 将 segment 级文本清理、动作登记、TTS 物料登记和终态收口纳入同一逐段契约；确认 Persona effect、全局 hook、result contributor 在该模式下的支持条件和明确拒绝原因。
+5. 将 segment 级文本清理、动作登记、TTS 物料登记和终态收口纳入同一逐段契约；确认 Persona effect、全局 Hook、result contributor 在该模式下的支持条件；不兼容能力在实际调用前跳过并记录，不阻止核心对话。
 6. 固定单段 TTS 只能由 Core 调用一次。阶段 1 继续使用完整音频物料；另行确认未来流式 Provider 是否能在完整合成前产出可播放首块，Provider 选择与音频格式冻结推迟到阶段 2。
 
 **完成条件：**首响基线可从真实日志计算；进程内 segment-ready/stream-finished 与 OLV 完整物料交付契约明确；未知总数时的 Adapter 校验规则明确；入口标记保持关闭直到阶段 1 启用闸门满足。流式 TTS 格式及实时 ASR Provider 不作为本阶段的完成前提。
@@ -124,7 +126,7 @@ PCM 麦克风帧
 
 **完成条件：**真实流式聊天 Provider 下，segment 0 在 Persona Turn 结束前到达 Adapter，且其完整音频在 `persona.stream_finished` 和后端 `control.synth_finished` 之前触发桌面实际 `playback_started`；未校验 delta 未进入 OLV；每段只发生一次 Core TTS；未知总数期间动作、文本和完整音频仍可关联；最终计数与已接收段一致；段序不受任务完成顺序影响；中断后晚到结果不能重开 Turn。
 
-**约束：**当前 Core 流式原型要求特定结构化输出模式，并拒绝部分全局钩子/输出贡献者，且不支持 Persona effects。阶段 0 必须明确 OLV 实际依赖哪些能力；所需钩子必须被纳入逐段契约或明确列为启用限制，不能静默跳过后宣称兼容。
+**约束：**Core 流式仍要求特定结构化输出模式。按用户 2026-10-16 确认的优先级，OLV 流式调用跳过未声明安全的旧 Hook、旧完整结果 contributor 和不支持的 Persona effects；跳过必须记录能力名称和原因，不能让可选插件阻止核心对话，也不能宣称被跳过的能力已适配。已支持的 Adapter 动作与终态 Hook 保持运行，Core 内容安全、格式及交付校验继续执行。
 
 ### 阶段 2：TTS 音频帧到桌面连续播放
 
@@ -180,7 +182,7 @@ PCM 麦克风帧
 
 ## 待评审决策与非目标
 
-1. 第一竖切片的 Core 配置、Persona Hook/effect 限制和逐段输出责任由阶段 0 冻结，不作为实施时临时放宽的条件。
+1. 第一竖切片保留 Core 配置及逐段输出责任；用户已确定 OLV 核心对话优先，不兼容插件能力按调用跳过并记录，不能沿用“插件不兼容则整轮失败”的规则。
 2. 为阶段 2 选定真实支持逐块输出的 TTS Provider，并冻结桌面可连续解码的采样率、声道、编码及二进制帧格式。
 3. 为阶段 3 选定实时 ASR Provider；文件型 STT 或完整文件上传后的 SSE 不满足麦克风实时识别。
 4. 冻结配套 AstrBot、Adapter 与桌面端版本启用策略；Provider/客户端不具备流式能力时明确拒绝启用，不静默宣称流式或降级成已完成。
