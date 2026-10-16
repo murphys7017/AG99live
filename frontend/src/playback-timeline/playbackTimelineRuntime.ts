@@ -933,7 +933,8 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     }
     const before = timeline.engine.getSnapshot();
     if (hasOpenSink(timeline, MOTION_TIMELINE_SINK_ID)) {
-      reportLatencyStage("motion_ended", turnId, null, messageId);
+      reportLatencyStage(terminal === "completed" ? "motion_ended"
+        : terminal === "failed" ? "motion_failed" : "motion_interrupted", turnId, null, messageId);
       markMotionSessionTerminal(turnId, messageId, terminal, reason);
     }
     timeline.engine.markSinkTerminal(

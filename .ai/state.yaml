@@ -938,3 +938,12 @@ olv_stream_first_stage_metrics_20261017:
   scope: "T0 partial: once-per-result Adapter first text/PCM/motion successful-send observations and desktop first text/PCM admission; per-segment PCM preparation, first consumed sample estimate and successful drain. Reuse the existing bounded stage whitelist and desktop latency bridge without content logging."
   validation: "Renderer/node typechecks and changed Adapter Ruff passed. Source traced from actual inbound worker and PCM output.started callback; first-sample stage uses output's monotonic sample estimate rather than callback dispatch time."
   evidence_gap: "No live latency sample collected. IPC callback epoch is observation time; the estimated sample epoch is renderer timeOrigin plus monotonicMs. No hardware loopback measurement. T0 baseline and Provider connect/task-ready correlation remain incomplete."
+
+olv_motion_terminal_observation_20261017:
+  class: maintenance
+  risk: medium
+  status: source_type_validated_pending_live_acceptance
+  scope: "Review correction: emit distinct motion_failed/motion_interrupted stages instead of recording every terminal as motion_ended. Keep success stage unchanged and reuse the bounded stage whitelist."
+  evidence: "03:12 M0 first segment has a motion_ended event without motion_started; its following segment has a valid started/completed record. Existing metric did not distinguish failed/interrupted closure. No new runtime root cause is asserted from missing start alone."
+  validation: "Renderer and node typechecks; direct source trace from motion terminal status to stage selection. No hardware or Provider run."
+  evidence_gap: "Need freshly loaded playback/MotionLab rejection diagnostics to identify the first segment's historical failure cause."
