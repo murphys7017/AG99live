@@ -149,8 +149,13 @@ export function createIncrementalSegmentWriter(options: {
   }
 
   function acceptIncrementalAudio(id: IncrementalIdentity, offset: number, byteLength: number): void {
-    const segment = segmentFor(sessionFor(id), id);
+    const session = sessionFor(id);
+    const segment = segmentFor(session, id);
     const stream = streamFor(segment, "audio", id);
+    for (const messageId of session.segmentOrder.slice(0, id.segmentIndex)) {
+      const prior = session.segments.get(messageId)?.incremental?.streams.audio;
+      if (!prior || prior.status === "open") throw new Error("incremental_output_audio_segment_order_invalid");
+    }
     if (!Number.isSafeInteger(offset) || offset !== stream.samples || !Number.isSafeInteger(byteLength)
       || byteLength <= 0 || byteLength > 65536 || byteLength % 2
       || !Number.isSafeInteger(offset + byteLength / 2)) throw new Error("incremental_output_audio_offset_invalid");

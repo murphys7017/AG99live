@@ -556,6 +556,15 @@ persona_optional_motion_chat_stream_only_20261016:
   evidence_gap:
     - "A restarted AstrBot with DeepSeek/MiniMax action and curve Providers still needs live OLV verification of first-chunk timing, optional failure isolation, TTS delivery, and visible Live2D playback."
 
+olv_incremental_audio_order_review_20261017:
+  date: '2026-10-17'
+  class: bugfix
+  risk: medium
+  status: store_boundary_validated
+  scope: "Reject a later segment's PCM until every earlier segment has an explicit audio production end, without advancing its samples or sequence. Playback drain remains the timeline consumer's responsibility."
+  validation: "Actual public SessionStore rejected segment 1 before segment 0 EOF with zero samples retained, then accepted the same first packet after explicit empty segment 0 EOF. Renderer typecheck passed."
+  evidence_gap: "Store boundary only; no repeat of the unchanged Electron suite or new live Provider/Live2D run."
+
 olv_incremental_desktop_dispatch_20261016:
   date: '2026-10-16'
   class: feature
