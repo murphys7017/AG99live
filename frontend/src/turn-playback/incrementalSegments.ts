@@ -208,8 +208,12 @@ export function createIncrementalSegmentWriter(options: {
         segment.motion.failed = false;
         segment.motion.reason = "";
       } else {
+        segment.motion.payload = null;
+        segment.motion.source = null;
+        segment.motion.receivedAtMs = null;
         segment.motion.absent = status === "completed";
         segment.motion.failed = status !== "completed";
+        segment.motion.released = status !== "completed";
         segment.motion.reason = status === "completed" ? "incremental_motion_empty" : reason;
       }
     }
