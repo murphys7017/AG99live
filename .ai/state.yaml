@@ -898,3 +898,11 @@ olv_nonstream_build_acceptance_20261017:
   scope: "Final review and complete Electron build for N0-N7 nonstream optimization commits; no service restart or runtime mode switch."
   validation: "npm run build passed renderer/WebSDK/node checks and Electron main/preload/renderer generation. AstrBot page build, changed Adapter Ruff, schema manifest and unique-key state YAML checks passed."
   validation_gap: "Core generic AI-state validator was also tried on Live and rejects its existing record-only format (missing task/context/checks_run/validation_gap top-level terms); Live governance format was not rewritten. Actual microphone, Providers and Live2D acceptance remains pending."
+
+olv_stream_input_identity_20261017:
+  class: bugfix
+  risk: high
+  status: real_core_loopback_boundary_validated_pending_live_acceptance
+  scope: "T0b/R0: submit the Adapter server-created backend input ID as event _turn_id so Core PlatformTurnContextFactory adopts the already registered identity; reject conflicting pre-existing event identity. Preserve writer identity/terminal checks."
+  validation: "Real local WebSocket input.text through MessageFactory/OLVPetPlatformEvent, Core TurnContext creation and writer delivered incremental text; wrong and terminal identities rejected without probe-side manual mapping. Scoped Ruff/AST passed."
+  evidence_gap: "No live Persona/TTS/Electron run. Isolated probe had no synchronized SemanticAxisProfile and logged the expected optional MotionLab profile error; identity/output assertions passed. No runtime setting switch or restart."

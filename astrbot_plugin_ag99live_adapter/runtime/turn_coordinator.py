@@ -585,8 +585,19 @@ class TurnCoordinator:
                 event = self._build_platform_event(message_obj)
                 set_extra = getattr(event, "set_extra", None)
                 if callable(set_extra):
+                    existing_core_id = str(event.get_extra("_turn_id", "") or "").strip()
+                    if existing_core_id and existing_core_id != backend_turn_id:
+                        raise RuntimeError("input_event_turn_identity_conflict")
+                    # Core's PlatformTurnContextFactory explicitly adopts this
+                    # server-created input identity. The map and admitted Turn
+                    # must not independently mint different IDs for one input.
+                    set_extra("_turn_id", backend_turn_id)
                     set_extra("enable_streaming", False)
                     set_extra("output_correlation_id", current_turn_id)
+                    logger.debug(
+                        "DIAG input.turn_bound: frontend_turn_id=%s core_turn_id=%s",
+                        current_turn_id, backend_turn_id,
+                    )
                 self._events_by_turn_id[current_turn_id] = event
                 self._commit_event(event)
             except Exception:
