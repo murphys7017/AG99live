@@ -69,6 +69,13 @@ INPUT_TYPES = {
 OUTPUT_TYPES = {
     TYPE_OUTPUT_SEGMENT,
     TYPE_OUTPUT_TRANSCRIPTION,
+    "output.text_stream_start",
+    "output.text_stream_delta",
+    "output.text_stream_end",
+    "output.audio_stream_start",
+    "output.audio_stream_end",
+    "output.motion_stream_start",
+    "output.motion_stream_end",
 }
 
 CONTROL_TYPES = {

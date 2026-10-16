@@ -30,6 +30,7 @@ from .message_utils import (
     iter_platform_motion_client_objects,
     resolve_platform_segment_message_id,
 )
+from .incremental_output import IncrementalOutputSession, SendPayload
 from .motion_observation_recorder import MotionObservationRecorder
 from .output_segment import (
     PASSIVE_BEHAVIOR_MOTION_SOURCE,
@@ -75,8 +76,10 @@ class OutputSegmentCoordinator:
         self._emitted_turn_ids: set[str] = set()
         self._output_failures: dict[str, str] = {}
         self._turn_level_motion_consumed: set[str] = set()
+        self._incremental_outputs: dict[str, IncrementalOutputSession] = {}
 
     def reset(self) -> None:
+        self._incremental_outputs.clear()
         self._pending_segments.clear()
         self._segment_sequences.clear()
         self._next_sequence_by_turn.clear()
@@ -90,7 +93,8 @@ class OutputSegmentCoordinator:
 
     def tracked_turn_ids(self) -> set[str]:
         return (
-            set(self._closing_turn_ids)
+            set(self._incremental_outputs)
+            | set(self._closing_turn_ids)
             | set(self._closed_turn_ids)
             | set(self._emitted_turn_ids)
             | {segment.turn_id for segment in self._pending_segments.values()}
@@ -101,6 +105,7 @@ class OutputSegmentCoordinator:
         return bool(segment is not None and segment.persona_segment_index is not None)
 
     def clear_turn(self, turn_id: str) -> None:
+        self._incremental_outputs.pop(turn_id, None)
         self._output_failures.pop(turn_id, None)
         prefix = f"{turn_id}|"
         for key in tuple(self._pending_segments):
@@ -117,6 +122,35 @@ class OutputSegmentCoordinator:
         self._closed_turn_ids.discard(turn_id)
         self._emitted_turn_ids.discard(turn_id)
         self._turn_level_motion_consumed.discard(turn_id)
+
+    async def open_incremental_output(
+        self, *, turn_id: str, core_turn_id: str, persona_result_id: str,
+        send_payload: SendPayload, require_turn_active: Callable[[], None],
+    ) -> IncrementalOutputSession:
+        async with self._get_turn_lock(turn_id):
+            require_turn_active()
+            self._require_output_queue_open(turn_id)
+            if self._first_pending_segment(turn_id) is not None or turn_id in self._emitted_turn_ids:
+                raise RuntimeError("incremental_output_mixed_delivery")
+
+            def require_current() -> None:
+                require_turn_active()
+                if self._incremental_outputs.get(turn_id) is not writer:
+                    raise RuntimeError("incremental_output_owner_stale")
+
+            def require_open() -> None:
+                require_current()
+                self._require_output_queue_open(turn_id, incremental=True)
+
+            writer = IncrementalOutputSession(
+                turn_id=turn_id, core_turn_id=core_turn_id,
+                persona_result_id=persona_result_id, lock=self._get_turn_lock(turn_id),
+                send_payload=send_payload, require_open=require_open,
+                require_current=require_current,
+                on_text_complete=lambda text: self.chat_buffer.add("assistant", text),
+            )
+            self._incremental_outputs[turn_id] = writer
+            return writer
 
     async def emit_message_chain(
         self,
@@ -353,6 +387,13 @@ class OutputSegmentCoordinator:
     def output_failure_reason(self, turn_id: str) -> str | None:
         return self._output_failures.get(turn_id)
 
+    async def require_playback_queue_closed(self, turn_id: str) -> None:
+        # An immediate client acknowledgement may race the awaited closure send.
+        # Observe closure only after its owner releases the same Turn lock.
+        async with self._get_turn_lock(turn_id):
+            if turn_id in self._incremental_outputs and turn_id not in self._closed_turn_ids:
+                raise RuntimeError("incremental_output_playback_before_synth_finished")
+
     async def close_turn_output_queue(
         self, *, turn_id: str, failure_reason: str | None = None
     ) -> None:
@@ -362,6 +403,15 @@ class OutputSegmentCoordinator:
                 return
             if normalized_turn_id in self._closing_turn_ids:
                 return
+            incremental = self._incremental_outputs.get(normalized_turn_id)
+            if incremental is not None:
+                # All resources must explicitly close; text/audio EOF alone
+                # cannot settle a still-pending optional motion producer.
+                incremental.require_complete()
+                if incremental.has_output:
+                    self._emitted_turn_ids.add(normalized_turn_id)
+                if incremental.failure_reason:
+                    self._output_failures[normalized_turn_id] = incremental.failure_reason
             self._closing_turn_ids.add(normalized_turn_id)
             if failure_reason:
                 self._output_failures[normalized_turn_id] = failure_reason
@@ -398,7 +448,8 @@ class OutputSegmentCoordinator:
                         reason=reason,
                     )
                     return
-                sent = await self._send_json(
+                send_close = incremental.send_final_control if incremental else self._send_json
+                sent = await send_close(
                     build_control_synth_finished(
                         turn_id=normalized_turn_id,
                         success=normalized_turn_id not in self._output_failures,
@@ -426,7 +477,9 @@ class OutputSegmentCoordinator:
             self._pending_segments[key] = segment
         return segment
 
-    def _require_output_queue_open(self, turn_id: str) -> None:
+    def _require_output_queue_open(self, turn_id: str, *, incremental: bool = False) -> None:
+        if turn_id in self._incremental_outputs and not incremental:
+            raise RuntimeError("output_segment_mixed_incremental_delivery")
         if (
             turn_id in self._closing_turn_ids
             or turn_id in self._closed_turn_ids

@@ -34,6 +34,8 @@ class PlatformEventAdapterPort(Protocol):
 
     async def emit_message_chain(self, **kwargs: Any) -> None: ...
 
+    async def open_incremental_output(self, *, event: Any, persona_result_id: str) -> Any: ...
+
 
 class OLVPetPlatformEvent(AstrMessageEvent):
     """Message event that sends AstrBot replies back to the desktop frontend."""
@@ -148,6 +150,16 @@ class OLVPetPlatformEvent(AstrMessageEvent):
             platform_extras={"logical_message_id": message_id},
         )
         await self.complete_visible_message(message_id=message_id)
+
+    async def open_interaction_incremental_output(self, *, persona_result_id: str):
+        """Core producer entry; opt-in remains unavailable until full negotiation."""
+        if self.get_extra("_interaction_incremental_output_requested") is not True:
+            raise RuntimeError("incremental_output_not_negotiated")
+        if self._is_stop_requested():
+            raise asyncio.CancelledError
+        return await self.adapter.open_incremental_output(
+            event=self, persona_result_id=persona_result_id,
+        )
 
     async def send_message_with_extras(
         self,

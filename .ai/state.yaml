@@ -757,3 +757,25 @@ ag99live_duplicate_clone_cleanup_20261016:
     - "The ignored Downloads cmd_config.json is preserved as a non-active backup before deletion."
     - "The duplicate directory was verified as a normal Git directory before removal."
     - "Final filesystem check confirmed C:/Users/Administrator/Downloads/AG99live no longer exists."
+
+olv_incremental_adapter_writer_20261017:
+  date: '2026-10-17'
+  class: feature
+  risk: high
+  scope: >-
+    Bind incremental JSON/PCM output to the existing OutputSegmentCoordinator
+    Turn lock and original WebSocket. Expose a gated platform event entry,
+    reject mixed atomic delivery, require explicit resource closure, invalidate
+    stale writers, and serialize playback acknowledgement with synthesis closure.
+  validation: >-
+    Pinned-current-Core TurnCoordinator and real loopback WebSocket emitted
+    twelve messages with 40000 synthetic PCM samples. Premature closure and ack
+    rejected; ack arriving during closure accepted; stale writer rejected.
+    Actual desktop parsers and SessionStore accepted the same serialized messages,
+    two bounded PCM packets and Unicode lengths. Scoped Ruff, plugin structure
+    and diff checks passed.
+  evidence_gap: >-
+    Probe sends playback acknowledgement without playing audio. No actual
+    Provider, Electron playback or Live2D acceptance in this batch. Core producer
+    does not call the new entry; motion updates/fusion and downstream flow control
+    remain pending. Capability remains unadvertised and disabled. No restart.

@@ -11,6 +11,16 @@
 - 桌面与 Adapter 完整实现后才登记 `olv_incremental_output.v1` 能力；协商同时校验 Core、真实 Provider 和桌面播放器能力。现有分段流开关不能单独证明能力具备，也不另加一组用户开关。
 - 同一 Turn 的同一内容只选择增量交付或现有完整 `output.segment.v5` 交付，不双发文本/声音/动作。新契约增加事件，不改变 v5 原子段含义。
 
+## Adapter 发送所有权（2026-10-17）
+
+`OLVPetPlatformEvent.open_interaction_incremental_output(persona_result_id=...)` 是待 Core producer 调用的入口，必须具有明确的增量准入标记；目前没有生产代码设置该标记。入口沿用现有外部 Turn 与 Core Turn 绑定，由 TurnCoordinator 校验，OutputSegmentCoordinator 保存唯一 writer。writer 共用该 Turn 的锁，发送始终绑定创建时的 WebSocket；不能改用最新连接或另建 Turn。
+
+start、append、end 均等待实际发送，成功后推进序号与采样位置。发送取消或异常可能已部分到达客户端，因此封闭 writer，禁止按同一序号重试。PCM 输入块最多 1 MiB，按最多 64 KiB 的协议帧切分；后段 PCM 必须等待前段音频明确生产 EOF。socket 写入等待仅是传输端等待，不代表已有桌面播放速度驱动的端到端流量控制。
+
+三条资源必须分别明确 end，才能由现有输出协调器发布 synth_finished。动作 failed/cancelled 不使成功文本和音频失败，文本/音频失败则记入本轮合成失败。结束文本将已接受前缀加入既有聊天缓冲，不重发全文。播放完成回执必须在输出关闭之后处理；检查等待同一把 Turn 锁，避免快速客户端在 synth_finished 发送返回前回执而被误拒绝。已有 Turn 清理同时撤销 writer，后续调用拒绝；发送中途断开仍须由既有失败/打断路径终止该 Turn，不能尝试在另一连接重放。
+
+本批验证为真实 Python 协调器/本地 WebSocket 与桌面解析器/SessionStore 的协议边界，使用合成 PCM 和探针回执，未证明桌面播放排空、真实 Provider 或 Live2D 已连通。Core producer、动作 update/融合和能力协商仍待实现。
+
 ## 公共字段
 
 每个事件 payload 包含：`schema_version=olv.incremental_output.v1`、`core_turn_id`、`persona_result_id`、`segment_index`、`segment_message_id`、`stream_id`、`seq`。索引和序号是非负整数，所有身份字符串非空。`segment_index` 不依赖最终段数。

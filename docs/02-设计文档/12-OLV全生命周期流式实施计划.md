@@ -4,6 +4,8 @@
 
 ## 当前进度
 
+- **2026-10-17 Adapter 增量发送端与既有 Turn 收口：**新增连接绑定的增量 writer，由现有 OutputSegmentCoordinator 持有，共用 Turn 锁、身份和关闭状态，不另建 Turn 或重试队列。文本原样追加、三条资源独立序号，PCM 按连续采样位置切成最多 64 KiB 的二进制包；先前段音频未 EOF 时禁止后段抢先发送。同一 Turn 拒绝混用完整段和增量输出。三条资源必须分别明确 end 后才能发送 synth_finished；可选动作失败不升级为核心语音失败。发送失败或取消后封闭 writer，避免歧义重放；Turn 清理使旧 writer 失效，绑定发送器不迁移到新连接。修正快速 playback_finished 与 synth_finished 发送返回之间的竞态，回执检查在相同 Turn 锁后读取关闭状态。隔离当前 Core 的真实 TurnCoordinator + loopback WebSocket 验证 12 条消息、40000 个合成采样、未闭合拒绝、提前回执拒绝、发送期间正常回执及终态后旧 writer 拒绝；同批真实消息再经桌面正式解析器和 SessionStore 接受，两个 PCM 包采样连续、Unicode 码点长度一致。Ruff、插件结构和 diff 检查通过。该回执为协议探针发送，不是桌面实际播放排空；未运行真实 Provider、Electron 播放或 Live2D。本批只完成 Adapter 发送入口与生命周期接线，Core 正式 producer 尚未调用；动作 update/融合、端到端流量控制和现场首响验收仍待完成。入口要求尚未开放的增量准入标记，没有登记/启用能力、修改配置或重启。
+
 - **2026-10-17 Core 增量文本预处理边界：**Core `3d0463dec` 新增 `PreOutputProcessor.create_incremental_text_preparer(event)`，消费已解码 speech delta，暂存拆开的私有标记、删除完整/嵌套 system_reminder 块，再对完整可见前缀执行既有内容安全检查；返回的新增文本可供显示和 TTS 共用，不逐字重复旧整段 decorating Hook。失败保留已接受前缀，未闭合标记在该段 finish 时明确拒绝，隐藏块不能跨 Persona 段闭合。输入最多 1 MiB UTF-8、可见输出最多 65536 UTF-16 单元；finish 返回最终全文用于核验，不能作为新增量重复送 TTS。真实 Core 事件/关键词策略验证拆标记、嵌套、Unicode/空白及跨增量匹配；再将处理后的两批文字交给真实 MiniMax PCM 服务，首音频早于第二批文字，234802 个采样排空，输入已关闭。本次首块距服务启动约 1797 ms，含连接/任务准备，不是整轮首响，也未证明优于旧路径。该边界尚未被 OLV producer 和 Adapter 发送链调用；后续必须同时接入已提交前缀、最终 Hook 限制及失败收口，不能只增加辅助类便标记生产链完成。未启用新能力或重启。
 
 - **2026-10-17 桌面接入审阅修正：**补上跨段音频顺序校验：前面段的 audio 流尚未明确 end 时，后面段的 PCM 首包不能抢先播放，拒绝时不推进采样或序号。公开 SessionStore 边界确认先拒绝第 1 段、在第 0 段明确空音频 EOF 后接受同一首包；renderer 类型检查通过。前段实际播放排空仍由既有时间线等待负责，此检查不代表新的 Provider/Live2D 现场验收。

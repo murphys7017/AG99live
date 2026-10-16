@@ -62,6 +62,7 @@ from .motion_observation_recorder import MotionObservationRecorder
 from .output_segment_coordinator import OutputSegmentCoordinator
 from .output_segment import PASSIVE_BEHAVIOR_MOTION_SOURCE
 from .performance_curve_coordinator import PerformanceCurveCoordinator
+from .incremental_output import IncrementalOutputSession, SendPayload
 
 
 MAX_REMEMBERED_TERMINAL_TURNS = 256
@@ -359,6 +360,22 @@ class TurnCoordinator:
                 self._active_speech_capture_turns.discard(capture_turn_id)
             self._active_vad_turn_by_capture_turn[capture_turn_id] = turn_id
 
+    async def open_incremental_output(
+        self, *, turn_id: str, core_turn_id: str, persona_result_id: str,
+        send_payload: SendPayload,
+    ) -> IncrementalOutputSession:
+        """Admit the existing frontend/Core identity pair, without creating a Turn."""
+        def require_turn_active() -> None:
+            if (turn_id in self._turn_terminal_results or turn_id in self._terminating_turn_ids
+                or self.turn_identity_map.resolve_astrbot_turn(turn_id) != core_turn_id):
+                raise RuntimeError("incremental_output_turn_binding_invalid")
+
+        return await self.output_segments.open_incremental_output(
+            turn_id=turn_id, core_turn_id=core_turn_id,
+            persona_result_id=persona_result_id, send_payload=send_payload,
+            require_turn_active=require_turn_active,
+        )
+
     async def emit_message_chain(
         self,
         message_chain,
@@ -486,6 +503,8 @@ class TurnCoordinator:
         resolved_turn_id = self._normalize_optional_turn_value(turn_id)
         if not resolved_turn_id:
             raise ValueError("playback_finished_turn_id_missing")
+
+        await self.output_segments.require_playback_queue_closed(resolved_turn_id)
 
         output_failure = self.output_segments.output_failure_reason(resolved_turn_id)
         if output_failure:
