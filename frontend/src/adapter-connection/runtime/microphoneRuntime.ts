@@ -408,6 +408,18 @@ export function createAdapterMicrophoneRuntime(
       && shouldEndAudioStream
       && !inputSequenceBroken
       && inputSocket?.readyState === WebSocket.OPEN;
+    // Capture at release time, while device teardown/end-queue work proceeds.
+    // The end envelope still owns the image, so Persona cannot miss a late image.
+    const desktopCapturePromise = desktopSnapshotRequested
+      ? (async () => {
+          reportLatencyStage("screenshot_start", inputTurnId, inputStreamId);
+          try {
+            return await captureRealtimeDesktopScreenshot();
+          } finally {
+            reportLatencyStage("screenshot_end", inputTurnId, inputStreamId);
+          }
+        })()
+      : Promise.resolve(null);
     clearMicCaptureSession();
 
     let captureStopError: unknown = null;
@@ -434,15 +446,7 @@ export function createAdapterMicrophoneRuntime(
         try {
           await enqueueAudioStreamEnd(async () => {
             reportLatencyStage("audio_end_queue_ready", inputTurnId, inputStreamId);
-            if (desktopSnapshotRequested) {
-              reportLatencyStage("screenshot_start", inputTurnId, inputStreamId);
-            }
-            const desktopCapture = desktopSnapshotRequested
-              ? await captureRealtimeDesktopScreenshot()
-              : null;
-            if (desktopSnapshotRequested) {
-              reportLatencyStage("screenshot_end", inputTurnId, inputStreamId);
-            }
+            const desktopCapture = await desktopCapturePromise;
             if (
               deps.getSocket() !== inputSocket
               || inputSocket.readyState !== WebSocket.OPEN
