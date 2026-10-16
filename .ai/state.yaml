@@ -882,3 +882,11 @@ olv_nonstream_speech_motion_handoff_20261017:
   scope: "N5: when same-Turn next file audio is ready and previous speech actually ended, stop previous motion ownership through ModelEngine and settle as intentional handoff before next audio. Preserve final tails, motion-only segments, audio ordering and general timeline blockers. Expire ungenerated motion outside its speech window; add identified motion start/end/handoff events."
   validation: "Renderer/node typechecks passed. Actual Store/timeline/orchestrator boundary proved next audio waits for audio end but not old motion tail and handoff is completed, not failed. Existing standalone runtime tail blocking check and latency IPC whitelist check passed."
   evidence_gap: "Historical long-gap cause remains unproven without actual motion-end logs. No Electron/Live2D visual continuity acceptance; uses existing stop semantics rather than a new blend engine. Real event observations are now available for confirmation."
+
+olv_nonstream_deferred_motion_app_review_20261017:
+  class: bugfix
+  risk: medium
+  status: source_validated_pending_live_acceptance
+  scope: "N4 follow-up source review: reserve pending segment motion in the real app speech-only admission gate, preventing fallback speech animation from claiming the slot before its deferred Provider result."
+  validation: "Full renderer typecheck passed; actual duration-ready -> speech-only preparation -> motion-start chain traced."
+  evidence_gap: "Existing boundary test did not instantiate the full model app, so this correction is source/static validated; real desktop acceptance remains pending."
