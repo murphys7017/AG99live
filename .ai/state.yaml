@@ -947,3 +947,11 @@ olv_motion_terminal_observation_20261017:
   evidence: "03:12 M0 first segment has a motion_ended event without motion_started; its following segment has a valid started/completed record. Existing metric did not distinguish failed/interrupted closure. No new runtime root cause is asserted from missing start alone."
   validation: "Renderer and node typechecks; direct source trace from motion terminal status to stage selection. No hardware or Provider run."
   evidence_gap: "Need freshly loaded playback/MotionLab rejection diagnostics to identify the first segment's historical failure cause."
+
+olv_stream_local_interrupt_20261017:
+  class: bugfix
+  risk: high
+  status: public_boundary_validated_pending_live_acceptance
+  scope: "T3 review correction: a locally interrupted/retired Turn must quietly retire its PCM worker before the server interrupt echo, rather than treating the expected append rejection as a fatal connection error. New Turn start retires any older queue generation."
+  validation: "Actual loopback flow still passed. Its real wire start/chunk replayed through a fresh public consumer: local Store interruption followed by blocked append rejection produced no fatal callback and no late credit. Renderer typecheck passed."
+  evidence_gap: "No actual microphone barge-in/device run. The isolated cancellation acceptance does not verify hardware cancellation timing."

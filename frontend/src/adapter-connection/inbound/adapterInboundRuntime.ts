@@ -204,6 +204,7 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
       normalizeMotionPayload: deps.normalizeMotionPayload,
       startMicrophoneCapture: (origin) => deps.startMicrophoneCapture(origin),
       notifyTurnLifecycle: (event) => {
+        if (event.phase === "started") incremental.beginTurn(event.turnId);
         if (event.phase === "terminal") incremental.cancelTurn(event.turnId);
         deps.notifyTurnLifecycle(event);
       },

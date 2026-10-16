@@ -75,7 +75,10 @@ export function createIncrementalOutputRuntime(options: {
       while (queue.length && epoch === generation) {
         signal.throwIfAborted();
         const job = queue.shift()!;
-        if (!isLive(job.id, false)) throw new DOMException("Stale PCM stream.", "AbortError");
+        if (!isLive(job.id, false)) {
+          cancelTurn(job.id.turnId);
+          return;
+        }
         if (job.kind === "chunk") {
           if (!active) {
             await waitWithAbort(draining, signal);
@@ -104,8 +107,11 @@ export function createIncrementalOutputRuntime(options: {
       }
     } catch (error) {
       if (epoch === generation && !signal.aborted) {
+        // Local interruption stops the timeline before its server echo arrives.
+        // That retirement is expected, including rejection of an in-flight append.
+        const retired = scope === null || !isLive(scope, false);
         reset();
-        try { options.onAsyncError(error); }
+        try { if (!retired) options.onAsyncError(error); }
         catch (observerError) { console.error("[IncrementalOutput] async failure cleanup failed.", observerError); }
       }
     } finally {
@@ -162,6 +168,9 @@ export function createIncrementalOutputRuntime(options: {
   function cancelTurn(turnId: string): void {
     if (scope?.turnId === turnId) reset();
   }
+  function beginTurn(turnId: string): void {
+    if (scope && scope.turnId !== turnId) reset();
+  }
   function reset(): void {
     generation += 1;
     controller.abort();
@@ -174,5 +183,5 @@ export function createIncrementalOutputRuntime(options: {
     receivedBytes = receivedFrames = releasedBytes = releasedFrames = 0;
     textObserved = false;
   }
-  return { handleAudio, handleEvent, cancelTurn, reset };
+  return { handleAudio, handleEvent, beginTurn, cancelTurn, reset };
 }
