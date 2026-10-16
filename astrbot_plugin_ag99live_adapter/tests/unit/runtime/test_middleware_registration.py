@@ -698,9 +698,13 @@ def test_segment_motion_uses_only_the_matching_neurobrain_result(
             )
 
     class Provider:
-        async def text_chat(self, *, prompt, **_kwargs):
+        async def text_chat_stream(self, *, prompt, **_kwargs):
             prompts.append(json.loads(prompt))
-            return SimpleNamespace(completion_text="")
+            yield SimpleNamespace(
+                role="assistant",
+                completion_text="",
+                is_chunk=True,
+            )
 
     monkeypatch.setattr(
         module,
@@ -1107,12 +1111,20 @@ def test_independent_motion_request_uses_text_memory_and_segment_without_images(
     calls: list[dict[str, object]] = []
 
     class Provider:
-        async def text_chat(self, **kwargs):
+        async def text_chat_stream(self, **kwargs):
             calls.append(kwargs)
-            return types.SimpleNamespace(
-                completion_text=(
-                    '{"intent_tags":["平和"],"axis_levels":{"head_roll":0}}'
-                )
+            completion = (
+                '{"intent_tags":["平和"],"axis_levels":{"head_roll":0}}'
+            )
+            yield types.SimpleNamespace(
+                role="assistant",
+                completion_text=completion,
+                is_chunk=True,
+            )
+            yield types.SimpleNamespace(
+                role="assistant",
+                completion_text=completion,
+                is_chunk=False,
             )
 
     monkeypatch.setattr(

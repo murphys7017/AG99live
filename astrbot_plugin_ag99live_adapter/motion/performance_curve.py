@@ -16,6 +16,11 @@ from ..prompts.performance_curve import (
     build_performance_curve_prompt,
 )
 from .observation import record_motion_observation
+from .text_stream import (
+    TextChatStreamUnavailable,
+    read_text_chat_stream,
+    supports_text_chat_stream,
+)
 
 CURVE_FAMILIES = {
     "default",
@@ -31,6 +36,32 @@ EMPHASES = {"none", "early", "middle", "late", "punctuated"}
 ENERGIES = {"low", "medium", "high", "teasing", "calm"}
 
 _MAX_RETAINED_RESULTS = 64
+
+
+async def _request_curve_text(
+    provider: Any,
+    *,
+    prompt: str,
+    system_prompt: str,
+    turn_id: str,
+) -> tuple[str, str]:
+    def _on_first_chunk() -> None:
+        logger.info(
+            "DIAG latency.performance_curve_first_chunk "
+            "turn_id=%s transport=stream timestamp_epoch_ms=%s",
+            turn_id,
+            time.time_ns() // 1_000_000,
+        )
+
+    return (
+        await read_text_chat_stream(
+            provider,
+            prompt=prompt,
+            system_prompt=system_prompt,
+            on_first_chunk=_on_first_chunk,
+        ),
+        "stream",
+    )
 
 
 @dataclass(slots=True)
@@ -182,12 +213,20 @@ class PerformanceCurveRuntime:
         )
         started_at = time.perf_counter()
         try:
-            response = await provider.text_chat(
+            logger.info(
+                "DIAG latency.performance_curve_provider_request_started "
+                "turn_id=%s transport=%s timestamp_epoch_ms=%s",
+                request.turn_id,
+                "stream" if supports_text_chat_stream(provider) else "unsupported",
+                time.time_ns() // 1_000_000,
+            )
+            completion_text, transport = await _request_curve_text(
+                provider,
                 prompt=prompt,
                 system_prompt=PERFORMANCE_CURVE_SYSTEM_PROMPT,
+                turn_id=request.turn_id,
             )
             latency_ms = int((time.perf_counter() - started_at) * 1000)
-            completion_text = str(getattr(response, "completion_text", "") or "").strip()
             hint = normalize_performance_curve_hint(_extract_json_object(completion_text))
             self._results[key] = hint
             self._drop_current_task(key)
@@ -201,8 +240,18 @@ class PerformanceCurveRuntime:
                     "motion_intent_tags": request.motion_intent_tags,
                     "curve_hint": hint,
                     "completion_text": completion_text,
+                    "transport": transport,
                     "latency_ms": latency_ms,
                 },
+            )
+        except TextChatStreamUnavailable as exc:
+            self._drop_cached_key(key)
+            self._record_failed(request, "provider_stream_unsupported", latency_ms=0)
+            logger.warning(
+                "Performance curve skipped: turn_id=%s request_id=%s reason=%s",
+                request.turn_id,
+                request.request_id,
+                exc,
             )
         except asyncio.CancelledError:
             self._drop_current_task(key)

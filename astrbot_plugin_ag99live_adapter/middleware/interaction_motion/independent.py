@@ -6,7 +6,7 @@ import math
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
-from time import perf_counter
+from time import monotonic, perf_counter, time_ns
 from typing import Any
 
 from astrbot.api import logger
@@ -30,6 +30,11 @@ from .shared import (
     _MotionRuntimeBundle,
     _sanitize_reason_fragment,
 )
+from ...motion.text_stream import (
+    TextChatStreamUnavailable,
+    read_text_chat_stream,
+    supports_text_chat_stream,
+)
 
 INDEPENDENT_MOTION_TASK_EXTRA_KEY = "_ag99live_independent_motion_task"
 INDEPENDENT_MOTION_RESULT_EXTRA_KEY = "_ag99live_independent_motion_result"
@@ -51,6 +56,102 @@ _NEUROBRAIN_RESULT_WAIT_SECONDS = 1.0
 # is included, otherwise the segment is delivered with an explicit motion
 # failure state and the dialogue continues.
 _STREAM_SEGMENT_TIMEOUT_SECONDS = 0.75
+
+
+def resolve_stream_motion_budget_seconds(runtime_state: Any) -> float:
+    """Return the hard per-segment budget for supplementary motion work."""
+
+    try:
+        configured = float(
+            getattr(
+                runtime_state,
+                "independent_motion_segment_timeout_seconds",
+                _STREAM_SEGMENT_TIMEOUT_SECONDS,
+            )
+        )
+    except (TypeError, ValueError):
+        configured = _STREAM_SEGMENT_TIMEOUT_SECONDS
+    if configured <= 0:
+        return _STREAM_SEGMENT_TIMEOUT_SECONDS
+    return min(configured, _STREAM_SEGMENT_TIMEOUT_SECONDS)
+
+
+async def _request_motion_provider_text(
+    provider: Any,
+    *,
+    prompt: str,
+    system_prompt: str,
+    contexts: list[dict[str, str]] | tuple[dict[str, str], ...] | None,
+    turn_id: str,
+) -> tuple[str, str]:
+    """Read the motion Provider incrementally without a complete-chat fallback."""
+
+    def _on_first_chunk() -> None:
+        logger.info(
+            "DIAG latency.motion_provider_first_chunk turn_id=%s "
+            "transport=stream timestamp_epoch_ms=%s",
+            turn_id,
+            time_ns() // 1_000_000,
+        )
+
+    return (
+        await read_text_chat_stream(
+            provider,
+            prompt=prompt,
+            system_prompt=system_prompt,
+            contexts=contexts,
+            on_first_chunk=_on_first_chunk,
+        ),
+        "stream",
+    )
+
+
+def _consume_background_motion_exception(task: asyncio.Task) -> None:
+    if task.cancelled():
+        return
+    try:
+        error = task.exception()
+    except asyncio.CancelledError:
+        return
+    if error is not None:
+        logger.warning(
+            "WIRING independent_motion.background_task_failed error=%s",
+            error,
+        )
+
+
+async def await_with_hard_deadline(
+    awaitable: Any,
+    timeout: float,
+    *,
+    background_tasks: set[asyncio.Task] | None = None,
+) -> Any:
+    """Await optional motion work without waiting for cancellation to finish."""
+
+    task = (
+        awaitable
+        if isinstance(awaitable, (asyncio.Task, asyncio.Future))
+        else asyncio.create_task(awaitable)
+    )
+    if background_tasks is not None:
+        background_tasks.add(task)
+        task.add_done_callback(background_tasks.discard)
+
+    try:
+        done, _ = await asyncio.wait({task}, timeout=max(0.0, float(timeout)))
+    except asyncio.CancelledError:
+        if not task.done():
+            task.cancel()
+        task.add_done_callback(_consume_background_motion_exception)
+        raise
+
+    if task in done:
+        return await task
+
+    if not task.done():
+        task.cancel()
+    task.add_done_callback(_consume_background_motion_exception)
+    raise asyncio.TimeoutError
 
 
 def _consume_background_motion_exception(task: asyncio.Task) -> None:
@@ -488,11 +589,11 @@ async def generate_independent_motion_for_segments(
         if callable(get_extra)
         else False
     )
-    if stream_active and segment_timeout_seconds > 0:
+    stream_deadlines: dict[int, float] = {}
+    if stream_active:
         configured_timeout = segment_timeout_seconds
-        segment_timeout_seconds = min(
-            segment_timeout_seconds,
-            _STREAM_SEGMENT_TIMEOUT_SECONDS,
+        segment_timeout_seconds = resolve_stream_motion_budget_seconds(
+            bundle.runtime_state
         )
         if segment_timeout_seconds < configured_timeout:
             logger.debug(
@@ -504,6 +605,9 @@ async def generate_independent_motion_for_segments(
                 configured_timeout,
                 segment_timeout_seconds,
             )
+        stream_deadlines = {
+            index: monotonic() + segment_timeout_seconds for index, _ in inputs
+        }
 
     shared_context = prepared_context
     if shared_context is None:
@@ -513,13 +617,41 @@ async def generate_independent_motion_for_segments(
                 bundle,
                 persona_result_id=persona_result_id,
             )
-            if segment_timeout_seconds > 0:
-                shared_context = await asyncio.wait_for(
+            if stream_active:
+                remaining = min(stream_deadlines.values()) - monotonic()
+                if remaining <= 0:
+                    raise asyncio.TimeoutError
+                shared_context = await await_with_hard_deadline(
                     context_preparation,
-                    timeout=segment_timeout_seconds,
+                    remaining,
+                    background_tasks=tasks,
+                )
+            elif segment_timeout_seconds > 0:
+                shared_context = await await_with_hard_deadline(
+                    context_preparation,
+                    segment_timeout_seconds,
+                    background_tasks=tasks,
                 )
             else:
                 shared_context = await context_preparation
+        except asyncio.TimeoutError:
+            logger.warning(
+                "WIRING independent_motion.shared_context_timeout turn_id=%s "
+                "timeout_seconds=%.2f",
+                get_extra("_turn_id", "<missing>")
+                if callable(get_extra)
+                else "<missing>",
+                segment_timeout_seconds,
+            )
+            return {
+                index: IndependentMotionResult(
+                    assistant_text=speech,
+                    motion_payload=None,
+                    reason="motion_timeout",
+                    image_count=0,
+                )
+                for index, speech in inputs
+            }
         except Exception as exc:  # noqa: BLE001
             get_extra = getattr(event, "get_extra", None)
             turn_id = (
@@ -534,6 +666,16 @@ async def generate_independent_motion_for_segments(
                 exc,
                 exc_info=True,
             )
+            if stream_active:
+                return {
+                    index: IndependentMotionResult(
+                        assistant_text=speech,
+                        motion_payload=None,
+                        reason="motion_context_unavailable",
+                        image_count=0,
+                    )
+                    for index, speech in inputs
+                }
             shared_context = None
 
     try:
@@ -574,10 +716,20 @@ async def generate_independent_motion_for_segments(
                         **kwargs,
                     )
 
-                if segment_timeout_seconds > 0:
-                    return await asyncio.wait_for(
+                if stream_active:
+                    remaining = stream_deadlines[index] - monotonic()
+                    if remaining <= 0:
+                        raise asyncio.TimeoutError
+                    return await await_with_hard_deadline(
                         _call_provider(),
-                        timeout=segment_timeout_seconds,
+                        remaining,
+                        background_tasks=tasks,
+                    )
+                if segment_timeout_seconds > 0:
+                    return await await_with_hard_deadline(
+                        _call_provider(),
+                        segment_timeout_seconds,
+                        background_tasks=tasks,
                     )
                 return await _call_provider()
             except asyncio.TimeoutError:
@@ -598,6 +750,25 @@ async def generate_independent_motion_for_segments(
                     assistant_text=speech,
                     motion_payload=None,
                     reason="motion_timeout",
+                    image_count=0,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                get_extra = getattr(event, "get_extra", None)
+                turn_id = get_extra("_turn_id", "<missing>") if callable(get_extra) else "<missing>"
+                logger.warning(
+                    "WIRING independent_motion.segment_failed turn_id=%s "
+                    "segment_index=%s error=%s action=continue_core_dialogue",
+                    turn_id or "<missing>",
+                    index,
+                    exc,
+                    exc_info=True,
+                )
+                return IndependentMotionResult(
+                    assistant_text=speech,
+                    motion_payload=None,
+                    reason="motion_failed:" + type(exc).__name__,
                     image_count=0,
                 )
 
@@ -1061,26 +1232,34 @@ async def generate_independent_motion(
             capability_payload=capability_payload,
             runtime_payload=runtime_payload,
         )
-        logger.debug(
-            "WIRING independent_motion.provider_request_started turn_id=%s "
-            "history_message_count=%s image_count=%s prompt_len=%s system_prompt_len=%s",
+        expected_transport = (
+            "stream" if supports_text_chat_stream(provider) else "unsupported"
+        )
+        logger.info(
+            "DIAG latency.motion_provider_request_started turn_id=%s "
+            "transport=%s history_message_count=%s image_count=%s "
+            "prompt_len=%s system_prompt_len=%s timestamp_epoch_ms=%s",
             turn_id,
+            expected_transport,
             len(contexts),
             len(images),
             len(prompt),
             len(system_prompt),
+            time_ns() // 1_000_000,
         )
-        response = await provider.text_chat(
+        response_text, transport = await _request_motion_provider_text(
+            provider,
             prompt=prompt,
             system_prompt=system_prompt,
             contexts=contexts or None,
+            turn_id=str(turn_id),
         )
-        response_text = str(getattr(response, "completion_text", "") or "").strip()
         logger.debug(
             "WIRING independent_motion.provider_response_received turn_id=%s "
-            "response_len=%s",
+            "response_len=%s transport=%s",
             turn_id,
             len(response_text),
+            transport,
         )
         if not response_text:
             return finish(
@@ -1177,6 +1356,18 @@ async def generate_independent_motion(
         return finish(
             motion_payload=motion_payload,
             reason=reason,
+            image_count=len(images),
+        )
+    except TextChatStreamUnavailable as exc:
+        logger.warning(
+            "WIRING independent_motion.skipped turn_id=%s provider=%s reason=%s",
+            turn_id,
+            provider_id,
+            exc,
+        )
+        return finish(
+            motion_payload=None,
+            reason="provider_stream_unsupported",
             image_count=len(images),
         )
     except asyncio.CancelledError:
@@ -1530,6 +1721,7 @@ __all__ = [
     "INDEPENDENT_MOTION_TASK_EXTRA_KEY",
     "IndependentMotionResult",
     "PERSONA_MOTION_WORK_BY_TURN_ATTRIBUTE",
+    "await_with_hard_deadline",
     "get_persona_motion_work",
     "generate_independent_motion_for_segments",
     "generate_independent_motion",
@@ -1543,4 +1735,5 @@ __all__ = [
     "track_motion_generation_task",
     "take_motion_result_for_turn",
     "untrack_motion_generation_task",
+    "resolve_stream_motion_budget_seconds",
 ]

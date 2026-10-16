@@ -32,7 +32,10 @@ def _optional_tts_state_hook():
 def _optional_persona_expression_hook():
     hook = getattr(filter, "on_persona_expression_result", None)
     if callable(hook):
-        return hook(persona_segment_stream_safe=True)
+        try:
+            return hook(persona_segment_stream_safe=True)
+        except TypeError:
+            return hook()
 
     def _identity(handler):
         return handler
@@ -43,7 +46,10 @@ def _optional_persona_expression_hook():
 def _optional_persona_stream_finished_hook():
     hook = getattr(filter, "on_persona_expression_stream_finished", None)
     if callable(hook):
-        return hook()
+        try:
+            return hook(persona_segment_stream_safe=True)
+        except TypeError:
+            return hook()
 
     def _identity(handler):
         return handler
@@ -54,7 +60,10 @@ def _optional_persona_stream_finished_hook():
 def _optional_persona_segment_ready_hook():
     hook = getattr(filter, "on_persona_expression_segment_ready", None)
     if callable(hook):
-        return hook()
+        try:
+            return hook(persona_segment_stream_safe=True)
+        except TypeError:
+            return hook()
 
     def _identity(handler):
         return handler
@@ -65,7 +74,10 @@ def _optional_persona_segment_ready_hook():
 def _optional_persona_segment_intent_ready_hook():
     hook = getattr(filter, "on_persona_expression_segment_intent_ready", None)
     if callable(hook):
-        return hook(persona_segment_stream_safe=True)
+        try:
+            return hook(persona_segment_stream_safe=True)
+        except TypeError:
+            return hook()
 
     def _identity(handler):
         return handler
@@ -76,12 +88,35 @@ def _optional_persona_segment_intent_ready_hook():
 def _optional_llm_response_hook():
     hook = getattr(filter, "on_llm_response", None)
     if callable(hook):
-        return hook(persona_segment_stream_safe=True)
+        try:
+            return hook(persona_segment_stream_safe=True)
+        except TypeError:
+            return hook()
 
     def _identity(handler):
         return handler
 
     return _identity
+
+
+def _optional_llm_request_hook():
+    hook = getattr(filter, "on_llm_request", None)
+    if not callable(hook):
+        return lambda handler: handler
+    try:
+        return hook(persona_segment_stream_safe=True)
+    except TypeError:
+        return hook()
+
+
+def _optional_decorating_result_hook():
+    hook = getattr(filter, "on_decorating_result", None)
+    if not callable(hook):
+        return lambda handler: handler
+    try:
+        return hook(persona_segment_stream_safe=True)
+    except TypeError:
+        return hook()
 
 
 class MyPlugin(Star):
@@ -131,7 +166,7 @@ class MyPlugin(Star):
                 "motion generation and performance curves are disabled."
             )
 
-    @filter.on_llm_request(persona_segment_stream_safe=True)
+    @_optional_llm_request_hook()
     async def start_independent_motion_generation(
         self,
         event: AstrMessageEvent,
@@ -370,7 +405,7 @@ class MyPlugin(Star):
                 len(assistant_text),
             )
 
-    @filter.on_decorating_result(persona_segment_stream_safe=True)
+    @_optional_decorating_result_hook()
     async def sanitize_hidden_output_markup(
         self,
         event: AstrMessageEvent,
@@ -474,9 +509,12 @@ class MyPlugin(Star):
             return
         from .middleware.interaction_motion.independent import (
             IndependentMotionResult,
+            _prepare_independent_motion_context,
+            await_with_hard_deadline,
             generate_independent_motion,
             is_persona_expression_request,
             persona_expression_intent,
+            resolve_stream_motion_budget_seconds,
             track_motion_generation_task,
             untrack_motion_generation_task,
         )
@@ -514,6 +552,9 @@ class MyPlugin(Star):
         registry = bundle.runtime_state.persona_stream_motion
         work = registry.get(normalized_turn_id)
         if work is None:
+            parallel = bool(
+                getattr(bundle.runtime_state, "independent_motion_parallel", False)
+            )
             try:
                 max_concurrency = max(
                     1,
@@ -528,13 +569,16 @@ class MyPlugin(Star):
                 "phase": str(intent.get("phase") or "").strip(),
                 "next_segment_index": 0,
                 "segment_result_futures": {},
+                "segment_deadlines": {},
                 "segment_intents_by_index": {},
                 "preview_tasks": {},
                 "speech_segments": [],
                 "tasks": set(),
                 "context_task": None,
-                "concurrency_gate": asyncio.Semaphore(max_concurrency),
-                "parallel": True,
+                "concurrency_gate": asyncio.Semaphore(
+                    max_concurrency if parallel else 1
+                ),
+                "parallel": parallel,
             }
             registry.register(normalized_turn_id, work)
         if (
@@ -543,12 +587,69 @@ class MyPlugin(Star):
             or segment_index != len(work.get("segment_intents_by_index", {}))
         ):
             return
-        result_future = asyncio.get_running_loop().create_future()
+        loop = asyncio.get_running_loop()
+        result_future = loop.create_future()
         work["segment_result_futures"][segment_index] = result_future
         work["segment_intents_by_index"][segment_index] = {
             "actions": list(actions) if isinstance(actions, (list, tuple)) else [],
             "tendency": dict(tendency) if isinstance(tendency, Mapping) else {},
         }
+        work.setdefault("segment_deadlines", {})[segment_index] = (
+            loop.time() + resolve_stream_motion_budget_seconds(bundle.runtime_state)
+        )
+
+        if not isinstance(work.get("context_task"), asyncio.Task):
+            async def _prepare_preview_context() -> Any:
+                try:
+                    return await await_with_hard_deadline(
+                        _prepare_independent_motion_context(
+                            event,
+                            bundle,
+                            persona_result_id=normalized_result_id,
+                        ),
+                        resolve_stream_motion_budget_seconds(bundle.runtime_state),
+                        background_tasks=work["tasks"],
+                    )
+                except asyncio.TimeoutError:
+                    logger.debug(
+                        "WIRING independent_motion.intent_preview_context_timeout "
+                        "turn_id=%s persona_result_id=%s",
+                        normalized_turn_id,
+                        normalized_result_id,
+                    )
+                    return None
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(
+                        "WIRING independent_motion.intent_preview_context_failed "
+                        "turn_id=%s persona_result_id=%s error=%s",
+                        normalized_turn_id,
+                        normalized_result_id,
+                        exc,
+                        exc_info=True,
+                    )
+                    return None
+
+            context_task = asyncio.create_task(
+                _prepare_preview_context(),
+                name=f"ag99live-persona-stream-preview-context-{normalized_result_id[:12]}",
+            )
+            work["context_task"] = context_task
+            work["tasks"].add(context_task)
+            self._independent_motion_tasks.add(context_task)
+            context_task.add_done_callback(work["tasks"].discard)
+            context_task.add_done_callback(self._independent_motion_tasks.discard)
+            context_task.add_done_callback(
+                lambda task: untrack_motion_generation_task(
+                    bundle.runtime_state,
+                    turn_id=normalized_turn_id,
+                    task=task,
+                )
+            )
+            track_motion_generation_task(
+                bundle.runtime_state,
+                turn_id=normalized_turn_id,
+                task=context_task,
+            )
 
         async def _generate_preview() -> None:
             current_task = asyncio.current_task()
@@ -558,30 +659,57 @@ class MyPlugin(Star):
                 if provider is None:
                     result = IndependentMotionResult("", None, "provider_unavailable", 0)
                 else:
-                    try:
-                        timeout_seconds = min(
-                            max(
-                                0.0,
-                                float(
-                                    getattr(
-                                        bundle.runtime_state,
-                                        "independent_motion_segment_timeout_seconds",
-                                        5.0,
-                                    )
-                                ),
-                            ),
-                            0.75,
-                        )
-                    except (TypeError, ValueError):
-                        timeout_seconds = 0.75
-                    call = generate_independent_motion(
-                        event,
-                        bundle,
-                        provider=provider,
-                        assistant_text="",
-                        segment_intent=work["segment_intents_by_index"][segment_index],
+                    timeout_seconds = resolve_stream_motion_budget_seconds(
+                        bundle.runtime_state
                     )
-                    result = await asyncio.wait_for(call, timeout=timeout_seconds) if timeout_seconds else await call
+                    deadline = work.get("segment_deadlines", {}).get(segment_index)
+                    if not isinstance(deadline, (int, float)):
+                        deadline = loop.time() + timeout_seconds
+                    prepared_context = None
+                    context_task = work.get("context_task")
+                    if isinstance(context_task, asyncio.Task):
+                        remaining = deadline - loop.time()
+                        if remaining <= 0:
+                            raise asyncio.TimeoutError
+                        prepared_context = await await_with_hard_deadline(
+                            asyncio.shield(context_task),
+                            remaining,
+                            background_tasks=work["tasks"],
+                        )
+                    if prepared_context is None:
+                        result = IndependentMotionResult(
+                            "", None, "motion_context_unavailable", 0
+                        )
+                    else:
+                        remaining = deadline - loop.time()
+                        if remaining <= 0:
+                            raise asyncio.TimeoutError
+                        acquired = False
+                        try:
+                            await asyncio.wait_for(
+                                work["concurrency_gate"].acquire(),
+                                timeout=remaining,
+                            )
+                            acquired = True
+                            remaining = deadline - loop.time()
+                            if remaining <= 0:
+                                raise asyncio.TimeoutError
+                            call = generate_independent_motion(
+                                event,
+                                bundle,
+                                provider=provider,
+                                assistant_text="",
+                                segment_intent=work["segment_intents_by_index"][segment_index],
+                                prepared_context=prepared_context,
+                            )
+                            result = await await_with_hard_deadline(
+                                call,
+                                remaining,
+                                background_tasks=work["tasks"],
+                            )
+                        finally:
+                            if acquired:
+                                work["concurrency_gate"].release()
             except asyncio.TimeoutError:
                 result = IndependentMotionResult("", None, "motion_timeout", 0)
             except Exception as exc:  # noqa: BLE001
@@ -641,9 +769,11 @@ class MyPlugin(Star):
         from .middleware.interaction_motion.independent import (
             IndependentMotionResult,
             _prepare_independent_motion_context,
+            await_with_hard_deadline,
             generate_independent_motion_for_segments,
             is_persona_expression_request,
             persona_expression_intent,
+            resolve_stream_motion_budget_seconds,
             track_motion_generation_task,
             untrack_motion_generation_task,
         )
@@ -680,12 +810,11 @@ class MyPlugin(Star):
             logger.warning(
                 "WIRING independent_motion.stream_segment_rejected "
                 "reason=identity_invalid turn_id=%s persona_result_id=%s "
-                "segment_index=%s",
+                "segment_index=%s action=continue_core_dialogue",
                 normalized_turn_id or "<missing>",
                 normalized_result_id or "<missing>",
                 segment_index,
             )
-            event.stop_event()
             return
 
         request = event.get_extra("provider_request")
@@ -757,25 +886,25 @@ class MyPlugin(Star):
             logger.warning(
                 "WIRING independent_motion.stream_segment_rejected "
                 "reason=stream_identity_conflict turn_id=%s "
-                "persona_result_id=%s segment_index=%s",
+                "persona_result_id=%s segment_index=%s "
+                "action=continue_core_dialogue",
                 normalized_turn_id,
                 normalized_result_id,
                 segment_index,
             )
-            event.stop_event()
             return
 
         if segment_index != work["next_segment_index"]:
             logger.warning(
                 "WIRING independent_motion.stream_segment_rejected "
                 "reason=segment_index_nonsequential turn_id=%s "
-                "persona_result_id=%s segment_index=%s expected_index=%s",
+                "persona_result_id=%s segment_index=%s expected_index=%s "
+                "action=continue_core_dialogue",
                 normalized_turn_id,
                 normalized_result_id,
                 segment_index,
                 work["next_segment_index"],
             )
-            event.stop_event()
             return
         work["next_segment_index"] += 1
         work.setdefault("segment_intents_by_index", {})[segment_index] = {
@@ -794,6 +923,11 @@ class MyPlugin(Star):
         if not isinstance(result_future, asyncio.Future):
             result_future = asyncio.get_running_loop().create_future()
             work["segment_result_futures"][segment_index] = result_future
+        work.setdefault("segment_deadlines", {}).setdefault(
+            segment_index,
+            asyncio.get_running_loop().time()
+            + resolve_stream_motion_budget_seconds(bundle.runtime_state),
+        )
         preview_tasks = work.get("preview_tasks")
         if isinstance(preview_tasks, dict) and segment_index in preview_tasks:
             # The intent hook already started the action request before speech
@@ -807,28 +941,21 @@ class MyPlugin(Star):
                     context_preparation = _prepare_independent_motion_context(
                         event, bundle, persona_result_id=normalized_result_id
                     )
-                    try:
-                        context_timeout = max(
-                            0.0,
-                            min(
-                                float(
-                                    getattr(
-                                        bundle.runtime_state,
-                                        "independent_motion_segment_timeout_seconds",
-                                        5.0,
-                                    )
-                                ),
-                                60.0,
-                            ),
-                        )
-                    except (TypeError, ValueError):
-                        context_timeout = 5.0
-                    if context_timeout > 0:
-                        return await asyncio.wait_for(
-                            context_preparation,
-                            timeout=context_timeout,
-                        )
-                    return await context_preparation
+                    return await await_with_hard_deadline(
+                        context_preparation,
+                        resolve_stream_motion_budget_seconds(
+                            bundle.runtime_state
+                        ),
+                        background_tasks=self._independent_motion_tasks,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "WIRING independent_motion.stream_context_timeout "
+                        "turn_id=%s persona_result_id=%s",
+                        normalized_turn_id,
+                        normalized_result_id,
+                    )
+                    return None
                 except Exception as exc:  # noqa: BLE001
                     logger.warning(
                         "WIRING independent_motion.stream_context_unavailable "
@@ -853,29 +980,72 @@ class MyPlugin(Star):
             result = None
             try:
                 async with work["concurrency_gate"]:
+                    context_timed_out = False
                     try:
-                        prepared_context = await asyncio.shield(context_task)
+                        deadline = work["segment_deadlines"].get(segment_index)
+                        remaining = (
+                            deadline - asyncio.get_running_loop().time()
+                            if isinstance(deadline, (int, float))
+                            else resolve_stream_motion_budget_seconds(
+                                bundle.runtime_state
+                            )
+                        )
+                        if remaining <= 0:
+                            raise asyncio.TimeoutError
+                        prepared_context = await await_with_hard_deadline(
+                            asyncio.shield(context_task),
+                            remaining,
+                            background_tasks=self._independent_motion_tasks,
+                        )
+                    except asyncio.TimeoutError:
+                        prepared_context = None
+                        context_timed_out = True
                     except Exception:  # noqa: BLE001
                         prepared_context = None
-                    result_map = await generate_independent_motion_for_segments(
-                        event,
-                        bundle,
-                        speech_segments=("",) * segment_index + (speech,),
-                        segment_intents=({},) * segment_index + (segment_intent,),
-                        parallel=bool(work["parallel"]),
-                        tasks=self._independent_motion_tasks,
-                        persona_result_id=normalized_result_id,
-                        segment_result_futures={segment_index: result_future},
-                        prepared_context=prepared_context,
-                    )
-                    result = result_map.get(segment_index)
-                    if result is None:
+                    if prepared_context is None:
                         result = IndependentMotionResult(
                             assistant_text=speech,
                             motion_payload=None,
-                            reason="independent_segment_result_missing",
+                            reason=(
+                                "motion_timeout"
+                                if context_timed_out
+                                else "motion_context_unavailable"
+                            ),
                             image_count=0,
                         )
+                    else:
+                        remaining = deadline - asyncio.get_running_loop().time()
+                        if remaining <= 0:
+                            raise asyncio.TimeoutError
+                        result_map = await await_with_hard_deadline(
+                            generate_independent_motion_for_segments(
+                                event,
+                                bundle,
+                                speech_segments=("",) * segment_index + (speech,),
+                                segment_intents=({},) * segment_index + (segment_intent,),
+                                parallel=bool(work["parallel"]),
+                                tasks=work["tasks"],
+                                persona_result_id=normalized_result_id,
+                                prepared_context=prepared_context,
+                            ),
+                            remaining,
+                            background_tasks=work["tasks"],
+                        )
+                        result = result_map.get(segment_index)
+                        if result is None:
+                            result = IndependentMotionResult(
+                                assistant_text=speech,
+                                motion_payload=None,
+                                reason="independent_segment_result_missing",
+                                image_count=0,
+                            )
+            except asyncio.TimeoutError:
+                result = IndependentMotionResult(
+                    assistant_text=speech,
+                    motion_payload=None,
+                    reason="motion_timeout",
+                    image_count=0,
+                )
             except asyncio.CancelledError:
                 if not result_future.done():
                     result_future.cancel()

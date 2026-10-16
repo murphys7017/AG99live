@@ -571,10 +571,55 @@ class OLVPetPlatformEvent(AstrMessageEvent):
             futures = work.get("segment_result_futures")
             future = futures.get(segment_index) if isinstance(futures, dict) else None
             if hasattr(future, "__await__"):
-                result = await asyncio.shield(future)
+                try:
+                    from .middleware.interaction_motion.independent import (
+                        resolve_stream_motion_budget_seconds,
+                    )
+
+                    timeout_seconds = resolve_stream_motion_budget_seconds(
+                        getattr(self.adapter, "runtime_state", None)
+                    )
+                except (ImportError, AttributeError, TypeError, ValueError):
+                    timeout_seconds = 0.75
+                remaining = timeout_seconds
+                deadlines = work.get("segment_deadlines")
+                if isinstance(deadlines, dict):
+                    deadline = deadlines.get(segment_index)
+                    if isinstance(deadline, (int, float)):
+                        remaining = max(
+                            0.0,
+                            deadline - asyncio.get_running_loop().time(),
+                        )
+                try:
+                    if future.done():
+                        result = await asyncio.shield(future)
+                    else:
+                        result = await asyncio.wait_for(
+                            asyncio.shield(future),
+                            timeout=remaining,
+                        )
+                except asyncio.TimeoutError:
+                    result = None
+                    failure_reason = "motion_timeout"
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:  # noqa: BLE001
+                    result = None
+                    failure_reason = "motion_failed:" + type(exc).__name__
+                    logger.warning(
+                        "WIRING independent_motion.future_failed turn_id=%s "
+                        "persona_result_id=%s segment_index=%s error=%s "
+                        "action=continue_core_dialogue",
+                        self.get_extra("_turn_id", "<missing>"),
+                        persona_result_id,
+                        segment_index,
+                        exc,
+                        exc_info=True,
+                    )
                 if self._is_stop_requested():
                     raise asyncio.CancelledError
-                failure_reason = str(getattr(result, "reason", "") or "")
+                if result is not None:
+                    failure_reason = str(getattr(result, "reason", "") or "")
 
         motion_payload = getattr(result, "motion_payload", None)
         if not isinstance(motion_payload, dict):

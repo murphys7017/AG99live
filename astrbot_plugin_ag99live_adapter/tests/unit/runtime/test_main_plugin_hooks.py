@@ -365,12 +365,14 @@ def test_persona_segment_ready_starts_motion_future_for_that_index(
     )
     independent_module.IndependentMotionResult = IndependentMotionResult
     independent_module._prepare_independent_motion_context = prepare_context
+    independent_module.await_with_hard_deadline = lambda awaitable, *_args, **_kwargs: awaitable
     independent_module.generate_independent_motion_for_segments = generate_for_segments
     independent_module.is_persona_expression_request = lambda _request: True
     independent_module.persona_expression_intent = lambda _request: {
         "phase": "immediate",
         "kind": "reply",
     }
+    independent_module.resolve_stream_motion_budget_seconds = lambda _state: 0.75
     independent_module.track_motion_generation_task = lambda *_args, **_kwargs: True
     independent_module.untrack_motion_generation_task = lambda *_args, **_kwargs: None
     monkeypatch.setitem(
@@ -455,6 +457,15 @@ def test_persona_segment_ready_starts_motion_future_for_that_index(
         motion = await work["segment_result_futures"][0]
         await asyncio.gather(*tuple(work["tasks"]))
         assert motion is result
+        await plugin.handle_persona_expression_segment_ready(
+            event,
+            turn_id="turn-1",
+            persona_result_id="result-1",
+            segment_index=2,
+            message_id="stream-parent",
+            segment={"speech": "second"},
+        )
+        assert not extras.get("stopped", False)
         await plugin.handle_persona_expression_result(
             event,
             types.SimpleNamespace(

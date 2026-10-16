@@ -54,7 +54,7 @@ AG99 Persona
 
 `independent_motion.enabled` 默认关闭。关闭时使用 Persona Effect 为 Persona 回复段生成动作。开启后使用单独选择的聊天 Provider，Persona Effect 动作路径停用；`per_speech_segment` 决定独立 Provider 是每条回复调用一次，还是对 Persona 每个非空 `segments[].speech` 分别调用并绑定到同索引的 TTS/输出段。分段模式保留 Persona 回复和 Core 的 TTS 生命周期。
 
-`parallel` 在整回复模式中控制动作 Provider 与回复生成并行/串行；在分段模式中控制 Persona 结果到达后各段动作请求并发/串行。分段动作任务会在 Persona 结果钩子中启动，可与 Core 控制的 TTS 合成重叠。TTS 身份到达后 Adapter 按 `turn_id`、`persona_result_id` 和分段索引绑定动作；支持段级物化时，Core 最大并发 2 准备语音，每段只等待对应动作 Future，按序提交并 flush 原子 `output.segment`，第一段不等整批动作。普通整条消息 finalizer 保留原投递边界。段索引决定对应关系，Provider 的返回先后不决定播放顺序。
+`parallel` 在整回复模式中控制动作 Provider 与回复生成并行/串行；在分段模式中控制 Persona 结果到达后各段动作请求并发/串行。独立动作 Provider 全路径使用 `text_chat_stream()`；OLV 流式分段会在 `segment_start` 的动作意图确认后立即启动请求，并与 speech 生成、Core 控制的 TTS 合成重叠，上下文与 Provider 共用最多 0.75 秒预算。Provider 不支持聊天流、请求超时或失败时，该段跳过动作并保留失败原因，核心文本/TTS 继续。TTS 身份到达后 Adapter 按 `turn_id`、`persona_result_id` 和分段索引绑定动作；支持段级物化时，Core 最大并发 2 准备语音，每段只等待对应动作 Future，按序提交并 flush 原子 `output.segment`，第一段不等整批动作。普通整条消息 finalizer 保留原投递边界。段索引决定对应关系，Provider 的返回先后不决定播放顺序。
 
 `history_turns` 控制附带的最近纯文本对话轮数（默认 6，范围 0–20）。动作 Provider 不接收图片、截图上下文说明或工具消息；主回复模型的图片输入不受影响。分段模式输入当前 `speech`、`actions`、`tendency`，并复用本轮已取得、允许模型读取的记忆摘要（最多 6 条，每条 240 字符），不额外检索记忆。Prompt 保留合法轴/等级和资源约束。另保留最多 2 个相关示例和最近 3 个执行动作，全部投影为当前输出契约的 input/output 结构；移除运行标识，跳过不兼容或超过 2400 字符的单条参考，不截断 JSON。当前 actions 优先于参考。分段模式另有 `max_concurrency`（默认 4，最大 8）和 `segment_timeout_seconds`（默认 5 秒，最大 60 秒；0 表示不限制单段请求），完整 Core 汇合仍受 30 秒上限约束。详细 WIRING 过程日志使用 DEBUG，分段生成摘要和最终投递保留 INFO，异常保留 WARN/ERROR。
 

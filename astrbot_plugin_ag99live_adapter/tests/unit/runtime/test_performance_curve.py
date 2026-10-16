@@ -136,22 +136,38 @@ def test_performance_curve_runtime_resolves_provider_hint(
     )
 
     class Provider:
-        async def text_chat(self, *, prompt: str, system_prompt: str):
+        async def text_chat_stream(
+            self,
+            *,
+            prompt: str,
+            system_prompt: str,
+            contexts=None,
+        ):
+            del contexts
             assert "assistant_text" in prompt
             assert "表演节奏选择器" in system_prompt
-            return SimpleNamespace(
-                completion_text=json.dumps(
-                    {
-                        "schema_version": "ag99.performance_curve_hint.v1",
-                        "curve_family": "quick_in_hold_soft_out",
-                        "entry": "quick",
-                        "hold": "steady",
-                        "exit": "soft",
-                        "emphasis": "early",
-                        "energy": "medium",
-                    },
-                    ensure_ascii=False,
-                )
+            completion = json.dumps(
+                {
+                    "schema_version": "ag99.performance_curve_hint.v1",
+                    "curve_family": "quick_in_hold_soft_out",
+                    "entry": "quick",
+                    "hold": "steady",
+                    "exit": "soft",
+                    "emphasis": "early",
+                    "energy": "medium",
+                },
+                ensure_ascii=False,
+            )
+            midpoint = len(completion) // 2
+            yield SimpleNamespace(
+                role="assistant",
+                completion_text=completion[:midpoint],
+                is_chunk=True,
+            )
+            yield SimpleNamespace(
+                role="assistant",
+                completion_text=completion,
+                is_chunk=False,
             )
 
     async def run_case() -> dict:
@@ -199,10 +215,17 @@ def test_performance_curve_runtime_discards_not_ready_request(
     )
 
     class SlowProvider:
-        async def text_chat(self, *, prompt: str, system_prompt: str):
-            del prompt, system_prompt
+        async def text_chat_stream(
+            self,
+            *,
+            prompt: str,
+            system_prompt: str,
+            contexts=None,
+        ):
+            del prompt, system_prompt, contexts
             await asyncio.sleep(60)
-            return SimpleNamespace(completion_text="{}")
+            if False:
+                yield None
 
     async def run_case() -> tuple[bool, dict | None]:
         runtime_state = SimpleNamespace(
@@ -241,6 +264,113 @@ def test_performance_curve_runtime_discards_not_ready_request(
     assert hint is None
 
 
+def test_performance_curve_runtime_skips_provider_without_chat_stream(
+    install_fake_astrbot,
+) -> None:
+    install_fake_astrbot()
+    from astrbot_plugin_ag99live_adapter.motion.performance_curve import (
+        PerformanceCurveInput,
+        PerformanceCurveRuntime,
+    )
+
+    class LegacyProvider:
+        def __init__(self) -> None:
+            self.complete_calls = 0
+
+        async def text_chat(self, **_kwargs):
+            self.complete_calls += 1
+            raise AssertionError("complete chat must not be used")
+
+    async def run_case() -> tuple[bool, int, bool]:
+        provider = LegacyProvider()
+        runtime = PerformanceCurveRuntime(
+            runtime_state=SimpleNamespace(
+                enable_performance_curve=True,
+                selected_performance_curve_provider=provider,
+                motion_lab_recorder=None,
+            )
+        )
+        started = runtime.start(
+            PerformanceCurveInput(
+                turn_id="turn-1",
+                tts_turn_id="tts-turn-1",
+                message_id="message-1",
+                request_id="request-1",
+                assistant_text="跳过动作曲线。",
+                assistant_reply_keywords=[],
+                motion_intent_tags=[],
+                motion_effect_summary={},
+                chat_context=[],
+            )
+        )
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        return (
+            started,
+            provider.complete_calls,
+            runtime.owns_request(turn_id="turn-1", request_id="request-1"),
+        )
+
+    assert asyncio.run(run_case()) == (True, 0, False)
+
+
+def test_text_stream_preserves_repeated_deltas(install_fake_astrbot) -> None:
+    install_fake_astrbot()
+    from astrbot_plugin_ag99live_adapter.motion.text_stream import read_text_chat_stream
+
+    class Provider:
+        async def text_chat_stream(self, **_kwargs):
+            for delta in ('{"value":"', '哈', '哈', '"', '}'):
+                yield SimpleNamespace(
+                    role="assistant", completion_text=delta, is_chunk=True
+                )
+
+    result = asyncio.run(read_text_chat_stream(
+        Provider(), prompt="prompt", system_prompt="system"
+    ))
+    assert result == '{"value":"哈哈"}'
+
+
+def test_text_stream_rejects_final_only_provider_without_fallback(
+    install_fake_astrbot,
+) -> None:
+    install_fake_astrbot()
+    from astrbot_plugin_ag99live_adapter.motion.text_stream import (
+        TextChatStreamUnavailable,
+        read_text_chat_stream,
+    )
+
+    class FinalOnlyProvider:
+        def __init__(self) -> None:
+            self.complete_calls = 0
+
+        async def text_chat_stream(self, **_kwargs):
+            yield SimpleNamespace(
+                role="assistant",
+                completion_text='{"ok":true}',
+                is_chunk=False,
+            )
+
+        async def text_chat(self, **_kwargs):
+            self.complete_calls += 1
+            raise AssertionError("complete chat must not be used")
+
+    async def run_case() -> int:
+        provider = FinalOnlyProvider()
+        with pytest.raises(
+            TextChatStreamUnavailable,
+            match="text_chat_stream_final_only",
+        ):
+            await read_text_chat_stream(
+                provider,
+                prompt="prompt",
+                system_prompt="system",
+            )
+        return provider.complete_calls
+
+    assert asyncio.run(run_case()) == 0
+
+
 def test_performance_curve_runtime_starts_logical_message_only_once(
     install_fake_astrbot,
 ) -> None:
@@ -251,10 +381,17 @@ def test_performance_curve_runtime_starts_logical_message_only_once(
     )
 
     class SlowProvider:
-        async def text_chat(self, *, prompt: str, system_prompt: str):
-            del prompt, system_prompt
+        async def text_chat_stream(
+            self,
+            *,
+            prompt: str,
+            system_prompt: str,
+            contexts=None,
+        ):
+            del prompt, system_prompt, contexts
             await asyncio.sleep(60)
-            return SimpleNamespace(completion_text="{}")
+            if False:
+                yield None
 
     async def run_case() -> tuple[bool, bool]:
         runtime = PerformanceCurveRuntime(

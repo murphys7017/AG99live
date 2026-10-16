@@ -534,3 +534,42 @@ olv_stream_setting_desktop_ownership_20261015:
   evidence_gap:
     - "A test-project TypeScript compile is blocked by existing Live2D SDK type errors; the targeted desktop-settings test compiled and passed independently."
     - "The updated desktop frontend and Adapter have not been loaded by the running applications; post-commit file deployment alone does not establish runtime activation or live OLV stream acceptance."
+
+persona_optional_motion_chat_stream_only_20261016:
+  recorded_at: "2026-10-16"
+  class: bugfix
+  risk: medium
+  status: source_validated_pending_live_acceptance
+  scope:
+    - "Use one shared chat-stream collector for independent motion and performance-curve Providers."
+    - "Remove text_chat fallback paths; unsupported, final-only, failed, or timed-out optional requests produce a local failure and allow Persona text/TTS delivery to continue."
+    - "Keep the per-segment hard budget and first-chunk diagnostics while preserving indexed motion delivery."
+  non_actions:
+    - "Do not change output.segment.v5 or the desktop playback protocol."
+    - "Do not claim token-level audio streaming or preview/final motion fusion."
+    - "Do not restart AstrBot or modify unrelated Core worktree changes."
+  validation:
+    - "Focused Adapter runtime suite passed: 120 tests."
+    - "Python compileall, changed-file diff checks, YAML parsing and plugin structure checks passed; runtime tests use test doubles and do not establish live acceptance."
+    - "Review located Ruff in the AstrBot venv; changed runtime Python files and the stream collector smoke test passed Ruff."
+    - "Review corrected repeated-delta loss and the segment-ready path's restarted Provider budget. Two collector boundary cases and the segment-ready Hook smoke passed."
+  evidence_gap:
+    - "A restarted AstrBot with DeepSeek/MiniMax action and curve Providers still needs live OLV verification of first-chunk timing, optional failure isolation, TTS delivery, and visible Live2D playback."
+
+ag99live_duplicate_clone_cleanup_20261016:
+  recorded_at: "2026-10-16"
+  class: maintenance
+  risk: high
+  status: completed
+  scope:
+    - "Synchronize applicable OLV streaming changes from the temporary Downloads clone into the Documents clone."
+    - "Keep a local recovery branch for the Downloads clone history and remove the duplicate Downloads working directory."
+  non_actions:
+    - "Do not overwrite the Documents clone's user-edited OLV plan document."
+    - "Do not copy the ignored Downloads cmd_config.json over the active configuration."
+    - "Do not restart AstrBot or deploy runtime files as part of cleanup."
+  validation:
+    - "Downloads history is retained as local branch codex/olv-stream-work-from-download."
+    - "The ignored Downloads cmd_config.json is preserved as a non-active backup before deletion."
+    - "The duplicate directory was verified as a normal Git directory before removal."
+    - "Final filesystem check confirmed C:/Users/Administrator/Downloads/AG99live no longer exists."
