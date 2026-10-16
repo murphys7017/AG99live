@@ -874,3 +874,11 @@ olv_nonstream_deferred_motion_20261017:
   scope: "N4: file-audio segments may declare motion pending in output.segment.v6; one identity-bound output.segment_motion resolves it before synth closure. Adapter owns bounded deferred tasks and cancels on Turn/disconnect. Desktop attaches valid late motion to existing audio timeline or explicitly expires it after audio terminal; M0 never enters PCM delivery."
   validation: "Renderer/node typechecks, manifest check, scoped Ruff/AST passed. Real loopback WebSocket delivery proved audio-before-motion-before-close and cancellation. Store/parser/actual timeline/orchestrator boundary proved early audio, late motion start without audio replay and duplicate rejection. AstrBot page build passed."
   evidence_gap: "No live Persona/TTS/motion Provider plus Electron/Live2D acceptance. v6 changes require matching desktop and Adapter; handshake rejects v5. Existing Core output_controller user hunk untouched. Motion provider timeout/quality and visual blending need live review."
+
+olv_nonstream_speech_motion_handoff_20261017:
+  class: feature
+  risk: high
+  status: timeline_boundary_validated_pending_live_acceptance
+  scope: "N5: when same-Turn next file audio is ready and previous speech actually ended, stop previous motion ownership through ModelEngine and settle as intentional handoff before next audio. Preserve final tails, motion-only segments, audio ordering and general timeline blockers. Expire ungenerated motion outside its speech window; add identified motion start/end/handoff events."
+  validation: "Renderer/node typechecks passed. Actual Store/timeline/orchestrator boundary proved next audio waits for audio end but not old motion tail and handoff is completed, not failed. Existing standalone runtime tail blocking check and latency IPC whitelist check passed."
+  evidence_gap: "Historical long-gap cause remains unproven without actual motion-end logs. No Electron/Live2D visual continuity acceptance; uses existing stop semantics rather than a new blend engine. Real event observations are now available for confirmation."

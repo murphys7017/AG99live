@@ -3,6 +3,7 @@ import type {
   PlaybackTimelineClockReader,
   PlaybackTimelineSnapshot,
 } from "./contracts.js";
+import { reportLatencyStage } from "../adapter-connection/runtime/latency.js";
 import {
   createPlaybackTimelineEngine,
   type PlaybackTimelineEngine,
@@ -79,6 +80,7 @@ export interface PlaybackTimelineRuntimeDeps<TMotionPayload = unknown> {
 }
 
 export interface PlaybackTimelineRuntime<TMotionPayload = unknown> {
+  handoffSpeechMotionTail: (turnId: string | null, messageId: string) => boolean;
   startSegmentJob: (
     job: PlaybackTimelineSegmentJob<TMotionPayload>,
   ) => void;
@@ -890,6 +892,7 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
       return;
     }
     const engine = timeline.engine;
+    reportLatencyStage("motion_started", turnId, null, messageId);
     const before = engine.getSnapshot();
     if (
       timeline.projectsMotionSession
@@ -930,6 +933,7 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     }
     const before = timeline.engine.getSnapshot();
     if (hasOpenSink(timeline, MOTION_TIMELINE_SINK_ID)) {
+      reportLatencyStage("motion_ended", turnId, null, messageId);
       markMotionSessionTerminal(turnId, messageId, terminal, reason);
     }
     timeline.engine.markSinkTerminal(
@@ -1139,8 +1143,8 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
       if (!snapshot || isTimelineTerminalPhase(timeline)) {
         continue;
       }
-      // Audio and motion are one ordered segment. A motion tail must settle
-      // before another segment can start, even after its audio has ended.
+      // Preserve ordered ownership. The orchestrator may explicitly hand off
+      // a completed speech segment's motion tail before starting its successor.
       const blocksRelease = snapshot.sinks.some(
         (sink) => sink.required && !isTerminalSinkValue(sink.terminal),
       );
@@ -1153,6 +1157,22 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
       });
     }
     return segments;
+  }
+
+  function handoffSpeechMotionTail(turnId: string | null, messageId: string): boolean {
+    const timeline = getTimeline(turnId, messageId);
+    const snapshot = timeline?.engine.getSnapshot();
+    if (!timeline || !snapshot
+      || snapshot.sinks.find((sink) => sink.id === AUDIO_TIMELINE_SINK_ID)?.terminal !== "completed"
+      || !hasOpenSink(timeline, MOTION_TIMELINE_SINK_ID)) return false;
+    // Stop the previous owner through ModelEngine before releasing the next
+    // segment. This is an intentional handoff, not concurrent parameter writes.
+    deps.segmentExecution.motionSink.interrupt(turnId, messageId, "speech_segment_handoff");
+    reportLatencyStage("motion_handoff", turnId, null, messageId);
+    if (getTimeline(turnId, messageId) === timeline) {
+      markMotionTimelineTerminal(turnId, messageId, "completed", "speech_segment_handoff");
+    }
+    return true;
   }
 
   function findAudioTimelineSegments(
@@ -1449,6 +1469,7 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
   }
 
   return {
+    handoffSpeechMotionTail,
     startSegmentJob,
     startIncrementalMotion,
     rejectAudioBeforeStart,

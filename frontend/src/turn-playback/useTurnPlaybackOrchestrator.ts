@@ -17,6 +17,7 @@ interface TurnPlaybackOrchestratorOptions {
   timelineRuntime: Pick<
     PlaybackTimelineRuntime<NormalizedMotionPayload>,
     | "startSegmentJob"
+    | "handoffSpeechMotionTail"
     | "startIncrementalMotion"
     | "rejectMotionBeforeStart"
     | "findPlaybackReleaseBlockers"
@@ -28,6 +29,22 @@ export function useTurnPlaybackOrchestrator(
   options: TurnPlaybackOrchestratorOptions,
 ) {
   function scheduleReadySegments(): void {
+    for (const session of options.sessionStore.getSessions()) {
+      if (session.phase === "completed" || session.phase === "failed") continue;
+      for (let index = 0; index + 1 < session.segmentOrder.length; index++) {
+        const previous = session.segments.get(session.segmentOrder[index]!);
+        const next = session.segments.get(session.segmentOrder[index + 1]!);
+        if (!previous || !next || previous.incremental || next.incremental
+          || previous.audio.terminal !== "completed" || !previous.text.delivered
+          || !isAtomicSegmentResolved(next) || !canReleaseAudio(next)) continue;
+        if (previous.motion.pending) {
+          // A generated result is still acknowledged later, but can no longer
+          // animate this completed speech window or hold up the following audio.
+          options.sessionStore.markMotionFailed(previous.turnId, previous.messageId, "deferred_motion_speech_window_ended");
+        }
+        options.timelineRuntime.handoffSpeechMotionTail(previous.turnId, previous.messageId);
+      }
+    }
     // Late motion belongs to an already playing audio timeline. It must be
     // attached before checking blockers, including that very audio timeline.
     for (const session of options.sessionStore.getSessions()) {

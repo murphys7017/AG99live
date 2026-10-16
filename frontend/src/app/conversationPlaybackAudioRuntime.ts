@@ -105,16 +105,16 @@ export function createConversationPlaybackAudioRuntime(options: {
     turnId: string | null,
     messageId: string,
   ): Promise<void> {
-    reportLatencyStage("audio_prepare_start", turnId, messageId);
+    reportLatencyStage("audio_prepare_start", turnId, null, messageId);
     presentation.reportAudioPlaybackPreparing();
     await audioSegmentRunner.start(audioUrl, turnId, messageId, {
       onPlaybackStarted: (event) => {
-        reportLatencyStage("audio_prepare_end", turnId, messageId);
-        reportLatencyStage("audio_started", turnId, messageId);
+        reportLatencyStage("audio_prepare_end", turnId, null, messageId);
+        reportLatencyStage("audio_started", turnId, null, messageId);
         presentation.reportAudioPlaybackStarted(turnId, event.durationMs);
       },
       onEnded: () => {
-        reportLatencyStage("audio_ended", turnId, messageId);
+        reportLatencyStage("audio_ended", turnId, null, messageId);
         presentation.reportAudioPlaybackEnded();
       },
       onError: (reason) => {

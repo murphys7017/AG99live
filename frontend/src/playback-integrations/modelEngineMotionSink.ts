@@ -283,10 +283,12 @@ export function createMotionTimelineRunTracker(options: {
       const completedByHandoff = owner.executionKind === "parameter_plan"
         && event.status === "stopped"
         && event.reason === "direct_parameter_plan_replaced";
+      const completedSpeechTail = event.status === "stopped"
+        && event.reason === "speech_segment_handoff";
       options.markMotionTimelineTerminal(
         owner.turnId,
         owner.messageId,
-        event.status === "completed" || completedByHandoff
+        event.status === "completed" || completedByHandoff || completedSpeechTail
           ? "completed"
           : event.status === "stopped"
             ? "interrupted"

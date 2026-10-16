@@ -23,6 +23,7 @@ export function parseDesktopLatencyEvent(value: unknown): DesktopLatencyEvent | 
     && DESKTOP_LATENCY_STAGES.some((stage) => stage === value.stage)
     && (value.turnId === null || isBoundedString(value.turnId))
     && (value.streamId === null || isBoundedString(value.streamId))
+    && (value.messageId === null || isBoundedString(value.messageId))
     && isFiniteNonNegativeNumber(value.monotonicMs)
     && isFiniteNonNegativeNumber(value.timeOriginMs)
     && isFiniteNonNegativeNumber(value.timestampEpochMs)
@@ -32,6 +33,7 @@ export function parseDesktopLatencyEvent(value: unknown): DesktopLatencyEvent | 
       stage: value.stage as typeof DESKTOP_LATENCY_STAGES[number],
       turnId: value.turnId,
       streamId: value.streamId,
+      messageId: value.messageId,
       monotonicMs: value.monotonicMs,
       timeOriginMs: value.timeOriginMs,
       timestampEpochMs: value.timestampEpochMs,

@@ -11,6 +11,7 @@ import type { ProtocolEnvelope } from "../src/types/protocol.js";
 const store = useTurnPlaybackSessionStore();
 let audioStarts = 0;
 let motionStarts = 0;
+const handoffs: string[] = [];
 const runtime = createPlaybackTimelineRuntime<NormalizedMotionPayload>({
   segmentExecution: {
     session: store,
@@ -19,7 +20,7 @@ const runtime = createPlaybackTimelineRuntime<NormalizedMotionPayload>({
       failAssistantTextForPlayback() { return true; },
     },
     audioSink: { releaseAudioForPlayback() { audioStarts++; return true; } },
-    motionSink: { start() { motionStarts++; return true; }, interrupt() {} },
+    motionSink: { start() { motionStarts++; return true; }, interrupt(_turn, _message, reason) { handoffs.push(reason); } },
   },
   audioSession: store,
   motionSession: store,
@@ -53,6 +54,20 @@ assert.equal(motionStarts, 1, "late motion must start on its active audio timeli
 assert.equal(audioStarts, 1, "late motion must not replay audio");
 store.assertOutputSegmentsResolved("turn:1");
 assert.throws(() => applyDeferredMotion(envelope, store, normalizeMotionPayload), /state_invalid/);
+store.commitOutputSegment("turn:1", "segment:2", {
+  state: "accepted", text: { state: "present", content: "next" },
+  audio: { state: "present", url: "http://localhost/next.wav" },
+  motion: { state: "absent" }, speech: { state: "absent" },
+});
+orchestrator.flush();
+assert.equal(audioStarts, 1, "next audio must not overlap playing audio");
+runtime.markAudioTimelineTerminal("turn:1", "segment:1", "completed", "audio_ended");
+await nextTick();
+orchestrator.flush();
+assert.equal(audioStarts, 2, "ready next speech must not wait for the previous motion tail");
+assert.deepEqual(handoffs, ["speech_segment_handoff"]);
+assert.equal(store.getSession("turn:1")?.segments.get("segment:1")?.motion.completed, true);
+assert.equal(store.getSession("turn:1")?.segments.get("segment:1")?.motion.failed, false);
 orchestrator.dispose();
 runtime.stopAllTimelines("test_complete");
 console.log("Complete-audio/late-motion timeline boundary passed.");

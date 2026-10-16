@@ -454,6 +454,7 @@ export type DesktopLatencyEvent =
       turnId: string | null;
       streamId: string | null;
       monotonicMs: number;
+      messageId: string | null;
       timeOriginMs: number;
       timestampEpochMs: number;
     }
