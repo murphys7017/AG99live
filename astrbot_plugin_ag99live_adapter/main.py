@@ -654,6 +654,7 @@ class MyPlugin(Star):
         async def _generate_preview() -> None:
             current_task = asyncio.current_task()
             result: IndependentMotionResult | None = None
+            wait_stage = "context"
             try:
                 provider = getattr(bundle.runtime_state, "selected_independent_motion_provider", None)
                 if provider is None:
@@ -681,6 +682,7 @@ class MyPlugin(Star):
                             "", None, "motion_context_unavailable", 0
                         )
                     else:
+                        wait_stage = "concurrency_gate"
                         remaining = deadline - loop.time()
                         if remaining <= 0:
                             raise asyncio.TimeoutError
@@ -701,7 +703,10 @@ class MyPlugin(Star):
                                 assistant_text="",
                                 segment_intent=work["segment_intents_by_index"][segment_index],
                                 prepared_context=prepared_context,
+                                persona_result_id=normalized_result_id,
+                                segment_index=segment_index,
                             )
+                            wait_stage = "provider"
                             result = await await_with_hard_deadline(
                                 call,
                                 remaining,
@@ -711,6 +716,15 @@ class MyPlugin(Star):
                             if acquired:
                                 work["concurrency_gate"].release()
             except asyncio.TimeoutError:
+                logger.warning(
+                    "DIAG motion.generation_deadline_exhausted turn_id=%s "
+                    "persona_result_id=%s segment_index=%s stage=%s timestamp_epoch_ms=%s",
+                    normalized_turn_id,
+                    normalized_result_id,
+                    segment_index,
+                    wait_stage,
+                    time.time_ns() // 1_000_000,
+                )
                 result = IndependentMotionResult("", None, "motion_timeout", 0)
             except Exception as exc:  # noqa: BLE001
                 logger.debug("WIRING independent_motion.intent_preview_failed error=%s", exc, exc_info=True)

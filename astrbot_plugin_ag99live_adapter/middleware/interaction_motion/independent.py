@@ -8,6 +8,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from time import monotonic, perf_counter, time_ns
 from typing import Any
+from uuid import uuid4
 
 from astrbot.api import logger
 
@@ -83,27 +84,58 @@ async def _request_motion_provider_text(
     system_prompt: str,
     contexts: list[dict[str, str]] | tuple[dict[str, str], ...] | None,
     turn_id: str,
+    motion_request_id: str,
+    persona_result_id: str | None,
+    segment_index: int | None,
 ) -> tuple[str, str]:
     """Read the motion Provider incrementally without a complete-chat fallback."""
 
+    started = perf_counter()
+    first_chunk_received = False
+
     def _on_first_chunk() -> None:
+        nonlocal first_chunk_received
+        first_chunk_received = True
         logger.info(
             "DIAG latency.motion_provider_first_chunk turn_id=%s "
-            "transport=stream timestamp_epoch_ms=%s",
+            "motion_request_id=%s persona_result_id=%s segment_index=%s "
+            "transport=stream elapsed_ms=%.1f timestamp_epoch_ms=%s",
             turn_id,
+            motion_request_id,
+            persona_result_id or "<none>",
+            segment_index,
+            (perf_counter() - started) * 1000,
             time_ns() // 1_000_000,
         )
 
-    return (
-        await read_text_chat_stream(
+    status = "failed"
+    try:
+        text = await read_text_chat_stream(
             provider,
             prompt=prompt,
             system_prompt=system_prompt,
             contexts=contexts,
             on_first_chunk=_on_first_chunk,
-        ),
-        "stream",
-    )
+        )
+        status = "completed"
+        return text, "stream"
+    except asyncio.CancelledError:
+        status = "cancelled"
+        raise
+    finally:
+        logger.info(
+            "DIAG latency.motion_provider_stream_finished turn_id=%s "
+            "motion_request_id=%s persona_result_id=%s segment_index=%s "
+            "status=%s first_chunk_received=%s elapsed_ms=%.1f timestamp_epoch_ms=%s",
+            turn_id,
+            motion_request_id,
+            persona_result_id or "<none>",
+            segment_index,
+            status,
+            first_chunk_received,
+            (perf_counter() - started) * 1000,
+            time_ns() // 1_000_000,
+        )
 
 
 def _consume_background_motion_exception(task: asyncio.Task) -> None:
@@ -707,6 +739,8 @@ async def generate_independent_motion_for_segments(
                         "provider": provider,
                         "assistant_text": speech,
                         "segment_intent": segment_intents[index] if index < len(segment_intents) else {},
+                        "persona_result_id": persona_result_id,
+                        "segment_index": index,
                     }
                     if shared_context is not None:
                         kwargs["prepared_context"] = shared_context
@@ -1107,8 +1141,12 @@ async def generate_independent_motion(
     assistant_text: str,
     prepared_context: IndependentMotionContext | None = None,
     segment_intent: Mapping[str, Any] | None = None,
+    persona_result_id: str | None = None,
+    segment_index: int | None = None,
 ) -> IndependentMotionResult:
     images: list[str] = []
+    motion_request_id = uuid4().hex
+    generation_started = perf_counter()
     turn_id = event.get_extra("_turn_id") or "<missing>"
     provider_id = getattr(bundle.runtime_state, "independent_motion_provider_id", "<missing>")
     mode = (
@@ -1128,6 +1166,19 @@ async def generate_independent_motion(
             motion_payload=motion_payload,
             reason=reason,
             image_count=image_count,
+        )
+        logger.info(
+            "DIAG latency.motion_result_ready turn_id=%s motion_request_id=%s "
+            "persona_result_id=%s segment_index=%s payload_present=%s reason=%s "
+            "elapsed_ms=%.1f timestamp_epoch_ms=%s",
+            turn_id,
+            motion_request_id,
+            persona_result_id or "<none>",
+            segment_index,
+            motion_payload is not None,
+            reason,
+            (perf_counter() - generation_started) * 1000,
+            time_ns() // 1_000_000,
         )
         logger.debug(
             "WIRING independent_motion.generation_completed turn_id=%s "
@@ -1241,9 +1292,13 @@ async def generate_independent_motion(
         )
         logger.info(
             "DIAG latency.motion_provider_request_started turn_id=%s "
+            "motion_request_id=%s persona_result_id=%s segment_index=%s "
             "transport=%s history_message_count=%s image_count=%s "
             "prompt_len=%s system_prompt_len=%s timestamp_epoch_ms=%s",
             turn_id,
+            motion_request_id,
+            persona_result_id or "<none>",
+            segment_index,
             expected_transport,
             len(contexts),
             len(images),
@@ -1257,6 +1312,9 @@ async def generate_independent_motion(
             system_prompt=system_prompt,
             contexts=contexts or None,
             turn_id=str(turn_id),
+            motion_request_id=motion_request_id,
+            persona_result_id=persona_result_id,
+            segment_index=segment_index,
         )
         logger.debug(
             "WIRING independent_motion.provider_response_received turn_id=%s "

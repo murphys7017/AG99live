@@ -556,6 +556,40 @@ persona_optional_motion_chat_stream_only_20261016:
   evidence_gap:
     - "A restarted AstrBot with DeepSeek/MiniMax action and curve Providers still needs live OLV verification of first-chunk timing, optional failure isolation, TTS delivery, and visible Live2D playback."
 
+olv_incremental_pipeline_batch1_20261016:
+  date: '2026-10-16'
+  class: feature
+  risk: high
+  status: contract_and_observability_ready_audio_boundary_probed
+  scope:
+    - "Freeze text, audio and motion stream identities, ordering, revision, completion and backpressure contract."
+    - "Add per-request/per-segment motion diagnostics for first chunk, stream termination, valid result and deadline stage."
+    - "Do not advertise unsupported protocol capability or alter active playback/deadline behavior in this batch."
+  validation:
+    - "Actual configured MiniMax model and voice passed bidirectional first-audio-before-second-text, flush, cancel and finish checks."
+    - "A separate PCM 32000 Hz mono probe passed: first chunk after text in about 234 ms; 78020 bytes received."
+  evidence_gap:
+    - "Provider boundary only: no live Core-to-Adapter-to-Electron chunk playback, lip sync or motion fusion acceptance."
+    - "Subsequent implementation must remove full-material barriers and separate motion generation lifetime from delivery."
+
+olv_incremental_pipeline_plan_revision_20261016:
+  date: '2026-10-16'
+  class: documentation
+  risk: medium
+  status: plan_updated_runtime_not_changed
+  scope:
+    - "User clarified that each stage must process and forward usable increments without full-segment, full-motion-JSON or full-audio barriers."
+    - "Replace the active plan with parallel text/audio and motion streams in the existing Turn and playback timeline; mark complete-material phase 1 as historical."
+    - "Separate first-response waiting from motion generation lifetime and require a delivery/fusion channel for valid late motion."
+  validation:
+    - "Traced the local motion stream collector, TTS base queue implementation and MiniMax TTS audio aggregation."
+    - "Reassessment verified the official MiniMax bidirectional TTS API and its sentence buffering, flush/cancel and completion semantics; actual account/model acceptance is still unverified."
+    - "Traced existing Persona speech_delta suppression in OLV, URL audio sink duration barrier and missing late motion revision contract."
+    - "Plan source-reviewed; no runtime changes or repeat test suites."
+  evidence_gap:
+    - "Incremental wire fields, selected Provider input capabilities, chunk format and motion fusion still need implementation design and real acceptance."
+    - "No commit, deployment, configuration changes or host restart."
+
 persona_optional_motion_completion_and_action_only_20261016:
   date: '2026-10-16'
   class: bugfix
