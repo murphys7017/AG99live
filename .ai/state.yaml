@@ -890,3 +890,11 @@ olv_nonstream_deferred_motion_app_review_20261017:
   scope: "N4 follow-up source review: reserve pending segment motion in the real app speech-only admission gate, preventing fallback speech animation from claiming the slot before its deferred Provider result."
   validation: "Full renderer typecheck passed; actual duration-ready -> speech-only preparation -> motion-start chain traced."
   evidence_gap: "Existing boundary test did not instantiate the full model app, so this correction is source/static validated; real desktop acceptance remains pending."
+
+olv_nonstream_build_acceptance_20261017:
+  class: maintenance
+  risk: medium
+  status: build_validated_pending_live_acceptance
+  scope: "Final review and complete Electron build for N0-N7 nonstream optimization commits; no service restart or runtime mode switch."
+  validation: "npm run build passed renderer/WebSDK/node checks and Electron main/preload/renderer generation. AstrBot page build, changed Adapter Ruff, schema manifest and unique-key state YAML checks passed."
+  validation_gap: "Core generic AI-state validator was also tried on Live and rejects its existing record-only format (missing task/context/checks_run/validation_gap top-level terms); Live governance format was not rewritten. Actual microphone, Providers and Live2D acceptance remains pending."
