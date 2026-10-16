@@ -156,13 +156,16 @@ export function createIncrementalSegmentWriter(options: {
     const stream = streamFor(segment, "motion", id);
     const normalized = options.normalizeMotionPayload(payload);
     if (!normalized.ok) throw new Error(`incremental_output_motion_payload_invalid:${normalized.reason}`);
+    stream.nextSeq += 1;
+    // A late production result is acknowledged but cannot reopen a local
+    // execution terminal or replace a payload already handed to the body.
+    if (segment.motion.released || segment.motion.completed || segment.motion.failed || segment.motion.absent) return;
     segment.motion.payload = normalized.payload;
     segment.motion.source = "incremental_stream";
     segment.motion.receivedAtMs = performance.now();
     segment.motion.absent = false;
     segment.motion.failed = false;
     segment.motion.released = false;
-    stream.nextSeq += 1;
   }
 
   function acceptIncrementalAudio(id: IncrementalIdentity, offset: number, byteLength: number): void {
@@ -203,6 +206,7 @@ export function createIncrementalSegmentWriter(options: {
       segment.audio.terminal = status === "completed" ? "absent" : "failed";
       segment.audio.reason = status === "completed" ? "incremental_audio_empty" : reason;
     } else if (resource === "motion") {
+      if (segment.motion.completed || segment.motion.failed || segment.motion.absent) return;
       if (segment.motion.payload !== null && status === "completed") {
         segment.motion.absent = false;
         segment.motion.failed = false;

@@ -30,7 +30,7 @@ export function useTurnPlaybackOrchestrator(
 ) {
   function scheduleReadySegments(): void {
     for (const session of options.sessionStore.getSessions()) {
-      if (session.phase === "completed" || session.phase === "failed") continue;
+      if (session.interrupted || session.phase === "completed" || session.phase === "failed") continue;
       for (let index = 0; index + 1 < session.segmentOrder.length; index++) {
         const previous = session.segments.get(session.segmentOrder[index]!);
         const next = session.segments.get(session.segmentOrder[index + 1]!);
@@ -48,10 +48,22 @@ export function useTurnPlaybackOrchestrator(
     // Late motion belongs to an already playing audio timeline. It must be
     // attached before checking blockers, including that very audio timeline.
     for (const session of options.sessionStore.getSessions()) {
-      if (session.phase === "completed" || session.phase === "failed") continue;
+      if (session.interrupted || session.phase === "completed" || session.phase === "failed") continue;
       for (const segment of session.segments.values()) {
+        if (segment.incremental && segment.motion.payload && !segment.motion.released
+          && !segment.motion.failed && !segment.motion.completed
+          && (segment.audio.terminal === "failed" || segment.audio.terminal === "completed")) {
+          options.timelineRuntime.rejectMotionBeforeStart(
+            segment.turnId, segment.messageId,
+            segment.audio.terminal === "failed"
+              ? `audio_failed_before_motion_release:${segment.audio.reason || "audio_failed"}`
+              : "incremental_motion_speech_window_ended",
+          );
+          continue;
+        }
         if (segment.audio.started && segment.audio.terminal === "idle"
           && segment.motion.payload && !segment.motion.released
+          && !segment.motion.failed && !segment.motion.completed
           && segment.motion.receivedAtMs !== null) {
           options.timelineRuntime.startIncrementalMotion({
             turnId: segment.turnId, messageId: segment.messageId,
@@ -71,7 +83,7 @@ export function useTurnPlaybackOrchestrator(
     }
     let segment: DeepReadonly<TurnPlaybackSegment> | null = null;
     for (const session of options.sessionStore.getSessions()) {
-      if (session.phase === "completed" || session.phase === "failed") {
+      if (session.interrupted || session.phase === "completed" || session.phase === "failed") {
         continue;
       }
       segment = getActivePlaybackSegment(session);
@@ -86,23 +98,28 @@ export function useTurnPlaybackOrchestrator(
         return;
       }
     }
-    // Incremental delivery is released by its stream consumer on this same
-    // timeline; it must never enter the complete-material executor again.
+    // Text/PCM remain owned by the stream consumer. A confirmed audio-free
+    // segment can use the existing independent motion timeline without replay.
     if (segment?.incremental) {
       if (
         segment.motion.payload
         && !segment.motion.released
-        && segment.audio.started
+        && !segment.motion.failed
+        && !segment.motion.completed
+        && segment.audio.terminal === "absent"
         && segment.motion.receivedAtMs !== null
       ) {
-        options.timelineRuntime.startIncrementalMotion({
+        options.timelineRuntime.startSegmentJob({
           turnId: segment.turnId,
           messageId: segment.messageId,
-          payload: cloneJson(segment.motion.payload) as NormalizedMotionPayload,
-          source: segment.motion.source,
-          receivedAtMs: segment.motion.receivedAtMs,
-          assistantText: segment.text.content ?? "",
-          speechCues: segment.speech.cues,
+          reason: "incremental_motion_without_audio",
+          text: { release: false, content: segment.text.content },
+          audio: { release: false, url: null, noAudioConfirmed: true },
+          motion: {
+            payload: cloneReleasedMotionPayload(segment.motion.payload),
+            source: segment.motion.source, receivedAtMs: segment.motion.receivedAtMs,
+          },
+          speech: { cues: segment.speech.cues },
         });
       }
       return;

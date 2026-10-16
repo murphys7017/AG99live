@@ -906,3 +906,11 @@ olv_stream_input_identity_20261017:
   scope: "T0b/R0: submit the Adapter server-created backend input ID as event _turn_id so Core PlatformTurnContextFactory adopts the already registered identity; reject conflicting pre-existing event identity. Preserve writer identity/terminal checks."
   validation: "Real local WebSocket input.text through MessageFactory/OLVPetPlatformEvent, Core TurnContext creation and writer delivered incremental text; wrong and terminal identities rejected without probe-side manual mapping. Scoped Ruff/AST passed."
   evidence_gap: "No live Persona/TTS/Electron run. Isolated probe had no synchronized SemanticAxisProfile and logged the expected optional MotionLab profile error; identity/output assertions passed. No runtime setting switch or restart."
+
+olv_stream_motion_terminal_20261017:
+  class: bugfix
+  risk: high
+  status: public_boundary_validated_pending_live_acceptance
+  scope: "T2/R2: use the existing motion-only timeline for confirmed zero-audio incremental segments; explicitly reject unreleased motion after audio failure or completed speech. Preserve current-audio attachment before blockers and acknowledge late production events without reopening local motion terminals. Interrupted sessions cannot release new work."
+  validation: "Renderer typecheck passed. Public incremental event runtime through real Store, normalizer, orchestrator and PlaybackTimeline started one motion-only job without replaying text/audio; failed zero-audio input rejected motion and a later production end preserved failure. Both settled locally. The body sink is an acceptance stub; no hardware."
+  evidence_gap: "Real Live2D execution, actual PCM failure and late-motion windows require joint desktop acceptance. No restart/settings change."
