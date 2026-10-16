@@ -556,6 +556,23 @@ persona_optional_motion_chat_stream_only_20261016:
   evidence_gap:
     - "A restarted AstrBot with DeepSeek/MiniMax action and curve Providers still needs live OLV verification of first-chunk timing, optional failure isolation, TTS delivery, and visible Live2D playback."
 
+olv_incremental_pcm_provider_substep_20261016:
+  date: '2026-10-16'
+  class: feature
+  risk: high
+  status: core_provider_committed_pending_consumer_implementation
+  core_commit: a612ad275
+  scope:
+    - "AstrBot exposes support_pcm_stream/get_pcm_stream with acknowledged segment boundaries and incremental MiniMax PCM output."
+    - "The existing file/WAV callers and active OLV delivery remain unchanged."
+  validation:
+    - "New implementation live two-segment smoke passed: PCM before second input, two flush boundaries, 80 chunks, 153810 bytes."
+    - "Public Provider early close passed in about 47 ms with no leftover bidi tasks. Invalid endpoint rejected before connection."
+    - "Scoped Ruff, Python syntax, state YAML and diff checks passed."
+  evidence_gap:
+    - "Core OLV incremental delivery, Adapter downlink and Electron PCM playback are not connected yet."
+    - "Do not restart or ask the user to validate the complete pipeline at this stage; no new default capability enabled."
+
 olv_incremental_pipeline_batch1_20261016:
   date: '2026-10-16'
   class: feature

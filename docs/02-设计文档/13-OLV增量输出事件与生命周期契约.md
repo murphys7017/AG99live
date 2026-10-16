@@ -41,6 +41,8 @@ Core 是文本生产状态的唯一所有者。复用 Persona 小记录协议：
 
 Core 是唯一 TTS 调用方。新 MiniMax 双向实现公开音频块与格式，不经过完整文件物化。一个在途合成会话由一个 Turn 持有，跨 Turn 复用连接须在取消/排空确认后切换生成代次。
 
+AstrBot Provider 入口为 `support_pcm_stream()` / `get_pcm_stream(text_source)`：输入字符串立即追加，输入 `None` 请求段 flush，输入迭代结束请求 session finish；输出 bytes 为 PCM 块，输出 `None` 为本次段 flush 确认。消费方必须在打断时关闭输出迭代器。此接口与旧文件/WAV `get_audio_stream()` 区分，不能把聊天流能力或旧 WAV 队列能力当作增量 PCM 准入。
+
 第一版不跨 Persona 段合并合成归属：segment_end 时发送 task_flush；确认已接受文本对应的 sentence_end 和 task_flushed、当前音频尾部归属确定后，才把下一段文本送入同一 Provider 会话。下一段在 Core 有界队列等待，不阻塞主模型继续生成，也不阻塞当前音频传输/播放。实现时先验证 Provider 的事件顺序，不能把 is_final 当整轮结束。
 
 桌面建立音频 stream sink，取代新路径对 audio URL 和预先确定总时长的依赖。按实际消费采样数建立播放时钟；暂停/欠载期间时钟不虚走。口型、音量、输出设备及动作时间锚点使用这个 sink，同一段不能产生两个音频播放实例。
