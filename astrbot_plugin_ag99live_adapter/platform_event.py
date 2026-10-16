@@ -540,7 +540,6 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         persona_result_id = str(
             platform_extras.get("persona_result_id") or ""
         ).strip()
-        semantic_text = str(platform_extras.get("semantic_text") or "")
         if (
             isinstance(segment_index, bool)
             or not isinstance(segment_index, int)
@@ -548,10 +547,6 @@ class OLVPetPlatformEvent(AstrMessageEvent):
             or not persona_result_id
         ):
             raise RuntimeError("persona_stream_motion_identity_invalid")
-        if platform_extras.get("persona_motion_only") or not semantic_text.strip():
-            platform_extras["_ag99live_motion_disabled"] = True
-            return
-
         registry = getattr(
             getattr(self.adapter, "runtime_state", None), "persona_stream_motion", None
         )

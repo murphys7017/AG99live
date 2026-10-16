@@ -50,6 +50,37 @@ async function run(): Promise<void> {
       { ...envelope, payload: { success: false } }, { currentTurnId: "turn" },
     );
     assert.equal(rejected.kind, "protocol_error");
+
+    // Optional motion generation failure preserves successful core delivery.
+    store.markTurnStarted("optional-motion");
+    store.commitOutputSegment("optional-motion", "reply", {
+      state: "accepted", text: { state: "present", content: "正常回复" },
+      audio: { state: "absent" },
+      motion: { state: "failed", reason: "motion_timeout" },
+      speech: { state: "absent" },
+    });
+    store.markSynthFinished("optional-motion", true, "");
+    store.markTextDelivered("optional-motion", "reply");
+    await nextTick();
+    assert.equal(acknowledgements.length, 2);
+    assert.deepEqual(acknowledgements[1], {
+      success: true, reason: "playback_state_changed",
+    });
+    assert.equal(
+      store.getSession("optional-motion")?.segments.get("reply")?.motion.reason,
+      "motion_timeout",
+    );
+
+    // With no core output, a failed action-only segment is still a real failure.
+    store.markTurnStarted("motion-only");
+    store.commitOutputSegment("motion-only", "action", {
+      state: "accepted", text: { state: "absent" }, audio: { state: "absent" },
+      motion: { state: "failed", reason: "motion_timeout" },
+      speech: { state: "absent" },
+    });
+    store.markSynthFinished("motion-only", true, "");
+    await nextTick();
+    assert.deepEqual(acknowledgements[2], { success: false, reason: "motion_timeout" });
   } finally {
     coordinator.dispose();
   }

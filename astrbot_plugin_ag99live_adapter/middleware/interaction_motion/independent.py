@@ -541,12 +541,12 @@ async def generate_independent_motion_for_segments(
     segment_result_futures: dict[int, asyncio.Future] | None = None,
     prepared_context: IndependentMotionContext | None = None,
 ) -> dict[int, IndependentMotionResult]:
-    """Generate one independent Provider result for each nonempty speech segment."""
+    """Generate one Provider result for each speech or explicit intent segment."""
     started = perf_counter()
     inputs = [
         (index, speech)
         for index, speech in enumerate(speech_segments)
-        if speech.strip()
+        if speech.strip() or (index < len(segment_intents) and segment_intents[index])
     ]
     if not inputs:
         return {}
@@ -1158,7 +1158,11 @@ async def generate_independent_motion(
             if prepared_context is not None
             else _dialogue_text(str(getattr(event, "message_str", "") or ""))
         )
-        if not current_user_text and not assistant_text.strip():
+        if (
+            not current_user_text
+            and not assistant_text.strip()
+            and not segment_intent
+        ):
             return finish(
                 motion_payload=None,
                 reason="current_input_missing",

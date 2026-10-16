@@ -4,6 +4,8 @@
 
 ## 当前进度
 
+- **2026-10-16 动作降级与纯动作段修复：**桌面完成回执保留动作失败诊断；没有动作物料、但该段文本或音频已正常交付时，不再把可选动作生成失败升级为整轮失败。有物料后的动作播放错误、纯动作段自身失败，以及文本/音频/生成失败仍按失败收口。空 speech 的流式段继续按身份汇合动作 Future；segment-ready 和独立动作输入筛选不再跳过有明确意图的纯动作段。Adapter 发送边界两例、桌面 Session→完成回执边界及定向 TypeScript 编译通过，Ruff、插件结构检查通过。提交前审阅未发现新增阻断项；提交后的 Adapter 文件同步由仓库钩子执行，运行中 AstrBot 尚未重启。真实动作生成、Live2D 播放及打断验收仍待执行；桌面修复需要重新构建并加载前端。
+
 - **2026-10-16 重复仓库同步与提交审阅：**Downloads 临时 clone 的独有动作流式读取、硬超时和可选动作失败隔离已移植到 Documents 主仓库，保留主仓库既有前端设置、终态及观测实现。独立动作和性能曲线统一使用聊天流接口，不支持时仅跳过可选结果。审阅修复增量前缀去重误吞重复字符，以及 segment-ready 备用路径重新计算 Provider 预算的问题；上下文和 Provider 共用段截止时间。变更前 runtime 检查 120 项通过，审阅后的两项流读取边界和一项 Hook 边界通过，Ruff 通过；这些检查不代表真实音频/Live2D 验收。Downloads clone 已删除，历史保存在本地恢复分支，独有配置单独备份。尚未完成 TTS 音频 chunk 连续播放和预览/最终动作融合。
 
 - **2026-10-16 整体复核修复：**Adapter 的请求、响应、结果修饰和完整 Persona 结果 Hook 已声明流式安全。动作 Future、并发任务和共享上下文现由 RuntimeState 的 `PersonaStreamMotionRegistry` 按后端 Turn 保存；交付、终态、打断及断线共享同一所有者，避免隔离 event extras 读不到任务。Core 在每次流式 Persona 调用结束（含异常和取消）后清除 `active`，`delegate` 后的普通 Core-final 回复恢复原有动作 Hook/contributor。流失败经 `control.synth_finished.success/reason` 传到桌面；已接受前缀继续播放，最终播放回执及 `turn_finished` 保留失败。相关基础提交：Adapter `f11a86c`、`fe4d1b1`，Core `75012004d`。

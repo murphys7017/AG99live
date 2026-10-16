@@ -556,6 +556,22 @@ persona_optional_motion_chat_stream_only_20261016:
   evidence_gap:
     - "A restarted AstrBot with DeepSeek/MiniMax action and curve Providers still needs live OLV verification of first-chunk timing, optional failure isolation, TTS delivery, and visible Live2D playback."
 
+persona_optional_motion_completion_and_action_only_20261016:
+  date: '2026-10-16'
+  class: bugfix
+  risk: medium
+  status: source_validated_pending_live_acceptance
+  scope:
+    - "Preserve motion failure diagnostics without failing successfully delivered core text/audio when optional motion has no payload."
+    - "Keep actual motion playback, action-only, text/audio and synthesis failures visible."
+    - "Join action-only streamed segments with their indexed motion Future and retain explicit intent in motion generation input selection."
+  validation:
+    - "Two public Adapter send boundary cases passed; targeted frontend compile and Session-to-playback-ack boundary passed."
+    - "Scoped Ruff, plugin structure and diff checks passed."
+  evidence_gap:
+    - "Pre-commit source review found no new blocking issue. No live Provider, TTS, Electron, Live2D or interruption acceptance; no host restart. Adapter file synchronization is handled by the repository post-commit hook."
+    - "Frontend requires rebuild and reload to activate the completion fix."
+
 ag99live_duplicate_clone_cleanup_20261016:
   recorded_at: "2026-10-16"
   class: maintenance

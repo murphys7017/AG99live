@@ -203,7 +203,14 @@ function resolvePlaybackFailureReason(
       return segment.audio.reason || `audio_playback_failed:${segmentId}`;
     }
     if (segment.motion.failed) {
-      return segment.motion.reason || `motion_playback_failed:${segmentId}`;
+      // A missing optional motion must not fail text/audio already delivered.
+      // Keep actual motion playback errors and failed motion-only output visible.
+      const coreOutputDelivered = (
+        segment.text.delivered && (segment.text.content?.trim().length ?? 0) > 0
+      ) || segment.audio.terminal === "completed";
+      if (segment.motion.payload !== null || !coreOutputDelivered) {
+        return segment.motion.reason || `motion_playback_failed:${segmentId}`;
+      }
     }
   }
   return null;

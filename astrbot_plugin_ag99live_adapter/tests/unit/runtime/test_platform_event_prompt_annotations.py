@@ -210,9 +210,11 @@ def test_streaming_segments_allow_unknown_count_until_terminal_hook(
     }
 
 
+@pytest.mark.parametrize("speech", ["spoken", ""])
 def test_streaming_output_joins_motion_future_by_segment_identity(
     install_fake_astrbot,
     monkeypatch,
+    speech,
 ) -> None:
     _install_platform_event_astrbot_stubs(install_fake_astrbot, monkeypatch)
     event = _build_event(_load_platform_event_module(), images=[])
@@ -241,7 +243,7 @@ def test_streaming_output_joins_motion_future_by_segment_identity(
             },
         )
         await event.send_message_with_extras(
-            [Plain("spoken")],
+            [Plain(speech)],
             platform_extras={
                 "logical_message_id": "stream-segment-0",
                 "persona_incremental_delivery": True,
@@ -249,7 +251,8 @@ def test_streaming_output_joins_motion_future_by_segment_identity(
                 "persona_result_id": "persona-result-1",
                 "persona_segment_index": 0,
                 "persona_streaming": True,
-                "semantic_text": "spoken",
+                "semantic_text": speech,
+                "persona_motion_only": not speech,
             },
             record_send_operation=False,
         )

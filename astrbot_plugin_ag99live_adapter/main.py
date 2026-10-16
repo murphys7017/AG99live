@@ -916,8 +916,6 @@ class MyPlugin(Star):
             speech_segments.append("")
         speech_segments[segment_index] = speech
         work["speech_segments"] = speech_segments
-        if not speech.strip():
-            return
 
         result_future = work["segment_result_futures"].get(segment_index)
         if not isinstance(result_future, asyncio.Future):
