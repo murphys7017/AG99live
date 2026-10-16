@@ -17,6 +17,7 @@ interface TurnPlaybackOrchestratorOptions {
   timelineRuntime: Pick<
     PlaybackTimelineRuntime<NormalizedMotionPayload>,
     | "startSegmentJob"
+    | "startIncrementalMotion"
     | "rejectMotionBeforeStart"
     | "findPlaybackReleaseBlockers"
     | "subscribeExecutionStateChanges"
@@ -53,7 +54,25 @@ export function useTurnPlaybackOrchestrator(
     }
     // Incremental delivery is released by its stream consumer on this same
     // timeline; it must never enter the complete-material executor again.
-    if (segment?.incremental) return;
+    if (segment?.incremental) {
+      if (
+        segment.motion.payload
+        && !segment.motion.released
+        && segment.audio.started
+        && segment.motion.receivedAtMs !== null
+      ) {
+        options.timelineRuntime.startIncrementalMotion({
+          turnId: segment.turnId,
+          messageId: segment.messageId,
+          payload: cloneJson(segment.motion.payload) as NormalizedMotionPayload,
+          source: segment.motion.source,
+          receivedAtMs: segment.motion.receivedAtMs,
+          assistantText: segment.text.content ?? "",
+          speechCues: segment.speech.cues,
+        });
+      }
+      return;
+    }
     if (!segment || !isAtomicSegmentResolved(segment)) {
       if (segment) {
         console.debug("[TurnPlaybackOrchestrator] candidate segment is not atomically resolved.", {
@@ -190,6 +209,7 @@ export function useTurnPlaybackOrchestrator(
           textDelivered: segment.text.delivered,
           audioUrl: segment.audio.url,
           audioReleased: segment.audio.released,
+          audioStarted: segment.audio.started,
           audioTerminal: segment.audio.terminal,
           motionPayloadPresent: segment.motion.payload !== null,
           motionReleased: segment.motion.released,

@@ -817,3 +817,20 @@ olv_incremental_motion_update_20261017:
     No real motion Provider, WebSocket, timeline start or Live2D acceptance.
     Update proves state/protocol handoff only; motion fusion, late replacement
     policy and capability advertisement remain pending. No restart.
+
+olv_incremental_motion_timeline_start_20261017:
+  date: '2026-10-17'
+  class: feature
+  risk: high
+  scope: >-
+    Start an incremental segment's normalized motion payload through the
+    existing PlaybackTimeline/ModelEngine sink after the PCM timeline has
+    actually started. Preserve the motion payload through production end and
+    let the existing ModelEngine terminal callback settle playback.
+  validation: >-
+    Frontend vue-tsc passed after adding the public runtime start boundary and
+    orchestrator watch for audio-started plus motion payload. Protocol/session
+    smoke accepted update then completed motion without marking it absent.
+  evidence_gap: >-
+    No Electron, real motion Provider, ModelEngine or Live2D runtime acceptance.
+    Audio and motion live-start timing remains to be verified after restart.

@@ -82,6 +82,15 @@ export interface PlaybackTimelineRuntime<TMotionPayload = unknown> {
   startSegmentJob: (
     job: PlaybackTimelineSegmentJob<TMotionPayload>,
   ) => void;
+  startIncrementalMotion: (options: {
+    turnId: string | null;
+    messageId: string;
+    payload: TMotionPayload;
+    source: string | null;
+    receivedAtMs: number;
+    assistantText: string;
+    speechCues: readonly import("../types/protocol.js").OutputSegmentSpeechCue[];
+  }) => boolean;
   rejectMotionBeforeStart: (
     turnId: string | null,
     messageId: string,
@@ -437,6 +446,46 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
       timeline: segmentExecutorTimelinePort,
     });
     notifyExecutionStateChanged();
+  }
+
+  function startIncrementalMotion(options: {
+    turnId: string | null;
+    messageId: string;
+    payload: TMotionPayload;
+    source: string | null;
+    receivedAtMs: number;
+    assistantText: string;
+    speechCues: readonly import("../types/protocol.js").OutputSegmentSpeechCue[];
+  }): boolean {
+    const interrupt = (reason: string) => deps.segmentExecution.motionSink.interrupt(
+      options.turnId,
+      options.messageId,
+      reason,
+    );
+    const prepared = ensureMotionTimelineSink(
+      options.turnId,
+      options.messageId,
+      {
+        start: () => deps.segmentExecution.motionSink.start(options.payload, {
+          turnId: options.turnId,
+          messageId: options.messageId,
+          assistantText: options.assistantText,
+          speechCues: options.speechCues,
+          motionSource: options.source,
+          receivedAtMs: options.receivedAtMs,
+          timelineMode: "audio",
+        }),
+        onInterrupt: interrupt,
+      },
+    );
+    if (!prepared || !startTimelineSink(options.turnId, options.messageId, MOTION_TIMELINE_SINK_ID)) {
+      rejectMotionBeforeStart(options.turnId, options.messageId, "incremental_motion_start_rejected");
+      return false;
+    }
+    deps.segmentExecution.session.markMotionReleased(options.turnId, options.messageId);
+    deps.segmentExecution.session.markPhase(options.turnId, "playing");
+    notifyExecutionStateChanged();
+    return true;
   }
 
   const segmentExecutorTimelinePort: PlaybackTimelineSegmentExecutorTimelinePort = {
@@ -1399,6 +1448,7 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
 
   return {
     startSegmentJob,
+    startIncrementalMotion,
     rejectAudioBeforeStart,
     rejectMotionBeforeStart,
     startAudioTimelineSink,

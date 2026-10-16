@@ -161,7 +161,7 @@ export function createIncrementalSegmentWriter(options: {
     segment.motion.receivedAtMs = performance.now();
     segment.motion.absent = false;
     segment.motion.failed = false;
-    segment.motion.released = true;
+    segment.motion.released = false;
     stream.nextSeq += 1;
   }
 
@@ -203,11 +203,15 @@ export function createIncrementalSegmentWriter(options: {
       segment.audio.terminal = status === "completed" ? "absent" : "failed";
       segment.audio.reason = status === "completed" ? "incremental_audio_empty" : reason;
     } else if (resource === "motion") {
-      // Completion means explicitly empty only when no update was accepted;
-      // never infer absent merely because text/audio has finished.
-      segment.motion.absent = status === "completed";
-      segment.motion.failed = status !== "completed";
-      segment.motion.reason = status === "completed" ? "incremental_motion_empty" : reason;
+      if (segment.motion.payload !== null && status === "completed") {
+        segment.motion.absent = false;
+        segment.motion.failed = false;
+        segment.motion.reason = "";
+      } else {
+        segment.motion.absent = status === "completed";
+        segment.motion.failed = status !== "completed";
+        segment.motion.reason = status === "completed" ? "incremental_motion_empty" : reason;
+      }
     }
   }
   return { startIncrementalStream, appendIncrementalText, updateIncrementalMotion, acceptIncrementalAudio, endIncrementalStream };
