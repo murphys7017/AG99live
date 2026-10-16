@@ -39,9 +39,13 @@ Core 是文本生产状态的唯一所有者。复用 Persona 小记录协议：
 
 `sample_offset` 和 `total_samples` 按每声道采样帧计数。首帧 offset 为 0，之后必须连续；PCM 块长度必须为采样帧字节数的整数倍。传输可分包，禁止补发已播放采样、静默丢帧和把每包当独立 WAV 解码。
 
+下行容器固定为 magic=AG99、version=1、frame_type=2、flags=0、12 字节头与 UTF-8 JSON metadata，长度字段为 little-endian；上行麦克风仍为 type=1。metadata 最多 64 KiB，单个 PCM 块最多 64 KiB。元数据同时包含公共身份、外部 turn_id 和固定音频格式；chunk seq 从 1 开始（0 留给 start）。整数和末采样位置必须在 JavaScript 安全整数范围内。实际消费端还须检查每条流的顺序、连续 offset、start/end 与旧 Turn；单包解析通过不代替状态校验。
+
 Core 是唯一 TTS 调用方。新 MiniMax 双向实现公开音频块与格式，不经过完整文件物化。一个在途合成会话由一个 Turn 持有，跨 Turn 复用连接须在取消/排空确认后切换生成代次。
 
 AstrBot Provider 入口为 `support_pcm_stream()` / `get_pcm_stream(text_source)`：输入字符串立即追加，输入 `None` 请求段 flush，输入迭代结束请求 session finish；输出 bytes 为 PCM 块，输出 `None` 为本次段 flush 确认。消费方必须在打断时关闭输出迭代器。此接口与旧文件/WAV `get_audio_stream()` 区分，不能把聊天流能力或旧 WAV 队列能力当作增量 PCM 准入。
+
+Core 语音服务入口为 `synthesize_pcm_stream(context, event, PCMTextPart 输入流)`，返回带 start/audio/end、segment_index、sample_offset 和音频格式的 PCMStreamFrame。输入必须是预处理完成的增量，服务不代替 Core 内容校验或最终交付收口。当前已有此边界，OLV 生产入口和桌面播放器尚未接通。
 
 第一版不跨 Persona 段合并合成归属：segment_end 时发送 task_flush；确认已接受文本对应的 sentence_end 和 task_flushed、当前音频尾部归属确定后，才把下一段文本送入同一 Provider 会话。下一段在 Core 有界队列等待，不阻塞主模型继续生成，也不阻塞当前音频传输/播放。实现时先验证 Provider 的事件顺序，不能把 is_final 当整轮结束。
 

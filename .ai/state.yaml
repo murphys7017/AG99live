@@ -556,6 +556,29 @@ persona_optional_motion_chat_stream_only_20261016:
   evidence_gap:
     - "A restarted AstrBot with DeepSeek/MiniMax action and curve Providers still needs live OLV verification of first-chunk timing, optional failure isolation, TTS delivery, and visible Live2D playback."
 
+olv_pcm_downlink_boundary_20261016:
+  date: '2026-10-16'
+  class: feature
+  risk: high
+  status: protocol_and_transport_boundaries_validated_not_enabled
+  scope:
+    - "Encode type-2 PCM downlink frames with complete identities, safe sample ranges and bounded frame size."
+    - "Send binary and JSON on the same connection with backpressure; deferred replies remain bound to their originating client."
+    - "Add a strict matching TypeScript decoder; do not advertise stream capability before the producer and playback sink exist."
+  core_commits:
+    - "2fa0550ee: close text input when interrupted during flush acknowledgement."
+    - "c50eb6de3: expose the prepared-text-to-tagged-PCM voice service."
+  validation:
+    - "Actual Python encoder output decoded in TypeScript; an uplink frame was rejected. Targeted TypeScript compilation passed."
+    - "Current Core with an isolated root passed real loopback JSON/binary WebSocket delivery and rejection of a stale connection-bound sender."
+    - "Real Core PCM service passed two-segment identity, sample continuity and first-audio-before-second-input checks."
+  validation_environment:
+    - "An initial AG99-cwd probe imported the system AstrBot 4.14.6 package and auto-normalized AG99live/data/cmd_config.json, an ignored test config with zero Providers. Its exact pre-probe contents were not captured; no reconstruction from a different config was attempted."
+    - "Repeated transport validation pinned the current Core source and an isolated ASTRBOT_ROOT. The actual Downloads/AstrBot config still contains its 32 Providers, interaction middleware and memory; the preserved Downloads-clone config backup hash is unchanged."
+  evidence_gap:
+    - "OLV producer preparation/callback wiring, desktop socket dispatch and PCM sink are pending; this is not desktop playback or motion-fusion acceptance."
+    - "No application restart or active-path switch."
+
 olv_incremental_pcm_provider_substep_20261016:
   date: '2026-10-16'
   class: feature

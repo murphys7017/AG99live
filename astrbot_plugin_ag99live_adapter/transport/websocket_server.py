@@ -26,7 +26,7 @@ class WebSocketTransport:
         用来给前端提供 /cache/audio/*.wav 等媒体文件。
 
     自身不解析任何业务消息：所有入站文本/二进制都转手给 handle_message /
-    handle_binary_message 回调；出站只暴露 send_json。回调用法见 __init__ 形参。
+    handle_binary_message 回调；出站支持 JSON 控制消息及 PCM 二进制帧。
     """
 
     def __init__(
@@ -132,34 +132,43 @@ class WebSocketTransport:
                 payload.get("turn_id"),
             )
             return False
-        return await self._send_json_to_client(client, payload)
+        return await self._send_payload_to_client(client, payload)
+
+    async def send_binary(self, payload: bytes) -> bool:
+        """Send one downlink frame with transport backpressure and no extra queue."""
+        client = self._ws_client
+        if client is None:
+            return False
+        return await self._send_payload_to_client(client, payload)
 
     def bind_current_client_sender(
         self,
-    ) -> Callable[[dict[str, Any]], Awaitable[bool]]:
-        """Bind deferred replies to the connection that originated the request."""
+    ) -> Callable[[dict[str, Any] | bytes], Awaitable[bool]]:
+        """Bind deferred JSON/binary replies to their originating connection."""
         client = self._ws_client
         if client is None:
             raise RuntimeError("websocket_client_unavailable")
 
-        async def send_bound(payload: dict[str, Any]) -> bool:
+        async def send_bound(payload: dict[str, Any] | bytes) -> bool:
             if self._ws_client is not client:
                 logger.warning(
                     "Bound WebSocket send skipped: connection is no longer current "
                     "type=%s turn_id=%s",
-                    payload.get("type", "<unknown>"),
-                    payload.get("turn_id"),
+                    payload.get("type", "<unknown>") if isinstance(payload, dict) else "binary",
+                    payload.get("turn_id") if isinstance(payload, dict) else None,
                 )
                 return False
-            return await self._send_json_to_client(client, payload)
+            return await self._send_payload_to_client(client, payload)
 
         return send_bound
 
-    async def _send_json_to_client(self, client, payload: dict[str, Any]) -> bool:
-        payload_type = payload.get("type", "<unknown>")
-        turn_id = payload.get("turn_id")
+    async def _send_payload_to_client(self, client, payload: dict[str, Any] | bytes) -> bool:
+        payload_type = payload.get("type", "<unknown>") if isinstance(payload, dict) else "binary"
+        turn_id = payload.get("turn_id") if isinstance(payload, dict) else None
         try:
-            await client.send(json.dumps(payload, ensure_ascii=False))
+            await client.send(
+                payload if isinstance(payload, bytes) else json.dumps(payload, ensure_ascii=False)
+            )
             return True
         except asyncio.CancelledError:
             raise

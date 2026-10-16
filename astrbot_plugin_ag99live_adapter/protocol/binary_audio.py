@@ -11,8 +11,53 @@ from .constants import TYPE_INPUT_AUDIO_STREAM_CHUNK
 MAGIC = b"AG99"
 VERSION = 1
 FRAME_TYPE_AUDIO_CHUNK = 1
+FRAME_TYPE_OUTPUT_AUDIO_CHUNK = 2
 HEADER_SIZE = 12
 MAX_METADATA_BYTES = 64 * 1024
+MAX_OUTPUT_AUDIO_BYTES = 64 * 1024
+
+
+def build_output_audio_frame(metadata: dict[str, Any], audio: bytes) -> bytes:
+    """Encode a bounded, identity-tagged downlink PCM chunk (frame type 2)."""
+    if not isinstance(audio, bytes) or not audio or len(audio) % 2:
+        raise BinaryAudioFrameError("output_audio_pcm_invalid")
+    if len(audio) > MAX_OUTPUT_AUDIO_BYTES:
+        raise BinaryAudioFrameError("output_audio_chunk_too_large")
+    for field in (
+        "turn_id", "core_turn_id", "persona_result_id", "segment_message_id", "stream_id"
+    ):
+        value = metadata.get(field)
+        if not isinstance(value, str) or not value.strip() or len(value) > 256:
+            raise BinaryAudioFrameError(f"output_audio_identity_invalid:{field}")
+    for field in ("segment_index", "seq", "sample_offset"):
+        value = metadata.get(field)
+        if type(value) is not int or not 0 <= value <= 9_007_199_254_740_991:
+            raise BinaryAudioFrameError(f"output_audio_sequence_invalid:{field}")
+    if metadata["seq"] < 1:
+        raise BinaryAudioFrameError("output_audio_chunk_requires_start_sequence")
+    if metadata["sample_offset"] + len(audio) // 2 > 9_007_199_254_740_991:
+        raise BinaryAudioFrameError("output_audio_sample_range_invalid")
+    if (
+        metadata.get("schema_version") != "olv.incremental_output.v1"
+        or metadata.get("encoding") != "pcm16le"
+        or type(metadata.get("sample_rate")) is not int
+        or metadata["sample_rate"] != 32000
+        or type(metadata.get("channels")) is not int
+        or metadata["channels"] != 1
+    ):
+        raise BinaryAudioFrameError("output_audio_format_invalid")
+    encoded_metadata = json.dumps(
+        metadata, ensure_ascii=False, separators=(",", ":"), allow_nan=False
+    ).encode("utf-8")
+    if len(encoded_metadata) > MAX_METADATA_BYTES:
+        raise BinaryAudioFrameError("output_audio_metadata_too_large")
+    return (
+        MAGIC
+        + bytes((VERSION, FRAME_TYPE_OUTPUT_AUDIO_CHUNK, 0, 0))
+        + len(encoded_metadata).to_bytes(4, "little")
+        + encoded_metadata
+        + audio
+    )
 
 
 @dataclass(frozen=True)
