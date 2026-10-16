@@ -1,3 +1,5 @@
+import { createPcmOutputSession, type PcmOutputSession } from "./pcmOutputSession.js";
+
 const SPEECH_OUTPUT_FADE_INITIAL_GAIN = 0.86;
 const SPEECH_OUTPUT_FADE_DURATION_SECONDS = 0.04;
 const SPEECH_OUTPUT_PRIMER_DURATION_SECONDS = 0.35;
@@ -15,6 +17,7 @@ export interface SpeechOutputSession {
 
 export interface SpeechOutputRuntime {
   attach(audio: HTMLAudioElement): SpeechOutputSession;
+  attachPcm(): PcmOutputSession;
   dispose(): Promise<void>;
 }
 
@@ -111,70 +114,81 @@ export function createSpeechOutputRuntime(): SpeechOutputRuntime {
     });
   }
 
+  function attachSource(context: AudioContext, source: AudioNode): SpeechOutputSession {
+    activeSession?.dispose();
+
+    const analyser = context.createAnalyser();
+    analyser.fftSize = 1024;
+    analyser.smoothingTimeConstant = 0.28;
+    const outputGain = context.createGain();
+    outputGain.gain.value = SPEECH_OUTPUT_FADE_INITIAL_GAIN;
+    source.connect(analyser);
+    analyser.connect(outputGain);
+    outputGain.connect(context.destination);
+
+    let sessionDisposed = false;
+    let outputStarted = false;
+    const session: SpeechOutputSession = {
+      analyser,
+      sampleRate: context.sampleRate,
+      prepare: () => prepareOutput(context),
+      start() {
+        if (sessionDisposed || outputStarted) {
+          return;
+        }
+        outputStarted = true;
+        const now = context.currentTime;
+        outputGain.gain.cancelScheduledValues(now);
+        outputGain.gain.setValueAtTime(SPEECH_OUTPUT_FADE_INITIAL_GAIN, now);
+        outputGain.gain.linearRampToValueAtTime(
+          1,
+          now + SPEECH_OUTPUT_FADE_DURATION_SECONDS,
+        );
+        console.info("[SpeechOutput] segment output fade started.", {
+          initialGain: SPEECH_OUTPUT_FADE_INITIAL_GAIN,
+          fadeMs: SPEECH_OUTPUT_FADE_DURATION_SECONDS * 1000,
+        });
+      },
+      dispose() {
+        if (sessionDisposed) {
+          return;
+        }
+        sessionDisposed = true;
+        if (activeSession === session) {
+          activeSession = null;
+        }
+        lastOutputActivityAtMs = performance.now();
+        try {
+          source.disconnect();
+        } catch (_error) {
+          // Browser audio graph teardown can race with element disposal.
+        }
+        try {
+          analyser.disconnect();
+        } catch (_error) {
+          // Browser audio graph teardown can race with element disposal.
+        }
+        try {
+          outputGain.disconnect();
+        } catch (_error) {
+          // Browser audio graph teardown can race with element disposal.
+        }
+      },
+    };
+    activeSession = session;
+    return session;
+  }
+
   return {
     attach(audio) {
       const context = requireAudioContext();
-      activeSession?.dispose();
-
-      const analyser = context.createAnalyser();
-      analyser.fftSize = 1024;
-      analyser.smoothingTimeConstant = 0.28;
-      const outputGain = context.createGain();
-      outputGain.gain.value = SPEECH_OUTPUT_FADE_INITIAL_GAIN;
-      const source = context.createMediaElementSource(audio);
-      source.connect(analyser);
-      analyser.connect(outputGain);
-      outputGain.connect(context.destination);
-
-      let sessionDisposed = false;
-      let outputStarted = false;
-      const session: SpeechOutputSession = {
-        analyser,
-        sampleRate: context.sampleRate,
-        prepare: () => prepareOutput(context),
-        start() {
-          if (sessionDisposed || outputStarted) {
-            return;
-          }
-          outputStarted = true;
-          const now = context.currentTime;
-          outputGain.gain.cancelScheduledValues(now);
-          outputGain.gain.setValueAtTime(SPEECH_OUTPUT_FADE_INITIAL_GAIN, now);
-          outputGain.gain.linearRampToValueAtTime(
-            1,
-            now + SPEECH_OUTPUT_FADE_DURATION_SECONDS,
-          );
-          console.info("[SpeechOutput] segment output fade started.", {
-            initialGain: SPEECH_OUTPUT_FADE_INITIAL_GAIN,
-            fadeMs: SPEECH_OUTPUT_FADE_DURATION_SECONDS * 1000,
-          });
-        },
-        dispose() {
-          if (sessionDisposed) {
-            return;
-          }
-          sessionDisposed = true;
-          if (activeSession === session) {
-            activeSession = null;
-          }
-          lastOutputActivityAtMs = performance.now();
-          try {
-            source.disconnect();
-          } catch (_error) {
-            // Browser audio graph teardown can race with element disposal.
-          }
-          try {
-            analyser.disconnect();
-          } catch (_error) {
-            // Browser audio graph teardown can race with element disposal.
-          }
-          try {
-            outputGain.disconnect();
-          } catch (_error) {
-            // Browser audio graph teardown can race with element disposal.
-          }
-        },
-      };
+      return attachSource(context, context.createMediaElementSource(audio));
+    },
+    attachPcm() {
+      const context = requireAudioContext();
+      const input = context.createGain();
+      const output = attachSource(context, input);
+      const session = createPcmOutputSession(context, input, output);
       activeSession = session;
       return session;
     },

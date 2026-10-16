@@ -556,6 +556,23 @@ persona_optional_motion_chat_stream_only_20261016:
   evidence_gap:
     - "A restarted AstrBot with DeepSeek/MiniMax action and curve Providers still needs live OLV verification of first-chunk timing, optional failure isolation, TTS delivery, and visible Live2D playback."
 
+olv_pcm_desktop_session_20261016:
+  date: '2026-10-16'
+  class: feature
+  risk: high
+  status: electron_webaudio_boundary_validated_not_enabled
+  scope:
+    - "Add attachPcm to the existing speech output runtime, sharing its AudioContext, analyser, fade and single-active-session ownership."
+    - "Schedule ordered PCM directly with a four-second/128-node bound, sample-consumption clock, volume sync, drain completion and interruptible writer backpressure."
+    - "Core review commit 67abf4b7a rejects truncated Provider completion and unsolicited flush acknowledgements."
+  validation:
+    - "Renderer typecheck passed. A real Electron/WebAudio muted boundary run passed unknown-duration playback, underrun clock freeze, duplicate offset rejection, EOF drain, buffer bound and cancellation wake."
+    - "Real MiniMax Core service returned 62416 samples after completion validation changes; a premature Provider EOF was rejected."
+    - "Source review and diff checks passed; no broad or repeated suites."
+  evidence_gap:
+    - "Production OLV delta preparation, socket dispatch, timeline/Turn binding and motion fusion remain pending; no capability advertised or application restarted."
+    - "Muted boundary scheduling is not audible-output, lip-sync or Live2D acceptance. The existing 350 ms cold device primer remains and should overlap stream preparation."
+
 olv_pcm_downlink_boundary_20261016:
   date: '2026-10-16'
   class: feature
