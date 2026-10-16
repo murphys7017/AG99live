@@ -51,4 +51,11 @@ assert.equal(
 );
 assert.equal(parseDesktopLatencyEvent({ type: "unrecognized" }), null);
 
+const stage = {
+  type: "pipeline_stage", stage: "screenshot_end", turnId: "input:turn-1",
+  streamId: "mic:stream-1", monotonicMs: 100, timeOriginMs: 1000, timestampEpochMs: 1100,
+};
+assert.deepEqual(parseDesktopLatencyEvent({ ...stage, transcript: "private" }), stage);
+assert.equal(parseDesktopLatencyEvent({ ...stage, stage: "arbitrary private data" }), null);
+
 console.log("Desktop latency event boundary tests passed.");

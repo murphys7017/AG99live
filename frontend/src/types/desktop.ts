@@ -445,7 +445,18 @@ export interface DesktopPttEventAck {
   timestamp: string;
 }
 
+import type { DesktopLatencyStage } from "./latency.js";
+
 export type DesktopLatencyEvent =
+  | {
+      type: "pipeline_stage";
+      stage: DesktopLatencyStage;
+      turnId: string | null;
+      streamId: string | null;
+      monotonicMs: number;
+      timeOriginMs: number;
+      timestampEpochMs: number;
+    }
   | {
       type: "audio_capture_ended";
       turnId: string;

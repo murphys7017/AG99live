@@ -834,3 +834,11 @@ olv_incremental_motion_timeline_start_20261017:
   evidence_gap: >-
     No Electron, real motion Provider, ModelEngine or Live2D runtime acceptance.
     Audio and motion live-start timing remains to be verified after restart.
+
+olv_nonstream_latency_20261017:
+  class: feature
+  risk: medium
+  status: source_validated_pending_live_acceptance
+  scope: "N0: record capture shutdown, end queue, screenshot, send and file playback milestones with renderer timeOrigin; whitelist content-free IPC events."
+  validation: "Renderer/node typechecks and focused desktop latency event boundary passed. General test compilation hits unrelated SDK typing errors; no SDK changes made."
+  evidence_gap: "No Electron restart or hardware playback measurement. Backend existing ASR/Persona/TTS timings remain in use; motion attribution follows in N5."

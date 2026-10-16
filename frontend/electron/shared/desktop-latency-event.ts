@@ -1,4 +1,5 @@
 import type { DesktopLatencyEvent } from "../../src/types/desktop";
+import { DESKTOP_LATENCY_STAGES } from "../../src/types/latency.js";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -15,6 +16,26 @@ function isBoundedString(value: unknown, maxLength = 128): value is string {
 export function parseDesktopLatencyEvent(value: unknown): DesktopLatencyEvent | null {
   if (!isRecord(value)) {
     return null;
+  }
+
+  if (
+    value.type === "pipeline_stage"
+    && DESKTOP_LATENCY_STAGES.some((stage) => stage === value.stage)
+    && (value.turnId === null || isBoundedString(value.turnId))
+    && (value.streamId === null || isBoundedString(value.streamId))
+    && isFiniteNonNegativeNumber(value.monotonicMs)
+    && isFiniteNonNegativeNumber(value.timeOriginMs)
+    && isFiniteNonNegativeNumber(value.timestampEpochMs)
+  ) {
+    return {
+      type: value.type,
+      stage: value.stage as typeof DESKTOP_LATENCY_STAGES[number],
+      turnId: value.turnId,
+      streamId: value.streamId,
+      monotonicMs: value.monotonicMs,
+      timeOriginMs: value.timeOriginMs,
+      timestampEpochMs: value.timestampEpochMs,
+    };
   }
 
   if (

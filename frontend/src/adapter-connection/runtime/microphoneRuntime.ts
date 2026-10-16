@@ -22,6 +22,7 @@ import {
 import type { DesktopPttKeyBinding } from "../../types/desktop.js";
 import { buildAudioStreamChunkFrame, float32ToPcm16le } from "./audioStreamFrame.js";
 import { captureRealtimeDesktopScreenshot } from "../outbound/desktopCapture.js";
+import { reportLatencyStage } from "./latency.js";
 
 export type MicrophoneCaptureOrigin = "manual" | "ptt" | "auto";
 export type PttCaptureCommandResult = "started" | "stopped" | "discarded" | "ignored" | "failed";
@@ -151,6 +152,7 @@ export function createAdapterMicrophoneRuntime(
         ),
       );
       audioStreamStarted = true;
+      reportLatencyStage("capture_start", turnId, streamId);
     }
 
     socket.send(
@@ -386,6 +388,7 @@ export function createAdapterMicrophoneRuntime(
     deps.state.micCapturing = false;
     const inputTurnId = activeMicTurnId ?? createRootInputTurnId();
     const inputStreamId = activeMicStreamId;
+    reportLatencyStage("capture_stop_requested", inputTurnId, inputStreamId);
     const inputLastSequence = activeMicSeq - 1;
     const inputCaptureMode = resolveMicrophoneCaptureMode();
     const shouldEndAudioStream = audioStreamStarted;
@@ -414,15 +417,23 @@ export function createAdapterMicrophoneRuntime(
     }
 
     let protocolError: unknown = null;
+    reportLatencyStage("capture_runtime_stopped", inputTurnId, inputStreamId);
     if (inputSocket?.readyState === WebSocket.OPEN && shouldEndAudioStream) {
       if (!inputStreamId) {
         protocolError = new Error("audio_stream_started_without_stream_id");
       } else {
         try {
           await enqueueAudioStreamEnd(async () => {
+            reportLatencyStage("audio_end_queue_ready", inputTurnId, inputStreamId);
+            if (desktopSnapshotRequested) {
+              reportLatencyStage("screenshot_start", inputTurnId, inputStreamId);
+            }
             const desktopCapture = desktopSnapshotRequested
               ? await captureRealtimeDesktopScreenshot()
               : null;
+            if (desktopSnapshotRequested) {
+              reportLatencyStage("screenshot_end", inputTurnId, inputStreamId);
+            }
             if (
               deps.getSocket() !== inputSocket
               || inputSocket.readyState !== WebSocket.OPEN
@@ -442,6 +453,7 @@ export function createAdapterMicrophoneRuntime(
               },
               inputTurnId,
             )));
+            reportLatencyStage("audio_end_sent", inputTurnId, inputStreamId);
             const latencyEvent = {
               type: "audio_capture_ended" as const,
               turnId: inputTurnId,

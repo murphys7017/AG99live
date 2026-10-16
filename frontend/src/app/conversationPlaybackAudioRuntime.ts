@@ -25,6 +25,7 @@ import { createLive2DLipSyncTimelineSink } from "../live2d/lipSyncTimelineSink.j
 import type { NormalizedMotionPayload } from "../types/motion.js";
 import type { SpeechOutputRuntime } from "../playback-timeline/speechOutputRuntime.js";
 import { createPcmTimelinePlayback } from "../playback-timeline/pcmTimelinePlayback.js";
+import { reportLatencyStage } from "../adapter-connection/runtime/latency.js";
 
 export interface ConversationPlaybackAudioPresentation {
   reportAudioPlaybackPreparing(): void;
@@ -104,12 +105,16 @@ export function createConversationPlaybackAudioRuntime(options: {
     turnId: string | null,
     messageId: string,
   ): Promise<void> {
+    reportLatencyStage("audio_prepare_start", turnId, messageId);
     presentation.reportAudioPlaybackPreparing();
     await audioSegmentRunner.start(audioUrl, turnId, messageId, {
       onPlaybackStarted: (event) => {
+        reportLatencyStage("audio_prepare_end", turnId, messageId);
+        reportLatencyStage("audio_started", turnId, messageId);
         presentation.reportAudioPlaybackStarted(turnId, event.durationMs);
       },
       onEnded: () => {
+        reportLatencyStage("audio_ended", turnId, messageId);
         presentation.reportAudioPlaybackEnded();
       },
       onError: (reason) => {
