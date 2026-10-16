@@ -67,6 +67,7 @@ export function createConversationPlaybackRuntime(options: {
     adapterPlayback: adapter.playback,
     motionSink: requiredMotionTimelineSink,
     audioSink,
+    speechOutputRuntime,
     onAudioTimelineStarted: (turnId, messageId, timeline) => {
       requireMotionRuntime().handleAudioTimelineStarted(turnId, messageId, timeline);
     },

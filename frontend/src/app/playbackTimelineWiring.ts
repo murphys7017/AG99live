@@ -7,6 +7,7 @@ import {
 } from "./conversationPlaybackAudioRuntime.js";
 import type { MotionTimelinePreparationResult } from "../model-engine/runtime/playbackClock.js";
 import type { PlaybackTimelineAudioSink } from "../playback-timeline/audioSink.js";
+import type { SpeechOutputRuntime } from "../playback-timeline/speechOutputRuntime.js";
 import type { PlaybackTimelineSnapshot } from "../playback-timeline/contracts.js";
 import {
   createPlaybackTimelineRuntime,
@@ -54,6 +55,7 @@ export function createAppPlaybackTimelineRuntime(options: {
     "start" | "interrupt"
   >;
   audioSink: PlaybackTimelineAudioSink;
+  speechOutputRuntime: SpeechOutputRuntime;
   onAudioTimelineStarted: (
     turnId: string | null,
     messageId: string,
@@ -108,6 +110,7 @@ export function createAppPlaybackTimelineRuntime(options: {
   audioRuntime = createConversationPlaybackAudioRuntime({
     playbackTimelineRuntime: runtime,
     audioSink: options.audioSink,
+    speechOutputRuntime: options.speechOutputRuntime,
     presentation: {
       reportAudioPlaybackPreparing: adapterPlayback.reportAudioPlaybackPreparing,
       reportAudioPlaybackStarted: adapterPlayback.reportAudioPlaybackStarted,

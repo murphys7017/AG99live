@@ -1,5 +1,5 @@
 import type {
-  PlaybackTimelineAudioElementContext,
+  PlaybackTimelineAudioSourceContext,
 } from "./audioSink.js";
 import type {
   PlaybackTimelineLipSyncRuntime,
@@ -7,7 +7,7 @@ import type {
 } from "./lipSyncSink.js";
 
 export interface PlaybackTimelineAudioLipSyncSink {
-  attachAudio(event: PlaybackTimelineAudioElementContext): void;
+  attachAudio(event: PlaybackTimelineAudioSourceContext): void;
   prepare(): Promise<void>;
   start(): void;
   completeAfterAudioEnded(): void;
@@ -85,7 +85,6 @@ export function createPlaybackTimelineAudioLipSyncSink(options: {
       });
       lipSyncRuntime.attachAudio({
         audioUrl: event.audioUrl,
-        audio: event.audio,
         getAudioCurrentTimeSeconds: event.getAudioCurrentTimeSeconds,
         isCurrentAudio: event.isCurrentAudio,
         speechOutput: event.speechOutput,

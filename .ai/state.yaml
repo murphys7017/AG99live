@@ -556,6 +556,25 @@ persona_optional_motion_chat_stream_only_20261016:
   evidence_gap:
     - "A restarted AstrBot with DeepSeek/MiniMax action and curve Providers still needs live OLV verification of first-chunk timing, optional failure isolation, TTS delivery, and visible Live2D playback."
 
+olv_pcm_timeline_binding_20261016:
+  date: '2026-10-16'
+  class: feature
+  risk: high
+  status: electron_timeline_boundary_validated_not_enabled
+  scope:
+    - "Wire PCM through ConversationPlaybackAudioRuntime into existing audio/lip-sync timeline sinks and interrupt ownership."
+    - "Report start after AudioContext consumes first samples; share analyser attachment without fabricating an HTMLAudioElement."
+    - "Preserve failed production status after accepted audio drains and reject simultaneous URL/PCM output."
+  validation:
+    - "Renderer typecheck and scoped diff checks passed."
+    - "Actual Electron/WebAudio plus PlaybackTimeline and real lip-sync sink passed preparation-not-started, consumed-sample start, shared clock/identity, unknown duration, drain completion, timeline interruption and stale append rejection."
+    - "Initial boundary run found the required audio sink start callback missing; preparation now starts through that callback and the corrected run passed."
+    - "Review retained known final duration when EOF precedes first consumed samples, and releases the previous PCM owner before terminal projection can synchronously release the next segment. The Electron boundary passed with EOF before start."
+  evidence_gap:
+    - "No Live2D model loaded; real lip-sync sink reported unavailable while audio completed. Muted output is not audible-device acceptance."
+    - "Formal socket dispatch, incremental playback segment storage, Core text preparation and Adapter production remain pending. No default capability or application restart."
+    - "The existing audio start deadline and device primer remain; started timestamp estimates AudioContext consumption, not hardware output latency."
+
 olv_pcm_desktop_session_20261016:
   date: '2026-10-16'
   class: feature

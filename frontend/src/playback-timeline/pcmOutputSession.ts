@@ -10,6 +10,8 @@ const SCHEDULE_LEAD_SECONDS = 0.005;
 
 export interface PcmOutputSession extends SpeechOutputSession {
   readonly clock: AudioPlaybackClock;
+  /** First consumed samples, expressed on this renderer's performance clock. */
+  readonly started: Promise<number>;
   /** Resolves only after production ends AND accepted audio drains. */
   readonly completed: Promise<void>;
   append(sampleOffset: number, pcm: Uint8Array): Promise<void>;
@@ -39,6 +41,16 @@ export function createPcmOutputSession(
   let prepared = false;
   let appending = false;
   let wakeWriter: (() => void) | null = null;
+  let firstStartTime: number | null = null;
+  let startTimer: ReturnType<typeof setTimeout> | null = null;
+  let startNotified = false;
+  let resolveStarted!: (atMs: number) => void;
+  let rejectStarted!: (error: Error) => void;
+  const started = new Promise<number>((resolve, reject) => {
+    resolveStarted = resolve;
+    rejectStarted = reject;
+  });
+  void started.catch(() => undefined);
   let resolveCompleted!: () => void;
   let rejectCompleted!: (error: Error) => void;
   const completed = new Promise<void>((resolve, reject) => {
@@ -79,10 +91,23 @@ export function createPcmOutputSession(
     if (finished && chunks.length === 0) resolveCompleted();
   }
 
+  function observeStart(): void {
+    if (startTimer !== null) clearTimeout(startTimer);
+    startTimer = null;
+    if (disposed || startNotified || firstStartTime === null) return;
+    if (context.state === "running" && context.currentTime > firstStartTime) {
+      startNotified = true;
+      resolveStarted(performance.now() - (context.currentTime - firstStartTime) * 1000);
+    } else {
+      startTimer = setTimeout(observeStart, 5);
+    }
+  }
+
   return {
     analyser: output.analyser,
     sampleRate: output.sampleRate,
     completed,
+    started,
     clock: {
       getCurrentTimeMs: () => currentSamples() * 1000 / SAMPLE_RATE,
       getDurationMs: () => finished ? acceptedSamples * 1000 / SAMPLE_RATE : null,
@@ -127,6 +152,7 @@ export function createPcmOutputSession(
         const start = Math.max(context.currentTime + SCHEDULE_LEAD_SECONDS, tailTime);
         const chunk = { source, start, end: start + count / SAMPLE_RATE, samples: count, ended: false };
         source.onended = () => {
+          observeStart();
           chunk.ended = true;
           source.disconnect();
           settleDrain();
@@ -142,6 +168,10 @@ export function createPcmOutputSession(
         chunks.push(chunk);
         tailTime = chunk.end;
         acceptedSamples += count;
+        if (firstStartTime === null) {
+          firstStartTime = start;
+          observeStart();
+        }
       } finally {
         appending = false;
       }
@@ -152,6 +182,9 @@ export function createPcmOutputSession(
         throw new Error("pcm_output_incomplete_or_invalid_end");
       }
       finished = true;
+      if (acceptedSamples === 0) {
+        rejectStarted(new Error("pcm_output_empty"));
+      }
       settleDrain();
     },
     dispose() {
@@ -159,6 +192,8 @@ export function createPcmOutputSession(
       // Freeze the clock at the actual consumed prefix before removing sources.
       const consumed = currentSamples();
       disposed = true;
+      if (startTimer !== null) clearTimeout(startTimer);
+      rejectStarted(new DOMException("PCM playback stopped.", "AbortError"));
       window.removeEventListener("storage", syncVolume);
       for (const chunk of chunks) {
         chunk.source.onended = null;

@@ -53,6 +53,8 @@ Core 语音服务入口为 `synthesize_pcm_stream(context, event, PCMTextPart �
 
 桌面播放边界已提供 `SpeechOutputRuntime.attachPcm()`：先 prepare，再串行 await append(sample_offset, pcm)，最后 finish(total_samples)。completed 仅在 EOF 且已接受音频排空后成功；dispose 冻结已消费前缀、停止节点并唤醒等待追加。复用现有输出图与 analyser；采样时钟只累计实际播放区间，欠载间隙不计入。缓冲最多四秒采样与 128 个音频节点，单块最多 64 KiB；调用者必须传播 await 背压，不能另建无界接收队列。此 API 尚未由正式桌面 socket/Turn 消费；现有冷启动设备预热仍为 350 ms，应在首包前开始准备。流序号、身份、旧 Turn 拒绝和最终时间线收口仍由后续正式路由负责。
 
+会话音频运行时现提供 `openPcmForTimelinePlayback(turn_id, segment_message_id)`，返回串行 append、finish 与排空 completed；沿用现有 PlaybackTimeline 的音频/口型 sink 及 Turn 打断，调用前必须完成正式播放段注册和流身份准入。PCM `started` 在 AudioContext 开始消费首批采样后通知，同进程 performance 时间由音频上下文估算，不等同于硬件实际发声时间。prepare、排队与设备预热不算起播。finish 的 failed 状态需提供 reason，已接受前缀先排空再以原原因失败；取消由时间线打断立即停播。此入口已在桌面组合层装配，正式 socket 入站及流式段存储仍待连接。真实 Live2D 口型和指定输出设备尚未验收。
+
 ## 动作事件
 
 | 类型 | 特有字段 | 语义 |

@@ -18,13 +18,17 @@ export interface RuntimeAudioPlaybackClock {
   isPlaying(): boolean;
 }
 
-export interface PlaybackTimelineAudioElementContext {
-  audioUrl: string;
-  audio: HTMLAudioElement;
+export interface PlaybackTimelineAudioSourceContext {
+  audioUrl: string | null;
   clock: AudioPlaybackClock;
   getAudioCurrentTimeSeconds: () => number;
   isCurrentAudio: () => boolean;
   speechOutput: SpeechOutputSession | null;
+}
+
+export interface PlaybackTimelineAudioElementContext extends PlaybackTimelineAudioSourceContext {
+  audioUrl: string;
+  audio: HTMLAudioElement;
 }
 
 export interface PlaybackTimelineAudioStartCallbacks {

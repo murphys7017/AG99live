@@ -23,6 +23,8 @@ import type {
 } from "../playback-timeline/playbackTimelineRuntime.js";
 import { createLive2DLipSyncTimelineSink } from "../live2d/lipSyncTimelineSink.js";
 import type { NormalizedMotionPayload } from "../types/motion.js";
+import type { SpeechOutputRuntime } from "../playback-timeline/speechOutputRuntime.js";
+import { createPcmTimelinePlayback, type PcmTimelineStream } from "../playback-timeline/pcmTimelinePlayback.js";
 
 export interface ConversationPlaybackAudioPresentation {
   reportAudioPlaybackPreparing(): void;
@@ -33,6 +35,7 @@ export interface ConversationPlaybackAudioPresentation {
 }
 
 export interface ConversationPlaybackAudioRuntime extends PlaybackTimelineAudioControl {
+  openPcmForTimelinePlayback(turnId: string, messageId: string): Promise<PcmTimelineStream>;
   releaseAudioForTimelinePlayback(
     audioUrl: string,
     messageId: string,
@@ -43,6 +46,7 @@ export interface ConversationPlaybackAudioRuntime extends PlaybackTimelineAudioC
 export function createConversationPlaybackAudioRuntime(options: {
   playbackTimelineRuntime: PlaybackTimelineRuntime<NormalizedMotionPayload>;
   audioSink: PlaybackTimelineAudioSink;
+  speechOutputRuntime: SpeechOutputRuntime;
   presentation: ConversationPlaybackAudioPresentation;
   createLipSyncRuntime?: (
     callbacks: PlaybackTimelineLipSyncRuntimeCallbacks,
@@ -86,6 +90,15 @@ export function createConversationPlaybackAudioRuntime(options: {
     runtime: playbackTimelineRuntime,
     audioSegmentSink,
   });
+  const pcmPlayback = createPcmTimelinePlayback({
+    runtime: playbackTimelineRuntime,
+    speechOutput: options.speechOutputRuntime,
+    createLipSyncSink,
+    onPreparing: () => presentation.reportAudioPlaybackPreparing(),
+    onStarted: (turnId, durationMs) => presentation.reportAudioPlaybackStarted(turnId, durationMs),
+    onEnded: () => presentation.reportAudioPlaybackEnded(),
+    onFailed: (reason) => presentation.reportAudioPlaybackFailed(reason),
+  });
 
   async function startAudioSegmentPlayback(
     audioUrl: string,
@@ -114,6 +127,7 @@ export function createConversationPlaybackAudioRuntime(options: {
     if (!audioUrl.trim()) {
       return false;
     }
+    if (pcmPlayback.isActive()) throw new Error("audio_timeline_pcm_stream_active");
     void startAudioSegmentPlayback(audioUrl, turnId, messageId);
     return true;
   }
@@ -207,6 +221,7 @@ export function createConversationPlaybackAudioRuntime(options: {
   }
 
   return {
+    openPcmForTimelinePlayback: pcmPlayback.open,
     releaseAudioForTimelinePlayback,
     stopAudioAndSettleTurn,
     stopAudioAndSettleAll,
