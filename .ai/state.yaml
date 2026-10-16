@@ -914,3 +914,11 @@ olv_stream_motion_terminal_20261017:
   scope: "T2/R2: use the existing motion-only timeline for confirmed zero-audio incremental segments; explicitly reject unreleased motion after audio failure or completed speech. Preserve current-audio attachment before blockers and acknowledge late production events without reopening local motion terminals. Interrupted sessions cannot release new work."
   validation: "Renderer typecheck passed. Public incremental event runtime through real Store, normalizer, orchestrator and PlaybackTimeline started one motion-only job without replaying text/audio; failed zero-audio input rejected motion and a later production end preserved failure. Both settled locally. The body sink is an acceptance stub; no hardware."
   evidence_gap: "Real Live2D execution, actual PCM failure and late-motion windows require joint desktop acceptance. No restart/settings change."
+
+olv_stream_motion_budget_20261017:
+  class: bugfix
+  risk: high
+  status: cross_repo_boundary_validated_pending_live_acceptance
+  scope: "T2/R5: remove the 750 ms streaming cap; use finite configured budget (default 5 s, max 60 s) bounded by Core Turn remaining time. Main preview/segment paths retain one absolute deadline across context, concurrency admission and Provider. Expose the registered producer deadline to Core, rather than minting another delivery wait."
+  validation: "Public Core output with actual OLV event, registry and writer accepted two delayed motion results at 1.15 s under a 2 s configuration, with all streams terminal and no pending tasks. Ruff and plugin structure checks passed. Core companion removes its 1 s override."
+  evidence_gap: "Isolated producer instead of real motion inference; no live success-rate or latency comparison. Adapter and Core companion changes require joint loading."

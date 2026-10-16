@@ -52,29 +52,33 @@ _PARALLEL_MOTION_WAIT_SECONDS = 2.0
 _DEFAULT_SEGMENT_MAX_CONCURRENCY = 4
 _DEFAULT_SEGMENT_TIMEOUT_SECONDS = 5.0
 _NEUROBRAIN_RESULT_WAIT_SECONDS = 1.0
-# OLV audio is the primary response.  A slow optional motion Provider must not
-# turn a streamed segment into a full-response wait; within this budget motion
-# is included, otherwise the segment is delivered with an explicit motion
-# failure state and the dialogue continues.
-_STREAM_SEGMENT_TIMEOUT_SECONDS = 0.75
-
-
-def resolve_stream_motion_budget_seconds(runtime_state: Any) -> float:
-    """Return the hard per-segment budget for supplementary motion work."""
+def resolve_stream_motion_budget_seconds(runtime_state: Any, *, event: Any = None) -> float:
+    """Bound configured motion work by the remaining owning Turn budget."""
 
     try:
         configured = float(
             getattr(
                 runtime_state,
                 "independent_motion_segment_timeout_seconds",
-                _STREAM_SEGMENT_TIMEOUT_SECONDS,
+                _DEFAULT_SEGMENT_TIMEOUT_SECONDS,
             )
         )
     except (TypeError, ValueError):
-        configured = _STREAM_SEGMENT_TIMEOUT_SECONDS
-    if configured <= 0:
-        return _STREAM_SEGMENT_TIMEOUT_SECONDS
-    return min(configured, _STREAM_SEGMENT_TIMEOUT_SECONDS)
+        configured = _DEFAULT_SEGMENT_TIMEOUT_SECONDS
+    if not math.isfinite(configured) or configured <= 0:
+        configured = _DEFAULT_SEGMENT_TIMEOUT_SECONDS
+    configured = min(configured, 60.0)
+    if event is not None:
+        # Enhanced Core supplies the Turn deadline; ordinary upstream AstrBot
+        # has no such API and keeps the configured bounded motion budget.
+        try:
+            from astrbot.core.interaction.turn_state import get_interaction_turn_deadline
+        except ImportError:
+            return configured
+        deadline = get_interaction_turn_deadline(event)
+        if deadline is not None:
+            configured = min(configured, deadline.remaining())
+    return configured
 
 
 async def _request_motion_provider_text(
@@ -625,7 +629,7 @@ async def generate_independent_motion_for_segments(
     if stream_active:
         configured_timeout = segment_timeout_seconds
         segment_timeout_seconds = resolve_stream_motion_budget_seconds(
-            bundle.runtime_state
+            bundle.runtime_state, event=event,
         )
         if segment_timeout_seconds < configured_timeout:
             logger.debug(

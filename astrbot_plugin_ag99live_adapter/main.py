@@ -595,7 +595,7 @@ class MyPlugin(Star):
             "tendency": dict(tendency) if isinstance(tendency, Mapping) else {},
         }
         work.setdefault("segment_deadlines", {})[segment_index] = (
-            loop.time() + resolve_stream_motion_budget_seconds(bundle.runtime_state)
+            loop.time() + resolve_stream_motion_budget_seconds(bundle.runtime_state, event=event)
         )
 
         if not isinstance(work.get("context_task"), asyncio.Task):
@@ -607,7 +607,7 @@ class MyPlugin(Star):
                             bundle,
                             persona_result_id=normalized_result_id,
                         ),
-                        resolve_stream_motion_budget_seconds(bundle.runtime_state),
+                        resolve_stream_motion_budget_seconds(bundle.runtime_state, event=event),
                         background_tasks=work["tasks"],
                     )
                 except asyncio.TimeoutError:
@@ -661,7 +661,7 @@ class MyPlugin(Star):
                     result = IndependentMotionResult("", None, "provider_unavailable", 0)
                 else:
                     timeout_seconds = resolve_stream_motion_budget_seconds(
-                        bundle.runtime_state
+                        bundle.runtime_state, event=event,
                     )
                     deadline = work.get("segment_deadlines", {}).get(segment_index)
                     if not isinstance(deadline, (int, float)):
@@ -958,7 +958,7 @@ class MyPlugin(Star):
         work.setdefault("segment_deadlines", {}).setdefault(
             segment_index,
             asyncio.get_running_loop().time()
-            + resolve_stream_motion_budget_seconds(bundle.runtime_state),
+            + resolve_stream_motion_budget_seconds(bundle.runtime_state, event=event),
         )
         preview_tasks = work.get("preview_tasks")
         if isinstance(preview_tasks, dict) and segment_index in preview_tasks:
@@ -976,7 +976,7 @@ class MyPlugin(Star):
                     return await await_with_hard_deadline(
                         context_preparation,
                         resolve_stream_motion_budget_seconds(
-                            bundle.runtime_state
+                            bundle.runtime_state, event=event,
                         ),
                         background_tasks=self._independent_motion_tasks,
                     )
@@ -1011,7 +1011,11 @@ class MyPlugin(Star):
             current_task = asyncio.current_task()
             result = None
             try:
-                async with work["concurrency_gate"]:
+                deadline = work["segment_deadlines"][segment_index]
+                remaining = deadline - asyncio.get_running_loop().time()
+                if remaining <= 0:
+                    raise asyncio.TimeoutError
+                async with asyncio.timeout(remaining), work["concurrency_gate"]:
                     context_timed_out = False
                     try:
                         deadline = work["segment_deadlines"].get(segment_index)
@@ -1019,7 +1023,7 @@ class MyPlugin(Star):
                             deadline - asyncio.get_running_loop().time()
                             if isinstance(deadline, (int, float))
                             else resolve_stream_motion_budget_seconds(
-                                bundle.runtime_state
+                                bundle.runtime_state, event=event,
                             )
                         )
                         if remaining <= 0:

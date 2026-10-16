@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import math
 from copy import copy
 from typing import Any, Protocol
 
@@ -207,6 +208,16 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         if isinstance(future, asyncio.Future) and not future.done():
             future.set_result(True)
         return True
+
+    def get_interaction_incremental_motion_deadline(self, *, segment_index: int) -> float | None:
+        """Expose the producer's existing deadline, never a fresh wait budget."""
+        registry = getattr(getattr(self.adapter, "runtime_state", None), "persona_stream_motion", None)
+        work = registry.get(str(self.get_extra("_turn_id") or "").strip()) if registry is not None else None
+        writer = self.get_extra("_interaction_incremental_output_writer")
+        if not isinstance(work, dict) or writer is None or work.get("persona_result_id") != writer.persona_result_id:
+            return None
+        deadline = work.get("segment_deadlines", {}).get(segment_index)
+        return float(deadline) if isinstance(deadline, (int, float)) and math.isfinite(deadline) else None
 
     async def flush_interaction_incremental_motion(self, *, segment_index: int) -> None:
         pending = self.get_extra("_interaction_incremental_motion_pending", {})
@@ -643,10 +654,10 @@ class OLVPetPlatformEvent(AstrMessageEvent):
                     )
 
                     timeout_seconds = resolve_stream_motion_budget_seconds(
-                        getattr(self.adapter, "runtime_state", None)
+                        getattr(self.adapter, "runtime_state", None), event=self,
                     )
                 except (ImportError, AttributeError, TypeError, ValueError):
-                    timeout_seconds = 0.75
+                    timeout_seconds = 5.0
                 remaining = timeout_seconds
                 deadlines = work.get("segment_deadlines")
                 if isinstance(deadlines, dict):
