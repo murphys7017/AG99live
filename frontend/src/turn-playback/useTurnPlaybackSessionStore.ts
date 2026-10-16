@@ -270,7 +270,7 @@ export function useTurnPlaybackSessionStore(options?: { normalizeMotionPayload?:
       const motionResolved = Boolean(segment.motion.payload)
         || segment.motion.absent
         || segment.motion.failed;
-      if (!textResolved || !audioResolved || !motionResolved) {
+      if (!textResolved || !audioResolved || !motionResolved || segment.motion.pending) {
         throw new Error(
           `Incomplete atomic output segment before synth_finished: turnId=${turnId}, messageId=${messageId}.`,
         );
@@ -377,6 +377,11 @@ export function useTurnPlaybackSessionStore(options?: { normalizeMotionPayload?:
     } else if (material.motion.state === "absent") {
       segment.motion.absent = true;
       segment.motion.reason = "output_segment_motion_absent";
+    } else if (material.motion.state === "pending") {
+      if (material.audio.state !== "present") {
+        throw new Error("Deferred motion requires file audio.");
+      }
+      segment.motion.pending = true;
     } else {
       segment.motion.released = true;
       segment.motion.failed = true;
@@ -407,6 +412,29 @@ export function useTurnPlaybackSessionStore(options?: { normalizeMotionPayload?:
   }
 
   // ── text ────────────────────────────────────────────────────────
+
+  function resolveDeferredMotion(
+    turnId: string, messageId: string,
+    material: Exclude<import("./session.js").OutputSegmentMotionMaterial, { state: "pending" }>,
+  ): void {
+    const { session, segment } = getSegmentSession(turnId, messageId);
+    if (isTerminalPhase(session.phase)) return; // Cancelled/finished Turn never revives.
+    if (segment.incremental || !segment.motion.pending || session.backend.synthFinished) {
+      throw new Error("deferred_motion_identity_or_state_invalid");
+    }
+    segment.motion.pending = false;
+    if (segment.audio.terminal !== "idle") {
+      markMotionFailed(turnId, messageId, "deferred_motion_audio_already_terminal");
+    } else if (material.state === "present") {
+      segment.motion.payload = material.payload;
+      segment.motion.source = material.source;
+      segment.motion.receivedAtMs = performance.now();
+    } else if (material.state === "absent") {
+      markMotionAbsent(turnId, messageId, "deferred_motion_absent");
+    } else {
+      markMotionFailed(turnId, messageId, material.reason);
+    }
+  }
 
   function markTextDelivered(
     turnId: string | null,
@@ -840,6 +868,7 @@ export function useTurnPlaybackSessionStore(options?: { normalizeMotionPayload?:
     getActiveSession,
     setActiveSession,
     commitOutputSegment,
+    resolveDeferredMotion,
     markTextDelivered,
     markTextFailed,
     markAudioReleased,

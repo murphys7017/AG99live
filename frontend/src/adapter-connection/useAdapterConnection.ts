@@ -423,7 +423,7 @@ export function createAdapterConnection(
         message_id: envelope.message_id,
         source_route: "adapter_inbound",
         phase: "output_segment_rejected",
-        payload_kind: "output.segment.v5",
+        payload_kind: "output.segment.v6",
         raw: {
           reason: message,
           type: envelope.type,

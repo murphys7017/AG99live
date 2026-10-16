@@ -67,6 +67,7 @@ INPUT_TYPES = {
 }
 
 OUTPUT_TYPES = {
+    "output.segment_motion",
     TYPE_OUTPUT_SEGMENT,
     TYPE_OUTPUT_TRANSCRIPTION,
     "output.text_stream_start",

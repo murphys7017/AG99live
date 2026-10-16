@@ -23,7 +23,7 @@ function makeEnvelope<TPayload>(
 
 function buildOutputSegment() {
   return {
-    schema_version: "output.segment.v5",
+    schema_version: "output.segment.v6",
     sequence: 0,
     text: { state: "present", content: "hello" },
     audio: { state: "present", url: "https://example.com/audio.wav" },

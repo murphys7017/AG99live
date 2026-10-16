@@ -5,7 +5,7 @@ AG99 插件 `astrbot_plugin_ag99live_adapter` 将 AG99 的对话、TTS 和动作
 ## 职责
 
 - 接收文本、流式麦克风、图片和平台事件输入，并提交到 AG99 的正常对话流程。
-- 收集一条逻辑消息的文本、TTS、动作和媒体，提交原子 `output.segment` 消息，其 Payload Schema 为 `output.segment.v5`。
+- 收集一条逻辑消息的文本、TTS、动作和媒体，提交原子 `output.segment` 消息，其 Payload Schema 为 `output.segment.v6`。
 - 校验 `ag99live.motion`，提供模型扫描、profile、动作资源和媒体的本机服务。
 - 管理 Turn、段、取消、Motion Lab 记录、可选 performance curve 与连接清理。
 
@@ -41,7 +41,7 @@ AG99 Persona
   -> ag99live.motion
   -> Adapter 严格校验
   -> engine.motion_intent.v4
-  -> output.segment（schema: output.segment.v5）
+  -> output.segment（schema: output.segment.v6）
   -> 前端 ModelEngine
   -> engine.parameter_plan.v3 或受控资源执行
 ```
@@ -62,13 +62,13 @@ AG99 Persona
 
 当同一 AstrBot 进程加载并启用 `astrbot_plugin_neurobrain` 时，普通完整结果路径中按 Persona speech 分段的独立动作会等待当前 `persona_result_id` 对应的状态更新，最多等待 1 秒。OLV 分段流式路径直接使用当前段的 `speech`、`actions`、`tendency`，省略 NeuroBrain 终态快照：该快照只在整轮结果完成后更新，等待它会推迟首段动作及语音。动作 prompt 中的 NeuroBrain 数据仅包含经过范围校验的 `emotion`、`behavior`、`last_tendency` 和 `step`；未取得对应更新时省略，不回退到上一轮缓存。整条回复独立动作链路不读取 NeuroBrain。AG99live 不会直接连接 NeuroBrain WebSocket，也不会推进状态。
 
-NeuroBrain 状态只是动作选择的辅助信号，不是动作命令；动作结果仍必须通过现有校验、`engine.motion_intent.v4` 和 `output.segment.v5` 发送链路。该接入不增加协议字段、不改变段身份、不改变播放时钟。
+NeuroBrain 状态只是动作选择的辅助信号，不是动作命令；动作结果仍必须通过现有校验、`engine.motion_intent.v4` 和 `output.segment.v6` 发送链路。该接入不增加协议字段、不改变段身份、不改变播放时钟。
 
 ### OLV 后台被动动作实验链路
 
 `passive_behavior.enabled` 默认关闭。开启后，OLV 桌宠 Adapter 自己维护一个异步后台任务；只有桌面端在线、没有活动 Turn 或正在采集/转写的语音输入、请求间隔和冷却条件都满足时，才读取 NeuroBrain 只读 API 的当前快照并调用所选 AstrBot Provider。`state_key` 留空时 NeuroBrain 只会在状态唯一时返回快照。该链路不读取或写入聊天历史，不等待 Persona，也不参与普通回复、TTS 或用户消息处理。
 
-后台 Provider 全程使用 AstrBot 的 `text_chat_stream()`。模型按 NDJSON 逐行返回动作决策；每一行完整后立即校验当前 Semantic Axis Profile，并作为独立 motion-only `output.segment.v5` 段按序发送，不等待整段模型输出结束。单次流最多接收 3 个动作；超时、过期、断线、Turn 被打断或无效动作都会停止或丢弃对应结果。被动动作不会写入聊天缓冲、普通动作 Prompt 历史、Motion Lab 对话样例或 performance curve 状态。该链路复用现有协议和前端播放能力，不修改 AstrBot 核心。
+后台 Provider 全程使用 AstrBot 的 `text_chat_stream()`。模型按 NDJSON 逐行返回动作决策；每一行完整后立即校验当前 Semantic Axis Profile，并作为独立 motion-only `output.segment.v6` 段按序发送，不等待整段模型输出结束。单次流最多接收 3 个动作；超时、过期、断线、Turn 被打断或无效动作都会停止或丢弃对应结果。被动动作不会写入聊天缓冲、普通动作 Prompt 历史、Motion Lab 对话样例或 performance curve 状态。该链路复用现有协议和前端播放能力，不修改 AstrBot 核心。
 
 PTT 采集开始、VAD 检测到开口以及新输入提交时会打断被动播放并取消在途生成；语音采集和转写期间暂停新的被动请求。
 
@@ -118,3 +118,7 @@ python -m pip install -r requirements.txt
 ```powershell
 python -m pip install -r astrbot_plugin_ag99live_adapter/requirements.txt
 ```
+
+### 普通模式的后到动作
+
+普通文件音频已就绪、同段动作仍在生成时，`output.segment.v6` 使用 `motion.state=pending` 先交付文本和完整音频；后续 `output.segment_motion` 使用相同 turn_id/message_id 交付一次终态动作槽位。它不复用 PCM 增量事件。后端在动作结果发送完成后才关闭 synth；断连/取消回收任务。桌面端将播放中的后到动作挂到原音频时间线，音频已经结束的过期动作显式失败，不重播声音。纯动作和音频合成失败继续按既有完整交付处理。两端须匹配 v6 manifest，旧桌面会在握手拒绝，升级后再重连。

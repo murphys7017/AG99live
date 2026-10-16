@@ -23,7 +23,7 @@ import {
   PROTOCOL_SCHEMA_MANIFEST,
   PROTOCOL_VERSION,
   SCHEMA_MOTION_INTENT_V4,
-  SCHEMA_OUTPUT_SEGMENT_V5,
+  SCHEMA_OUTPUT_SEGMENT_V6,
 } from "../../types/protocolSchema.generated.js";
 import {
   asRecord,
@@ -65,8 +65,8 @@ export function parseOutputSegmentPayload(
 ): PayloadParseResult<OutputSegmentPayload> {
   const record = parseObjectPayload(envelope);
   if (!record.ok) return record;
-  if (record.payload.schema_version !== SCHEMA_OUTPUT_SEGMENT_V5) {
-    return invalidPayload(envelope.type, "payload.schema_version", SCHEMA_OUTPUT_SEGMENT_V5);
+  if (record.payload.schema_version !== SCHEMA_OUTPUT_SEGMENT_V6) {
+    return invalidPayload(envelope.type, "payload.schema_version", SCHEMA_OUTPUT_SEGMENT_V6);
   }
   const rootKeys = validateExactKeys(
     envelope.type,
@@ -92,6 +92,9 @@ export function parseOutputSegmentPayload(
   }
   const motion = parseSegmentMotionSlot(envelope.type, record.payload.motion);
   if (!motion.ok) return motion;
+  if (motion.payload.state === "pending" && audio.payload.state !== "present") {
+    return invalidPayload(envelope.type, "payload.motion", "pending motion requires file audio");
+  }
   const speech = parseSegmentSpeechSlot(envelope.type, record.payload.speech);
   if (!speech.ok) return speech;
   const images = record.payload.images;
@@ -106,7 +109,7 @@ export function parseOutputSegmentPayload(
   return {
     ok: true,
     payload: {
-      schema_version: SCHEMA_OUTPUT_SEGMENT_V5,
+      schema_version: SCHEMA_OUTPUT_SEGMENT_V6,
       sequence,
       text: text.payload,
       audio: audio.payload,
@@ -170,9 +173,13 @@ function parseSegmentAudioSlot(type: string, value: unknown): PayloadParseResult
   return invalidPayload(type, "payload.audio", "valid tagged audio slot");
 }
 
-function parseSegmentMotionSlot(type: string, value: unknown): PayloadParseResult<OutputSegmentPayload["motion"]> {
+export function parseSegmentMotionSlot(type: string, value: unknown): PayloadParseResult<OutputSegmentPayload["motion"]> {
   const slot = asRecord(value);
   if (!slot) return invalidPayload(type, "payload.motion", "segment motion slot");
+  if (slot.state === "pending") {
+    const keys = validateExactKeys(type, "payload.motion", slot, ["state"]);
+    return keys.ok ? { ok: true, payload: { state: "pending" } } : keys;
+  }
   if (slot.state === "absent") {
     const keys = validateExactKeys(type, "payload.motion", slot, ["state"]);
     return keys.ok ? { ok: true, payload: { state: "absent" } } : keys;

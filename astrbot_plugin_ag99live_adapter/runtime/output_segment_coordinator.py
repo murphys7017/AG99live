@@ -31,6 +31,7 @@ from .message_utils import (
     resolve_platform_segment_message_id,
 )
 from .incremental_output import IncrementalOutputSession, SendPayload
+from .deferred_motion import DeferredMotionDelivery
 from .motion_observation_recorder import MotionObservationRecorder
 from .output_segment import (
     PASSIVE_BEHAVIOR_MOTION_SOURCE,
@@ -77,8 +78,12 @@ class OutputSegmentCoordinator:
         self._output_failures: dict[str, str] = {}
         self._turn_level_motion_consumed: set[str] = set()
         self._incremental_outputs: dict[str, IncrementalOutputSession] = {}
+        self.deferred_motion = DeferredMotionDelivery(
+            send_json=send_json, is_turn_terminal=is_turn_terminal,
+        )
 
     def reset(self) -> None:
+        self.deferred_motion.clear()
         self._incremental_outputs.clear()
         self._pending_segments.clear()
         self._segment_sequences.clear()
@@ -105,6 +110,7 @@ class OutputSegmentCoordinator:
         return bool(segment is not None and segment.persona_segment_index is not None)
 
     def clear_turn(self, turn_id: str) -> None:
+        self.deferred_motion.clear(turn_id)
         self._incremental_outputs.pop(turn_id, None)
         self._output_failures.pop(turn_id, None)
         prefix = f"{turn_id}|"
@@ -309,6 +315,10 @@ class OutputSegmentCoordinator:
                 # indexed TTS delivery owns this logical segment's motion state.
                 motion_expected = False
                 motion_failure_reason = ""
+            if self.deferred_motion.contains(normalized_turn_id, segment_message_id):
+                motion_expected = False
+                motion_failure_reason = ""
+                motion_resolution_failure = ""
             logger.debug(
                 "WIRING output_motion_resolved turn_id=%s message_id=%s "
                 "client_object_count=%s candidate_present=%s expected=%s "
@@ -398,6 +408,9 @@ class OutputSegmentCoordinator:
         self, *, turn_id: str, failure_reason: str | None = None
     ) -> None:
         normalized_turn_id = _require_turn_id_value(turn_id)
+        await self.deferred_motion.drain(normalized_turn_id)
+        if self._is_turn_terminal(normalized_turn_id):
+            return
         async with self._get_turn_lock(normalized_turn_id):
             if normalized_turn_id in self._closed_turn_ids:
                 return
@@ -606,7 +619,9 @@ class OutputSegmentCoordinator:
             )
             audio_slot = {"state": "present", "url": audio_url}
 
-        motion_slot = self._build_motion_slot(segment)
+        motion_slot = self.build_motion_slot(segment)
+        if self.deferred_motion.contains(segment.turn_id, segment.message_id):
+            motion_slot = {"state": "pending"}
         logger.debug(
             "WIRING output_motion_slot_built turn_id=%s message_id=%s "
             "state=%s source=%s schema=%s",
@@ -661,6 +676,7 @@ class OutputSegmentCoordinator:
         key = self._segment_key(segment.turn_id, segment.message_id)
         self._pending_segments.pop(key, None)
         self._flushed_segment_keys.add(key)
+        self.deferred_motion.mark_sent(segment.turn_id, segment.message_id)
         self._emitted_turn_ids.add(segment.turn_id)
 
         is_passive_behavior = segment.motion_source == PASSIVE_BEHAVIOR_MOTION_SOURCE
@@ -738,7 +754,7 @@ class OutputSegmentCoordinator:
             ),
             None,
         )
-    def _build_motion_slot(self, segment: PendingOutputSegment) -> dict[str, Any]:
+    def build_motion_slot(self, segment: PendingOutputSegment) -> dict[str, Any]:
         if segment.motion_payload is None:
             if segment.motion_failure_reason:
                 logger.warning(

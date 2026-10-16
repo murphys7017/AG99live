@@ -397,6 +397,7 @@ class AG99liveMotionResultContributor:
         parent_message_id: str,
         persona_result_id: str | None,
         materialization: Mapping[str, Any],
+        defer_motion: bool = True,
     ):
         del plugin_context
         normalized_result_id = str(persona_result_id or "").strip()
@@ -435,6 +436,65 @@ class AG99liveMotionResultContributor:
         segment_index = materialization.get("persona_segment_index")
         incremental = isinstance(segment_index, int) and not isinstance(segment_index, bool)
         last_segment = bool(materialization.get("persona_last_output_segment"))
+        if incremental and defer_motion:
+            future = work.get("segment_result_futures", {}).get(segment_index)
+            binding = work.get("tts_bindings_by_index", {}).get(segment_index)
+            identity = _resolve_frontend_identity_snapshot(event)
+            tts_items = materialization.get("tts") or []
+            tts_ready = bool(tts_items) and not tts_items[0].get("tts_failed")
+            if (
+                future is not None and not future.done() and tts_ready
+                and identity.event_frontend_turn_id
+                and _persona_tts_binding_failure_reason(
+                    binding, turn_id=turn_id, parent_message_id=parent_message_id,
+                    persona_result_id=normalized_result_id, segment_index=segment_index,
+                    segment_count=len(work.get("speech_segments") or ()),
+                ) is None
+            ):
+                async def resolve_late_motion():
+                    contribution = await self.finalize_output(
+                        event, None, turn_id=turn_id, phase=phase,
+                        parent_message_id=parent_message_id, persona_result_id=persona_result_id,
+                        materialization=materialization, defer_motion=False,
+                    )
+                    objects = getattr(contribution, "client_objects", ())
+                    for obj in objects:
+                        if obj.get("persona_segment_index") == segment_index:
+                            from ...runtime.output_segment import PendingOutputSegment
+                            segment = PendingOutputSegment(
+                                turn_id=identity.event_frontend_turn_id,
+                                message_id=binding["message_id"],
+                                tts_request_id=binding["tts_request_id"],
+                                semantic_text=str(tts_items[0].get("tts_source_text") or ""),
+                            )
+                            segment.merge_motion(
+                                payload=obj["motion_payload"], mode=obj.get("mode", "preview"),
+                                source=obj.get("source", "independent_provider"),
+                            )
+                            outputs = bundle.turn_coordinator.output_segments
+                            if outputs.performance_curves.owns_request(
+                                turn_id=segment.turn_id, request_id=segment.tts_request_id,
+                            ):
+                                segment.bind_performance_curve_request(segment.tts_request_id)
+                            slot = outputs.build_motion_slot(segment)
+                            outputs.performance_curves.commit_output_side_effects(segment, slot)
+                            outputs.observations.record_motion_slot(slot, source=segment.motion_source)
+                            return slot
+                    return {"state": "failed", "reason": "deferred_motion_payload_unavailable"}
+
+                bundle.turn_coordinator.output_segments.deferred_motion.register(
+                    identity.event_frontend_turn_id, binding["message_id"], resolve_late_motion,
+                    timeout_seconds=_persona_motion_finalization_timeout(
+                        bundle.runtime_state, tuple(work.get("speech_segments") or ()),
+                    ),
+                )
+                capabilities = get_interaction_capabilities()
+                return capabilities.interaction_result_contribution(
+                    plugin_id=self.plugin_id, priority=self.priority,
+                    metadata={"ag99live_motion_schedule": _build_persona_segment_motion_schedule(
+                        segment_count=len(work.get("speech_segments") or ()),
+                    )},
+                ) if capabilities else None
         try:
             if incremental:
                 future = work.get("segment_result_futures", {}).get(segment_index)

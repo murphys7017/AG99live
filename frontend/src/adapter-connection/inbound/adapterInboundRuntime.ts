@@ -2,6 +2,7 @@ import type { ProtocolEnvelope, SystemModelSyncPayload, SystemDesktopSettingsQue
 import type { MotionPayloadNormalizer } from "../../types/motion.js";
 import type { AdapterConnectionState } from "../state/adapterConnectionState.js";
 import { parseInboundEnvelope } from "./inboundProtocol.js";
+import { applyDeferredMotion } from "./deferredMotionProtocol.js";
 import { dispatchInboundRuntimeEvent } from "./inboundRuntimeDispatcher.js";
 import { parseIncrementalOutputEvent } from "./incrementalOutputProtocol.js";
 import { createIncrementalOutputRuntime } from "./incrementalOutputRuntime.js";
@@ -118,6 +119,11 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
     }
 
     const envelope = parsed.envelope;
+    if (envelope.type === "output.segment_motion") {
+      if (deps.state.serverInfo === null) throw new Error("deferred_motion_before_handshake");
+      applyDeferredMotion(envelope, deps.getSessionStore(), deps.normalizeMotionPayload);
+      return;
+    }
     const streamEvent = parseIncrementalOutputEvent(envelope);
     if (streamEvent) {
       if (deps.state.serverInfo === null) throw new Error("incremental_output_before_handshake");

@@ -129,6 +129,7 @@ export interface TurnPlaybackSessionAudio {
  * released/started 表示动作生命周期推进；payload 为 null 表示尚未收到任何动作意图。
  */
 export interface TurnPlaybackSessionMotion {
+  pending: boolean;
   payload: NormalizedMotionPayload | null;
   source: string | null;
   receivedAtMs: number | null;
@@ -156,6 +157,7 @@ export type OutputSegmentAudioMaterial =
   | { state: "failed"; reason: string };
 
 export type OutputSegmentMotionMaterial =
+  | { state: "pending" }
   | { state: "present"; payload: NormalizedMotionPayload; source: string }
   | { state: "absent" }
   | { state: "failed"; reason: string };
@@ -270,6 +272,7 @@ export function createEmptyAudioState(): TurnPlaybackSessionAudio {
 
 export function createEmptyMotionState(): TurnPlaybackSessionMotion {
   return {
+    pending: false,
     payload: null,
     source: null,
     receivedAtMs: null,

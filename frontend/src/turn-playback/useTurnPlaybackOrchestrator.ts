@@ -28,6 +28,23 @@ export function useTurnPlaybackOrchestrator(
   options: TurnPlaybackOrchestratorOptions,
 ) {
   function scheduleReadySegments(): void {
+    // Late motion belongs to an already playing audio timeline. It must be
+    // attached before checking blockers, including that very audio timeline.
+    for (const session of options.sessionStore.getSessions()) {
+      if (session.phase === "completed" || session.phase === "failed") continue;
+      for (const segment of session.segments.values()) {
+        if (segment.audio.started && segment.audio.terminal === "idle"
+          && segment.motion.payload && !segment.motion.released
+          && segment.motion.receivedAtMs !== null) {
+          options.timelineRuntime.startIncrementalMotion({
+            turnId: segment.turnId, messageId: segment.messageId,
+            payload: cloneReleasedMotionPayload(segment.motion.payload),
+            source: segment.motion.source, receivedAtMs: segment.motion.receivedAtMs,
+            assistantText: segment.text.content ?? "", speechCues: segment.speech.cues,
+          });
+        }
+      }
+    }
     const blockers = options.timelineRuntime.findPlaybackReleaseBlockers();
     if (blockers.length > 0) {
       console.debug("[TurnPlaybackOrchestrator] playback release blocked by active timeline.", {
@@ -241,6 +258,7 @@ function isAtomicSegmentResolved(
   const textResolved = Boolean(segment.text.content) || segment.text.delivered;
   const audioResolved = Boolean(segment.audio.url) || segment.audio.terminal !== "idle";
   const motionResolved = Boolean(segment.motion.payload)
+    || segment.motion.pending
     || segment.motion.absent
     || segment.motion.failed;
   return textResolved && audioResolved && motionResolved;

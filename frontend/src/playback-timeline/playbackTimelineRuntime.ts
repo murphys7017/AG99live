@@ -462,6 +462,8 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
       options.messageId,
       reason,
     );
+    const timeline = getTimeline(options.turnId, options.messageId);
+    if (timeline) timeline.projectsMotionSession = true;
     const prepared = ensureMotionTimelineSink(
       options.turnId,
       options.messageId,
