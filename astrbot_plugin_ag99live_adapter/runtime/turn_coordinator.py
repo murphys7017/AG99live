@@ -112,6 +112,7 @@ class TurnCoordinator:
         build_platform_event: Callable[[Any], Any],
         commit_event: Callable[[Any], None],
         create_vad_engine: Callable[[], Any],
+        input_preparation=None,
     ) -> None:
         self.session_state = session_state
         self.turn_identity_map = turn_identity_map
@@ -128,6 +129,7 @@ class TurnCoordinator:
         self._build_platform_event = build_platform_event
         self._commit_event = commit_event
         self._create_vad_engine = create_vad_engine
+        self._input_preparation = input_preparation
         self._active_speech_capture_turns: set[str] = set()
         self._passive_behavior_interrupt_handler: Callable[[], Awaitable[None]] | None = None
         self.speech_ingress = SpeechIngressService(
@@ -207,6 +209,8 @@ class TurnCoordinator:
                 self._active_speech_capture_turns.discard(turn_id)
                 await self.speech_ingress.handle_audio_stream_start(message)
                 if message.payload.get("capture_mode", "ptt") == "ptt":
+                    if self._input_preparation is not None:
+                        self._input_preparation.start(turn_id)
                     self._active_speech_capture_turns.add(turn_id)
                     async with self._turn_lock:
                         await self._interrupt_passive_work()
@@ -218,6 +222,8 @@ class TurnCoordinator:
                     if message_obj is not None:
                         await self._commit_inbound_message(message_obj, turn_id=turn_id)
                 finally:
+                    if self._input_preparation is not None:
+                        self._input_preparation.cancel(turn_id)
                     self._active_vad_turn_by_capture_turn.pop(turn_id, None)
                     self._active_speech_capture_turns.discard(turn_id)
                 return
@@ -245,6 +251,8 @@ class TurnCoordinator:
 
     def reset_turn_tracking(self) -> None:
         """Stop active AstrBot events before discarding connection-scoped state."""
+        if self._input_preparation is not None:
+            self._input_preparation.cancel()
         cleanup_failures: list[str] = []
         try:
             active_events = tuple(self._events_by_turn_id.items())
@@ -357,6 +365,8 @@ class TurnCoordinator:
             try:
                 await self._commit_inbound_message(message_obj, turn_id=turn_id)
             finally:
+                if self._input_preparation is not None:
+                    self._input_preparation.cancel(capture_turn_id)
                 self._active_speech_capture_turns.discard(capture_turn_id)
             self._active_vad_turn_by_capture_turn[capture_turn_id] = turn_id
 
@@ -892,6 +902,9 @@ class TurnCoordinator:
 
     async def _handle_vad_speech_started(self, capture_turn_id: str) -> None:
         normalized_capture_turn_id = self._require_turn_id_value(capture_turn_id)
+        if self._input_preparation is not None:
+            self._input_preparation.cancel()
+            self._input_preparation.start(normalized_capture_turn_id)
         self._active_speech_capture_turns.add(normalized_capture_turn_id)
         active_turn_id = self._active_vad_turn_by_capture_turn.get(
             normalized_capture_turn_id

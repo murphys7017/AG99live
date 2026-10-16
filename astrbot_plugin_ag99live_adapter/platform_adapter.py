@@ -26,6 +26,7 @@ from .services.frontend_system_service import FrontendSystemCommandHandler
 from .services.history_service import ConversationHistoryBridge
 from .services.media_service import MediaService
 from .services.message_factory import MessageFactory
+from .services.input_preparation import InputPreparation
 from .transport.static_routes import build_static_routes, list_background_files
 from .runtime.plugin_runtime import (
     ADAPTER_PLATFORM_NAME,
@@ -213,6 +214,12 @@ class OLVPetPlatformAdapter(Platform):
             is_connected=lambda: self.transport._ws_client is not None,
         )
         self.turn_coordinator = TurnCoordinator(
+            input_preparation=InputPreparation(
+                plugin_context=self._plugin_context,
+                build_event=lambda: self._build_platform_event(
+                    self.message_factory.build_message_object(text="", raw_message={})
+                ),
+            ),
             session_state=self.session_state,
             turn_identity_map=self.turn_identity_map,
             runtime_state=self.runtime_state,

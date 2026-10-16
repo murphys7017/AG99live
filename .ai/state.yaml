@@ -858,3 +858,11 @@ olv_nonstream_release_screenshot_20261017:
   scope: "N3: begin a fresh screenshot at microphone release concurrently with capture teardown/end-queue waiting; retain atomic audio-end image delivery."
   validation: "Renderer typecheck passed; source trace preserves socket identity recheck and existing image failure semantics."
   evidence_gap: "Actual overlap savings need new milestone logs. ASR still starts after the complete end envelope; no claim that screenshot cost was eliminated."
+
+olv_nonstream_memory_cache_prewarm_20261017:
+  class: feature
+  risk: medium
+  status: source_validated_pending_live_acceptance
+  scope: "N1 narrow slice: capture-owned, five-second bounded preparation initializes routed Memory service and warms existing recall caches for current identity/conversation; no Prompt cache or formal Turn. PTT start and VAD speech-start trigger; end/disconnect cancel."
+  validation: "Scoped Ruff, AST and public preparation success/early-cancel smoke passed. py_compile encountered a local pycache permission error; AST used instead."
+  evidence_gap: "No live memory-cache hit or latency improvement measured. Formal collectors re-read current config/identity/local state and only reuse existing keyed recall caches; no direct snapshot adoption or waiting on background update. Full collector/capability preparation remains outside this narrow slice."
