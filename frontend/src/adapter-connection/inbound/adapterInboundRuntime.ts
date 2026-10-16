@@ -2,6 +2,7 @@ import type { ProtocolEnvelope, SystemModelSyncPayload, SystemDesktopSettingsQue
 import type { MotionPayloadNormalizer } from "../../types/motion.js";
 import type { AdapterConnectionState } from "../state/adapterConnectionState.js";
 import { parseInboundEnvelope } from "./inboundProtocol.js";
+import { dispatchInboundRuntimeEvent } from "./inboundRuntimeDispatcher.js";
 import {
   mapInboundEnvelopeToEvent,
   type InboundAdapterEvent,
@@ -65,7 +66,20 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
     console.warn("[Connection] runtime protocol violation.", message);
   }
 
-  async function handleSocketMessage(rawData: string | ArrayBuffer | Blob): Promise<void> {
+  function tryHandlePriorityInterrupt(rawData: string | ArrayBuffer | Blob): boolean {
+    if (typeof rawData !== "string" || deps.state.serverInfo === null) return false;
+    // Full envelope and event validation still apply. Unknown/future Turns stay
+    // in wire order so their turn_started cannot be overtaken by an interrupt.
+    const parsed = parseInboundEnvelope(rawData);
+    if (!parsed.ok || parsed.envelope.type !== "control.interrupt") return false;
+    const event = mapInboundEnvelopeToEvent(parsed.envelope, buildInboundEventContext());
+    if (event.kind !== "interrupt" || event.turnId !== deps.state.currentTurnId) return false;
+    dispatchInboundRuntimeEvent(buildDispatchDeps(), event);
+    return true;
+  }
+
+  async function handleSocketMessage(rawData: string | ArrayBuffer | Blob, signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted();
     if (typeof rawData !== "string") {
       console.warn("[Connection] ignored non-JSON inbound websocket payload.");
       return;
@@ -181,6 +195,7 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
   }
 
   return {
+    tryHandlePriorityInterrupt,
     handleSocketMessage,
     buildInboundEventContext,
     dispatchInboundEvent,

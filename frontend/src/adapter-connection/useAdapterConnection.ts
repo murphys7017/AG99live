@@ -698,44 +698,45 @@ export function createAdapterConnection(
         state.lastError = "";
         pushHistory("system", `已连接 ${targetAddress}`);
       },
-      onMessage: (nextSocket, rawData) => {
-        if (socket !== nextSocket || attemptSerial !== connectAttemptSerial) {
-          return;
+      onPriorityMessage: (nextSocket, rawData) => {
+        if (socket !== nextSocket || attemptSerial !== connectAttemptSerial) return false;
+        return inboundRuntime.tryHandlePriorityInterrupt(rawData);
+      },
+      onMessage: (nextSocket, rawData, signal) => {
+        if (socket !== nextSocket || attemptSerial !== connectAttemptSerial) return;
+        return inboundRuntime.handleSocketMessage(rawData, signal);
+      },
+      onMessageError: (nextSocket, error) => {
+        if (socket !== nextSocket || attemptSerial !== connectAttemptSerial) return;
+        const details = error instanceof Error ? error.message : String(error);
+        state.status = "error";
+        state.lastError = `入站消息处理失败，连接已关闭：${details}`;
+        state.statusMessage = state.lastError;
+        pushHistory("error", state.lastError);
+        console.error("[AdapterConnection] fatal inbound message handler error:", error);
+        const cleanupErrors: unknown[] = [];
+        runConnectionCleanupStep(
+          "fatal audio and timeline cleanup",
+          () => stopAudioAndSettleAll("inbound_runtime_failure"),
+          cleanupErrors,
+        );
+        runConnectionCleanupStep(
+          "fatal session failure projection",
+          () => failUnresolvedSessions("inbound_runtime_failure"),
+          cleanupErrors,
+        );
+        runConnectionCleanupStep(
+          "fatal websocket close",
+          () => nextSocket.close(),
+          cleanupErrors,
+        );
+        if (cleanupErrors.length > 0) {
+          console.error(
+            "[AdapterConnection] fatal inbound cleanup completed with errors.",
+            cleanupErrors,
+          );
         }
-        inboundRuntime.handleSocketMessage(rawData).catch((error) => {
-          if (socket !== nextSocket || attemptSerial !== connectAttemptSerial) {
-            return;
-          }
-          const details = error instanceof Error ? error.message : String(error);
-          state.status = "error";
-          state.lastError = `入站消息处理失败，连接已关闭：${details}`;
-          state.statusMessage = state.lastError;
-          pushHistory("error", state.lastError);
-          console.error("[AdapterConnection] fatal inbound message handler error:", error);
-          const cleanupErrors: unknown[] = [];
-          runConnectionCleanupStep(
-            "fatal audio and timeline cleanup",
-            () => stopAudioAndSettleAll("inbound_runtime_failure"),
-            cleanupErrors,
-          );
-          runConnectionCleanupStep(
-            "fatal session failure projection",
-            () => failUnresolvedSessions("inbound_runtime_failure"),
-            cleanupErrors,
-          );
-          runConnectionCleanupStep(
-            "fatal websocket close",
-            () => nextSocket.close(),
-            cleanupErrors,
-          );
-          if (cleanupErrors.length > 0) {
-            console.error(
-              "[AdapterConnection] fatal inbound cleanup completed with errors.",
-              cleanupErrors,
-            );
-          }
-      });
-    },
+      },
       onError: (nextSocket, opened) => {
         if (socket !== nextSocket || attemptSerial !== connectAttemptSerial) {
           return;

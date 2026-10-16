@@ -556,6 +556,24 @@ persona_optional_motion_chat_stream_only_20261016:
   evidence_gap:
     - "A restarted AstrBot with DeepSeek/MiniMax action and curve Providers still needs live OLV verification of first-chunk timing, optional failure isolation, TTS delivery, and visible Live2D playback."
 
+olv_ordered_inbound_transport_20261016:
+  date: '2026-10-16'
+  class: feature
+  risk: high
+  status: real_transport_boundary_validated_pcm_route_pending
+  scope:
+    - "Await inbound handlers in wire order with a 128-message/16-MiB bound including in-flight data; reject oversized frames and set binaryType=arraybuffer."
+    - "Prioritize only validated, handshaken interrupts for the current Turn, settling its timeline and aborting the in-flight handler signal. Other Turn interrupts retain wire order."
+    - "Unify handler/queue failures with existing connection audio/session cleanup. Close aborts and discards queued work; async consumers must cooperate with cancellation."
+  validation:
+    - "Reviewed be66ffd PCM timeline start, failed-prefix drain and interruption paths; no new blocking finding."
+    - "Renderer typecheck passed. Real Python WebSocket server plus Electron transport preserved awaited order, aborted a priority-interrupted wait and explicitly rejected queue overflow while executing only the first handler."
+    - "Scoped diff and state YAML checks passed; no broad suites."
+  evidence_gap:
+    - "Transport callback evidence only; no actual application session admission, Provider, PCM downlink playback or Live2D acceptance."
+    - "Browser WebSocket has no receive backpressure. This bounds local intake and fails overflow; server credit/flow control and formal stream dispatch are pending."
+    - "No application restart or incremental capability activation. Preserve original AstrBot dirty files."
+
 olv_pcm_timeline_binding_20261016:
   date: '2026-10-16'
   class: feature
