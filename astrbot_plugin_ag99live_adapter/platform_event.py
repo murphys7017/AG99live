@@ -126,6 +126,13 @@ class OLVPetPlatformEvent(AstrMessageEvent):
                     "_interaction_persona_segment_stream_requested",
                     True,
                 )
+                # The Core producer may opt into the connection-bound
+                # incremental writer. Keep this separate from the existing
+                # segment-stream gate so older Core builds can still fall back.
+                self.set_extra(
+                    "_interaction_incremental_output_requested",
+                    True,
+                )
                 logger.info(
                     "WIRING interaction.persona_segment_stream_requested "
                     "independent_motion=true per_speech_segment=true"

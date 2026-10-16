@@ -779,3 +779,22 @@ olv_incremental_adapter_writer_20261017:
     Provider, Electron playback or Live2D acceptance in this batch. Core producer
     does not call the new entry; motion updates/fusion and downstream flow control
     remain pending. Capability remains unadvertised and disabled. No restart.
+
+olv_core_producer_adapter_gate_20261017:
+  date: '2026-10-17'
+  class: feature
+  risk: high
+  scope: >-
+    Declare the existing desktop OLV stream setting as an internal request for
+    the connection-bound incremental writer, and wire the Core Persona producer
+    to send accepted text deltas plus PCM frames through it. Keep the atomic
+    segment path as fallback when the writer cannot be opened.
+  validation: >-
+    Current Core focused Persona stream tests, compile and Ruff checks passed.
+    A Core boundary probe exercised hidden-markup filtering, visible text,
+    synthetic PCM and explicit resource end states. Adapter Ruff and diff checks
+    passed. Core commit ece8c24b1 is present; Adapter gate is staged for commit.
+  evidence_gap: >-
+    No real Provider/WebSocket/Electron playback or Live2D acceptance. Motion
+    update/fusion and capability negotiation remain pending. Do not claim full
+    lifecycle streaming or restart the host from this state.
