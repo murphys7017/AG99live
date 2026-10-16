@@ -127,6 +127,8 @@ Core 语音服务入口为 `synthesize_pcm_stream(context, event, PCMTextPart �
 
 ## 观测与第一批实测
 
+同日新增 M2 观测：Adapter 每个 writer 的首个成功发送 text/PCM/motion 各记录一次，带 frontend/Core/Persona/segment/message 身份及 epoch，不记录正文；桌面白名单新增 `incremental_text_first`、`incremental_pcm_first`、`pcm_prepare_start/end`、`pcm_first_sample`、`pcm_drained`。前两项每结果一次，PCM 准备/消费项每段一次。`pcm_first_sample.monotonicMs` 来自 `output.started` 的软件消费估计；其估计 epoch 可按 `timeOriginMs + monotonicMs` 计算，`timestampEpochMs` 是回调记录时刻，二者不可混同为硬件声卡实测。尚无新现场样本，不据此给出收益百分比。
+
 - 动作 Provider 请求必须记录 motion_request_id、core_turn_id、persona_result_id、segment_index；首块、流结束和合法结果共享请求 ID。deadline 日志注明实际阶段，区分没首块、已有增量但未闭合、解析拒绝和交付过期。
 - 文本首增量、TTS 首块、Adapter 首帧、桌面首采样及动作首指令分别记录。跨进程记录 epoch，进程内耗时用本进程 monotonic；仅在同一时钟域相减。
 - 2026-10-16 使用当前配置的 speech-2.8-turbo 与当前音色直连双向接口：连接约 578 ms，任务就绪约 610 ms，首 MP3 块约 797 ms（发送首批文本后约 187 ms），首块早于第二批文本和 finish；flush、cancel、finish 均收到确认。

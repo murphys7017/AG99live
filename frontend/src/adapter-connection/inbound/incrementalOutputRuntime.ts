@@ -4,6 +4,7 @@ import type { PcmTimelineStream } from "../../playback-timeline/pcmTimelinePlayb
 import type { IncrementalOutputEvent } from "./incrementalOutputProtocol.js";
 import { identityFromAudioFrame } from "./incrementalOutputProtocol.js";
 import { parseOutputAudioFrame } from "./outputAudioFrame.js";
+import { reportLatencyStage } from "../runtime/latency.js";
 
 const WINDOW_BYTES = 128 * 1024;
 const WINDOW_FRAMES = 64;
@@ -46,6 +47,7 @@ export function createIncrementalOutputRuntime(options: {
   let receivedFrames = 0;
   let releasedBytes = 0;
   let releasedFrames = 0;
+  let textObserved = false;
 
   function isLive(id: IncrementalIdentity, production = true): boolean {
     const session = options.getStore().getSession(id.turnId);
@@ -123,6 +125,7 @@ export function createIncrementalOutputRuntime(options: {
       throw new Error("incremental_audio_credit_window_exceeded");
     }
     options.getStore().acceptIncrementalAudio(id, metadata.sample_offset, pcm.byteLength);
+    if (receivedFrames === 0) reportLatencyStage("incremental_pcm_first", id.turnId, id.streamId, id.messageId);
     receivedBytes += pcm.byteLength;
     receivedFrames += 1;
     enqueue({ kind: "chunk", id, offset: metadata.sample_offset, pcm });
@@ -138,6 +141,10 @@ export function createIncrementalOutputRuntime(options: {
     } else if (event.kind === "delta") {
       const text = store.appendIncrementalText(id, event.text);
       options.displayText(text, id.turnId);
+      if (!textObserved) {
+        textObserved = true;
+        reportLatencyStage("incremental_text_first", id.turnId, id.streamId, id.messageId);
+      }
     } else if (event.kind === "update") {
       store.updateIncrementalMotion(id, event.motionPayload);
     } else {
@@ -165,6 +172,7 @@ export function createIncrementalOutputRuntime(options: {
     processing = false;
     scope = null;
     receivedBytes = receivedFrames = releasedBytes = releasedFrames = 0;
+    textObserved = false;
   }
   return { handleAudio, handleEvent, cancelTurn, reset };
 }

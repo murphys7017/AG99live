@@ -930,3 +930,11 @@ olv_stream_audio_credit_20261017:
   scope: "T3/R7: synchronous wire admission plus one bounded PCM playback worker; cumulative byte/frame credit from desktop to Adapter, 128 KiB/64 frames per result. Credit wait is outside the shared writer lock; reset/retirement wakes waiters. Bilateral audio_credit.v1 manifest/settings negotiation requires matching builds. Audio production closure no longer invalidates admitted playback."
   validation: "Actual local WebSocket passed Python writer/TurnCoordinator -> compiled TypeScript transport/Store/worker -> parsed credit/playback acknowledgement. Text/motion/synth_finished advanced during blocked PCM; third frame resumed only after credit, invalid credit rejected, reset released a blocked sender. Full renderer/WebSDK/node checks and Electron build passed; scoped Ruff and generated schema check passed."
   evidence_gap: "Playback sink accepts deterministic PCM without hardware; no actual Provider, Electron device/Live2D, production overload or measured latency distribution. Existing mode preserved; no restart. New protocol requires both processes to load matching builds before reconnecting."
+
+olv_stream_first_stage_metrics_20261017:
+  class: maintenance
+  risk: medium
+  status: source_and_type_validated_pending_live_acceptance
+  scope: "T0 partial: once-per-result Adapter first text/PCM/motion successful-send observations and desktop first text/PCM admission; per-segment PCM preparation, first consumed sample estimate and successful drain. Reuse the existing bounded stage whitelist and desktop latency bridge without content logging."
+  validation: "Renderer/node typechecks and changed Adapter Ruff passed. Source traced from actual inbound worker and PCM output.started callback; first-sample stage uses output's monotonic sample estimate rather than callback dispatch time."
+  evidence_gap: "No live latency sample collected. IPC callback epoch is observation time; the estimated sample epoch is renderer timeOrigin plus monotonicMs. No hardware loopback measurement. T0 baseline and Provider connect/task-ready correlation remain incomplete."

@@ -2,6 +2,7 @@ import type { PlaybackTimelineAudioLipSyncSink } from "./audioLipSyncCoordinator
 import type { PlaybackTimelineRuntime } from "./playbackTimelineRuntime.js";
 import type { PcmOutputSession } from "./pcmOutputSession.js";
 import type { SpeechOutputRuntime } from "./speechOutputRuntime.js";
+import { reportLatencyStage } from "../adapter-connection/runtime/latency.js";
 
 export interface PcmTimelineStream {
   readonly completed: Promise<void>;
@@ -33,6 +34,7 @@ export function createPcmTimelinePlayback<TMotion>(options: {
   function settle(stream: ActiveStream, terminal: "completed" | "failed" | "interrupted", reason: string): void {
     if (stream.terminal) return;
     stream.terminal = true;
+    if (terminal === "completed") reportLatencyStage("pcm_drained", stream.turnId, null, stream.messageId);
     const errors: unknown[] = [];
     try {
       if (terminal === "completed") stream.lipSync.completeAfterAudioEnded();
@@ -66,6 +68,7 @@ export function createPcmTimelinePlayback<TMotion>(options: {
     if (active || options.runtime.findOpenAudioTimelineSegments().length) {
       throw new Error("pcm_timeline_previous_audio_unsettled");
     }
+    reportLatencyStage("pcm_prepare_start", turnId, null, messageId);
     const output = options.speechOutput.attachPcm();
     let lipSync: PlaybackTimelineAudioLipSyncSink;
     try {
@@ -89,6 +92,7 @@ export function createPcmTimelinePlayback<TMotion>(options: {
       if (!options.runtime.markAudioTimelineStarted(turnId, messageId, atMs, durationMs, output.clock)) {
         throw new Error("pcm_timeline_start_rejected");
       }
+      reportLatencyStage("pcm_first_sample", turnId, null, messageId, atMs);
       options.runtime.startLipSyncTimelineSink(turnId, messageId, () => {
         stream.lipSync.start();
       });
@@ -135,6 +139,7 @@ export function createPcmTimelinePlayback<TMotion>(options: {
       });
       await Promise.all([preparation, stream.lipSync.prepare()]);
       if (stream.terminal) throw new DOMException("PCM playback interrupted.", "AbortError");
+      reportLatencyStage("pcm_prepare_end", turnId, null, messageId);
     } catch (error) {
       settle(stream, "failed", "pcm_timeline_prepare_failed");
       throw error;

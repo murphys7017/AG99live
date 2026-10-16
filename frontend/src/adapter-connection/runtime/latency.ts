@@ -6,6 +6,7 @@ export function reportLatencyStage(
   turnId: string | null,
   streamId: string | null = null,
   messageId: string | null = null,
+  monotonicMs: number = performance.now(),
 ): void {
   if (typeof window === "undefined") return;
   window.ag99desktop?.reportLatencyEvent?.({
@@ -14,7 +15,7 @@ export function reportLatencyStage(
     turnId,
     streamId,
     messageId,
-    monotonicMs: performance.now(),
+    monotonicMs,
     timeOriginMs: performance.timeOrigin,
     timestampEpochMs: Date.now(),
   });

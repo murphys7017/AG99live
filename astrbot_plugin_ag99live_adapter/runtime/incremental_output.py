@@ -6,7 +6,10 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal
+from time import perf_counter, time_ns
 from uuid import uuid4
+
+from astrbot.api import logger
 
 from ..protocol.binary_audio import MAX_OUTPUT_AUDIO_BYTES, build_output_audio_frame
 from ..protocol.constants import SOURCE_ADAPTER
@@ -75,6 +78,21 @@ class IncrementalOutputSession:
         self._broken = False
         self._audio_lock = asyncio.Lock()
         self._audio_credit = AudioCredit()
+        self._created_at = perf_counter()
+        self._observed_resources: set[str] = set()
+
+    def _observe_first(self, resource: str, index: int, message_id: str) -> None:
+        if resource in self._observed_resources:
+            return
+        self._observed_resources.add(resource)
+        logger.info(
+            "DIAG latency.incremental_first_%s frontend_turn_id=%s core_turn_id=%s "
+            "persona_result_id=%s segment_index=%s message_id=%s "
+            "writer_elapsed_ms=%.1f timestamp_epoch_ms=%s",
+            resource, self.turn_id, self.core_turn_id, self.persona_result_id,
+            index, message_id, (perf_counter() - self._created_at) * 1000,
+            time_ns() // 1_000_000,
+        )
 
     def invalidate(self) -> None:
         self._audio_credit.close()
@@ -204,6 +222,7 @@ class IncrementalOutputSession:
             payload = self._payload(segment_index, segment, stream)
             payload["text"] = text
             await self._send_event("text", "delta", payload)
+            self._observe_first("text", segment_index, segment.message_id)
             segment.text += text
             segment.text_units += units
             self._text_units += units
@@ -242,6 +261,7 @@ class IncrementalOutputSession:
                         encoding="pcm16le", sample_rate=32000, channels=1,
                     )
                     await self._send_once(build_output_audio_frame(payload, block))
+                    self._observe_first("pcm", segment_index, segment.message_id)
                     stream.samples += len(block) // 2
                     stream.seq += 1
 
@@ -254,6 +274,7 @@ class IncrementalOutputSession:
             payload = self._payload(segment_index, segment, stream)
             payload["motion_payload"] = dict(motion_payload)
             await self._send_event("motion", "update", payload)
+            self._observe_first("motion", segment_index, segment.message_id)
             stream.seq += 1
 
     async def end_stream(
