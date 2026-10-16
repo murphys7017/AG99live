@@ -793,7 +793,8 @@ olv_core_producer_adapter_gate_20261017:
     Current Core focused Persona stream tests, compile and Ruff checks passed.
     A Core boundary probe exercised hidden-markup filtering, visible text,
     synthetic PCM and explicit resource end states. Adapter Ruff and diff checks
-    passed. Core commit ece8c24b1 is present; Adapter gate is staged for commit.
+    passed. Core commit ece8c24b1 and Adapter commit 8fc3738 are present; the
+    post-commit hook deployed the Adapter gate and the deployed file hash matches.
   evidence_gap: >-
     No real Provider/WebSocket/Electron playback or Live2D acceptance. Motion
     update/fusion and capability negotiation remain pending. Do not claim full
