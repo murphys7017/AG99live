@@ -556,6 +556,17 @@ persona_optional_motion_chat_stream_only_20261016:
   evidence_gap:
     - "A restarted AstrBot with DeepSeek/MiniMax action and curve Providers still needs live OLV verification of first-chunk timing, optional failure isolation, TTS delivery, and visible Live2D playback."
 
+olv_core_text_preparation_progress_20261017:
+  date: '2026-10-17'
+  class: feature
+  risk: high
+  status: core_boundary_committed_production_wiring_pending
+  core_commit: 3d0463dec
+  scope: "Core now prepares decoded deltas with cross-delta private-tag filtering and full-prefix response safety, without repeating complete-message decorators."
+  validation: "Actual Core event and keyword strategy passed. Prepared deltas fed actual MiniMax PCM before second input; 234802 samples drained, first frame 1797 ms after service start including connection/task setup. Ruff, diff and YAML checks passed."
+  constraints: "Private markup must close within its Persona segment; input 1 MiB UTF-8 and visible text 65536 UTF-16 units. finish returns validation text, not a replay delta."
+  evidence_gap: "Not called by OLV producer/Adapter sending yet. No default activation, restart, whole-dialogue latency comparison or real Live2D acceptance. Preserve original Core dirty files."
+
 olv_incremental_audio_order_review_20261017:
   date: '2026-10-17'
   class: bugfix
