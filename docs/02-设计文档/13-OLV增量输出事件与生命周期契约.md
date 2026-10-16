@@ -1,6 +1,6 @@
 # OLV 增量输出事件与生命周期契约
 
-> 2026-10-16 第一批实施契约。事件名及身份规则在此冻结；尚未注册为可启用的桌面能力，不能据此宣称发送、播放或动作融合已经实现。沿用现有 AstrBot Turn、Adapter TurnCoordinator 和桌面 PlaybackTimeline。
+> 2026-10-17 当前契约状态。Core、Adapter 和桌面已经具备增量文本/PCM/动作 update 的代码接线，但能力仍由现有桌面 OLV 流式设置门控，尚未登记为独立公开能力。协议边界和隔离环境已验证，真实 Provider、Electron 播放和 Live2D 表现仍待现场验收。沿用现有 AstrBot Turn、Adapter TurnCoordinator 和桌面 PlaybackTimeline。
 
 ## 身份与协商
 
@@ -8,18 +8,18 @@
 - 流的身份为 `(turn_id, persona_result_id, segment_index, stream_id)`。`segment_index` 从 0 单调增长，总数在生成期间可未知。
 - 每条流 `seq` 从 0 开始严格递增；start 为 0，data/update 和 end 继续递增。生产结束只能出现一次；错误结束后不接受后续数据。同一流的重复消息不得再次播放。
 - 信封 `message_id` 是本次事件的唯一 ID；`segment_message_id` 是目标段的稳定 ID，不能用每个事件的 message_id 新建播放段。
-- 桌面与 Adapter 完整实现后才登记 `olv_incremental_output.v1` 能力；协商同时校验 Core、真实 Provider 和桌面播放器能力。现有分段流开关不能单独证明能力具备，也不另加一组用户开关。
+- `olv.incremental_output.v1` 当前作为内部已实现协议使用，但仍不登记为独立公开能力；实际准入由现有桌面 OLV 流式设置、Core 兼容性和连接绑定 writer 共同决定。真实 Provider 和桌面播放器的现场验收通过后，才能考虑公开能力登记。现有分段流开关不另加第二组用户开关。
 - 同一 Turn 的同一内容只选择增量交付或现有完整 `output.segment.v5` 交付，不双发文本/声音/动作。新契约增加事件，不改变 v5 原子段含义。
 
 ## Adapter 发送所有权（2026-10-17）
 
-`OLVPetPlatformEvent.open_interaction_incremental_output(persona_result_id=...)` 是待 Core producer 调用的入口，必须具有明确的增量准入标记；目前没有生产代码设置该标记。入口沿用现有外部 Turn 与 Core Turn 绑定，由 TurnCoordinator 校验，OutputSegmentCoordinator 保存唯一 writer。writer 共用该 Turn 的锁，发送始终绑定创建时的 WebSocket；不能改用最新连接或另建 Turn。
+`OLVPetPlatformEvent.open_interaction_incremental_output(persona_result_id=...)` 已由 Core producer 在 OLV 流头调用，并由现有桌面 OLV 流式设置设置内部准入标记。入口沿用现有外部 Turn 与 Core Turn 绑定，由 TurnCoordinator 校验，OutputSegmentCoordinator 保存唯一 writer。writer 共用该 Turn 的锁，发送始终绑定创建时的 WebSocket；不能改用最新连接或另建 Turn。
 
 start、append、end 均等待实际发送，成功后推进序号与采样位置。发送取消或异常可能已部分到达客户端，因此封闭 writer，禁止按同一序号重试。PCM 输入块最多 1 MiB，按最多 64 KiB 的协议帧切分；后段 PCM 必须等待前段音频明确生产 EOF。socket 写入等待仅是传输端等待，不代表已有桌面播放速度驱动的端到端流量控制。
 
 三条资源必须分别明确 end，才能由现有输出协调器发布 synth_finished。动作 failed/cancelled 不使成功文本和音频失败，文本/音频失败则记入本轮合成失败。结束文本将已接受前缀加入既有聊天缓冲，不重发全文。播放完成回执必须在输出关闭之后处理；检查等待同一把 Turn 锁，避免快速客户端在 synth_finished 发送返回前回执而被误拒绝。已有 Turn 清理同时撤销 writer，后续调用拒绝；发送中途断开仍须由既有失败/打断路径终止该 Turn，不能尝试在另一连接重放。
 
-本批验证为真实 Python 协调器/本地 WebSocket 与桌面解析器/SessionStore 的协议边界，使用合成 PCM 和探针回执，未证明桌面播放排空、真实 Provider 或 Live2D 已连通。Core producer、动作 update/融合和能力协商仍待实现。
+已验证真实 Python 协调器/本地 WebSocket 与桌面解析器/SessionStore 的协议边界，使用合成 PCM 和探针回执；另有 Core producer 的隐藏标记过滤、文本增量、PCM 和动作 update 边界 smoke。上述检查未证明桌面播放排空、真实 Provider、ModelEngine 或 Live2D 已连通；动作融合和公开能力协商仍待现场验收。
 
 ## 公共字段
 
@@ -43,7 +43,7 @@ Core 是文本生产状态的唯一所有者。复用 Persona 小记录协议：
 
 动作 update 的接入只证明协议和状态承接，不代表动作一定在首音频前完成。动作 Provider 仍有自己的 deadline，桌面仍需等待音频时间线满足现有 motion start 条件；真正的动作融合、迟到替换策略和现场 Live2D 表现仍需单独验收。
 
-Core 现提供 `PreOutputProcessor.create_incremental_text_preparer(event)` 预处理入口：每个已解码 Persona 段创建一份状态，feed 返回本次可立即提交的新文本；跨 delta 的 system_reminder 标记和嵌套块不会泄露到显示/TTS。既有 Core 内容安全检查覆盖整个可见前缀，拒绝后保留已经接受的前缀。finish 只返回最终全文供校验，不是额外增量；未闭合的标记或标记前缀会使该段失败，不能跨 Persona 段闭合。单段原始输入最多 1 MiB UTF-8，可见文本最多 65536 UTF-16 单元，保留首尾空白并将连续换行限制为两个。该入口不执行整段 decorating Hook，避免重复副作用与撤回已提交文本；后续生产接线仍须隔离旧整段修饰，不能在结尾重新改写此前已交付内容。目前仅边界验证通过，正式 OLV producer 尚未调用。
+Core 现提供 `PreOutputProcessor.create_incremental_text_preparer(event)` 预处理入口：每个已解码 Persona 段创建一份状态，feed 返回本次可立即提交的新文本；跨 delta 的 system_reminder 标记和嵌套块不会泄露到显示/TTS。既有 Core 内容安全检查覆盖整个可见前缀，拒绝后保留已经接受的前缀。finish 只返回最终全文供校验，不是额外增量；未闭合的标记或标记前缀会使该段失败，不能跨 Persona 段闭合。单段原始输入最多 1 MiB UTF-8，可见文本最多 65536 UTF-16 单元，保留首尾空白并将连续换行限制为两个。该入口不执行整段 decorating Hook，避免重复副作用与撤回已提交文本；生产路径隔离旧整段修饰，不能在结尾重新改写此前已交付内容。真实运行中的 Provider、桌面和 Live2D 仍未现场验收。
 
 桌面正式入站已接收文本 start/delta/end。SessionStore 注册增量段，保存完整前缀和独立流状态，delta 原样显示，end 校验 Unicode 码点长度并记录该段历史；生成终态与音频播放终态分别保存。同一 Turn 不混用完整 output.segment 与增量交付，旧完整段执行器不再释放增量段。首版每 Turn 最多 256 段、文本最多 262144 个 UTF-16 单元，每段最多 65536 个 UTF-16 单元；这些是本地容量限制，不改变 text_length 的码点计数。前端身份/结构校验不代替 Core 内容安全和流式隐藏标记清洗，后者仍未接通。
 
@@ -67,7 +67,7 @@ Core 是唯一 TTS 调用方。新 MiniMax 双向实现公开音频块与格式�
 
 AstrBot Provider 入口为 `support_pcm_stream()` / `get_pcm_stream(text_source)`：输入字符串立即追加，输入 `None` 请求段 flush，输入迭代结束请求 session finish；输出 bytes 为 PCM 块，输出 `None` 为本次段 flush 确认。消费方必须在打断时关闭输出迭代器。此接口与旧文件/WAV `get_audio_stream()` 区分，不能把聊天流能力或旧 WAV 队列能力当作增量 PCM 准入。
 
-Core 语音服务入口为 `synthesize_pcm_stream(context, event, PCMTextPart 输入流)`，返回带 start/audio/end、segment_index、sample_offset 和音频格式的 PCMStreamFrame。输入必须是预处理完成的增量，服务不代替 Core 内容校验或最终交付收口。当前已有此边界；桌面消费端已接入正式入站与时间线，但尚未连接 Core OLV 生产入口。
+Core 语音服务入口为 `synthesize_pcm_stream(context, event, PCMTextPart 输入流)`，返回带 start/audio/end、segment_index、sample_offset 和音频格式的 PCMStreamFrame。输入必须是预处理完成的增量，服务不代替 Core 内容校验或最终交付收口。当前 Core OLV producer、Adapter 下行和桌面消费端已经连接；仍需真实运行时验收 Provider 首块、桌面首采样和播放排空。
 
 第一版不跨 Persona 段合并合成归属：segment_end 时发送 task_flush；确认已接受文本对应的 sentence_end 和 task_flushed、当前音频尾部归属确定后，才把下一段文本送入同一 Provider 会话。下一段在 Core 有界队列等待，不阻塞主模型继续生成，也不阻塞当前音频传输/播放。实现时先验证 Provider 的事件顺序，不能把 is_final 当整轮结束。
 
@@ -77,27 +77,27 @@ Core 语音服务入口为 `synthesize_pcm_stream(context, event, PCMTextPart �
 
 会话音频运行时现提供 `openPcmForTimelinePlayback(turn_id, segment_message_id)`，返回串行 append、finish 与排空 completed；沿用现有 PlaybackTimeline 的音频/口型 sink 及 Turn 打断，调用前必须完成正式播放段注册和流身份准入。PCM `started` 在 AudioContext 开始消费首批采样后通知，同进程 performance 时间由音频上下文估算，不等同于硬件实际发声时间。prepare、排队与设备预热不算起播。finish 的 failed 状态需提供 reason，已接受前缀先排空再以原原因失败；取消由时间线打断立即停播。此入口已在桌面组合层装配并由正式 socket 入站及流式段存储调用。真实 Live2D 口型和指定输出设备尚未验收。
 
-正式 socket 入站与流式段存储现已连接：type=2 音频帧校验身份/seq/连续 sample_offset 后进入上述 PCM 时间线；首包创建播放器，空音频流明确 end 后记为 absent，不创建播放器。下一段首包等待上一段排空，音频播放不等 motion end；已终止/过期 Turn 的包明确记录并忽略。所有生产流关闭后允许 synth_finished 到达，播放完成回执仍等本地实际排空。打断/连接失败由原 Turn 清理播放，Store 将仍 open 的生产状态收为 cancelled；已经结束的生产状态不被播放取消改写。动作目前只准入 start/end，update 尚未实现；因此完整增量能力仍不登记、不启用，Core/Adapter 生产端也未接上。冷设备预热当前在首包创建播放器时发生，提前预热与真实首响耗时仍需后续测量。
+正式 socket 入站与流式段存储现已连接：type=2 音频帧校验身份/seq/连续 sample_offset 后进入上述 PCM 时间线；首包创建播放器，空音频流明确 end 后记为 absent，不创建播放器。下一段首包等待上一段排空，音频播放不等 motion end；已终止/过期 Turn 的包明确记录并忽略。所有生产流关闭后允许 synth_finished 到达，播放完成回执仍等本地实际排空。打断/连接失败由原 Turn 清理播放，Store 将仍 open 的生产状态收为 cancelled；已经结束的生产状态不被播放取消改写。动作 update 已接入：桌面先校验并保存 payload，PCM 时间线实际起播后由编排器启动现有 motion sink；动作失败终态会清理 payload，避免错误启动。冷设备预热当前在首包创建播放器时发生，提前预热与真实首响耗时仍需后续测量。
 
 ## 动作事件
 
 | 类型 | 特有字段 | 语义 |
 | --- | --- | --- |
 | `output.motion_stream_start` | 无 | 为该段打开动作输入，不将 pending 当作 absent/failed |
-| `output.motion_stream_update` | `action_id`、`revision`、`mode`、`anchor`、`expires_at_sample`、`payload` | 通过校验的完整单条动作指令；mode 为 preview/actual，revision 在 action_id 内严格递增 |
+| `output.motion_stream_update` | `motion_payload` | 已通过 Adapter/桌面动作契约校验入口的完整动作 payload；使用该 motion 流自己的 `seq`，允许在文本或 PCM 已开始后到达 |
 | `output.motion_stream_end` | `status`、`reason` | 动作生产结束，可选动作失败不覆盖已成功交付的核心文本/音频 |
 
 `payload` 使用现有可执行动作契约，由 ModelEngine 校验/编译，不直接写未经校验的 Live2D 参数。`profile_revision` 仍表示模型资源版本，不能替代这里的动作修订号。
 
 `anchor` 明确为 `audio_sample` 或 `segment_now`。前者携带目标采样位置，后者表示当前姿态上的短预览；不能使用两个进程各自的 monotonic 时间进行比较。尚无音频时允许 segment_now 预览，后续实际动作到达后在同一参数控制权下融合。
 
-桌面仅接受更高 revision。尚未执行部分可替换/追加；已执行部分不回放。超过 expires_at_sample、该段已关闭或 Turn 已终止的动作更新明确拒绝，并记录 expired/stale/terminal 原因。融合交接从当前实际姿态开始，不能重置整个动作造成跳变。
+桌面当前按单一 motion 流的 `seq` 接受更新；流结束后拒绝迟到更新，Turn 终止后忽略旧身份。动作 payload 由 `normalizeMotionPayload` 校验，再交给现有 PlaybackTimeline/ModelEngine；实际动作融合、revision/anchor 细粒度替换和过期窗口仍属于后续扩展，不应把当前 update 接线误认为完整动作融合。
 
 动作输出契约为连续闭合的小记录；收到一条完整指令就提交，不等 Provider EOF。聊天 Provider 在途请求不支持追加 prompt 时，使用用户输入预请求加后续有界意图请求，合并尚未发出的重复更新，不每个字重新请求。
 
 ## 结束、期限与背压
 
-桌面正式 transport 当前串行 await 消息处理，接收队列（含在途消息）最多 128 条、16 MiB，同时限制单包；二进制直接以 ArrayBuffer 接收。溢出显式失败并关闭连接，不静默丢块。关闭连接取消在途 AbortSignal 并清空排队消息；异步消费者仍须在等待之后核对 signal/Turn，不能仅在回调入口核对一次。已握手、已校验且属于当前 Turn 的 interrupt 可以越过普通队列，先停止播放再取消在途处理，避免被 PCM 缓冲等待阻塞。未知或后续 Turn 打断不能越过其 turn_started。此机制是接收容量限制和协作式取消，不是浏览器 WebSocket 接收侧背压或服务端信用窗口；桌面音频分发已接通，Core/Adapter 生产端仍未连接。
+桌面正式 transport 当前串行 await 消息处理，接收队列（含在途消息）最多 128 条、16 MiB，同时限制单包；二进制直接以 ArrayBuffer 接收。溢出显式失败并关闭连接，不静默丢块。关闭连接取消在途 AbortSignal 并清空排队消息；异步消费者仍须在等待之后核对 signal/Turn，不能仅在回调入口核对一次。已握手、已校验且属于当前 Turn 的 interrupt 可以越过普通队列，先停止播放再取消在途处理，避免被 PCM 缓冲等待阻塞。未知或后续 Turn 打断不能越过其 turn_started。此机制是接收容量限制和协作式取消，不是浏览器 WebSocket 接收侧背压或服务端信用窗口；当前 Core/Adapter 生产端已接通，但端到端信用窗口仍未实现。
 
 1. 文本、音频和动作流独立结束。未返回动作不能提前登记为失败；音频起播不等待动作终态。
 2. 移除把 0.75 秒同时作为首响等待和动作任务生存期限的设计。动作生产期限使用配置并受 Turn 剩余预算约束；音频不等待动作。到期需记录 context/gate/provider/parse 等实际阶段，不能只留下 motion_state=failed。
