@@ -69,7 +69,7 @@ export const petDesktopRuntimeKey: InjectionKey<PetDesktopRuntime> =
   Symbol("AG99livePetDesktopRuntime");
 
 export function providePetDesktopRuntime(): PetDesktopRuntime {
-  const sessionStore = useTurnPlaybackSessionStore();
+  const sessionStore = useTurnPlaybackSessionStore({ normalizeMotionPayload });
   const modelSync = createModelSync();
   const { state, selectedModel, selectedSemanticAxisProfile } = modelSync;
   useCursorGaze(selectedModel);

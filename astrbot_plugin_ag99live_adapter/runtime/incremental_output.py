@@ -231,6 +231,17 @@ class IncrementalOutputSession:
                 stream.samples += len(block) // 2
                 stream.seq += 1
 
+    async def update_motion(self, segment_index: int, motion_payload: dict[str, Any]) -> None:
+        async with self._lock:
+            self._require_open()
+            segment, stream = self._stream("motion", segment_index)
+            if not isinstance(motion_payload, dict) or not motion_payload:
+                raise ValueError("incremental_output_motion_payload_invalid")
+            payload = self._payload(segment_index, segment, stream)
+            payload["motion_payload"] = dict(motion_payload)
+            await self._send_event("motion", "update", payload)
+            stream.seq += 1
+
     async def end_stream(
         self,
         resource: Resource,

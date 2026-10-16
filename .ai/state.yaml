@@ -799,3 +799,21 @@ olv_core_producer_adapter_gate_20261017:
     No real Provider/WebSocket/Electron playback or Live2D acceptance. Motion
     update/fusion and capability negotiation remain pending. Do not claim full
     lifecycle streaming or restart the host from this state.
+
+olv_incremental_motion_update_20261017:
+  date: '2026-10-17'
+  class: feature
+  risk: high
+  scope: >-
+    Carry the existing Persona motion Future into the same incremental motion
+    stream. Adapter publishes a sequenced motion update and terminal result;
+    Core waits asynchronously per segment with a timeout fallback; desktop
+    validates and stores the normalized payload for the existing motion timeline.
+  validation: >-
+    Python writer output plus rebuilt TypeScript parser and SessionStore smoke
+    accepted text, PCM ordering, motion update, and motion completion. Frontend
+    vue-tsc, Adapter Ruff and Core Ruff/compile checks passed.
+  evidence_gap: >-
+    No real motion Provider, WebSocket, timeline start or Live2D acceptance.
+    Update proves state/protocol handoff only; motion fusion, late replacement
+    policy and capability advertisement remain pending. No restart.

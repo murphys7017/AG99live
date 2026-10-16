@@ -168,6 +168,58 @@ class OLVPetPlatformEvent(AstrMessageEvent):
             event=self, persona_result_id=persona_result_id,
         )
 
+    async def publish_interaction_incremental_motion(
+        self,
+        *,
+        segment_index: int,
+        motion_payload: dict[str, Any] | None,
+        reason: str = "",
+    ) -> bool:
+        """Publish one optional motion result without blocking core text/audio."""
+        if self._is_stop_requested():
+            return False
+        writer = self.get_extra("_interaction_incremental_output_writer")
+        started = self.get_extra("_interaction_incremental_motion_started", {})
+        if not isinstance(started, dict) or started.get(segment_index) is not True:
+            pending = self.get_extra("_interaction_incremental_motion_pending", {})
+            if not isinstance(pending, dict):
+                pending = {}
+            pending[segment_index] = (motion_payload, reason)
+            self.set_extra("_interaction_incremental_motion_pending", pending)
+            return True
+        if writer is None:
+            return False
+        try:
+            if isinstance(motion_payload, dict) and motion_payload:
+                await writer.update_motion(segment_index, motion_payload)
+                await writer.end_stream("motion", segment_index)
+            else:
+                await writer.end_stream(
+                    "motion",
+                    segment_index,
+                    status="failed",
+                    reason=str(reason or "motion_payload_missing"),
+                )
+        except (RuntimeError, ValueError):
+            return False
+        futures = self.get_extra("_interaction_incremental_motion_futures", {})
+        future = futures.get(segment_index) if isinstance(futures, dict) else None
+        if isinstance(future, asyncio.Future) and not future.done():
+            future.set_result(True)
+        return True
+
+    async def flush_interaction_incremental_motion(self, *, segment_index: int) -> None:
+        pending = self.get_extra("_interaction_incremental_motion_pending", {})
+        if not isinstance(pending, dict) or segment_index not in pending:
+            return
+        motion_payload, reason = pending.pop(segment_index)
+        self.set_extra("_interaction_incremental_motion_pending", pending)
+        await self.publish_interaction_incremental_motion(
+            segment_index=segment_index,
+            motion_payload=motion_payload,
+            reason=reason,
+        )
+
     async def send_message_with_extras(
         self,
         message,

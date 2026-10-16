@@ -732,6 +732,26 @@ class MyPlugin(Star):
             finally:
                 if result is not None and not result_future.done():
                     result_future.set_result(result)
+                publish_motion = getattr(
+                    event,
+                    "publish_interaction_incremental_motion",
+                    None,
+                )
+                if result is not None and callable(publish_motion):
+                    try:
+                        await publish_motion(
+                            segment_index=segment_index,
+                            motion_payload=result.motion_payload,
+                            reason=result.reason or "motion_payload_missing",
+                        )
+                    except Exception:  # noqa: BLE001 - optional motion cannot stop dialogue.
+                        logger.debug(
+                            "WIRING independent_motion.incremental_publish_failed "
+                            "turn_id=%s segment_index=%s",
+                            normalized_turn_id,
+                            segment_index,
+                            exc_info=True,
+                        )
                 if isinstance(current_task, asyncio.Task):
                     untrack_motion_generation_task(
                         bundle.runtime_state,
@@ -1081,6 +1101,26 @@ class MyPlugin(Star):
             finally:
                 if result is not None and not result_future.done():
                     result_future.set_result(result)
+                publish_motion = getattr(
+                    event,
+                    "publish_interaction_incremental_motion",
+                    None,
+                )
+                if result is not None and callable(publish_motion):
+                    try:
+                        await publish_motion(
+                            segment_index=segment_index,
+                            motion_payload=result.motion_payload,
+                            reason=result.reason or "motion_payload_missing",
+                        )
+                    except Exception:  # noqa: BLE001 - optional motion cannot stop dialogue.
+                        logger.debug(
+                            "WIRING independent_motion.incremental_publish_failed "
+                            "turn_id=%s segment_index=%s",
+                            normalized_turn_id,
+                            segment_index,
+                            exc_info=True,
+                        )
                 if isinstance(current_task, asyncio.Task):
                     untrack_motion_generation_task(
                         bundle.runtime_state,

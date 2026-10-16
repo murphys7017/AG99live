@@ -5,6 +5,7 @@ import type { OutputAudioFrameMetadata } from "./outputAudioFrame.js";
 export type IncrementalOutputEvent =
   | { kind: "start"; resource: IncrementalResource; identity: IncrementalIdentity }
   | { kind: "delta"; resource: "text"; identity: IncrementalIdentity; text: string }
+  | { kind: "update"; resource: "motion"; identity: IncrementalIdentity; motionPayload: unknown }
   | { kind: "end"; resource: IncrementalResource; identity: IncrementalIdentity;
       status: IncrementalStatus; reason: string; length?: number };
 
@@ -61,7 +62,17 @@ export function parseIncrementalOutputEvent(envelope: ProtocolEnvelope<unknown>)
     }
     return { kind, resource, identity: id, text: payload.text };
   }
-  if (kind !== "end") throw new Error("incremental_output_update_not_implemented");
+  if (kind === "update") {
+    if (resource !== "motion" || id.seq < 1 || !payload.motion_payload
+      || typeof payload.motion_payload !== "object" || Array.isArray(payload.motion_payload)) {
+      throw new Error("incremental_output_motion_update_invalid");
+    }
+    let encodedLength = 0;
+    try { encodedLength = JSON.stringify(payload.motion_payload).length; } catch { throw new Error("incremental_output_motion_update_invalid"); }
+    if (encodedLength > 65536) throw new Error("incremental_output_motion_update_too_large");
+    return { kind, resource, identity: id, motionPayload: payload.motion_payload };
+  }
+  if (kind !== "end") throw new Error("incremental_output_event_invalid");
   const status = payload.status;
   if (status !== "completed" && status !== "failed" && status !== "cancelled") throw new Error("incremental_output_end_status_invalid");
   const reason = payload.reason === undefined ? "" : payload.reason;

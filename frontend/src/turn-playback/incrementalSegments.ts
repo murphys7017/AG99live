@@ -1,5 +1,6 @@
 import { createTurnPlaybackSegment, isTerminalPhase } from "./session.js";
 import type { TurnPlaybackSession, TurnPlaybackSegment } from "./session.js";
+import type { MotionPayloadNormalizer } from "../types/motion.js";
 
 export type IncrementalResource = "text" | "audio" | "motion";
 export type IncrementalStatus = "completed" | "failed" | "cancelled";
@@ -55,6 +56,7 @@ export function cancelIncrementalProduction(session: TurnPlaybackSession, reason
 export function createIncrementalSegmentWriter(options: {
   requireSession(turnId: string): TurnPlaybackSession;
   markReady(turnId: string): void;
+  normalizeMotionPayload: MotionPayloadNormalizer;
 }) {
   function sessionFor(id: IncrementalIdentity): TurnPlaybackSession {
     const session = options.requireSession(id.turnId);
@@ -148,6 +150,21 @@ export function createIncrementalSegmentWriter(options: {
     return segment.text.content;
   }
 
+  function updateIncrementalMotion(id: IncrementalIdentity, payload: unknown): void {
+    const session = sessionFor(id);
+    const segment = segmentFor(session, id);
+    const stream = streamFor(segment, "motion", id);
+    const normalized = options.normalizeMotionPayload(payload);
+    if (!normalized.ok) throw new Error(`incremental_output_motion_payload_invalid:${normalized.reason}`);
+    segment.motion.payload = normalized.payload;
+    segment.motion.source = "incremental_stream";
+    segment.motion.receivedAtMs = performance.now();
+    segment.motion.absent = false;
+    segment.motion.failed = false;
+    segment.motion.released = true;
+    stream.nextSeq += 1;
+  }
+
   function acceptIncrementalAudio(id: IncrementalIdentity, offset: number, byteLength: number): void {
     const session = sessionFor(id);
     const segment = segmentFor(session, id);
@@ -186,12 +203,12 @@ export function createIncrementalSegmentWriter(options: {
       segment.audio.terminal = status === "completed" ? "absent" : "failed";
       segment.audio.reason = status === "completed" ? "incremental_audio_empty" : reason;
     } else if (resource === "motion") {
-      // No motion updates are admitted yet. Completion means explicitly empty,
-      // never infer absent merely because the text/audio has finished.
+      // Completion means explicitly empty only when no update was accepted;
+      // never infer absent merely because text/audio has finished.
       segment.motion.absent = status === "completed";
       segment.motion.failed = status !== "completed";
       segment.motion.reason = status === "completed" ? "incremental_motion_empty" : reason;
     }
   }
-  return { startIncrementalStream, appendIncrementalText, acceptIncrementalAudio, endIncrementalStream };
+  return { startIncrementalStream, appendIncrementalText, updateIncrementalMotion, acceptIncrementalAudio, endIncrementalStream };
 }

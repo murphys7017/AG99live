@@ -75,6 +75,8 @@ export function createIncrementalOutputRuntime(options: {
     } else if (event.kind === "delta") {
       const text = store.appendIncrementalText(id, event.text);
       options.displayText(text, id.turnId);
+    } else if (event.kind === "update") {
+      store.updateIncrementalMotion(id, event.motionPayload);
     } else {
       store.endIncrementalStream(resource, id, event.status, event.reason, event.length);
       if (resource === "text") {

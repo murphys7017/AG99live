@@ -75,6 +75,7 @@ OUTPUT_TYPES = {
     "output.audio_stream_start",
     "output.audio_stream_end",
     "output.motion_stream_start",
+    "output.motion_stream_update",
     "output.motion_stream_end",
 }
 

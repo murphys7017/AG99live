@@ -37,6 +37,12 @@ start、append、end 均等待实际发送，成功后推进序号与采样位�
 
 Core 是文本生产状态的唯一所有者。复用 Persona 小记录协议：完整 speech_delta 记录闭合即可下发，不等待 segment_end；无需先开放未经解码的 JSON token。跨增量的隐藏标记/转义由同一流的过滤状态处理，最终 Hook 不能改写已提交前缀。
 
+## 动作更新事件（2026-10-17）
+
+`output.motion_stream_update` 只能用于已经 start 且仍 open 的 motion 流。payload 复用公共身份字段并携带 `motion_payload`；每次更新只推进该 motion 流自己的 `seq`，允许在文本和 PCM 已经开始后到达。Adapter 的 Persona 动作 Future 完成后发送 update，随后发送 motion end；无结果或超时只发送带原因的 failed end。桌面先用既有 `normalizeMotionPayload` 校验，再把最新合法 payload 写入段状态，交给现有 PlaybackTimeline/ModelEngine 的动作启动边界。update 不能改写已结束流；动作失败不影响文本和音频收口。
+
+动作 update 的接入只证明协议和状态承接，不代表动作一定在首音频前完成。动作 Provider 仍有自己的 deadline，桌面仍需等待音频时间线满足现有 motion start 条件；真正的动作融合、迟到替换策略和现场 Live2D 表现仍需单独验收。
+
 Core 现提供 `PreOutputProcessor.create_incremental_text_preparer(event)` 预处理入口：每个已解码 Persona 段创建一份状态，feed 返回本次可立即提交的新文本；跨 delta 的 system_reminder 标记和嵌套块不会泄露到显示/TTS。既有 Core 内容安全检查覆盖整个可见前缀，拒绝后保留已经接受的前缀。finish 只返回最终全文供校验，不是额外增量；未闭合的标记或标记前缀会使该段失败，不能跨 Persona 段闭合。单段原始输入最多 1 MiB UTF-8，可见文本最多 65536 UTF-16 单元，保留首尾空白并将连续换行限制为两个。该入口不执行整段 decorating Hook，避免重复副作用与撤回已提交文本；后续生产接线仍须隔离旧整段修饰，不能在结尾重新改写此前已交付内容。目前仅边界验证通过，正式 OLV producer 尚未调用。
 
 桌面正式入站已接收文本 start/delta/end。SessionStore 注册增量段，保存完整前缀和独立流状态，delta 原样显示，end 校验 Unicode 码点长度并记录该段历史；生成终态与音频播放终态分别保存。同一 Turn 不混用完整 output.segment 与增量交付，旧完整段执行器不再释放增量段。首版每 Turn 最多 256 段、文本最多 262144 个 UTF-16 单元，每段最多 65536 个 UTF-16 单元；这些是本地容量限制，不改变 text_length 的码点计数。前端身份/结构校验不代替 Core 内容安全和流式隐藏标记清洗，后者仍未接通。

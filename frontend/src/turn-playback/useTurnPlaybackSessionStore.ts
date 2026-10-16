@@ -65,7 +65,7 @@ type ReadonlyTurnPlaybackSegment = DeepReadonly<TurnPlaybackSegment>;
  * 不做任何 I/O，可被多个调用方共享（依赖注入下，主控制器装配一份并下发到适配器、
  * 播放编排、完成协调、投影发布等所有消费者）。
  */
-export function useTurnPlaybackSessionStore() {
+export function useTurnPlaybackSessionStore(options?: { normalizeMotionPayload?: import("../types/motion.js").MotionPayloadNormalizer }) {
   const state = reactive<SessionStoreState>({
     sessions: new Map(),
     activeSessionId: null,
@@ -820,6 +820,8 @@ export function useTurnPlaybackSessionStore() {
   const incrementalWriter = createIncrementalSegmentWriter({
     requireSession,
     markReady: (turnId) => { markPhase(turnId, "ready"); },
+    normalizeMotionPayload: options?.normalizeMotionPayload ?? ((payload) =>
+      ({ ok: false, reason: "motion_payload_normalizer_unavailable" })),
   });
 
   return {
