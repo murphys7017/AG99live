@@ -11,6 +11,7 @@ from uuid import uuid4
 from ..protocol.binary_audio import MAX_OUTPUT_AUDIO_BYTES, build_output_audio_frame
 from ..protocol.constants import SOURCE_ADAPTER
 from ..protocol.parser import build_message_envelope
+from .audio_credit import AudioCredit
 
 Resource = Literal["text", "audio", "motion"]
 Status = Literal["completed", "failed", "cancelled"]
@@ -43,8 +44,8 @@ class IncrementalOutputSession:
     """One admitted Persona result; no socket reader, TTS or Turn lifecycle.
 
     The owner supplies its Turn lock, current-owner guard and a connection-bound
-    sender. Each awaited send applies transport backpressure. Motion updates are
-    intentionally not exposed until their desktop consumer is implemented.
+    sender. PCM has separate bounded desktop credit; waiting for playback
+    capacity never holds the shared text/motion writer lock.
     """
 
     def __init__(
@@ -72,6 +73,18 @@ class IncrementalOutputSession:
         self.has_output = False
         self.failure_reason: str | None = None
         self._broken = False
+        self._audio_lock = asyncio.Lock()
+        self._audio_credit = AudioCredit()
+
+    def invalidate(self) -> None:
+        self._audio_credit.close()
+
+    def release_audio_credit(self, *, core_turn_id: str, persona_result_id: str,
+                             released_bytes: int, released_frames: int) -> None:
+        self._require_current()
+        if core_turn_id != self.core_turn_id or persona_result_id != self.persona_result_id:
+            raise ValueError("incremental_audio_credit_identity_invalid")
+        self._audio_credit.release(released_bytes, released_frames)
 
     def _require_open(self) -> None:
         if self._broken:
@@ -199,7 +212,7 @@ class IncrementalOutputSession:
     async def append_audio(
         self, segment_index: int, sample_offset: int, pcm: bytes
     ) -> None:
-        async with self._lock:
+        async with self._audio_lock:
             self._require_open()
             segment, stream = self._stream("audio", segment_index)
             if type(sample_offset) is not int or sample_offset != stream.samples:
@@ -218,18 +231,19 @@ class IncrementalOutputSession:
             ):
                 raise ValueError("incremental_output_audio_segment_order_invalid")
             for offset in range(0, len(pcm), MAX_OUTPUT_AUDIO_BYTES):
-                payload = self._payload(segment_index, segment, stream)
-                payload.update(
-                    turn_id=self.turn_id,
-                    sample_offset=stream.samples,
-                    encoding="pcm16le",
-                    sample_rate=32000,
-                    channels=1,
-                )
                 block = pcm[offset : offset + MAX_OUTPUT_AUDIO_BYTES]
-                await self._send_once(build_output_audio_frame(payload, block))
-                stream.samples += len(block) // 2
-                stream.seq += 1
+                await self._audio_credit.reserve(len(block))
+                async with self._lock:
+                    self._require_open()
+                    segment, stream = self._stream("audio", segment_index)
+                    payload = self._payload(segment_index, segment, stream)
+                    payload.update(
+                        turn_id=self.turn_id, sample_offset=stream.samples,
+                        encoding="pcm16le", sample_rate=32000, channels=1,
+                    )
+                    await self._send_once(build_output_audio_frame(payload, block))
+                    stream.samples += len(block) // 2
+                    stream.seq += 1
 
     async def update_motion(self, segment_index: int, motion_payload: dict[str, Any]) -> None:
         async with self._lock:

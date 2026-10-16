@@ -1,6 +1,7 @@
 {
   "protocol_version": "v2",
   "schemas": {
+    "audio_credit": "olv.audio_credit.v1",
     "model_info": "live2d_scan.v4",
     "motion_intent": "engine.motion_intent.v4",
     "motion_tuning_sample": "ag99.motion_tuning_sample.v2",

@@ -21,6 +21,7 @@ export const INBOUND_MESSAGE_TYPES = {
 } as const;
 
 export const OUTBOUND_MESSAGE_TYPES = {
+  CONTROL_AUDIO_CREDIT: "control.audio_credit",
   INPUT_TEXT: "input.text",
   INPUT_AUDIO_STREAM_START: "input.audio_stream_start",
   INPUT_AUDIO_STREAM_END: "input.audio_stream_end",

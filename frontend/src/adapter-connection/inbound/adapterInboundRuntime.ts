@@ -32,6 +32,8 @@ export interface AdapterInboundRuntimeDeps {
   openPcmForTimelinePlayback(turnId: string, messageId: string): Promise<PcmTimelineStream>;
   displayIncrementalText(text: string, turnId: string): void;
   recordIncrementalText(text: string, turnId: string): void;
+  sendAudioCredit: Parameters<typeof createIncrementalOutputRuntime>[0]["sendAudioCredit"];
+  onAsyncMessageError(error: unknown): void;
   getHistoryAdapter: () => ReturnType<typeof useAdapterHistory> | null;
   getMotionTuningAdapter: () => ReturnType<typeof useAdapterMotionTuning> | null;
   getModelSyncAdapter: () => ModelSyncInstance | null;
@@ -57,6 +59,8 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
     openPcm: (turnId, messageId) => deps.openPcmForTimelinePlayback(turnId, messageId),
     displayText: (text, turnId) => deps.displayIncrementalText(text, turnId),
     recordText: (text, turnId) => deps.recordIncrementalText(text, turnId),
+    sendAudioCredit: deps.sendAudioCredit,
+    onAsyncError: deps.onAsyncMessageError,
   });
 
   function logProtocolError(
@@ -98,7 +102,7 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
       if (deps.state.serverInfo === null) throw new Error("incremental_output_before_handshake");
       const buffer = rawData instanceof Blob ? await rawData.arrayBuffer() : rawData;
       signal?.throwIfAborted();
-      await incremental.handleAudio(buffer, signal);
+      incremental.handleAudio(buffer, signal);
       return;
     }
     const parsed = parseInboundEnvelope(rawData);

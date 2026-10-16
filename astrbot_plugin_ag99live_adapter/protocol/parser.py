@@ -22,6 +22,7 @@ from .constants import (
     INBOUND_ALLOWED_TYPES,
     KNOWN_MESSAGE_TYPES,
     SOURCE_FRONTEND,
+    TYPE_CONTROL_AUDIO_CREDIT,
     TYPE_CONTROL_PLAYBACK_FINISHED,
     TYPE_INPUT_AUDIO_STREAM_END,
     TYPE_INPUT_AUDIO_STREAM_START,
@@ -154,7 +155,21 @@ def build_message_envelope(
 
 
 def _validate_payload(message_type: str, payload: dict[str, Any]) -> None:
+    if message_type == TYPE_CONTROL_AUDIO_CREDIT:
+        if payload.get("schema_version") != "olv.audio_credit.v1":
+            raise ProtocolError("control.audio_credit schema invalid")
+        for key in ("core_turn_id", "persona_result_id"):
+            value = payload.get(key)
+            if not isinstance(value, str) or not value.strip() or len(value) > 256:
+                raise ProtocolError(f"control.audio_credit {key} invalid")
+        for key in ("released_bytes", "released_frames"):
+            value = payload.get(key)
+            if type(value) is not int or not 0 <= value <= 9007199254740991:
+                raise ProtocolError(f"control.audio_credit {key} invalid")
+        return
     if message_type == TYPE_SYSTEM_DESKTOP_RUNTIME_SETTINGS:
+        if payload.get("audio_credit_schema") != "olv.audio_credit.v1":
+            raise ProtocolError("desktop audio credit capability mismatch; reload matching AG99live/Adapter builds")
         if not isinstance(payload.get("persona_segment_stream_enabled"), bool):
             raise ProtocolError(
                 f"`{message_type}` requires `payload.persona_segment_stream_enabled` "

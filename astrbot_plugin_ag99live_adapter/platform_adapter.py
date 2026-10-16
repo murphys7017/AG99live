@@ -121,6 +121,7 @@ class OLVPetPlatformAdapter(Platform):
         self.speaker_name = get_config_value(self.config, "speaker_name", "AstrBot")
         self.auto_start_mic = bool(get_config_value(self.config, "auto_start_mic", False))
         self.desktop_persona_segment_stream_enabled = False
+        self.desktop_audio_credit_enabled = False
         self._event_loop: asyncio.AbstractEventLoop | None = None
 
         self._plugin_context = get_plugin_context()
@@ -434,6 +435,8 @@ class OLVPetPlatformAdapter(Platform):
         return await self._send_json(payload)
 
     async def open_incremental_output(self, *, event, persona_result_id: str):
+        if not self.desktop_audio_credit_enabled:
+            raise RuntimeError("incremental_audio_credit_not_negotiated")
         return await self.turn_coordinator.open_incremental_output(
             turn_id=str(event.get_extra("output_correlation_id", "") or "").strip(),
             core_turn_id=str(event.get_extra("_turn_id", "") or "").strip(),
@@ -444,6 +447,7 @@ class OLVPetPlatformAdapter(Platform):
     async def _handle_frontend_system(self, message: Any) -> None:
         # TurnCoordinator hands over a parsed ProtocolMessage, not the raw dict.
         if message.type == TYPE_SYSTEM_DESKTOP_RUNTIME_SETTINGS:
+            self.desktop_audio_credit_enabled = message.payload.get("audio_credit_schema") == "olv.audio_credit.v1"
             self.desktop_persona_segment_stream_enabled = message.payload[
                 "persona_segment_stream_enabled"
             ]
@@ -488,6 +492,7 @@ class OLVPetPlatformAdapter(Platform):
         """
         cleanup_failures: list[tuple[str, Exception]] = []
         self.desktop_persona_segment_stream_enabled = False
+        self.desktop_audio_credit_enabled = False
 
         try:
             self.desktop_settings_broker.fail_pending("desktop_client_offline")

@@ -2,6 +2,25 @@
 
 > 2026-10-17 当前契约状态。Core、Adapter 和桌面已经具备增量文本/PCM/动作 update 的代码接线，但能力仍由现有桌面 OLV 流式设置门控，尚未登记为独立公开能力。协议边界和隔离环境已验证，真实 Provider、Electron 播放和 Live2D 表现仍待现场验收。沿用现有 AstrBot Turn、Adapter TurnCoordinator 和桌面 PlaybackTimeline。
 
+**同日后续修复：**入口身份、PCM 生命周期、旧队列和 TTS 准入已修复；动作空音频结算与配置期限已接通。接收与播放现已分离，并增加下述双端容量契约。本文较早关于串行接收或 750 ms 期限的说明属于历史实现；新代码仍待联合现场验收。
+
+## 下行音频容量契约（olv.audio_credit.v1）
+
+- `system.server_info.schema_manifest.schemas.audio_credit` 必须为 `olv.audio_credit.v1`；桌面现有严格 manifest 校验会拒绝不匹配版本。桌面在 `system.desktop_runtime_settings` 同时发送 `audio_credit_schema=olv.audio_credit.v1`，Adapter 验证并记录在本连接；断开即清除。未协商不得建立 M2 writer，不新增用户开关。必须配套加载 Adapter 和桌面，不能单独更新一端后视为可运行。
+- 现有二进制容器和 `olv.incremental_output.v1` 三资源事件不改版本；新增前端→Adapter 的 `control.audio_credit`。外层仍为 v2、`source=frontend`、目标 frontend `turn_id`。payload 为 `{schema_version:"olv.audio_credit.v1", core_turn_id, persona_result_id, released_bytes, released_frames}`，累计值从每个 writer 的 0 开始，必须为非负安全整数，字节数为偶数。
+- 每个结果初始最多允许 **128 KiB PCM 字节且 64 个 PCM 帧**在途。两项都满足才可发送下一帧；按实际拆分后的二进制帧计数，不能按 Provider 原始 chunk 数计数。metadata 每帧仍有 64 KiB 上限，帧数窗口同时约束其开销。文本、动作和控制不消耗音频信用。
+- 桌面按线序同步验证身份、seq、offset 和容量，写入 Store 后，将 PCM/音频 end 放入同一串行 worker。接收函数随即返回，不等待设备准备、四秒播放缓冲或前段 drain。worker 只在 PCM append 已被播放器接纳后归还该帧容量；这不是实际播完回执。实际声音仍由既有播放器/时钟消费，不新增播放器或音频时钟。
+- worker 容量最多为 64 个 PCM 帧加 256 个段结束记录，PCM 字节遵循上述窗口；不能用无限 Promise 链存储音频。后段 PCM 仍等待前段音频 drain；字幕、动作与生成终态可先推进。`synth_finished` 禁止新生产，但不能使已经接纳的音频过期；只有 Turn 打断、终态或连接代次退休才能取消消费。
+- Adapter 按 frontend/Core/Persona 身份检查回执；累计值不能超过已预留发送量，旧/重复累计值不重复加信用，不接受一项回退另一项前进。已退休 Turn 的迟到回执不创建 writer。等待信用时不持有 text/audio/motion 共用发送锁。连续 30 秒无可用容量时明确报告 `incremental_audio_credit_timeout`；不静默丢包、不重发歧义帧。
+- Turn 退休与断连会唤醒后端信用等待；桌面取消会清空待消费队列并终止等待，旧 worker 不能修改新代次。异步播放失败沿用原有显式失败、音频/时间线清理和断连路径，不吞掉异常继续宣称成功。
+- 本地真实 WebSocket 验证经过 Python writer/TurnCoordinator 与编译后的 TypeScript transport/Store/worker：容量满时文本先行；首帧归还后续传第三帧；第二帧消费阻塞时仍接收 `synth_finished`，之后排空三帧并完成回执；超额信用被拒绝；连接 reset 唤醒信用等待。音频 sink 为隔离接纳桩，没有真实 Provider、声卡或 Live2D。完整 Electron 构建通过，不代表现场首响或听感已验收。
+
+## 动作期限与无音频结算（同日修正）
+
+动作生产默认 5 秒，遵循配置（上限 60 秒），并受 Core Turn 剩余预算约束；不再强制 750 ms。intent-ready 创建绝对 deadline，context、并发槽、Provider 和交付只用 remaining；Core 从平台事件读取同一已登记 deadline，不再额外截成 1 秒。未准入动作 producer 时，空动作资源立即正常结束。终态仅代表生产结束，不等于身体执行完成。
+
+明确无音频的增量段复用 `motion_only` 时间线，不重播文本、不填静音。音频失败或语音窗口已结束时，尚未释放的动作明确拒绝并结算；本段音频仍运行时，后到动作可在全局 blocker 检查前接入。已释放或本地已结算的动作不能被迟到 update/end 重新打开，合法迟到事件仍推进生产 seq。真实身体动作及连续段交接仍需现场验证。
+
 ## 身份与协商
 
 - 协议信封继续使用 v2。`turn_id` 使用桌面可识别的外部 Turn 身份；另携带 `core_turn_id`，禁止把两者混用。
@@ -9,7 +28,7 @@
 - 每条流 `seq` 从 0 开始严格递增；start 为 0，data/update 和 end 继续递增。生产结束只能出现一次；错误结束后不接受后续数据。同一流的重复消息不得再次播放。
 - 信封 `message_id` 是本次事件的唯一 ID；`segment_message_id` 是目标段的稳定 ID，不能用每个事件的 message_id 新建播放段。
 - `olv.incremental_output.v1` 当前作为内部已实现协议使用，但仍不登记为独立公开能力；实际准入由现有桌面 OLV 流式设置、Core 兼容性和连接绑定 writer 共同决定。真实 Provider 和桌面播放器的现场验收通过后，才能考虑公开能力登记。现有分段流开关不另加第二组用户开关。
-- 同一 Turn 的同一内容只选择增量交付或现有完整 `output.segment.v5` 交付，不双发文本/声音/动作。新契约增加事件，不改变 v5 原子段含义。
+- 同一 Turn 的同一内容只选择增量交付或现有完整 `output.segment.v6` 交付，不双发文本/声音/动作。v6 的 `output.segment_motion` 不得更新 M2 增量段。
 
 ## Adapter 发送所有权（2026-10-17）
 

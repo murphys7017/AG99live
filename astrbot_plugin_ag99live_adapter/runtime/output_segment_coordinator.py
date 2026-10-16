@@ -84,6 +84,8 @@ class OutputSegmentCoordinator:
 
     def reset(self) -> None:
         self.deferred_motion.clear()
+        for writer in self._incremental_outputs.values():
+            writer.invalidate()
         self._incremental_outputs.clear()
         self._pending_segments.clear()
         self._segment_sequences.clear()
@@ -111,7 +113,9 @@ class OutputSegmentCoordinator:
 
     def clear_turn(self, turn_id: str) -> None:
         self.deferred_motion.clear(turn_id)
-        self._incremental_outputs.pop(turn_id, None)
+        writer = self._incremental_outputs.pop(turn_id, None)
+        if writer is not None:
+            writer.invalidate()
         self._output_failures.pop(turn_id, None)
         prefix = f"{turn_id}|"
         for key in tuple(self._pending_segments):
@@ -128,6 +132,15 @@ class OutputSegmentCoordinator:
         self._closed_turn_ids.discard(turn_id)
         self._emitted_turn_ids.discard(turn_id)
         self._turn_level_motion_consumed.discard(turn_id)
+
+    def release_audio_credit(self, *, turn_id: str, payload: dict[str, Any]) -> None:
+        writer = self._incremental_outputs.get(turn_id)
+        if writer is None:
+            return  # Late credit for an already retired Turn grants nothing.
+        writer.release_audio_credit(
+            core_turn_id=payload["core_turn_id"], persona_result_id=payload["persona_result_id"],
+            released_bytes=payload["released_bytes"], released_frames=payload["released_frames"],
+        )
 
     async def open_incremental_output(
         self, *, turn_id: str, core_turn_id: str, persona_result_id: str,

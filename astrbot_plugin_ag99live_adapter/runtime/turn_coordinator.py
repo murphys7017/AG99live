@@ -187,6 +187,10 @@ class TurnCoordinator:
 
         turn_id = self._require_interactive_turn_id(message)
 
+        if message.type == "control.audio_credit":
+            self.output_segments.release_audio_credit(turn_id=turn_id, payload=message.payload)
+            return
+
         if message.type == TYPE_CONTROL_PLAYBACK_FINISHED:
             success_raw = message.payload.get("success", True)
             success = success_raw if isinstance(success_raw, bool) else True

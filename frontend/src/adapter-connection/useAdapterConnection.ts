@@ -402,6 +402,15 @@ export function createAdapterConnection(
       state.assistantTextDeliveryTurnId = turnId;
     },
     recordIncrementalText: (text, turnId) => updateAssistantText(text, turnId),
+    sendAudioCredit: (id, releasedBytes, releasedFrames) => {
+      if (!outboundClient.send(OUTBOUND_MESSAGE_TYPES.CONTROL_AUDIO_CREDIT, {
+        schema_version: "olv.audio_credit.v1", core_turn_id: id.coreTurnId,
+        persona_result_id: id.personaResultId, released_bytes: releasedBytes, released_frames: releasedFrames,
+      }, id.turnId)) throw new Error("incremental_audio_credit_send_failed");
+    },
+    onAsyncMessageError: (error) => {
+      if (socket) failInboundSocket(socket, error);
+    },
     getHistoryAdapter: () => historyAdapter,
     getMotionTuningAdapter: () => motionTuningAdapter,
     getModelSyncAdapter: () => modelSync,
@@ -478,6 +487,7 @@ export function createAdapterConnection(
 
   function syncDesktopRuntimeSettings(): void {
     const payload: SystemDesktopRuntimeSettingsPayload = {
+      audio_credit_schema: "olv.audio_credit.v1",
       persona_segment_stream_enabled: state.personaSegmentStreamEnabled,
     };
     if (!outboundClient.send(OUTBOUND_MESSAGE_TYPES.SYSTEM_DESKTOP_RUNTIME_SETTINGS, payload)) {
@@ -677,6 +687,23 @@ export function createAdapterConnection(
     return disposePromise;
   }
 
+  function failInboundSocket(nextSocket: WebSocket, error: unknown): void {
+    if (socket !== nextSocket) return;
+    const details = error instanceof Error ? error.message : String(error);
+    state.status = "error";
+    state.lastError = `入站消息处理失败，连接已关闭：${details}`;
+    state.statusMessage = state.lastError;
+    pushHistory("error", state.lastError);
+    console.error("[AdapterConnection] fatal inbound message handler error:", error);
+    const cleanupErrors: unknown[] = [];
+    runConnectionCleanupStep("fatal audio and timeline cleanup",
+      () => stopAudioAndSettleAll("inbound_runtime_failure"), cleanupErrors);
+    runConnectionCleanupStep("fatal session failure projection",
+      () => failUnresolvedSessions("inbound_runtime_failure"), cleanupErrors);
+    runConnectionCleanupStep("fatal websocket close", () => nextSocket.close(), cleanupErrors);
+    if (cleanupErrors.length > 0) console.error("[AdapterConnection] fatal inbound cleanup completed with errors.", cleanupErrors);
+  }
+
   function openConnectionCandidate(
     candidates: string[],
     index: number,
@@ -717,34 +744,7 @@ export function createAdapterConnection(
       },
       onMessageError: (nextSocket, error) => {
         if (socket !== nextSocket || attemptSerial !== connectAttemptSerial) return;
-        const details = error instanceof Error ? error.message : String(error);
-        state.status = "error";
-        state.lastError = `入站消息处理失败，连接已关闭：${details}`;
-        state.statusMessage = state.lastError;
-        pushHistory("error", state.lastError);
-        console.error("[AdapterConnection] fatal inbound message handler error:", error);
-        const cleanupErrors: unknown[] = [];
-        runConnectionCleanupStep(
-          "fatal audio and timeline cleanup",
-          () => stopAudioAndSettleAll("inbound_runtime_failure"),
-          cleanupErrors,
-        );
-        runConnectionCleanupStep(
-          "fatal session failure projection",
-          () => failUnresolvedSessions("inbound_runtime_failure"),
-          cleanupErrors,
-        );
-        runConnectionCleanupStep(
-          "fatal websocket close",
-          () => nextSocket.close(),
-          cleanupErrors,
-        );
-        if (cleanupErrors.length > 0) {
-          console.error(
-            "[AdapterConnection] fatal inbound cleanup completed with errors.",
-            cleanupErrors,
-          );
-        }
+        failInboundSocket(nextSocket, error);
       },
       onError: (nextSocket, opened) => {
         if (socket !== nextSocket || attemptSerial !== connectAttemptSerial) {

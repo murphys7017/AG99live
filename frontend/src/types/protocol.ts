@@ -129,6 +129,7 @@ export type DesktopSettingsAction = "list" | "set";
 
 /** Desktop-owned runtime choices sent on connection and whenever they change. */
 export interface SystemDesktopRuntimeSettingsPayload {
+  audio_credit_schema: "olv.audio_credit.v1";
   persona_segment_stream_enabled: boolean;
 }
 
