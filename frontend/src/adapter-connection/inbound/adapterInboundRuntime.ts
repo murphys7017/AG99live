@@ -3,6 +3,9 @@ import type { MotionPayloadNormalizer } from "../../types/motion.js";
 import type { AdapterConnectionState } from "../state/adapterConnectionState.js";
 import { parseInboundEnvelope } from "./inboundProtocol.js";
 import { dispatchInboundRuntimeEvent } from "./inboundRuntimeDispatcher.js";
+import { parseIncrementalOutputEvent } from "./incrementalOutputProtocol.js";
+import { createIncrementalOutputRuntime } from "./incrementalOutputRuntime.js";
+import type { PcmTimelineStream } from "../../playback-timeline/pcmTimelinePlayback.js";
 import {
   mapInboundEnvelopeToEvent,
   type InboundAdapterEvent,
@@ -25,6 +28,9 @@ import type { useTurnPlaybackSessionStore } from "../../turn-playback/useTurnPla
 export interface AdapterInboundRuntimeDeps {
   state: AdapterConnectionState;
   getSessionStore: () => ReturnType<typeof useTurnPlaybackSessionStore>;
+  openPcmForTimelinePlayback(turnId: string, messageId: string): Promise<PcmTimelineStream>;
+  displayIncrementalText(text: string, turnId: string): void;
+  recordIncrementalText(text: string, turnId: string): void;
   getHistoryAdapter: () => ReturnType<typeof useAdapterHistory> | null;
   getMotionTuningAdapter: () => ReturnType<typeof useAdapterMotionTuning> | null;
   getModelSyncAdapter: () => ModelSyncInstance | null;
@@ -44,6 +50,13 @@ export interface AdapterInboundRuntimeDeps {
 
 export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
   const reportedProtocolWarnings = new Set<string>();
+  const incremental = createIncrementalOutputRuntime({
+    getStore: deps.getSessionStore,
+    currentTurnId: () => deps.state.currentTurnId,
+    openPcm: (turnId, messageId) => deps.openPcmForTimelinePlayback(turnId, messageId),
+    displayText: (text, turnId) => deps.displayIncrementalText(text, turnId),
+    recordText: (text, turnId) => deps.recordIncrementalText(text, turnId),
+  });
 
   function logProtocolError(
     key: string,
@@ -81,7 +94,10 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
   async function handleSocketMessage(rawData: string | ArrayBuffer | Blob, signal?: AbortSignal): Promise<void> {
     signal?.throwIfAborted();
     if (typeof rawData !== "string") {
-      console.warn("[Connection] ignored non-JSON inbound websocket payload.");
+      if (deps.state.serverInfo === null) throw new Error("incremental_output_before_handshake");
+      const buffer = rawData instanceof Blob ? await rawData.arrayBuffer() : rawData;
+      signal?.throwIfAborted();
+      await incremental.handleAudio(buffer, signal);
       return;
     }
     const parsed = parseInboundEnvelope(rawData);
@@ -102,6 +118,12 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
     }
 
     const envelope = parsed.envelope;
+    const streamEvent = parseIncrementalOutputEvent(envelope);
+    if (streamEvent) {
+      if (deps.state.serverInfo === null) throw new Error("incremental_output_before_handshake");
+      incremental.handleEvent(streamEvent);
+      return;
+    }
     const event = mapInboundEnvelopeToEvent(envelope, buildInboundEventContext());
     await dispatchInboundEvent(event);
   }
@@ -171,7 +193,10 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
       findActiveAudioSegment: () => deps.findActiveAudioSegment(),
       normalizeMotionPayload: deps.normalizeMotionPayload,
       startMicrophoneCapture: (origin) => deps.startMicrophoneCapture(origin),
-      notifyTurnLifecycle: (event) => deps.notifyTurnLifecycle(event),
+      notifyTurnLifecycle: (event) => {
+        if (event.phase === "terminal") incremental.cancelTurn(event.turnId);
+        deps.notifyTurnLifecycle(event);
+      },
       reportedProtocolWarnings,
       buildInboundEventContext: () => buildInboundEventContext(),
     };
@@ -195,6 +220,7 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
   }
 
   return {
+    resetIncremental: incremental.reset,
     tryHandlePriorityInterrupt,
     handleSocketMessage,
     buildInboundEventContext,

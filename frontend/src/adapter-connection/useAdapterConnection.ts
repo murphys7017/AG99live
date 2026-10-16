@@ -393,6 +393,13 @@ export function createAdapterConnection(
   const inboundRuntime = createAdapterInboundRuntime({
     state,
     getSessionStore: () => sessionStore,
+    openPcmForTimelinePlayback: (turnId, messageId) =>
+      requirePlaybackAudioControl().openPcmForTimelinePlayback(turnId, messageId),
+    displayIncrementalText: (text, turnId) => {
+      state.lastAssistantText = text;
+      state.assistantTextDeliveryTurnId = turnId;
+    },
+    recordIncrementalText: (text, turnId) => updateAssistantText(text, turnId),
     getHistoryAdapter: () => historyAdapter,
     getMotionTuningAdapter: () => motionTuningAdapter,
     getModelSyncAdapter: () => modelSync,
@@ -791,6 +798,7 @@ export function createAdapterConnection(
   }
 
   async function resetConnectionRuntimeState(reason: string): Promise<void> {
+    inboundRuntime.resetIncremental();
     const errors: unknown[] = [];
     runConnectionCleanupStep(
       "unresolved session failure projection",

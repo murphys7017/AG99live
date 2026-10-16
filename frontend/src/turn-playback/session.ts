@@ -22,6 +22,7 @@
 import type { NormalizedMotionPayload } from "../types/motion.js";
 import type { OutputSegmentSpeechCue } from "../types/protocol.js";
 import type { DeepReadonly } from "vue";
+import type { IncrementalSegmentState } from "./incrementalSegments.js";
 
 // ── Phase ──────────────────────────────────────────────────────────
 
@@ -201,6 +202,7 @@ export interface TurnPlaybackSessionBackend {
 }
 
 export interface TurnPlaybackSegment {
+  incremental: IncrementalSegmentState | null;
   id: string;
   messageId: string;
   turnId: string | null;
@@ -296,6 +298,7 @@ export function createTurnPlaybackSegment(
 ): TurnPlaybackSegment {
   return {
     id: messageId,
+    incremental: null,
     messageId,
     turnId,
     rejected: false,
@@ -346,6 +349,9 @@ export function isSegmentLocallySettled(
   if (segment.rejected) {
     return true;
   }
+  if (segment.incremental && Object.values(segment.incremental.streams).some(
+    (stream) => !stream || stream.status === "open",
+  )) return false;
   if (!segment.text.delivered) {
     return false;
   }

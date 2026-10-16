@@ -1,4 +1,5 @@
 /** Bounded downlink PCM frame decoder; uplink microphone frames use type 1. */
+import { incrementalIdentityString } from "./incrementalOutputProtocol.js";
 export interface OutputAudioFrameMetadata {
   schema_version: "olv.incremental_output.v1";
   turn_id: string;
@@ -23,12 +24,6 @@ const HEADER_SIZE = 12;
 const MAX_METADATA_BYTES = 64 * 1024;
 const MAX_PCM_BYTES = 64 * 1024;
 
-function identity(value: unknown, field: string): string {
-  if (typeof value !== "string" || !value.trim() || value.length > 256) {
-    throw new Error(`output_audio_identity_invalid:${field}`);
-  }
-  return value;
-}
 
 function sequence(value: unknown, field: string): number {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
@@ -77,11 +72,11 @@ export function parseOutputAudioFrame(buffer: ArrayBuffer): OutputAudioFrame {
   return {
     metadata: {
       schema_version: "olv.incremental_output.v1",
-      turn_id: identity(value.turn_id, "turn_id"),
-      core_turn_id: identity(value.core_turn_id, "core_turn_id"),
-      persona_result_id: identity(value.persona_result_id, "persona_result_id"),
-      segment_message_id: identity(value.segment_message_id, "segment_message_id"),
-      stream_id: identity(value.stream_id, "stream_id"),
+      turn_id: incrementalIdentityString(value.turn_id, "turn_id"),
+      core_turn_id: incrementalIdentityString(value.core_turn_id, "core_turn_id"),
+      persona_result_id: incrementalIdentityString(value.persona_result_id, "persona_result_id"),
+      segment_message_id: incrementalIdentityString(value.segment_message_id, "segment_message_id"),
+      stream_id: incrementalIdentityString(value.stream_id, "stream_id"),
       segment_index: sequence(value.segment_index, "segment_index"),
       seq,
       sample_offset: sampleOffset,

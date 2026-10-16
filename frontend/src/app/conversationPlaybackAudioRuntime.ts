@@ -24,7 +24,7 @@ import type {
 import { createLive2DLipSyncTimelineSink } from "../live2d/lipSyncTimelineSink.js";
 import type { NormalizedMotionPayload } from "../types/motion.js";
 import type { SpeechOutputRuntime } from "../playback-timeline/speechOutputRuntime.js";
-import { createPcmTimelinePlayback, type PcmTimelineStream } from "../playback-timeline/pcmTimelinePlayback.js";
+import { createPcmTimelinePlayback } from "../playback-timeline/pcmTimelinePlayback.js";
 
 export interface ConversationPlaybackAudioPresentation {
   reportAudioPlaybackPreparing(): void;
@@ -35,7 +35,6 @@ export interface ConversationPlaybackAudioPresentation {
 }
 
 export interface ConversationPlaybackAudioRuntime extends PlaybackTimelineAudioControl {
-  openPcmForTimelinePlayback(turnId: string, messageId: string): Promise<PcmTimelineStream>;
   releaseAudioForTimelinePlayback(
     audioUrl: string,
     messageId: string,

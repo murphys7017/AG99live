@@ -556,6 +556,26 @@ persona_optional_motion_chat_stream_only_20261016:
   evidence_gap:
     - "A restarted AstrBot with DeepSeek/MiniMax action and curve Providers still needs live OLV verification of first-chunk timing, optional failure isolation, TTS delivery, and visible Live2D playback."
 
+olv_incremental_desktop_dispatch_20261016:
+  date: '2026-10-16'
+  class: feature
+  risk: high
+  status: real_desktop_dispatch_boundary_validated_not_enabled
+  scope:
+    - "Wire formal inbound JSON text/audio/motion start/end, text deltas and type-2 PCM through current-Turn admission into the existing SessionStore and PCM timeline."
+    - "Keep per-resource production state, sequence and accepted samples in Store; distinguish producer EOF from playback drain and exclude incremental segments from the atomic executor."
+    - "Bound each Turn to 256 segments / 262144 UTF-16 text units, each segment to 65536 units; wire text_length remains Unicode codepoints. Match Python identity length using codepoints."
+    - "Reject mixed atomic/incremental delivery, repeated/reordered streams and discontinuous PCM. Cancel open production on Turn failure/interruption while keeping accepted prefix."
+  validation:
+    - "Renderer typecheck passed. Actual Python binary encoder and loopback WebSocket -> formal inbound -> real Store -> PCM timeline -> completion coordinator passed first-sample-before-EOF, synth-before-drain, one post-drain acknowledgement and optional-motion failure isolation."
+    - "The same public boundary rejected duplicate PCM without advancing its 12800 accepted samples. A targeted actual priority-interrupt run cancelled open streams and ignored stale PCM."
+    - "Unicode text '好的🙂' retained three codepoints and exactly one complete-segment history entry. No broad suites."
+    - "Initial isolated fixture omitted activeWsAddress and failed URL rewriting before handshake; supplying the real loopback address corrected the fixture. No production change was made for that fixture error."
+  evidence_gap:
+    - "Synthetic sine PCM, muted Electron, no real Provider or Live2D model. Completion observed at its existing acknowledgement port, not at a running AstrBot TurnCoordinator."
+    - "Core incremental preparation/production, Adapter production, motion update/fusion and server flow control remain pending. Motion only admits start/end in this batch."
+    - "Cold output primer still begins at first PCM packet. No new capability advertised, active default switched or application restarted; original AstrBot dirty files preserved."
+
 olv_ordered_inbound_transport_20261016:
   date: '2026-10-16'
   class: feature

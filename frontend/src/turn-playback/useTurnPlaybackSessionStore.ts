@@ -10,14 +10,14 @@
  *   三个子状态 + turnId/messageId 的组合。
  *
  * 写入约定：
- *   - 正式协议只通过 commitOutputSegment 一次性创建完整段；段级 mark* 只更新
- *     已提交段的 timeline 生命周期，缺段时直接抛错。
+ *   - 完整段通过 commitOutputSegment 原子提交；增量段由同一 Store 的流写入器
+ *     注册并推进，各自不能混入另一条路径。段级 mark* 只更新已注册段。
  *   - 后端 turn/synth/finished 信号要求 session 已存在，synth_finished 不推断
  *     缺失材料，也不把未解析状态改写为 absent。
  *   - phase 转移统一经 markPhaseInternal 做合法性检查；非法转移直接抛错，
  *     避免协议副作用在状态写入失败后继续执行。
- *   - 段写入不通过计时器猜测 readiness；phase 只由原子提交、timeline 生命周期
- *     和完成协调器显式推进。
+ *   - 段写入不通过计时器猜测 readiness；phase 由原子提交/流注册、timeline
+ *     生命周期和完成协调器显式推进。流生成 EOF 与本地播放终态分别记录。
  *
  * 边界：
  *   - 不知道协议形状，也不收发任何消息。
@@ -43,6 +43,7 @@ import {
   isSegmentLocallySettled,
 } from "./session.js";
 import { getActivePlaybackSegment } from "./selectors.js";
+import { cancelIncrementalProduction, createIncrementalSegmentWriter } from "./incrementalSegments.js";
 
 // ── Store state ────────────────────────────────────────────────────
 
@@ -258,6 +259,12 @@ export function useTurnPlaybackSessionStore() {
       if (segment.rejected) {
         continue;
       }
+      if (segment.incremental) {
+        if (Object.values(segment.incremental.streams).some((stream) => !stream || stream.status === "open")) {
+          throw new Error(`Incremental production still open before synth_finished: messageId=${messageId}.`);
+        }
+        continue; // PCM production EOF may precede local playback drain.
+      }
       const textResolved = Boolean(segment.text.content) || segment.text.delivered;
       const audioResolved = Boolean(segment.audio.url) || segment.audio.terminal !== "idle";
       const motionResolved = Boolean(segment.motion.payload)
@@ -291,6 +298,9 @@ export function useTurnPlaybackSessionStore() {
   ): OutputSegmentCommitResult {
     const session = requireSession(turnId);
     const segmentId = normalizeRequiredMessageId(messageId);
+    if ([...session.segments.values()].some((segment) => Boolean(segment.incremental))) {
+      return { status: "rejected", reason: "output_segment_mixed_incremental_delivery" };
+    }
     if (isTerminalPhase(session.phase)) {
       return {
         status: "rejected",
@@ -687,6 +697,7 @@ export function useTurnPlaybackSessionStore() {
     }
     if (!success) {
       markPhaseInternal(session, "failed");
+      cancelIncrementalProduction(session, normalizedReason || "turn_failed");
     }
     session.backend.turnFinished = true;
     session.backend.success = success;
@@ -709,6 +720,7 @@ export function useTurnPlaybackSessionStore() {
     }
     markPhaseInternal(session, "failed");
     session.interrupted = true;
+    cancelIncrementalProduction(session, "interrupted");
     session.backend.reason = session.backend.reason || "interrupted";
     log("session interrupted", {
       id: session.id,
@@ -730,6 +742,7 @@ export function useTurnPlaybackSessionStore() {
     }
     markPhaseInternal(session, "failed");
     session.backend.reason = reason || session.backend.reason;
+    cancelIncrementalProduction(session, reason || "session_failed");
     return true;
   }
 
@@ -804,7 +817,13 @@ export function useTurnPlaybackSessionStore() {
 
   // ── public API ──────────────────────────────────────────────────
 
+  const incrementalWriter = createIncrementalSegmentWriter({
+    requireSession,
+    markReady: (turnId) => { markPhase(turnId, "ready"); },
+  });
+
   return {
+    ...incrementalWriter,
     state: readonly(state),
     ensureSession,
     requireSession,

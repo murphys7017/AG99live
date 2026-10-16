@@ -51,6 +51,9 @@ export function useTurnPlaybackOrchestrator(
         return;
       }
     }
+    // Incremental delivery is released by its stream consumer on this same
+    // timeline; it must never enter the complete-material executor again.
+    if (segment?.incremental) return;
     if (!segment || !isAtomicSegmentResolved(segment)) {
       if (segment) {
         console.debug("[TurnPlaybackOrchestrator] candidate segment is not atomically resolved.", {
