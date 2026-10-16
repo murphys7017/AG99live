@@ -54,13 +54,14 @@ export function createConversationPlaybackRuntime(options: {
       requireMotionRuntime().motionTimelineSink.interrupt(turnId, messageId, reason);
     },
   };
+  const speechOutputRuntime = createSpeechOutputRuntime();
   const adapter: AdapterConnectionCompositionInstance = createAdapterConnection({
+    prepareSpeechOutput: () => speechOutputRuntime.prepare(),
     sessionStore: options.sessionStore,
     modelSync: options.modelSync,
     normalizeMotionPayload: options.normalizeMotionPayload,
     desktopRuntimeSettings: options.desktopRuntimeSettings,
   });
-  const speechOutputRuntime = createSpeechOutputRuntime();
   const audioSink = createBrowserAudioTimelineSink({ speechOutputRuntime });
   const playbackComposition = createAppPlaybackTimelineRuntime({
     sessionStore: options.sessionStore,

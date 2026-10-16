@@ -16,6 +16,7 @@ export interface SpeechOutputSession {
 }
 
 export interface SpeechOutputRuntime {
+  prepare(): Promise<void>;
   attach(audio: HTMLAudioElement): SpeechOutputSession;
   attachPcm(): PcmOutputSession;
   dispose(): Promise<void>;
@@ -25,10 +26,13 @@ export function createSpeechOutputRuntime(): SpeechOutputRuntime {
   let audioContext: AudioContext | null = null;
   let activeSession: SpeechOutputSession | null = null;
   let outputWarmed = false;
+  let outputActive = false;
   let lastOutputActivityAtMs: number | null = null;
   let keepAliveSource: OscillatorNode | null = null;
   let keepAliveGain: GainNode | null = null;
   let disposed = false;
+  let preparation: Promise<void> | null = null;
+  let cancelPrimer: (() => void) | null = null;
 
   function requireAudioContext(): AudioContext {
     if (disposed) {
@@ -60,11 +64,19 @@ export function createSpeechOutputRuntime(): SpeechOutputRuntime {
     source.buffer = buffer;
     source.connect(context.destination);
 
-    return new Promise<void>((resolve) => {
+    return new Promise<void>((resolve, reject) => {
+      const cancel = () => {
+        source.stop();
+        source.disconnect();
+        cancelPrimer = null;
+        reject(new DOMException("Output preparation disposed.", "AbortError"));
+      };
+      cancelPrimer = cancel;
       source.addEventListener(
         "ended",
         () => {
           source.disconnect();
+          if (cancelPrimer === cancel) cancelPrimer = null;
           resolve();
         },
         { once: true },
@@ -97,21 +109,33 @@ export function createSpeechOutputRuntime(): SpeechOutputRuntime {
     if (resumed) {
       await context.resume();
     }
+    if (disposed) throw new Error("speech_output_runtime_disposed");
     ensureOutputKeepAlive(context);
     const now = performance.now();
     const needsPrimer = !outputWarmed
       || resumed
       || lastOutputActivityAtMs === null
-      || now - lastOutputActivityAtMs >= SPEECH_OUTPUT_REPRIME_IDLE_MS;
+      || (!outputActive && now - lastOutputActivityAtMs >= SPEECH_OUTPUT_REPRIME_IDLE_MS);
     if (needsPrimer) {
       await primeOutput(context);
       outputWarmed = true;
     }
+    if (disposed) throw new Error("speech_output_runtime_disposed");
+    lastOutputActivityAtMs = performance.now();
     console.info("[SpeechOutput] output runtime prepared.", {
       audioContextState: context.state,
       resumed,
       primerMs: needsPrimer ? SPEECH_OUTPUT_PRIMER_DURATION_SECONDS * 1000 : 0,
     });
+  }
+
+  async function prepare(): Promise<void> {
+    if (preparation) return preparation;
+    const pending = prepareOutput(requireAudioContext()).finally(() => {
+      if (preparation === pending) preparation = null;
+    });
+    preparation = pending;
+    return pending;
   }
 
   function attachSource(context: AudioContext, source: AudioNode): SpeechOutputSession {
@@ -131,12 +155,13 @@ export function createSpeechOutputRuntime(): SpeechOutputRuntime {
     const session: SpeechOutputSession = {
       analyser,
       sampleRate: context.sampleRate,
-      prepare: () => prepareOutput(context),
+      prepare,
       start() {
         if (sessionDisposed || outputStarted) {
           return;
         }
         outputStarted = true;
+        outputActive = true;
         const now = context.currentTime;
         outputGain.gain.cancelScheduledValues(now);
         outputGain.gain.setValueAtTime(SPEECH_OUTPUT_FADE_INITIAL_GAIN, now);
@@ -157,6 +182,7 @@ export function createSpeechOutputRuntime(): SpeechOutputRuntime {
         if (activeSession === session) {
           activeSession = null;
         }
+        if (outputStarted) outputActive = false;
         lastOutputActivityAtMs = performance.now();
         try {
           source.disconnect();
@@ -180,6 +206,7 @@ export function createSpeechOutputRuntime(): SpeechOutputRuntime {
   }
 
   return {
+    prepare,
     attach(audio) {
       const context = requireAudioContext();
       return attachSource(context, context.createMediaElementSource(audio));
@@ -197,6 +224,7 @@ export function createSpeechOutputRuntime(): SpeechOutputRuntime {
         return;
       }
       disposed = true;
+      cancelPrimer?.();
       activeSession?.dispose();
       activeSession = null;
       const context = audioContext;

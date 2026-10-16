@@ -266,9 +266,8 @@ export function createBrowserAudioTimelineSink(options: {
       if (activeAudioElement !== audio) {
         throw new DOMException("Audio playback stopped before start.", "AbortError");
       }
-      // Prime the persistent output path only after this segment is decoded and
-      // immediately before media playback. Priming earlier can let a dormant
-      // device close again while the file is loading, which cuts its opening.
+      // Recheck after decoding: capture prewarming shares this output graph,
+      // while suspended or long-idle devices still need a fresh primer.
       await speechOutput?.prepare();
       if (activeAudioElement !== audio) {
         throw new DOMException("Audio playback stopped before start.", "AbortError");

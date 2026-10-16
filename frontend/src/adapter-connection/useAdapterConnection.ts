@@ -165,6 +165,7 @@ export interface AdapterPlaybackCompositionPort {
 }
 
 interface CreateAdapterConnectionOptions {
+  prepareSpeechOutput?: () => Promise<void>;
   sessionStore: SessionStore;
   modelSync: ModelSyncInstance;
   normalizeMotionPayload: MotionPayloadNormalizer;
@@ -225,6 +226,7 @@ export function createAdapterConnection(
   }
 
   const microphoneRuntime = createAdapterMicrophoneRuntime({
+    prepareSpeechOutput: options.prepareSpeechOutput,
     state,
     getSocket: () => socket,
     buildEnvelope: buildMessageEnvelope as (typeof buildMessageEnvelope),
