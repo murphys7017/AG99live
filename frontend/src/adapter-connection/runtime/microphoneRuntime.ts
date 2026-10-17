@@ -446,6 +446,26 @@ export function createAdapterMicrophoneRuntime(
         try {
           await enqueueAudioStreamEnd(async () => {
             reportLatencyStage("audio_end_queue_ready", inputTurnId, inputStreamId);
+            if (
+              deps.getSocket() !== inputSocket
+              || inputSocket.readyState !== WebSocket.OPEN
+            ) {
+              throw new Error("audio_stream_connection_changed_during_capture");
+            }
+            if (desktopSnapshotRequested) {
+              // Seal PCM now so ASR overlaps capture. The end envelope below
+              // still commits the complete text + image input atomically.
+              inputSocket.send(JSON.stringify(deps.buildEnvelope(
+                "input.audio_stream_seal",
+                {
+                  stream_id: inputStreamId,
+                  last_seq: inputLastSequence,
+                  capture_mode: inputCaptureMode,
+                },
+                inputTurnId,
+              )));
+              reportLatencyStage("audio_seal_sent", inputTurnId, inputStreamId);
+            }
             const desktopCapture = await desktopCapturePromise;
             if (
               deps.getSocket() !== inputSocket

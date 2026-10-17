@@ -11,8 +11,16 @@ export async function captureRealtimeDesktopScreenshot(): Promise<DesktopCapture
     console.warn("[DesktopCapture] Desktop capture bridge is unavailable");
     return null;
   }
+  let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
-    const result = await capture();
+    // The input must settle even if Electron's capture request never returns.
+    // This is shorter than Adapter's 15 s sealed-input assembly deadline.
+    const result = await Promise.race([
+      capture(),
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(() => reject(new Error("desktop_capture_timeout")), 10_000);
+      }),
+    ]);
     if (!result) {
       console.warn("[DesktopCapture] Desktop capture returned no image");
     }
@@ -20,5 +28,7 @@ export async function captureRealtimeDesktopScreenshot(): Promise<DesktopCapture
   } catch (error) {
     console.warn("[DesktopCapture] Failed to capture realtime desktop screenshot", error);
     return null;
+  } finally {
+    clearTimeout(timeout);
   }
 }

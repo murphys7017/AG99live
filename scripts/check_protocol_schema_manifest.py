@@ -14,6 +14,8 @@ MANIFEST_PATH = (
 TYPESCRIPT_PATH = ROOT / "frontend" / "src" / "types" / "protocolSchema.generated.ts"
 
 EXPORT_NAMES = {
+    "pre_action": "PRE_ACTION_SCHEMA_VERSION",
+    "audio_input": "AUDIO_INPUT_SCHEMA_VERSION",
     "audio_credit": "AUDIO_CREDIT_SCHEMA_VERSION",
     "protocol_version": "PROTOCOL_VERSION",
     "model_info": "SCHEMA_MODEL_INFO_V4",

@@ -10,6 +10,7 @@ SOURCE_ENGINE = "engine"
 TYPE_INPUT_TEXT = "input.text"
 TYPE_INPUT_AUDIO_STREAM_START = "input.audio_stream_start"
 TYPE_INPUT_AUDIO_STREAM_CHUNK = "input.audio_stream_chunk"
+TYPE_INPUT_AUDIO_STREAM_SEAL = "input.audio_stream_seal"
 TYPE_INPUT_AUDIO_STREAM_END = "input.audio_stream_end"
 
 TYPE_OUTPUT_SEGMENT = "output.segment"
@@ -64,10 +65,12 @@ DESKTOP_SETTINGS_ACTIONS = {
 INPUT_TYPES = {
     TYPE_INPUT_TEXT,
     TYPE_INPUT_AUDIO_STREAM_START,
+    TYPE_INPUT_AUDIO_STREAM_SEAL,
     TYPE_INPUT_AUDIO_STREAM_END,
 }
 
 OUTPUT_TYPES = {
+    "output.pre_action",
     "output.segment_motion",
     TYPE_OUTPUT_SEGMENT,
     TYPE_OUTPUT_TRANSCRIPTION,

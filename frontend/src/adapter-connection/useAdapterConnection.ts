@@ -83,6 +83,7 @@ import {
 } from "./runtime/connectionRuntimeState.js";
 import { createAdapterConnectionState } from "./state/adapterConnectionState.js";
 import { createAdapterInboundRuntime } from "./inbound/adapterInboundRuntime.js";
+import type { PreActionEvent } from "./inbound/preActionProtocol.js";
 
 type SessionStore = ReturnType<typeof useTurnPlaybackSessionStore>;
 type AdapterHistory = ReturnType<typeof useAdapterHistory>;
@@ -94,6 +95,7 @@ export interface AdapterTurnLifecycleEvent {
 }
 
 export interface AdapterConnectionInstance {
+  setPreActionObserver: (observer: ((event: PreActionEvent) => void) | null) => void;
   readonly state: DeepReadonly<ReturnType<typeof createAdapterConnectionState>>;
   readonly modelSync: ModelSyncInstance;
   initialize: () => Promise<void>;
@@ -196,6 +198,9 @@ export function createAdapterConnection(
     turnId: string | null,
   ) => void) | null = null;
   let turnLifecycleObserver: ((event: AdapterTurnLifecycleEvent) => void) | null = null;
+  let preActionObserver: ((event: PreActionEvent) => void) | null = null;
+  let preActionInputId: string | null = null;
+  const preActionReceived = new Set<string>();
   let detachPttHookStatusListener: (() => void) | null = null;
   let playbackAudioControl: PlaybackTimelineAudioControl | null = null;
 
@@ -204,6 +209,16 @@ export function createAdapterConnection(
     payload: TPayload,
     turnId: string | null = null,
   ): ProtocolEnvelope<TPayload> {
+    if (["system.history_create", "system.history_load", "system.history_delete",
+      "system.semantic_axis_profile_save"].includes(type)) {
+      preActionInputId = null;
+      preActionObserver?.({ action: "cancel", turnId: null });
+    }
+    if ((type === "input.text" || type === "input.audio_stream_start") && turnId) {
+      preActionInputId = turnId;
+      preActionReceived.clear();
+      preActionObserver?.({ action: "input", turnId });
+    }
     return buildProtocolMessageEnvelope(type, payload, turnId);
   }
 
@@ -393,6 +408,16 @@ export function createAdapterConnection(
   );
 
   const inboundRuntime = createAdapterInboundRuntime({
+    onPreAction: (event) => {
+      if (event.action === "ready") {
+        if (!preActionInputId || (event.turnId !== preActionInputId
+          && !event.turnId.startsWith(`${preActionInputId}:vad:`))
+          || Date.now() >= event.expiresAt || preActionReceived.has(event.requestId)) return;
+        preActionReceived.add(event.requestId);
+        if (preActionReceived.size > 256) preActionReceived.delete(preActionReceived.values().next().value!);
+      }
+      preActionObserver?.(event);
+    },
     state,
     getSessionStore: () => sessionStore,
     openPcmForTimelinePlayback: (turnId, messageId) =>
@@ -800,6 +825,9 @@ export function createAdapterConnection(
   }
 
   async function resetConnectionRuntimeState(reason: string): Promise<void> {
+    preActionInputId = null;
+    preActionReceived.clear();
+    preActionObserver?.({ action: "cancel", turnId: null });
     inboundRuntime.resetIncremental();
     const errors: unknown[] = [];
     runConnectionCleanupStep(
@@ -910,7 +938,14 @@ export function createAdapterConnection(
   }
 
   function interruptCurrentTurn(): boolean {
-    return sendInterrupt(outboundCtx);
+    const pendingInputId = preActionInputId;
+    const continuousCapture = state.micCapturing && !state.pttModeEnabled;
+    preActionInputId = continuousCapture ? pendingInputId : null;
+    preActionObserver?.({ action: "cancel", turnId: continuousCapture ? state.currentTurnId : null });
+    const inputInterrupted = !continuousCapture && pendingInputId && pendingInputId !== state.currentTurnId
+      ? outboundClient.send(OUTBOUND_MESSAGE_TYPES.CONTROL_INTERRUPT, {}, pendingInputId)
+      : false;
+    return sendInterrupt(outboundCtx) || Boolean(inputInterrupted);
   }
 
   function sendSemanticAxisProfileSave(
@@ -1023,6 +1058,9 @@ export function createAdapterConnection(
     disconnect,
     sendText,
     setTurnLifecycleObserver,
+    setPreActionObserver: (observer: ((event: PreActionEvent) => void) | null) => {
+      preActionObserver = observer;
+    },
     interruptCurrentTurn,
     sendSemanticAxisProfileSave,
     requestHistoryList,

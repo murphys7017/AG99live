@@ -24,6 +24,7 @@ export const OUTBOUND_MESSAGE_TYPES = {
   CONTROL_AUDIO_CREDIT: "control.audio_credit",
   INPUT_TEXT: "input.text",
   INPUT_AUDIO_STREAM_START: "input.audio_stream_start",
+  INPUT_AUDIO_STREAM_SEAL: "input.audio_stream_seal",
   INPUT_AUDIO_STREAM_END: "input.audio_stream_end",
   CONTROL_INTERRUPT: "control.interrupt",
   CONTROL_PLAYBACK_FINISHED: "control.playback_finished",

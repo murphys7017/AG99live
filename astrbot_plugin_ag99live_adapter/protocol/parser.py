@@ -25,6 +25,7 @@ from .constants import (
     TYPE_CONTROL_AUDIO_CREDIT,
     TYPE_CONTROL_PLAYBACK_FINISHED,
     TYPE_INPUT_AUDIO_STREAM_END,
+    TYPE_INPUT_AUDIO_STREAM_SEAL,
     TYPE_INPUT_AUDIO_STREAM_START,
     TYPE_INPUT_TEXT,
     TYPE_SYSTEM_DESKTOP_RUNTIME_SETTINGS,
@@ -227,6 +228,13 @@ def _validate_payload(message_type: str, payload: dict[str, Any]) -> None:
             raise ProtocolError(
                 "`input.audio_stream_start` requires `payload.device_id` to be a string when provided."
             )
+        return
+
+    if message_type == TYPE_INPUT_AUDIO_STREAM_SEAL:
+        _require_payload_string(message_type, payload, "stream_id")
+        _require_payload_non_negative_int(message_type, payload, "last_seq")
+        if payload.get("capture_mode") != "ptt":
+            raise ProtocolError("`input.audio_stream_seal` requires `payload.capture_mode=ptt`.")
         return
 
     if message_type == TYPE_INPUT_AUDIO_STREAM_END:

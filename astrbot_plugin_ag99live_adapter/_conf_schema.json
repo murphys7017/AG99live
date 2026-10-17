@@ -99,6 +99,22 @@
       }
     }
   },
+  "pre_action": {
+    "description": "ASR 文本到达即触发的轻量预动作（使用独立动作 Provider）",
+    "type": "object",
+    "items": {
+      "enabled": {
+        "description": "独立动作启用时，在有效输入到达后立即生成一个小反应，不等待主对话 Prompt。",
+        "type": "bool",
+        "default": true
+      },
+      "character_core": {
+        "description": "仅保留指导动作的核心性格、情绪表达与表现习惯；不填人物关系、背景或历史。留空则摘选当前人设的核心人格、情绪与互动反应等命名章节；无法识别时跳过预动作并记录原因。",
+        "type": "text",
+        "default": ""
+      }
+    }
+  },
   "passive_behavior": {
     "description": "OLV 桌宠 NeuroBrain 后台被动动作（实验）",
     "type": "object",

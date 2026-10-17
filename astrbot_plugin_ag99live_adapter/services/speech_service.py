@@ -9,6 +9,7 @@ AstrBotMessage 并配套发 build_output_transcription（如果转写出了文�
 
 from __future__ import annotations
 
+import asyncio
 from collections import Counter
 from dataclasses import dataclass, field
 import os
@@ -39,6 +40,9 @@ class AudioStreamState:
     last_seq: int = -1
     vad_engine: Any | None = None
     vad_turn_count: int = 0
+    transcription_task: asyncio.Task[str | None] | None = None
+    context_timeout_task: asyncio.Task[None] | None = None
+    sample_count: int = 0
 
 
 @dataclass
@@ -73,6 +77,8 @@ class _StreamVadMessage:
 
 TEMP_AUDIO_CLEANUP_DELAY_TURNS = 3
 TEMP_AUDIO_CLEANUP_WARNING_THRESHOLD = 5
+SEALED_INPUT_CONTEXT_TIMEOUT_SECONDS = 15
+MAX_SEALED_INPUTS = 4
 
 
 class SpeechIngressService:
@@ -98,6 +104,8 @@ class SpeechIngressService:
         build_message_object,
         on_vad_speech_started,
         on_vad_speech_ended=None,
+        on_capture_abandoned=None,
+        on_valid_transcription=None,
     ) -> None:
         self.media_service = media_service
         self.runtime_state = runtime_state
@@ -106,6 +114,8 @@ class SpeechIngressService:
         self._build_message_object = build_message_object
         self._on_vad_speech_started = on_vad_speech_started
         self._on_vad_speech_ended = on_vad_speech_ended
+        self._on_capture_abandoned = on_capture_abandoned
+        self._on_valid_transcription = on_valid_transcription
         self._audio_streams: dict[str, AudioStreamState] = {}
         self._pending_temp_audio_files: dict[str, PendingTempAudioFile] = {}
         self._completed_transcription_turns = 0
@@ -151,6 +161,9 @@ class SpeechIngressService:
         stream = self._audio_streams.get(stream_id)
         if stream is None:
             raise ValueError(f"binary_audio_chunk_without_start:{stream_id}")
+        self._validate_capture_turn(stream, frame.turn_id)
+        if stream.transcription_task is not None:
+            raise ValueError(f"binary_audio_chunk_after_seal:{stream_id}")
 
         if frame.seq <= stream.last_seq:
             self._audio_streams.pop(stream_id, None)
@@ -200,6 +213,39 @@ class SpeechIngressService:
         stream.last_seq = frame.seq
         return None
 
+    async def handle_audio_stream_seal(self, message) -> None:
+        """收齐 PTT PCM 后先转写；图片仍由后续 end 原子提交。"""
+        stream_id = self._normalize_stream_id(message.payload.get("stream_id"))
+        stream = self._audio_streams.get(stream_id)
+        if stream is None:
+            raise ValueError(f"audio_stream_seal_without_start:{stream_id}")
+        self._validate_capture_turn(stream, message.turn_id)
+        if stream.capture_mode != "ptt" or message.payload.get("capture_mode") != "ptt":
+            raise ValueError(f"audio_stream_seal_requires_ptt:{stream_id}")
+        if stream.transcription_task is not None:
+            raise ValueError(f"audio_stream_duplicate_seal:{stream_id}")
+        if message.payload.get("last_seq") != stream.last_seq or not stream.chunks:
+            raise ValueError(f"audio_stream_seal_sequence_mismatch:{stream_id}")
+        if sum(s.transcription_task is not None for s in self._audio_streams.values()) >= MAX_SEALED_INPUTS:
+            raise ValueError("audio_stream_sealed_input_limit")
+        audio_buffer = self._pcm16_bytes_to_float32(stream.chunks)
+        stream.chunks.clear()
+        stream.sample_count = int(audio_buffer.size)
+        stream.transcription_task = asyncio.create_task(
+            self._transcribe_audio_buffer(
+                audio_buffer,
+                turn_id=stream.capture_turn_id,
+                sample_rate=stream.sample_rate,
+                stream_id=stream_id,
+            ),
+            name=f"audio-asr:{stream_id}",
+        )
+        stream.transcription_task.add_done_callback(self._observe_input_task)
+        stream.context_timeout_task = asyncio.create_task(
+            self._expire_sealed_input(stream), name=f"audio-context:{stream_id}"
+        )
+        stream.context_timeout_task.add_done_callback(self._observe_input_task)
+
     async def handle_audio_stream_end(self, message):
         """处理 input.audio_stream_end：取走流、组装一轮消息。
 
@@ -215,7 +261,23 @@ class SpeechIngressService:
         if not stream_id:
             raise ValueError("audio_stream_end_stream_id_missing")
 
-        stream = self._audio_streams.pop(stream_id, None)
+        stream = self._audio_streams.get(stream_id)
+        if stream is not None:
+            self._validate_capture_turn(stream, message.turn_id)
+        # Ownership transfers to this handler. Timeout/disconnect cannot consume
+        # the same stream again; cancellation below also owns the ASR task.
+        self._audio_streams.pop(stream_id, None)
+        if stream is not None and stream.context_timeout_task is not None:
+            stream.context_timeout_task.cancel()
+        try:
+            return await self._finish_audio_stream(message, stream, stream_id)
+        finally:
+            if stream is not None and stream.transcription_task is not None:
+                stream.transcription_task.cancel()
+                await asyncio.gather(stream.transcription_task, return_exceptions=True)
+
+    async def _finish_audio_stream(self, message, stream, stream_id):
+        payload = message.payload
         dropped = bool(payload.get("dropped", False))
         if dropped:
             logger.warning("Dropping binary microphone audio stream because frontend reported chunk loss.")
@@ -252,6 +314,19 @@ class SpeechIngressService:
             )
             return None
 
+        if stream.transcription_task is not None:
+            text = await stream.transcription_task
+            if text is None:
+                return None
+            return await self._build_message_from_transcription(
+                text,
+                raw_message=message.raw,
+                turn_id=message.turn_id,
+                sample_count=stream.sample_count,
+                sample_rate=stream.sample_rate,
+                stream_id=stream_id,
+            )
+
         if not stream.chunks:
             await self._emit_input_error(
                 turn_id=message.turn_id,
@@ -268,13 +343,48 @@ class SpeechIngressService:
             stream_id=stream_id,
         )
 
-    async def handle_audio_stream_interrupt(self, stream_id: str | None = None) -> None:
+    async def handle_audio_stream_interrupt(
+        self, stream_id: str | None = None, *, turn_id: str | None = None
+    ) -> None:
         normalized_stream_id = self._normalize_stream_id(stream_id)
-        if normalized_stream_id:
-            self._audio_streams.pop(normalized_stream_id, None)
-            return
+        tasks = []
+        for key, stream in list(self._audio_streams.items()):
+            if normalized_stream_id and key != normalized_stream_id:
+                continue
+            if turn_id is not None and stream.capture_turn_id != turn_id:
+                continue
+            self._audio_streams.pop(key, None)
+            for task in (stream.transcription_task, stream.context_timeout_task):
+                if task is not None:
+                    task.cancel()
+                    tasks.append(task)
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
-        self._audio_streams.clear()
+    async def _expire_sealed_input(self, stream: AudioStreamState) -> None:
+        await asyncio.sleep(SEALED_INPUT_CONTEXT_TIMEOUT_SECONDS)
+        if self._audio_streams.get(stream.stream_id) is not stream:
+            return
+        self._audio_streams.pop(stream.stream_id)
+        if stream.transcription_task is not None:
+            stream.transcription_task.cancel()
+            await asyncio.gather(stream.transcription_task, return_exceptions=True)
+        if self._on_capture_abandoned is not None:
+            await self._on_capture_abandoned(stream.capture_turn_id)
+        await self._emit_input_error(
+            turn_id=stream.capture_turn_id,
+            error_message="Audio input expired while waiting for desktop context.",
+        )
+
+    @staticmethod
+    def _validate_capture_turn(stream: AudioStreamState, turn_id: str | None) -> None:
+        if stream.capture_turn_id != turn_id:
+            raise ValueError(f"audio_stream_capture_turn_mismatch:{stream.stream_id}")
+
+    @staticmethod
+    def _observe_input_task(task: asyncio.Task) -> None:
+        if not task.cancelled() and (error := task.exception()) is not None:
+            logger.error("Audio input task failed: %s", error)
 
     async def _handle_vad_pcm16_chunk(
         self,
@@ -345,6 +455,28 @@ class SpeechIngressService:
         sample_rate: int = 16000,
         stream_id: str | None = None,
     ):
+        text = await self._transcribe_audio_buffer(
+            audio_buffer, turn_id=turn_id, sample_rate=sample_rate, stream_id=stream_id
+        )
+        if text is None:
+            return None
+        return await self._build_message_from_transcription(
+            text,
+            raw_message=raw_message,
+            turn_id=turn_id,
+            sample_count=int(audio_buffer.size),
+            sample_rate=sample_rate,
+            stream_id=stream_id,
+        )
+
+    async def _transcribe_audio_buffer(
+        self,
+        audio_buffer: np.ndarray,
+        *,
+        turn_id: str | None,
+        sample_rate: int,
+        stream_id: str | None,
+    ) -> str | None:
         transcription_started_at = time.perf_counter()
         logger.info(
             "DIAG latency.transcription_started turn_id=%s stream_id=%s "
@@ -399,6 +531,23 @@ class SpeechIngressService:
             )
             return None
 
+        if self._on_valid_transcription is not None:
+            try:
+                await self._on_valid_transcription(text, turn_id)
+            except Exception:
+                logger.exception("Optional ASR pre-action scheduling failed")
+        return text
+
+    async def _build_message_from_transcription(
+        self,
+        text: str,
+        *,
+        raw_message: dict[str, Any],
+        turn_id: str | None,
+        sample_count: int,
+        sample_rate: int,
+        stream_id: str | None,
+    ):
         await self._send_json(
             build_output_transcription(
                 turn_id=turn_id,
@@ -409,7 +558,7 @@ class SpeechIngressService:
         normalized_raw_message = dict(raw_message)
         normalized_payload = dict(normalized_raw_message.get("payload") or {})
         normalized_payload["transcription"] = text
-        normalized_payload["audio_sample_count"] = int(audio_buffer.size)
+        normalized_payload["audio_sample_count"] = sample_count
         normalized_payload["audio_sample_rate"] = sample_rate
         if stream_id:
             normalized_payload["stream_id"] = stream_id

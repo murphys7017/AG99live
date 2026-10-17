@@ -6,6 +6,7 @@ import { applyDeferredMotion } from "./deferredMotionProtocol.js";
 import { dispatchInboundRuntimeEvent } from "./inboundRuntimeDispatcher.js";
 import { parseIncrementalOutputEvent } from "./incrementalOutputProtocol.js";
 import { createIncrementalOutputRuntime } from "./incrementalOutputRuntime.js";
+import { parsePreAction, type PreActionEvent } from "./preActionProtocol.js";
 import type { PcmTimelineStream } from "../../playback-timeline/pcmTimelinePlayback.js";
 import {
   mapInboundEnvelopeToEvent,
@@ -27,6 +28,7 @@ import type { ModelSyncInstance } from "../model-sync/useModelSync.js";
 import type { useTurnPlaybackSessionStore } from "../../turn-playback/useTurnPlaybackSessionStore.js";
 
 export interface AdapterInboundRuntimeDeps {
+  onPreAction: (event: PreActionEvent) => void;
   state: AdapterConnectionState;
   getSessionStore: () => ReturnType<typeof useTurnPlaybackSessionStore>;
   openPcmForTimelinePlayback(turnId: string, messageId: string): Promise<PcmTimelineStream>;
@@ -123,6 +125,15 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
     }
 
     const envelope = parsed.envelope;
+    if (envelope.type === "output.pre_action") {
+      if (deps.state.serverInfo === null) return;
+      try {
+        deps.onPreAction(parsePreAction(envelope, deps.normalizeMotionPayload));
+      } catch (error) {
+        console.warn("[PreAction] optional reaction rejected.", error);
+      }
+      return;
+    }
     if (envelope.type === "output.segment_motion") {
       if (deps.state.serverInfo === null) throw new Error("deferred_motion_before_handshake");
       applyDeferredMotion(envelope, deps.getSessionStore(), deps.normalizeMotionPayload);

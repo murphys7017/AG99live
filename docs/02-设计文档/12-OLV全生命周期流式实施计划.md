@@ -4,6 +4,8 @@
 
 ## 阅读入口与当前状态
 
+2026-10-18 输入延迟专项：PTT 截图与 ASR 改为并行，采用 `audio_stream_seal` 提前转写、`audio_stream_end` 原子提交图片和文本，详见[音频输入契约](../01-架构与结构/02-WebSocket协议契约.md#ptt-截图与转写并行)。独立轻量预动作已按用户确认接入：有效 ASR 文本即触发，原话上限 100 字符、保留动作相关性格、无历史/当前姿态，行为倾向与合法动作轴独立投影。前端通过专属入口进入现有 ModelEngine，支持正式动作接管和预动作独占参数回收。局部边界及静态检查已有证据，真实首采样/首动作收益待配套加载后实测，详见 [Prompt 与接入说明](14-轻量预动作Prompt草案.md)；VAD 结束等待保持不变。
+
 跨仓库下一步以 Core 的 `docs/Yakumo/dev/structured-persona-output/14-olv-remaining-work-and-acceptance.md` 为准。架构目标及提交证据保留在同目录 08，行为细则见 09，历史运行样本见 10，普通模式实施范围见 11。
 
 **文本/PCM 增量链路已有实现与局部验证，尚未完成真实 M2 全链路验收。动作 update 已接通，动作小记录逐条执行仍未实现。**源码同步、类型检查、成功构建和本地 socket 检查都不等于运行中的 AstrBot、Electron、真实 Provider 与 Live2D 已验收。

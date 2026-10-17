@@ -4,6 +4,7 @@ import asyncio
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 class MediaServiceStub:
     def __init__(self) -> None:
@@ -60,6 +61,126 @@ class MessageStub:
 
 async def ignore_vad_speech_started(_capture_turn_id: str) -> None:
     return None
+
+
+def test_sealed_ptt_transcribes_before_final_image_commit(install_fake_astrbot) -> None:
+    install_fake_astrbot()
+    from astrbot_plugin_ag99live_adapter.protocol.binary_audio import BinaryAudioChunkFrame
+    from astrbot_plugin_ag99live_adapter.protocol.parser import parse_inbound_message
+    from astrbot_plugin_ag99live_adapter.services.speech_service import SpeechIngressService
+
+    async def run():
+        started = asyncio.Event()
+        release = asyncio.Event()
+        sent = []
+
+        class Provider:
+            async def get_text(self, _path):
+                started.set()
+                await release.wait()
+                return "看看桌面"
+
+        async def send_json(message):
+            sent.append(message)
+
+        service = SpeechIngressService(
+            media_service=MediaServiceStub(),
+            runtime_state=SimpleNamespace(resolve_stt_provider=Provider),
+            create_vad_engine=lambda: None,
+            send_json=send_json,
+            build_message_object=lambda **kwargs: kwargs,
+            on_vad_speech_started=ignore_vad_speech_started,
+        )
+
+        def message(kind, payload, turn_id="input:sealed"):
+            return parse_inbound_message({
+                "type": f"input.audio_stream_{kind}", "version": "v2",
+                "source": "frontend", "turn_id": turn_id, "payload": payload,
+                "message_id": f"boundary:{kind}:{turn_id}",
+            })
+
+        await service.handle_audio_stream_start(message("start", {
+            "stream_id": "mic:sealed", "source": "web_audio", "encoding": "pcm16le",
+            "sample_rate": 16000, "channels": 1, "capture_mode": "ptt",
+        }))
+        await service.handle_audio_stream_binary_chunk(BinaryAudioChunkFrame(
+            stream_id="mic:sealed", turn_id="input:sealed", seq=0,
+            encoding="pcm16le", sample_rate=16000, channels=1,
+            payload=np.array([8192, -8192], dtype=np.int16).tobytes(),
+            metadata={"capture_mode": "ptt"},
+        ))
+        await service.handle_audio_stream_seal(message("seal", {
+            "stream_id": "mic:sealed", "last_seq": 0, "capture_mode": "ptt",
+        }))
+        await asyncio.wait_for(started.wait(), timeout=1)
+        assert sent == []  # The input is not published before its screenshot.
+        release.set()
+        image = {"source": "screen", "data": "data:image/jpeg;base64,AA=="}
+        end = {"stream_id": "mic:sealed", "reason": "ptt_release", "last_seq": 0,
+               "capture_mode": "ptt", "images": [image], "desktop_snapshot_requested": True}
+        with pytest.raises(ValueError, match="capture_turn_mismatch"):
+            await service.handle_audio_stream_end(message("end", end, "input:other"))
+        result = await service.handle_audio_stream_end(message("end", end))
+        assert result["text"] == "看看桌面"
+        assert result["images"] == [image]
+        assert result["raw_message"]["payload"]["audio_sample_count"] == 2
+        assert [item["type"] for item in sent] == ["output.transcription"]
+        with pytest.raises(ValueError, match="without_start"):
+            await service.handle_audio_stream_end(message("end", end))
+
+    asyncio.run(run())
+
+
+def test_interrupted_sealed_ptt_cannot_commit(install_fake_astrbot) -> None:
+    install_fake_astrbot()
+    from astrbot_plugin_ag99live_adapter.protocol.binary_audio import BinaryAudioChunkFrame
+    from astrbot_plugin_ag99live_adapter.services.speech_service import SpeechIngressService
+
+    async def run():
+        started = asyncio.Event()
+        cancelled = asyncio.Event()
+        sent = []
+
+        class Provider:
+            async def get_text(self, _path):
+                started.set()
+                try:
+                    await asyncio.Event().wait()
+                finally:
+                    cancelled.set()
+
+        async def send_json(message):
+            sent.append(message)
+
+        service = SpeechIngressService(
+            media_service=MediaServiceStub(),
+            runtime_state=SimpleNamespace(resolve_stt_provider=Provider),
+            create_vad_engine=lambda: None, send_json=send_json,
+            build_message_object=lambda **kwargs: kwargs,
+            on_vad_speech_started=ignore_vad_speech_started,
+        )
+        await service.handle_audio_stream_start(MessageStub(payload={
+            "stream_id": "mic:cancel", "encoding": "pcm16le", "sample_rate": 16000,
+            "channels": 1, "capture_mode": "ptt",
+        }))
+        await service.handle_audio_stream_binary_chunk(BinaryAudioChunkFrame(
+            stream_id="mic:cancel", turn_id="input:segment-1", seq=0,
+            encoding="pcm16le", sample_rate=16000, channels=1,
+            payload=np.array([8192], dtype=np.int16).tobytes(), metadata={},
+        ))
+        await service.handle_audio_stream_seal(MessageStub(payload={
+            "stream_id": "mic:cancel", "last_seq": 0, "capture_mode": "ptt",
+        }))
+        await asyncio.wait_for(started.wait(), timeout=1)
+        await service.handle_audio_stream_interrupt(turn_id="input:segment-1")
+        assert cancelled.is_set()
+        with pytest.raises(ValueError, match="without_start"):
+            await service.handle_audio_stream_end(MessageStub(payload={
+                "stream_id": "mic:cancel", "reason": "ptt_release",
+            }))
+        assert sent == []
+
+    asyncio.run(run())
 
 
 def start_audio_stream(

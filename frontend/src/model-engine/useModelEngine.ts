@@ -61,6 +61,8 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     lastStartReason: "",
   });
   let activePlaybackRun: ModelEngineActivePlaybackRun | null = null;
+  const preActionBlockedTurns = new Set<string>();
+  let activePreActionPlan: MotionPlanPayload | null = null;
   let thinkingSwayTurnId: string | null = null;
   const preparedSemanticMotions = new Map<string, {
     durationMs: number;
@@ -112,11 +114,38 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
   const motionStartDependencies: MotionStartDependencies = {
     getSelectedModel: dependencies.getSelectedModel,
     getSettings: dependencies.getSettings,
-    playPlan: dependencies.playPlan,
+    playPlan: (plan, model, options) => {
+      if (activePlaybackRun?.origin !== "pre_action" || !activePreActionPlan) {
+        return dependencies.playPlan(plan, model, options);
+      }
+      const parsed = parseSemanticParameterPlan(plan);
+      if (!parsed.ok || parsed.value.profile_id !== activePreActionPlan.profile_id
+        || parsed.value.profile_revision !== activePreActionPlan.profile_revision
+        || parsed.value.model_id !== activePreActionPlan.model_id) {
+        return dependencies.playPlan(plan, model, options);
+      }
+      const owned = new Set(parsed.value.parameters.map((p) => p.parameter_id));
+      const release = activePreActionPlan.parameters.filter((p) => !owned.has(p.parameter_id)).map((p) => {
+        const { keyframes, modulation, input_value, ...binding } = p;
+        return { ...binding, source: "continuity" as const, activation_at_ms: 0,
+          target_value: p.neutral_target_value,
+          dynamics: { ...p.dynamics, max_speech_offset: 0 } };
+      });
+      // The existing SDK transfers the actual driven offset and velocity for
+      // matching parameters. Carry orphan parameters to neutral through that
+      // same plan so replacing the preview cannot snap them to the base pose.
+      return dependencies.playPlan({ ...parsed.value,
+        parameters: [...parsed.value.parameters, ...release] }, model, options);
+    },
     playMotionResource: dependencies.playMotionResource,
     getPlayerMessage: dependencies.getPlayerMessage,
     stopInteractionSway: dependencies.stopInteractionSway,
     onPlanStarted: (event) => {
+      activePreActionPlan = event.playbackOrigin === "pre_action" && event.executionKind === "parameter_plan"
+        ? event.plan : null;
+      if (event.playbackOrigin === "conversation") {
+        blockPreAction(event.turnId);
+      }
       activePlaybackRun = {
         runId: event.runId,
         origin: event.playbackOrigin,
@@ -280,6 +309,29 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
       timeline: context.playbackClock,
     });
     return accepted;
+  }
+
+  function startPreAction(payload: NormalizedMotionPayload, turnId: string, requestId: string): boolean {
+    if (preActionBlockedTurns.has(turnId) || activePlaybackRun?.origin === "manual_preview") return false;
+    return startNormalizedMotionPayload(payload, {
+      turnId, messageId: requestId, playbackTurnId: null, playbackOrigin: "pre_action",
+      assistantText: "", speechCues: [], startReason: "input_pre_action", queuedDelayMs: 0,
+      playbackClock: null, playbackClockReader: null,
+    }, motionStartDependencies, runtimeStateController, null);
+  }
+
+  function cancelPreAction(turnId: string | null = null): void {
+    blockPreAction(turnId);
+    if (activePlaybackRun?.origin === "pre_action"
+      && (!turnId || activePlaybackRun.turnId === turnId)) {
+      stopActivePlayback("pre_action_cancelled", "预动作已结束。");
+    }
+  }
+
+  function blockPreAction(turnId: string | null): void {
+    if (!turnId) return;
+    preActionBlockedTurns.add(turnId);
+    if (preActionBlockedTurns.size > 256) preActionBlockedTurns.delete(preActionBlockedTurns.values().next().value!);
   }
 
   function handlePlaybackTimelineStarted(
@@ -632,6 +684,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
   }
 
   function startThinkingSway(turnId: string): boolean {
+    if (activePlaybackRun?.origin === "pre_action") return false;
     const normalizedTurnId = normalizeTurnId(turnId);
     if (!normalizedTurnId) {
       return false;
@@ -751,6 +804,8 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
   return {
     state: readonly(state),
     ingestNormalizedPayload,
+    startPreAction,
+    cancelPreAction,
     preparePlaybackTimeline,
     handlePlaybackTimelineStarted,
     previewCompiledSemanticMotion,

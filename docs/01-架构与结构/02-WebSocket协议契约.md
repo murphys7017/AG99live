@@ -49,6 +49,26 @@ python scripts/check_protocol_schema_manifest.py
 
 按键说话以 `reason="ptt_release"` 结束当前流。持续收音由 VAD 从采集根派生正式对话 Turn；身份规则见[协议身份与顺序](../02-设计文档/03-协议身份与顺序.md)。
 
+### PTT 截图与转写并行
+
+开启发送截图时，松手即采集本轮图片，同时先发送 `input.audio_stream_seal`，payload 为 `stream_id`、`last_seq`、`capture_mode="ptt"`。Adapter 校验与 start 相同的 `turn_id`、最后序号和模式后，封闭 PCM 并启动一次后台 ASR；seal 本身不创建正式对话。seal 后继续发送 PCM 或重复 seal 会被拒绝。
+
+截图完成后，前端仍通过 `input.audio_stream_end` 提交 `images` 和 `desktop_snapshot_requested`。Adapter 复用本流转写结果，图片和文本完整后才提交一次用户输入，不重跑 ASR，不沿用旧图。未请求截图的 PTT 直接在 end 转写；manual/auto 的 VAD 切分保持原样。
+
+截图调用最多等待 10 秒，失败或超时沿用原来的无图输入行为，晚到图片不再进入其他轮。seal 后若 15 秒仍未收到 end，Adapter 取消转写、清理采集准备并报告输入错误；等待 end 期间收到中断或进入断线清理也取消该 seal 任务。end 接管后的转写跟随处理协程取消，不新增通用 WebSocket 并发处理。每个连接最多保留 4 个等待 end 的 seal 输入。丢弃或校验失败的 end 不会提交已启动的转写。
+
+此路径由 manifest 的 `audio_input` 项（`olv.audio_input.v1`）协商，必须配套加载桌面端和 Adapter 并重连。新增 `audio_seal_sent` 桌面时点，与后端 `latency.transcription_started/ready`、桌面 `screenshot_end/audio_end_sent` 对照验证重叠；单独通过源码或静态检查不能证明真实首播收益。
+
+## 输入阶段预动作
+
+`output.pre_action` 是独立的可选动作消息，不创建正式 Turn、播放段、语音或回执。manifest 增加 `pre_action: olv.pre_action.v1`，需双端配套加载。信封 `turn_id` 是本次输入 ID（或 VAD 子输入 ID），payload 固定包含：
+
+- `schema_version: "olv.pre_action.v1"` 与唯一 `request_id`；
+- `action: "ready"` 时，`motion` 为当前合法的 `engine.motion_intent.v4` 单姿态，`expires_at_epoch_ms` 为到期时刻；
+- `action: "cancel"` 时，`motion` 与 `expires_at_epoch_ms` 均为 null。
+
+桌面校验握手、当前连接最新输入/子输入、请求去重和到期时间，再交给 ModelEngine 的 `pre_action` 来源入口。结果只允许 1–2 个合法轴、绝对值不超过 2 的整数等级及短标签；资源和多步动作不在此路径。非法、取消或过期结果只影响预动作，不能终止核心对话。预动作不进入正式语音段的完成回执，正式动作开始后不得被迟到预动作抢占；同一输入被放弃/取消、历史切换、Profile 改变和断线都会清理该动作。
+
 ## 失败处理
 
 协议层给出明确拒绝原因，不补字段、不重命名参数，也不生成默认动作。动作输入来自 Persona Effect 或独立动作 Provider，并统一校验为当前 V4 动作契约；协议不从对话文本标签解析动作。

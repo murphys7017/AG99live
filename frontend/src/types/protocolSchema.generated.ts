@@ -1,5 +1,7 @@
 // Generated from astrbot_plugin_ag99live_adapter/protocol/schema_manifest.json.
 export const PROTOCOL_VERSION = "v2" as const;
+export const PRE_ACTION_SCHEMA_VERSION = "olv.pre_action.v1" as const;
+export const AUDIO_INPUT_SCHEMA_VERSION = "olv.audio_input.v1" as const;
 export const AUDIO_CREDIT_SCHEMA_VERSION = "olv.audio_credit.v1" as const;
 export const SCHEMA_MODEL_INFO_V4 = "live2d_scan.v4" as const;
 export const SCHEMA_MOTION_INTENT_V4 = "engine.motion_intent.v4" as const;
@@ -13,6 +15,8 @@ export const SCHEMA_SEMANTIC_AXIS_RELATION_GRAPH_V1 = "ag99.semantic_axis_relati
 export const SCHEMA_VOICE_FOLLOWING_PROFILE_V3 = "ag99.voice_following_profile.v3" as const;
 
 export const PROTOCOL_SCHEMAS = {
+  pre_action: PRE_ACTION_SCHEMA_VERSION,
+  audio_input: AUDIO_INPUT_SCHEMA_VERSION,
   audio_credit: AUDIO_CREDIT_SCHEMA_VERSION,
   model_info: SCHEMA_MODEL_INFO_V4,
   motion_intent: SCHEMA_MOTION_INTENT_V4,

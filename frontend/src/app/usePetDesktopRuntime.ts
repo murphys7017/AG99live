@@ -23,6 +23,7 @@ import {
 } from "../live2d-renderer/settings";
 import { useModelEngine } from "../model-engine/useModelEngine";
 import { normalizeMotionPayload } from "../model-engine/normalize";
+import { reportLatencyStage } from "../adapter-connection/runtime/latency.js";
 import {
   applyModelEngineSettings,
   cloneModelEngineSettings,
@@ -274,6 +275,9 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
   ): void {
     notifyMotionLifecycleObserver("terminal", "model_engine", event.runId, () => {
       const completedRun = modelEngine.handlePlaybackTerminal(event);
+      if (completedRun?.origin === "pre_action") {
+        reportLatencyStage("pre_action_ended", completedRun.turnId, null, completedRun.messageId);
+      }
       if (completedRun?.origin !== "manual_preview") {
         return;
       }
@@ -343,6 +347,9 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     pushHistory: (role, text) => adapter.pushHistory(role, text),
     getPlayerMessage: () => motionPlayer.state.message,
     onPlanStarted: (event) => {
+      if (event.playbackOrigin === "pre_action") {
+        reportLatencyStage("pre_action_started", event.turnId, null, event.messageId);
+      }
       console.info("[MotionLifecycle] plan started callback received.", {
         playbackOrigin: event.playbackOrigin,
         startReason: event.startReason,
@@ -536,7 +543,21 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       return;
     }
     modelEngine.releaseThinkingSway(event.turnId);
+    modelEngine.cancelPreAction(event.turnId);
   });
+  adapter.setPreActionObserver((event) => {
+    if (event.action === "ready") {
+      const started = modelEngine.startPreAction(event.motion, event.turnId, event.requestId);
+      console.info("[PreAction] execution admission.", { turnId: event.turnId, requestId: event.requestId, started });
+    } else {
+      modelEngine.cancelPreAction(event.action === "input" ? null : event.turnId);
+    }
+  });
+  watch(() => {
+    const model = selectedModel.value;
+    const profile = model?.semantic_axis_profile;
+    return [model?.model_path, profile?.profile_id, profile?.revision, profile?.source_hash].join(":");
+  }, () => modelEngine.cancelPreAction());
   const pushToTalk = usePushToTalkController(adapter);
   let snapshotPublisher: ReturnType<typeof createPetRuntimeSnapshotPublisher> | null = null;
   const bilibiliLive = useBilibiliLiveRuntime({

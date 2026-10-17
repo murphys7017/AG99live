@@ -1,3 +1,51 @@
+ptt_screenshot_asr_overlap_and_preaction_draft_20261018:
+  class: feature
+  risk: high
+  status: sources_synced_locally_validated_pending_paired_reload_and_live_acceptance
+  scope: >-
+    PTT screenshot capture overlaps one early ASR task after audio_stream_seal;
+    audio_stream_end still atomically commits the same-turn image and transcript.
+    Add audio_input manifest negotiation, strict capture identity, sealed input
+    bounds, timeout and cancellation. Preserve no-screenshot and VAD semantics.
+    Add an ASR-valid-text-owned lightweight preaction request and dedicated
+    frontend admission into existing ModelEngine before Core Turn creation.
+    Request text is capped at 100 Unicode characters; personality is selected
+    from current persona core/expressive sections without relationships/history
+    or current pose. Read already published behavioral/emotion snapshots only.
+    Bound request/production to 800 ms and first JSON / 128 output tokens;
+    support cancellation, expiry and formal-motion ownership transfer, carrying
+    orphan parameters to neutral through the same plan as continuity sources.
+  user_boundary: >-
+    User approved implementation after confirming 100-char input, richer core
+    personality and removal of relationship/history/current-pose context.
+    User requested review and scoped commits. No VAD tuning or process restart.
+    Preserve existing ASR overlap and concurrent NeuroBrain work.
+  validation: >-
+    Four focused public speech ingress checks passed: sealed transcription/image
+    commit and identity rejection, cancelled input rejection, direct PTT and VAD.
+    Changed Python Ruff, renderer/Node type checks and manifest consistency passed.
+    Two input-owned request boundary checks passed using actual Core persona
+    resolver and isolated streaming Provider: early single JSON and cancellation.
+    Actual TS parser/ModelEngine/compiler boundary accepted clock-free preaction,
+    formal takeover, orphan continuity parameters and refused a late reaction.
+    Current persona selection retained all core personality lines in 449 chars
+    and excluded relationship markers; no paid Provider or device run.
+    Review fixed superseded-ASR ownership, async begin/cancel supersession and
+    input-only interrupts publishing terminal events for absent Core turns.
+    Three request/coordinator boundary checks and scoped Ruff passed after fixes.
+    These are isolated boundary checks, not live-chain acceptance evidence.
+    Canonical Live Git object writes were denied by Windows ACL during commit;
+    reviewed source remains uncommitted there. Core companion commit is separate.
+  evidence_gap: >-
+    No real Provider/Electron screenshot/playback acceptance. Measured historical
+    screenshot waits are not a measured speedup. Paired Adapter/frontend loading
+    and reconnect are required because the manifest contract changed.
+    Requires the audio_input and pre_action manifest contracts together. Reused
+    SDK parameter transfer is source-traced, not proof of visual continuity.
+    Eight changed/new Adapter code/schema files copied to the Core deployment
+    and SHA256 matched. Frontend source changed; no packaged desktop build or
+    process reload. Preserve concurrent Core expression/NeuroBrain changes.
+
 neurobrain_persona_result_motion_context_20261013:
   date: '2026-10-13'
   class: bugfix

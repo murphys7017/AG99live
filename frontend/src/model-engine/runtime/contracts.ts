@@ -30,7 +30,7 @@ export type ModelEngineStatus =
   | "playing"
   | "failed";
 
-export type ModelEnginePlaybackOrigin = "conversation" | "manual_preview";
+export type ModelEnginePlaybackOrigin = "conversation" | "manual_preview" | "pre_action";
 
 export interface ModelEngineActivePlaybackRun {
   runId: string;

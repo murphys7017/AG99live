@@ -245,7 +245,7 @@ export function createMotionTimelineRunTracker(options: {
 
   return {
     recordStarted(event) {
-      if (event.playbackOrigin === "manual_preview") {
+      if (event.playbackOrigin !== "conversation") {
         return;
       }
       console.info("[ModelEngineMotionSink] model engine run started for timeline.", {

@@ -59,14 +59,16 @@ async def read_text_chat_stream(
     contexts: list[dict[str, str]] | tuple[dict[str, str], ...] | None = None,
     on_first_chunk: Callable[[], None] | None = None,
     on_complete_json: Callable[[dict[str, Any]], Awaitable[None] | None] | None = None,
+    stop_after_complete_json: bool = False,
+    request_options: dict[str, Any] | None = None,
 ) -> str:
     """Collect a Provider chat stream without a non-streaming fallback.
 
     ``on_complete_json`` is called as soon as the first complete top-level JSON
     object appears in the accumulated delta.  The stream is still consumed to
-    EOF so the caller retains the Provider's normal lifecycle, but consumers
-    that only need a validated action can start before trailing whitespace or
-    provider metadata arrives.
+    EOF by default. ``stop_after_complete_json`` lets short input reactions
+    close the iterator immediately after their only complete record. Callers
+    can pass request-local Provider options without mutating its configuration.
     """
 
     if not supports_text_chat_stream(provider):
@@ -95,6 +97,7 @@ async def read_text_chat_stream(
             prompt=prompt,
             system_prompt=system_prompt,
             contexts=contexts or None,
+            **(request_options or {}),
         )
         if inspect.isawaitable(iterator):
             iterator = await iterator
@@ -115,6 +118,8 @@ async def read_text_chat_stream(
                     # AstrBot is_chunk responses carry deltas, including repeats.
                     streamed_text += chunk_text
                     await report_complete_json()
+                    if complete_json_reported and stop_after_complete_json:
+                        return streamed_text
                 continue
             if chunk_text:
                 final_text = chunk_text
