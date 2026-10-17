@@ -1,5 +1,7 @@
 # OLV 全生命周期流式实施计划
 
+> **2026-10-17 最新剩余工作入口：**Core 仓库 `docs/Yakumo/dev/structured-persona-output/14-olv-remaining-work-and-acceptance.md`。下一步优先配套版本的真实 M2 验收，补首响/段间间隙与身体表现证据；T6 动作小记录尚未实现，历史 M0 首段缺少 motion_started 的根因仍未确定。Prompt 重构、ASR revision、AudioWorklet、跨段连续 TTS 暂缓；额外连接准备按测量结果决定。本文历史阶段不是未完成清单，本次更新没有新增运行验证。
+
 > **状态：2026-10-17 已完成代码接线，尚未完成现场验收。**Core 已将 Persona 可见文本增量同时送入 Adapter 文本流和 MiniMax PCM 流；Adapter 已绑定现有 Turn/连接生命周期；动作 Future 可发送 `motion_stream_update`，桌面在 PCM 实际起播后通过既有 PlaybackTimeline/ModelEngine 启动动作。当前仍未重启运行中的 AstrBot、未加载新桌面构建、未完成真实 Provider → WebSocket → Electron → Live2D 验收，因此不能报告最终首响或动作表现。历史阶段 0/1 中等待完整段和物料汇合的记录保留为过渡背景，不代表当前实现状态。范围覆盖 AstrBot Core、AG99live Adapter Python 后端和 TypeScript 桌面前端；不涉及 C++。
 
 ## 当前进度

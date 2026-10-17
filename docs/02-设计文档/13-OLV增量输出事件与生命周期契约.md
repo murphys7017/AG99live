@@ -1,5 +1,7 @@
 # OLV 增量输出事件与生命周期契约
 
+> **剩余工作与验收顺序（2026-10-17）：**以 Core 仓库 `docs/Yakumo/dev/structured-persona-output/14-olv-remaining-work-and-acceptance.md` 为交接入口。当前契约需真实 M2 配套运行验收；动作小记录/revision/anchor/融合仍是后续设计，不能从现有 motion update 推断已完成。软件首采样估计不代表声卡实测，旧 M0 样本不构成 M2 提速证据。本次只更新文档。
+
 > 2026-10-17 当前契约状态。Core、Adapter 和桌面已经具备增量文本/PCM/动作 update 的代码接线，但能力仍由现有桌面 OLV 流式设置门控，尚未登记为独立公开能力。协议边界和隔离环境已验证，真实 Provider、Electron 播放和 Live2D 表现仍待现场验收。沿用现有 AstrBot Turn、Adapter TurnCoordinator 和桌面 PlaybackTimeline。
 
 **同日后续修复：**入口身份、PCM 生命周期、旧队列和 TTS 准入已修复；动作空音频结算与配置期限已接通。接收与播放现已分离，并增加下述双端容量契约。本文较早关于串行接收或 750 ms 期限的说明属于历史实现；新代码仍待联合现场验收。
