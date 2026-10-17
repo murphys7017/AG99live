@@ -156,6 +156,9 @@ class TurnCoordinator:
             observations=self.motion_observations,
         )
         self._turn_terminal_results: dict[str, tuple[bool, str | None] | None] = {}
+        self._turn_terminal_waiters: dict[
+            str, list[asyncio.Future[tuple[bool, str | None]]]
+        ] = {}
         self._terminating_turn_ids: set[str] = set()
         self._active_vad_turn_by_capture_turn: dict[str, str] = {}
         self.output_segments = OutputSegmentCoordinator(
@@ -318,6 +321,13 @@ class TurnCoordinator:
                 registry.reset()
             self.output_segments.reset()
             self._turn_terminal_results.clear()
+            for waiters in self._turn_terminal_waiters.values():
+                for waiter in waiters:
+                    if not waiter.done():
+                        waiter.set_result(
+                            (False, "turn_coordinator_reset_before_completion")
+                        )
+            self._turn_terminal_waiters.clear()
             self._events_by_turn_id.clear()
             self._active_vad_turn_by_capture_turn.clear()
             self._active_speech_capture_turns.clear()
@@ -550,6 +560,45 @@ class TurnCoordinator:
             reason or "",
         )
 
+    async def wait_for_turn_finished(
+        self,
+        *,
+        turn_id: str,
+        timeout_seconds: float,
+    ) -> tuple[bool, str | None]:
+        """Wait for the frontend's terminal result after playback settles."""
+        resolved_turn_id = self._require_turn_id_value(turn_id)
+        if (
+            isinstance(timeout_seconds, bool)
+            or not isinstance(timeout_seconds, (int, float))
+            or timeout_seconds <= 0
+        ):
+            raise ValueError("turn_finished_wait_timeout_invalid")
+        terminal = self._turn_terminal_results.get(resolved_turn_id)
+        if terminal is not None:
+            return terminal
+
+        future = asyncio.get_running_loop().create_future()
+        waiters = self._turn_terminal_waiters.setdefault(resolved_turn_id, [])
+        waiters.append(future)
+        try:
+            return await asyncio.wait_for(
+                asyncio.shield(future), timeout=float(timeout_seconds)
+            )
+        except asyncio.TimeoutError as exc:
+            raise TimeoutError(
+                f"turn_finished_ack_timeout:{resolved_turn_id}"
+            ) from exc
+        finally:
+            current_waiters = self._turn_terminal_waiters.get(resolved_turn_id)
+            if current_waiters is not None:
+                if future in current_waiters:
+                    current_waiters.remove(future)
+                if not current_waiters:
+                    self._turn_terminal_waiters.pop(resolved_turn_id, None)
+            if not future.done():
+                future.cancel()
+
     async def _commit_inbound_message(self, message_obj, *, turn_id: str | None = None) -> None:
         async with self._turn_lock:
             normalized_turn_id = self._require_turn_id_value(turn_id)
@@ -780,9 +829,17 @@ class TurnCoordinator:
                 raise RuntimeError(f"turn_finished_send_failed:{resolved_turn_id}")
         except Exception:
             self._turn_terminal_results.pop(resolved_turn_id, None)
+            for waiter in self._turn_terminal_waiters.pop(resolved_turn_id, []):
+                if not waiter.done():
+                    waiter.set_result(
+                        (False, f"turn_finished_send_failed:{resolved_turn_id}")
+                    )
             raise
 
         self._turn_terminal_results[resolved_turn_id] = terminal_result
+        for waiter in self._turn_terminal_waiters.pop(resolved_turn_id, []):
+            if not waiter.done():
+                waiter.set_result(terminal_result)
         self._prune_turn_terminal_results()
         turn_identity_map = getattr(self, "turn_identity_map", None)
         if turn_identity_map is not None:

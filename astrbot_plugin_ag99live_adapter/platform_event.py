@@ -18,6 +18,8 @@ from .motion.output_sanitizer import (
 )
 from .runtime.message_utils import resolve_platform_segment_message_id
 
+ACTION_ONLY_MOTION_ACK_TIMEOUT_SECONDS = 30.0
+
 
 class OutputSegmentDeliveryPort(Protocol):
     async def finalize_output_segment(self, *, turn_id: str, message_id: str) -> None: ...
@@ -194,6 +196,14 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         try:
             if isinstance(motion_payload, dict) and motion_payload:
                 await writer.update_motion(segment_index, motion_payload)
+                first_output_at = self.get_extra(
+                    "_interaction_personal_stream_first_output_monotonic"
+                )
+                if not isinstance(first_output_at, (int, float)):
+                    self.set_extra(
+                        "_interaction_personal_stream_first_output_monotonic",
+                        time.monotonic(),
+                    )
                 await writer.end_stream("motion", segment_index)
             else:
                 await writer.end_stream(
@@ -474,6 +484,35 @@ class OLVPetPlatformEvent(AstrMessageEvent):
             if inspect.isawaitable(result):
                 await result
         await self._close_frontend_turn_output_queue()
+        if self.get_extra("_interaction_wait_for_motion_execution_ack") is not True:
+            return
+
+        turn_id = str(self.get_extra("output_correlation_id", "") or "").strip()
+        coordinator = getattr(self.adapter, "turn_coordinator", None)
+        wait_for_turn_finished = getattr(
+            coordinator,
+            "wait_for_turn_finished",
+            None,
+        )
+        if not turn_id or not callable(wait_for_turn_finished):
+            raise RuntimeError("motion_playback_ack_unavailable")
+        try:
+            success, reason = await wait_for_turn_finished(
+                turn_id=turn_id,
+                timeout_seconds=ACTION_ONLY_MOTION_ACK_TIMEOUT_SECONDS,
+            )
+        except TimeoutError as exc:
+            abort_turn = getattr(coordinator, "abort_turn_from_backend", None)
+            if callable(abort_turn):
+                await abort_turn(
+                    turn_id=turn_id,
+                    reason="motion_playback_ack_timeout",
+                )
+            raise RuntimeError("motion_playback_ack_timeout") from exc
+        if not success:
+            raise RuntimeError(
+                f"motion_playback_failed:{reason or 'unknown'}"
+            )
 
     async def abort_visible_turn(self, *, reason: str) -> None:
         """Close this frontend turn before a superseding Core turn begins."""

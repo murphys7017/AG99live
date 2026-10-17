@@ -28,6 +28,7 @@ def test_backend_abort_is_idempotent_while_terminal_publication_is_pending(
 
     runtime = types.SimpleNamespace(
         _turn_terminal_results={},
+        _turn_terminal_waiters={},
         _terminating_turn_ids=set(),
         _events_by_turn_id={},
         _turn_timings={},
@@ -43,6 +44,14 @@ def test_backend_abort_is_idempotent_while_terminal_publication_is_pending(
     runtime._finish_turn = types.MethodType(TurnCoordinator._finish_turn, runtime)
 
     async def run_case() -> None:
+        wait_task = asyncio.create_task(
+            TurnCoordinator.wait_for_turn_finished(
+                runtime,
+                turn_id="old-turn",
+                timeout_seconds=1.0,
+            )
+        )
+        await asyncio.sleep(0)
         results = await asyncio.gather(
             TurnCoordinator.abort_turn_from_backend(
                 runtime,
@@ -56,6 +65,7 @@ def test_backend_abort_is_idempotent_while_terminal_publication_is_pending(
             ),
         )
         assert results == [0, 0]
+        assert await wait_task == (False, "superseded_by_new_user_input")
 
     asyncio.run(run_case())
 
@@ -66,6 +76,68 @@ def test_backend_abort_is_idempotent_while_terminal_publication_is_pending(
     assert runtime._turn_terminal_results == {
         "old-turn": (False, "superseded_by_new_user_input"),
     }
+
+
+def test_wait_for_turn_finished_observes_playback_completion_result(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    install_fake_astrbot()
+    components_module = types.ModuleType("astrbot.api.message_components")
+    components_module.Image = type("Image", (), {})
+    components_module.Plain = type("Plain", (), {})
+    components_module.Record = type("Record", (), {})
+    monkeypatch.setitem(sys.modules, "astrbot.api.message_components", components_module)
+    from astrbot_plugin_ag99live_adapter.runtime.turn_coordinator import (
+        TurnCoordinator,
+    )
+
+    async def send_json(_payload: dict) -> bool:
+        return True
+
+    runtime = types.SimpleNamespace(
+        _turn_terminal_results={},
+        _turn_terminal_waiters={},
+        _events_by_turn_id={},
+        _turn_timings={},
+        output_segments=types.SimpleNamespace(
+            require_playback_queue_closed=lambda _turn_id: _completed(),
+            output_failure_reason=lambda _turn_id: None,
+            clear_turn=lambda _turn_id: None,
+        ),
+        turn_identity_map=types.SimpleNamespace(clear_frontend_turn=lambda _turn_id: None),
+        session_state=types.SimpleNamespace(current_turn_id=None, reset_to_idle=lambda: None),
+        performance_curves=types.SimpleNamespace(cancel_turn=lambda _turn_id: None),
+    )
+    runtime._send_json = send_json
+    runtime._require_turn_id_value = TurnCoordinator._require_turn_id_value
+    runtime._normalize_optional_turn_value = TurnCoordinator._normalize_optional_turn_value
+    runtime._prune_turn_terminal_results = lambda: None
+    runtime._clear_active_vad_turn = lambda _turn_id: None
+    runtime._mark_turn_timing = lambda *_args: None
+    runtime._elapsed_ms = lambda *_args: 0.0
+    runtime._finish_turn = types.MethodType(TurnCoordinator._finish_turn, runtime)
+
+    async def run_case() -> None:
+        waiter = asyncio.create_task(
+            TurnCoordinator.wait_for_turn_finished(
+                runtime,
+                turn_id="action-turn",
+                timeout_seconds=1.0,
+            )
+        )
+        await asyncio.sleep(0)
+        await TurnCoordinator.finalize_turn(
+            runtime,
+            turn_id="action-turn",
+            success=True,
+        )
+        assert await waiter == (True, None)
+
+    async def _completed() -> None:
+        return None
+
+    asyncio.run(run_case())
 
 
 def test_backend_abort_cancels_turn_owned_motion_task_and_discards_cache(

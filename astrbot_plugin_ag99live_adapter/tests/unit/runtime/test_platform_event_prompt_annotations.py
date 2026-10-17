@@ -314,6 +314,42 @@ def test_streaming_empty_motion_placeholder_is_not_marked_as_downlinked(
     assert "persona_segment_count" not in extras
 
 
+def test_incremental_motion_update_records_first_output_time(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_platform_event_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    event = _build_event(_load_platform_event_module(), images=[])
+    updates = []
+
+    class WriterStub:
+        async def update_motion(self, segment_index, payload):
+            updates.append((segment_index, payload))
+
+        async def end_stream(self, resource, segment_index):
+            updates.append((resource, segment_index))
+
+    event.set_extra("_interaction_incremental_output_writer", WriterStub())
+    event.set_extra("_interaction_incremental_motion_started", {0: True})
+
+    accepted = asyncio.run(
+        event.publish_interaction_incremental_motion(
+            segment_index=0,
+            motion_payload={"actions": ["nod"]},
+        )
+    )
+
+    assert accepted is True
+    assert updates == [
+        (0, {"actions": ["nod"]}),
+        ("motion", 0),
+    ]
+    assert isinstance(
+        event.get_extra("_interaction_personal_stream_first_output_monotonic"),
+        float,
+    )
+
+
 def test_streaming_terminal_rejects_missing_completed_segment(
     install_fake_astrbot,
     monkeypatch,
@@ -682,6 +718,28 @@ def test_standard_send_aggregates_parts_without_closing_output_queue(
 
     asyncio.run(event.complete_visible_turn())
     assert adapter.closed_output_queues == ["turn-1"]
+
+
+def test_action_only_visible_turn_waits_for_motion_playback_result(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_platform_event_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    event = _build_event(_load_platform_event_module(), images=[])
+    event.set_extra("_interaction_wait_for_motion_execution_ack", True)
+    received = []
+
+    async def wait_for_turn_finished(*, turn_id: str, timeout_seconds: float):
+        received.append((turn_id, timeout_seconds))
+        return False, "motion_playback_failed:segment-0"
+
+    event.adapter.turn_coordinator.wait_for_turn_finished = wait_for_turn_finished
+
+    with pytest.raises(RuntimeError, match="motion_playback_failed:segment-0"):
+        asyncio.run(event.complete_visible_turn())
+
+    assert event.adapter.closed_output_queues == ["turn-1"]
+    assert received == [("turn-1", 30.0)]
 
 
 def test_persona_tts_gap_keeps_empty_speech_segment_without_motion(

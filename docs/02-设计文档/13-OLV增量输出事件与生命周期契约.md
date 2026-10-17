@@ -66,7 +66,7 @@ Core 是文本生产状态的唯一所有者。复用 Persona 小记录协议：
 
 Core 现提供 `PreOutputProcessor.create_incremental_text_preparer(event)` 预处理入口：每个已解码 Persona 段创建一份状态，feed 返回本次可立即提交的新文本；跨 delta 的 system_reminder 标记和嵌套块不会泄露到显示/TTS。既有 Core 内容安全检查覆盖整个可见前缀，拒绝后保留已经接受的前缀。finish 返回最终全文；调用方只把相对 finish 前已接受文本新增的后缀追加一次到显示和 PCM 输入。隐藏块外未完成的标记前缀按普通文本通过相同安全/大小检查，真正打开却未闭合的隐藏块仍失败，不能跨 Persona 段闭合。单段原始输入最多 1 MiB UTF-8，可见文本最多 65536 UTF-16 单元，保留首尾空白并将连续换行限制为两个。成功的 M2 分段状态和 Persona 结果使用实际交付文本，原文仅保留用于协议一致性校验。该入口不执行整段 decorating Hook，避免重复副作用与撤回已提交文本；生产路径隔离旧整段修饰，不能在结尾重新改写此前已交付内容。真实运行中的 Provider、桌面和 Live2D 仍未现场验收。
 
-纯动作交付事实由 writer 的 `delivered_motion_segment_indexes` 或旧分段回退路径的已发送 payload 记录：只有非空动作 payload 经绑定输出队列成功接受后才记录该段，重复 update 不重复计段。空占位、无结果、failed/cancelled end 和动作任务完成本身都不计成功下发。Core 据此记录输出和收口，OLV 流式请求可接受至少含一项动作的无语音回复；无文字也无动作仍拒绝。历史保留动作交付元数据，不伪造语音文本。此接口需要同步部署配套 Core 与 Adapter；发送成功不等于桌面已经实际执行动作。
+纯动作交付事实由 writer 的 `delivered_motion_segment_indexes` 或旧分段回退路径的已发送 payload 记录：只有非空动作 payload 经绑定输出队列成功接受后才记录该段，重复 update 不重复计段。空占位、无结果、failed/cancelled end 和动作任务完成本身都不计成功下发。Core 据此记录输出和收口，OLV 流式请求可接受至少含一项动作的无语音回复；无文字也无动作仍拒绝。已发布但最终没有文字或动作下发的流会关闭 `synth_finished` 并作为失败收口，不记为静默成功。纯动作回合关闭输出队列后等待现有 `control.playback_finished` / `control.turn_finished` 终态，播放失败会使 Core 回合失败，30 秒无回执则中断并失败；带文字回合仍把动作作为可选模态，不等待其播放。历史保留动作交付元数据，不伪造语音文本。需要同步部署配套 Core 与 Adapter。
 
 桌面正式入站已接收文本 start/delta/end。SessionStore 注册增量段，保存完整前缀和独立流状态，delta 原样显示，end 校验 Unicode 码点长度并记录该段历史；生成终态与音频播放终态分别保存。同一 Turn 不混用完整 output.segment 与增量交付，旧完整段执行器不再释放增量段。每 Turn 最多 256 段、文本最多 262144 个 UTF-16 单元，每段最多 65536 个 UTF-16 单元；这些限制不改变 text_length 的码点计数。Core 的增量预处理已接入 producer，桌面身份/结构校验仍不能代替它。
 
