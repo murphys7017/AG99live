@@ -21,6 +21,8 @@
 
 明确无音频的增量段复用 `motion_only` 时间线，不重播文本、不填静音。音频失败或语音窗口已结束时，尚未释放的动作明确拒绝并结算；本段音频仍运行时，后到动作可在全局 blocker 检查前接入。已释放或本地已结算的动作不能被迟到 update/end 重新打开，合法迟到事件仍推进生产 seq。真实身体动作及连续段交接仍需现场验证。
 
+真实 model app 的默认 speech-only 动作准入也检查 motion stream：open 时不准备/启动默认动作，防止在语义动作生成期间预占身体。它与普通段 `motion.pending` 使用同一准入回调，不能只改一个隔离播放器而遗漏正式 app。
+
 ## 身份与协商
 
 - 协议信封继续使用 v2。`turn_id` 使用桌面可识别的外部 Turn 身份；另携带 `core_turn_id`，禁止把两者混用。
@@ -64,7 +66,7 @@ Core 是文本生产状态的唯一所有者。复用 Persona 小记录协议：
 
 Core 现提供 `PreOutputProcessor.create_incremental_text_preparer(event)` 预处理入口：每个已解码 Persona 段创建一份状态，feed 返回本次可立即提交的新文本；跨 delta 的 system_reminder 标记和嵌套块不会泄露到显示/TTS。既有 Core 内容安全检查覆盖整个可见前缀，拒绝后保留已经接受的前缀。finish 只返回最终全文供校验，不是额外增量；未闭合的标记或标记前缀会使该段失败，不能跨 Persona 段闭合。单段原始输入最多 1 MiB UTF-8，可见文本最多 65536 UTF-16 单元，保留首尾空白并将连续换行限制为两个。该入口不执行整段 decorating Hook，避免重复副作用与撤回已提交文本；生产路径隔离旧整段修饰，不能在结尾重新改写此前已交付内容。真实运行中的 Provider、桌面和 Live2D 仍未现场验收。
 
-桌面正式入站已接收文本 start/delta/end。SessionStore 注册增量段，保存完整前缀和独立流状态，delta 原样显示，end 校验 Unicode 码点长度并记录该段历史；生成终态与音频播放终态分别保存。同一 Turn 不混用完整 output.segment 与增量交付，旧完整段执行器不再释放增量段。首版每 Turn 最多 256 段、文本最多 262144 个 UTF-16 单元，每段最多 65536 个 UTF-16 单元；这些是本地容量限制，不改变 text_length 的码点计数。前端身份/结构校验不代替 Core 内容安全和流式隐藏标记清洗，后者仍未接通。
+桌面正式入站已接收文本 start/delta/end。SessionStore 注册增量段，保存完整前缀和独立流状态，delta 原样显示，end 校验 Unicode 码点长度并记录该段历史；生成终态与音频播放终态分别保存。同一 Turn 不混用完整 output.segment 与增量交付，旧完整段执行器不再释放增量段。每 Turn 最多 256 段、文本最多 262144 个 UTF-16 单元，每段最多 65536 个 UTF-16 单元；这些限制不改变 text_length 的码点计数。Core 的增量预处理已接入 producer，桌面身份/结构校验仍不能代替它。
 
 段头先给出身份，动作/情绪后续发布；turn_action 仍须在可见回复前完成准入。最终段校验与流结束校验继续执行，失败时保留已经交付的前缀并显式报错。
 
@@ -84,6 +86,8 @@ Core 现提供 `PreOutputProcessor.create_incremental_text_preparer(event)` 预�
 
 Core 是唯一 TTS 调用方。新 MiniMax 双向实现公开音频块与格式，不经过完整文件物化。一个在途合成会话由一个 Turn 持有，跨 Turn 复用连接须在取消/排空确认后切换生成代次。
 
+当前只复用 MiniMax Provider 持有的 HTTP session/connector 资源，PCM 不再每轮构造新的 HTTP session；每次 get_pcm_stream 仍新建独立 WS 和 task，不做跨 Turn 合成复用或收费预热。Provider terminate 关闭共享资源，拒绝新的 PCM 流并唤醒在途流；Core consumer 用 aclosing 显式回收 PCM 服务迭代器。两次本地真实 WS 及发送中取消边界已通过，未测得外部网络加速数值。
+
 AstrBot Provider 入口为 `support_pcm_stream()` / `get_pcm_stream(text_source)`：输入字符串立即追加，输入 `None` 请求段 flush，输入迭代结束请求 session finish；输出 bytes 为 PCM 块，输出 `None` 为本次段 flush 确认。消费方必须在打断时关闭输出迭代器。此接口与旧文件/WAV `get_audio_stream()` 区分，不能把聊天流能力或旧 WAV 队列能力当作增量 PCM 准入。
 
 Core 语音服务入口为 `synthesize_pcm_stream(context, event, PCMTextPart 输入流)`，返回带 start/audio/end、segment_index、sample_offset 和音频格式的 PCMStreamFrame。输入必须是预处理完成的增量，服务不代替 Core 内容校验或最终交付收口。当前 Core OLV producer、Adapter 下行和桌面消费端已经连接；仍需真实运行时验收 Provider 首块、桌面首采样和播放排空。
@@ -92,11 +96,11 @@ Core 语音服务入口为 `synthesize_pcm_stream(context, event, PCMTextPart �
 
 桌面建立音频 stream sink，取代新路径对 audio URL 和预先确定总时长的依赖。按实际消费采样数建立播放时钟；暂停/欠载期间时钟不虚走。口型、音量、输出设备及动作时间锚点使用这个 sink，同一段不能产生两个音频播放实例。
 
-桌面播放边界已提供 `SpeechOutputRuntime.attachPcm()`：先 prepare，再串行 await append(sample_offset, pcm)，最后 finish(total_samples)。completed 仅在 EOF 且已接受音频排空后成功；dispose 冻结已消费前缀、停止节点并唤醒等待追加。复用现有输出图与 analyser；采样时钟只累计实际播放区间，欠载间隙不计入。缓冲最多四秒采样与 128 个音频节点，单块最多 64 KiB；调用者必须传播 await 背压，不能另建无界接收队列。此 API 已由正式桌面 socket/Store 消费，流序号、身份和旧 Turn 在入站校验，最终播放收口沿用现有时间线；现有冷启动设备预热仍为 350 ms，首版在首包时准备，提前准备仍待优化。
+桌面播放边界已提供 `SpeechOutputRuntime.attachPcm()`：先 prepare，再串行 await append(sample_offset, pcm)，最后 finish(total_samples)。completed 仅在 EOF 且已接受音频排空后成功；dispose 冻结已消费前缀、停止节点并唤醒等待追加。复用现有输出图与 analyser；采样时钟只累计实际播放区间，欠载间隙不计入。播放缓冲最多四秒采样与 128 个音频节点，单块最多 64 KiB；worker 传播该背压并通过信用限制网络在途量。350 ms 冷设备准备现可由麦克风输入开始提前触发，PCM prepare 仍复核同一输出图；不能再一概描述为首包后才开始预热。
 
 会话音频运行时现提供 `openPcmForTimelinePlayback(turn_id, segment_message_id)`，返回串行 append、finish 与排空 completed；沿用现有 PlaybackTimeline 的音频/口型 sink 及 Turn 打断，调用前必须完成正式播放段注册和流身份准入。PCM `started` 在 AudioContext 开始消费首批采样后通知，同进程 performance 时间由音频上下文估算，不等同于硬件实际发声时间。prepare、排队与设备预热不算起播。finish 的 failed 状态需提供 reason，已接受前缀先排空再以原原因失败；取消由时间线打断立即停播。此入口已在桌面组合层装配并由正式 socket 入站及流式段存储调用。真实 Live2D 口型和指定输出设备尚未验收。
 
-正式 socket 入站与流式段存储现已连接：type=2 音频帧校验身份/seq/连续 sample_offset 后进入上述 PCM 时间线；首包创建播放器，空音频流明确 end 后记为 absent，不创建播放器。下一段首包等待上一段排空，音频播放不等 motion end；已终止/过期 Turn 的包明确记录并忽略。所有生产流关闭后允许 synth_finished 到达，播放完成回执仍等本地实际排空。打断/连接失败由原 Turn 清理播放，Store 将仍 open 的生产状态收为 cancelled；已经结束的生产状态不被播放取消改写。动作 update 已接入：桌面先校验并保存 payload，PCM 时间线实际起播后由编排器启动现有 motion sink；动作失败终态会清理 payload，避免错误启动。冷设备预热当前在首包创建播放器时发生，提前预热与真实首响耗时仍需后续测量。
+正式 socket 入站与流式段存储已连接：type=2 帧校验身份/seq/连续 sample_offset 后进入有界 worker；worker 在本段第一包创建播放器，空音频 end 则记为 absent。后段首包可以在信用窗口内先被接纳，实际消费等前段排空；音频起播不等 motion end。所有生产流关闭后允许 synth_finished 到达，已接纳音频继续播放，本地结算后才回执。打断/连接失败沿用 Turn 清理；Store 只取消仍 open 的生产状态，不改写已结束状态。动作 update 经校验后进入现有 sink；无音频可独立执行，已失败/过期动作不被迟到事件重开。提前输出预热已经接入同一输出图，真实首响收益仍待现场测量。
 
 ## 动作事件
 
@@ -108,26 +112,28 @@ Core 语音服务入口为 `synthesize_pcm_stream(context, event, PCMTextPart �
 
 `payload` 使用现有可执行动作契约，由 ModelEngine 校验/编译，不直接写未经校验的 Live2D 参数。`profile_revision` 仍表示模型资源版本，不能替代这里的动作修订号。
 
-`anchor` 明确为 `audio_sample` 或 `segment_now`。前者携带目标采样位置，后者表示当前姿态上的短预览；不能使用两个进程各自的 monotonic 时间进行比较。尚无音频时允许 segment_now 预览，后续实际动作到达后在同一参数控制权下融合。
+后续 T6 的 `anchor` 设计候选为 `audio_sample` 或 `segment_now`，尚不是当前 update 的已实现字段。前者应携带目标采样位置，后者表示当前姿态上的短预览；不能使用两个进程各自的 monotonic 时间进行比较。后续修订与预览融合必须先定义同一参数控制权，不能把候选字段直接塞入旧 payload。
 
 桌面当前按单一 motion 流的 `seq` 接受更新；流结束后拒绝迟到更新，Turn 终止后忽略旧身份。动作 payload 由 `normalizeMotionPayload` 校验，再交给现有 PlaybackTimeline/ModelEngine；实际动作融合、revision/anchor 细粒度替换和过期窗口仍属于后续扩展，不应把当前 update 接线误认为完整动作融合。
 
-动作输出契约为连续闭合的小记录；收到一条完整指令就提交，不等 Provider EOF。聊天 Provider 在途请求不支持追加 prompt 时，使用用户输入预请求加后续有界意图请求，合并尚未发出的重复更新，不每个字重新请求。
+动作小记录是 T6 待实施目标。当前 reader 仍在 EOF 后解析完整 JSON，桌面已释放的 payload 不会被后续 update 替换。改造前需同步正式输出契约、增量解析、revision/anchor 和身体执行入口；不能只截取旧 JSON 前缀并声称逐条执行。聊天 Provider 在途请求不支持追加 prompt 时，应另行定义有界意图请求与合并规则，不每个字重启模型。
 
 ## 结束、期限与背压
 
-桌面正式 transport 当前串行 await 消息处理，接收队列（含在途消息）最多 128 条、16 MiB，同时限制单包；二进制直接以 ArrayBuffer 接收。溢出显式失败并关闭连接，不静默丢块。关闭连接取消在途 AbortSignal 并清空排队消息；异步消费者仍须在等待之后核对 signal/Turn，不能仅在回调入口核对一次。已握手、已校验且属于当前 Turn 的 interrupt 可以越过普通队列，先停止播放再取消在途处理，避免被 PCM 缓冲等待阻塞。未知或后续 Turn 打断不能越过其 turn_started。此机制是接收容量限制和协作式取消，不是浏览器 WebSocket 接收侧背压或服务端信用窗口；当前 Core/Adapter 生产端已接通，但端到端信用窗口仍未实现。
+桌面 transport 保持线序接纳，通用接收队列（含在途消息）最多 128 条、16 MiB，同时限制单包；二进制直接以 ArrayBuffer 接收。PCM handler 不再等待播放，而是验证后提交上文的有界 worker，双端信用控制音频在途容量。通用队列不是浏览器原生接收背压，溢出仍显式失败且不静默丢块。当前 Turn 的已校验 interrupt 可优先执行，未知/后续 Turn 不能越过 turn_started；本地先中断、服务端回执尚未到达的正常 PCM 退出不会触发连接故障。连接 reset 和新 Turn 代次会退休旧 worker。
 
 1. 文本、音频和动作流独立结束。未返回动作不能提前登记为失败；音频起播不等待动作终态。
 2. 移除把 0.75 秒同时作为首响等待和动作任务生存期限的设计。动作生产期限使用配置并受 Turn 剩余预算约束；音频不等待动作。到期需记录 context/gate/provider/parse 等实际阶段，不能只留下 motion_state=failed。
 3. 音频已播放完但动作仍在合法窗口时，Turn 保持结算态；窗口关闭后取消尚未完成的动作并发出明确终态，不无限等待，不补播过期动作。
-4. 所有生产流关闭并排空后才发送 control.synth_finished。桌面所有已接受播放任务结算后发送 playback_finished。TurnCoordinator 最后发送 turn_finished，不能在文本或音频单支路结束时清理全部动作注册表。
+4. 所有生产流明确关闭后发送 control.synth_finished，不等桌面播放排空。桌面继续消费已接纳音频，全部本地播放任务结算后才发送 playback_finished；TurnCoordinator 最后发送 turn_finished。不能在文本或音频单支路结束时清理全部动作注册表。
 5. 用户打断、断线或总期限到达时，由 Turn 所有者终止三条流与本地播放。已接受前缀保留为不完整结果；旧生成代次不得污染新 Turn。
 6. 各队列必须同时限制条数和累计字节/采样量，单个超大块也计入容量。传输满时通过有界 await 背压；停止或失败必须能唤醒排队任务。首版具体容量随真实播放负载验证后冻结，不使用无界容器。
 
 ## 观测与第一批实测
 
 同日新增 M2 观测：Adapter 每个 writer 的首个成功发送 text/PCM/motion 各记录一次，带 frontend/Core/Persona/segment/message 身份及 epoch，不记录正文；桌面白名单新增 `incremental_text_first`、`incremental_pcm_first`、`pcm_prepare_start/end`、`pcm_first_sample`、`pcm_drained`。前两项每结果一次，PCM 准备/消费项每段一次。`pcm_first_sample.monotonicMs` 来自 `output.started` 的软件消费估计；其估计 epoch 可按 `timeOriginMs + monotonicMs` 计算，`timestampEpochMs` 是回调记录时刻，二者不可混同为硬件声卡实测。尚无新现场样本，不据此给出收益百分比。
+
+动作终态现分为 `motion_ended`（成功）、`motion_failed` 和 `motion_interrupted`，不再把失败写成 ended。历史日志中的 ended 可能是任意终态；没有对应 started 时不能算作实际动作成功。03:12 的 M0 首段曾出现这种情况，缺少当时的拒绝原因，未把它臆断为某个已修复问题的现场复现。
 
 - 动作 Provider 请求必须记录 motion_request_id、core_turn_id、persona_result_id、segment_index；首块、流结束和合法结果共享请求 ID。deadline 日志注明实际阶段，区分没首块、已有增量但未闭合、解析拒绝和交付过期。
 - 文本首增量、TTS 首块、Adapter 首帧、桌面首采样及动作首指令分别记录。跨进程记录 epoch，进程内耗时用本进程 monotonic；仅在同一时钟域相减。

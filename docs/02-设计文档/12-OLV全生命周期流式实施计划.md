@@ -4,6 +4,8 @@
 
 ## 当前进度
 
+- **2026-10-17 后续可靠性和容量修复：**真实输入身份、旧队列误写、PCM 退出/取消、TTS 准入已修复；动作无音频/过期结算及绝对 deadline 已接通，移除 750 ms 和额外 1 秒上限。接收与播放已通过独立有界 worker、双端 `olv.audio_credit.v1` 解耦，新增两端能力协商。已完成真实本地 WS 与完整 Electron 构建，未重启或做真实声音/Live2D 验收。Core 08 文档第 12/13 节记录提交和边界，本文历史描述不再作为原样待办。动作小记录、revision/anchor 和连续跨段身体融合仍未完成；详见 13 契约当前状态。
+
 - **2026-10-17 Core Persona 增量 producer 接线：**AstrBot Core 在 OLV Persona 流头建立连接绑定 writer；每个已解码 Persona 段创建增量文本预处理器，首个通过安全检查的可见 delta 立即发送到 Adapter，并同时送入同一个 MiniMax PCM 流。段结束关闭文本输入并发出 PCM flush；动作由独立 Future 异步完成或超时失败。文本、音频、动作三条流均有显式终态。PCM 失败只标记音频失败并保留已接受文本，生产异常/取消会关闭仍打开的资源。Adapter 不可用时保留旧的完整 Persona 段回退路径。Core 定向 Persona 测试 9 项、编译和 Ruff 通过；真实 Core 边界探针确认隐藏 `system_reminder` 不泄漏、可见文本先行、PCM 音频和三条 end 均产生。提交 `ece8c24b1`、`93ab37ae5`。本批仍未进行真实运行时 Provider + WebSocket + Electron 播放验收；入口由现有桌面 OLV 流式设置门控，未重启。
 
 - **2026-10-17 Adapter 增量准入标记：**现有桌面 OLV 流式设置通过兼容性检查后，同时向 Core 事件声明增量输出请求；Core 发现连接绑定 writer 不可用时自动回退旧段路径，避免插件能力问题终止核心对话。该标记不单独开放动作 update 或最终能力协商。
