@@ -4,16 +4,25 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
-from astrbot.api import logger
 from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
+
+from astrbot.api import logger
 
 from ..protocol.builder import (
     build_control_error,
     build_control_start_mic,
     build_system_server_info,
 )
+
+
+@dataclass(order=True, slots=True)
+class _OutboundItem:
+    sequence: int
+    payload: dict[str, Any] | bytes = field(compare=False)
+    result: asyncio.Future[bool] = field(compare=False)
 
 
 class WebSocketTransport:
@@ -56,6 +65,9 @@ class WebSocketTransport:
 
         self._ws_server = None
         self._ws_client = None
+        self._outbound_queue: asyncio.Queue[_OutboundItem] | None = None
+        self._outbound_writer_task: asyncio.Task | None = None
+        self._outbound_sequence = 0
 
     async def start(self) -> None:
         """启动静态资源 + WebSocket 监听；直到 ws_server.wait_closed()。
@@ -103,6 +115,8 @@ class WebSocketTransport:
                 else:
                     logger.exception("Failed to close desktop websocket client cleanly")
 
+        await self._stop_outbound_writer()
+
         if self._ws_server is not None:
             try:
                 self._ws_server.close()
@@ -132,14 +146,14 @@ class WebSocketTransport:
                 payload.get("turn_id"),
             )
             return False
-        return await self._send_payload_to_client(client, payload)
+        return await self._enqueue_payload(client, payload)
 
     async def send_binary(self, payload: bytes) -> bool:
-        """Send one downlink frame with transport backpressure and no extra queue."""
+        """Send one downlink frame through the connection writer."""
         client = self._ws_client
         if client is None:
             return False
-        return await self._send_payload_to_client(client, payload)
+        return await self._enqueue_payload(client, payload)
 
     def bind_current_client_sender(
         self,
@@ -158,9 +172,94 @@ class WebSocketTransport:
                     payload.get("turn_id") if isinstance(payload, dict) else None,
                 )
                 return False
-            return await self._send_payload_to_client(client, payload)
+            return await self._enqueue_payload(client, payload)
 
         return send_bound
+
+    def _start_outbound_writer(self, client) -> None:
+        # A single FIFO writer is the ordering boundary for the protocol.  A
+        # priority queue lets terminal control frames jump over already queued
+        # text, motion, or PCM frames, which leaves the desktop observing an
+        # impossible stream state.  Keep the queue bounded so a slow socket
+        # applies backpressure instead of retaining an unbounded audio burst.
+        self._outbound_queue = asyncio.Queue(maxsize=256)
+        self._outbound_sequence = 0
+        self._outbound_writer_task = asyncio.create_task(
+            self._run_outbound_writer(client),
+            name="ag99live-websocket-outbound-writer",
+        )
+
+    async def _stop_outbound_writer(self, client=None) -> None:
+        if client is not None and self._ws_client is not client:
+            return
+        task = self._outbound_writer_task
+        queue = self._outbound_queue
+        self._outbound_writer_task = None
+        self._outbound_queue = None
+        if task is not None and not task.done():
+            task.cancel()
+        if task is not None:
+            await asyncio.gather(task, return_exceptions=True)
+        if queue is not None:
+            while not queue.empty():
+                item = queue.get_nowait()
+                if not item.result.done():
+                    item.result.set_result(False)
+
+    async def _enqueue_payload(self, client, payload: dict[str, Any] | bytes) -> bool:
+        queue = self._outbound_queue
+        if self._ws_client is not client or queue is None:
+            return False
+        loop = asyncio.get_running_loop()
+        result = loop.create_future()
+        self._outbound_sequence += 1
+        item = _OutboundItem(
+            self._outbound_sequence,
+            payload,
+            result,
+        )
+        try:
+            while True:
+                if self._ws_client is not client or self._outbound_queue is not queue:
+                    if not result.done():
+                        result.set_result(False)
+                    return False
+                try:
+                    await asyncio.wait_for(queue.put(item), timeout=0.25)
+                    break
+                except asyncio.TimeoutError:
+                    continue
+            return await result
+        except asyncio.CancelledError:
+            if not result.done():
+                result.cancel()
+            raise
+        except Exception:
+            if not result.done():
+                result.set_result(False)
+            return False
+
+    async def _run_outbound_writer(self, client) -> None:
+        queue = self._outbound_queue
+        if queue is None:
+            return
+        try:
+            while self._ws_client is client:
+                item = await queue.get()
+                if item.result.cancelled():
+                    continue
+                sent = await self._send_payload_to_client(client, item.payload)
+                if not item.result.done():
+                    item.result.set_result(sent)
+                if not sent:
+                    return
+        except asyncio.CancelledError:
+            raise
+        finally:
+            while not queue.empty():
+                item = queue.get_nowait()
+                if not item.result.done():
+                    item.result.set_result(False)
 
     async def _send_payload_to_client(self, client, payload: dict[str, Any] | bytes) -> bool:
         payload_type = payload.get("type", "<unknown>") if isinstance(payload, dict) else "binary"
@@ -226,6 +325,7 @@ class WebSocketTransport:
             return
 
         self._ws_client = websocket
+        self._start_outbound_writer(websocket)
         logger.debug("Desktop frontend connected to adapter transport")
         try:
             await self._send_initial_messages()
@@ -282,6 +382,7 @@ class WebSocketTransport:
                 logger.exception("Desktop frontend handler aborted unexpectedly")
         finally:
             if self._ws_client is websocket:
+                await self._stop_outbound_writer(websocket)
                 self._ws_client = None
                 try:
                     await self._on_disconnect()

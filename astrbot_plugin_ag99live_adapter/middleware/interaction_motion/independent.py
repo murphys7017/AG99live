@@ -16,6 +16,11 @@ from ...motion.output_sanitizer import sanitize_assistant_output_text
 from ...motion.payload_validation import (
     normalize_motion_arguments_payload,
 )
+from ...motion.text_stream import (
+    TextChatStreamUnavailable,
+    read_text_chat_stream,
+    supports_text_chat_stream,
+)
 from .prompt_builder import (
     _build_motion_capability_prompt_payload,
     _build_motion_runtime_payload,
@@ -30,11 +35,6 @@ from .shared import (
     _append_resolution_reason,
     _MotionRuntimeBundle,
     _sanitize_reason_fragment,
-)
-from ...motion.text_stream import (
-    TextChatStreamUnavailable,
-    read_text_chat_stream,
-    supports_text_chat_stream,
 )
 
 INDEPENDENT_MOTION_TASK_EXTRA_KEY = "_ag99live_independent_motion_task"
@@ -72,7 +72,9 @@ def resolve_stream_motion_budget_seconds(runtime_state: Any, *, event: Any = Non
         # Enhanced Core supplies the Turn deadline; ordinary upstream AstrBot
         # has no such API and keeps the configured bounded motion budget.
         try:
-            from astrbot.core.interaction.turn_state import get_interaction_turn_deadline
+            from astrbot.core.interaction.turn_state import (
+                get_interaction_turn_deadline,
+            )
         except ImportError:
             return configured
         deadline = get_interaction_turn_deadline(event)
