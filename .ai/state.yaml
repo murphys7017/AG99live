@@ -989,3 +989,11 @@ olv_stream_open_pcm_motion_preparation_20261017:
   evidence: "Two real M2 turns at 15:54 delivered text/PCM and generated five motion payloads, but all five failed with late_motion_audio_window_unavailable. This identifies the known-duration-only preparation logic in the runtime; exact loaded commit remains unverified despite the user not manually updating."
   validation: "Same public incremental event -> Store -> orchestrator -> timeline -> actual ModelEngine/compiler case fails before this change and starts before audio EOF afterward. Relative clock, preserved curve, open audio production state and user interruption checked; existing M0 success/expiry case retained. Narrow compile and full npm run build passed."
   evidence_gap: "Final audio/device and motion execution interfaces remain isolated in the boundary check. No new real conversation or Live2D result after this change; original 03:12 sample cause is not retroactively asserted. Exact process version must be recorded on next live acceptance."
+
+olv_action_only_delivery_accounting_20261017:
+  class: bugfix
+  risk: high
+  status: writer_boundary_validated_pending_live_acceptance
+  scope: "Expose delivered_motion_segment_indexes from canonical writer segment state, marking only after the bound sender accepts a motion update. Companion Core uses this delivery fact for action-only output accounting and completion/history."
+  validation: "Actual public writer through an isolated sender counted repeated updates to one segment once and excluded another segment ending failed without a payload. Scoped F lint passed; Core parser/controller boundary checks passed. Contract wording also corrected for text EOF suffix and canonical delivered speech."
+  evidence_gap: "Requires paired Core and Adapter deployment; downlink acceptance does not prove desktop execution. No runtime reload, paid Provider or device/Live2D acceptance."

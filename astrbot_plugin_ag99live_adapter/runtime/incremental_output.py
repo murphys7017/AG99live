@@ -41,6 +41,7 @@ class _Segment:
     streams: dict[str, _Stream] = field(default_factory=dict)
     text: str = ""
     text_units: int = 0
+    motion_delivered: bool = False
 
 
 class IncrementalOutputSession:
@@ -92,6 +93,14 @@ class IncrementalOutputSession:
             resource, self.turn_id, self.core_turn_id, self.persona_result_id,
             index, message_id, (perf_counter() - self._created_at) * 1000,
             time_ns() // 1_000_000,
+        )
+
+    @property
+    def delivered_motion_segment_indexes(self) -> frozenset[int]:
+        """Segments whose motion update was accepted by the bound sender."""
+        return frozenset(
+            index for index, segment in self._segments.items()
+            if segment.motion_delivered
         )
 
     def invalidate(self) -> None:
@@ -274,6 +283,7 @@ class IncrementalOutputSession:
             payload = self._payload(segment_index, segment, stream)
             payload["motion_payload"] = dict(motion_payload)
             await self._send_event("motion", "update", payload)
+            segment.motion_delivered = True
             self._observe_first("motion", segment_index, segment.message_id)
             stream.seq += 1
 
