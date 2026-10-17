@@ -163,15 +163,65 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
       });
       const key = buildSegmentKey(context.turnId, context.messageId);
       const cached = preparedSemanticMotions.get(key);
-      const prepared = payload.kind === "semantic_intent"
+      let prepared = payload.kind === "semantic_intent"
         && cached?.assistantText === context.assistantText
         && cached.speechCueKey === buildSpeechCueKey(context.speechCues)
         ? cached.prepared
         : null;
       preparedSemanticMotions.delete(key);
+      let startContext = context;
+      if (!prepared && context.playbackClock?.source === "audio") {
+        const clock = context.playbackClock;
+        const reader = context.playbackClockReader;
+        const originMs = reader?.getElapsedMs();
+        if (
+          (clock.phase !== "playing" && clock.phase !== "paused")
+          || !reader
+          || originMs === null || originMs === undefined
+          || !Number.isFinite(originMs) || originMs < 0
+          || clock.durationMs === null || !Number.isFinite(clock.durationMs)
+          || clock.durationMs <= originMs
+        ) {
+          state.lastCompileReason = "late_motion_audio_window_unavailable";
+          return false;
+        }
+        // A deferred payload missed duration-ready preparation. Prepare it now,
+        // with both the plan and its clock measured from this same audio sample.
+        // Keep the original reader so pauses, cancellation and drain still belong
+        // to the existing segment; do not create a second playback clock.
+        startContext = {
+          ...context,
+          playbackClock: {
+            ...clock,
+            currentTimeMs: 0,
+            durationMs: clock.durationMs - originMs,
+          },
+          playbackClockReader: {
+            getElapsedMs() {
+              const elapsedMs = reader.getElapsedMs();
+              return elapsedMs !== null && Number.isFinite(elapsedMs)
+                ? Math.max(0, elapsedMs - originMs)
+                : null;
+            },
+          },
+        };
+        console.info("[ModelEngine] preparing deferred motion on active audio.", {
+          turnId: context.turnId,
+          messageId: context.messageId,
+          audioOriginMs: originMs,
+          remainingAudioMs: startContext.playbackClock?.durationMs,
+        });
+        prepared = prepareSemanticMotionPayload(
+          payload,
+          startContext,
+          motionStartDependencies,
+          runtimeStateController,
+        );
+        if (!prepared) return false;
+      }
       return startNormalizedMotionPayload(
         payload,
-        context,
+        startContext,
         motionStartDependencies,
         runtimeStateController,
         prepared,

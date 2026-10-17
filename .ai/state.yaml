@@ -971,3 +971,11 @@ olv_stream_final_build_20261017:
   scope: "Complete implementation/review record for T0b/T1/T2/T3 and scoped T4 HTTP ownership, preserving user mode and unrelated Core changes. Documentation separates implemented boundaries, historical evidence and deferred R6 architecture."
   validation: "Final npm run build passed renderer/WebSDK/node checks and Electron main/preload/renderer generation after local-cancel, stage metrics and speech-only changes. Scoped Adapter Ruff, generated manifest and unique-key YAML checks passed; 11 deployed runtime source hashes matched."
   evidence_gap: "No process restart, installer/publication or remote push. Pair-load the new audio_credit manifest/settings capability in Adapter and desktop before M2 acceptance. No actual Provider/device/Live2D performance or M2 p50/p95."
+olv_nonstream_deferred_motion_preparation_20261017:
+  class: bugfix
+  risk: high
+  status: real_model_engine_boundary_and_build_validated_pending_live_acceptance
+  scope: "Repair M0 deferred semantic motion that reaches a playing audio timeline without a duration-ready prepared plan. Compile within its known remaining audio window and rebase the existing audio reader to the same attachment sample; preserve preparation, model/profile and Turn ownership checks."
+  evidence: "Five live M0 turns at 15:39-15:42 each generated both motions, rejected first motion with motion_plan_not_prepared_before_audio_start, and played the second. Previous deferredMotionOutput smoke replaced the body sink and omitted the actual ModelEngine."
+  validation: "Upgraded the same public protocol -> Store -> orchestrator -> timeline -> real ModelEngine/compiler boundary, with only audio/device execution isolated. Previous ModelEngine reproduces first-motion failure; corrected implementation starts it at relative zero, follows subsequent audio samples without replay, and rejects an exhausted window. Narrow test compile and final npm run build passed."
+  evidence_gap: "No process restart, real Provider request or device/Live2D verification after this fix. Unknown-duration M2 preparation remains outside this repair; the earlier 03:12 historical failure is not retrospectively assigned this cause."
