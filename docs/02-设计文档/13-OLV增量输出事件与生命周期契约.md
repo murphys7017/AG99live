@@ -1,10 +1,8 @@
 # OLV 增量输出事件与生命周期契约
 
-> **剩余工作与验收顺序（2026-10-17）：**以 Core 仓库 `docs/Yakumo/dev/structured-persona-output/14-olv-remaining-work-and-acceptance.md` 为交接入口。当前契约需真实 M2 配套运行验收；动作小记录/revision/anchor/融合仍是后续设计，不能从现有 motion update 推断已完成。软件首采样估计不代表声卡实测，旧 M0 样本不构成 M2 提速证据。本次只更新文档。
+更新：2026-10-17。本文是当前事件、容量与生命周期契约；实施状态和职责见 [12 实施计划](12-OLV全生命周期流式实施计划.md)，跨仓库剩余工作见 Core 的 `docs/Yakumo/dev/structured-persona-output/14-olv-remaining-work-and-acceptance.md`。
 
-> 2026-10-17 当前契约状态。Core、Adapter 和桌面已经具备增量文本/PCM/动作 update 的代码接线，但能力仍由现有桌面 OLV 流式设置门控，尚未登记为独立公开能力。协议边界和隔离环境已验证，真实 Provider、Electron 播放和 Live2D 表现仍待现场验收。沿用现有 AstrBot Turn、Adapter TurnCoordinator 和桌面 PlaybackTimeline。
-
-**同日后续修复：**入口身份、PCM 生命周期、旧队列和 TTS 准入已修复；动作空音频结算与配置期限已接通。接收与播放现已分离，并增加下述双端容量契约。本文较早关于串行接收或 750 ms 期限的说明属于历史实现；新代码仍待联合现场验收。
+Core、Adapter 和桌面已接通增量文本/PCM/动作 update，并实现双端信用、动作特殊状态及期限；已有局部验证，真实 Provider、Electron 播放和 Live2D 尚待联合验收。沿用现有 Turn/时间线，能力由既有 OLV 设置门控，增量输出尚未登记为独立公开能力。动作小记录/revision/anchor/融合仍是后续设计。
 
 ## 下行音频容量契约（olv.audio_credit.v1）
 
@@ -38,11 +36,11 @@
 
 `OLVPetPlatformEvent.open_interaction_incremental_output(persona_result_id=...)` 已由 Core producer 在 OLV 流头调用，并由现有桌面 OLV 流式设置设置内部准入标记。入口沿用现有外部 Turn 与 Core Turn 绑定，由 TurnCoordinator 校验，OutputSegmentCoordinator 保存唯一 writer。writer 共用该 Turn 的锁，发送始终绑定创建时的 WebSocket；不能改用最新连接或另建 Turn。
 
-start、append、end 均等待实际发送，成功后推进序号与采样位置。发送取消或异常可能已部分到达客户端，因此封闭 writer，禁止按同一序号重试。PCM 输入块最多 1 MiB，按最多 64 KiB 的协议帧切分；后段 PCM 必须等待前段音频明确生产 EOF。socket 写入等待仅是传输端等待，不代表已有桌面播放速度驱动的端到端流量控制。
+start、append、end 均等待实际发送，成功后推进序号与采样位置。发送取消或异常可能已部分到达客户端，因此封闭 writer，禁止按同一序号重试。PCM 输入块最多 1 MiB，按最多 64 KiB 的协议帧切分；后段 PCM 必须等待前段音频明确生产 EOF。音频容量受上文独立 credit 约束，不能仅依赖 socket 写入等待；等待信用不持有三资源共用发送锁。
 
 三条资源必须分别明确 end，才能由现有输出协调器发布 synth_finished。动作 failed/cancelled 不使成功文本和音频失败，文本/音频失败则记入本轮合成失败。结束文本将已接受前缀加入既有聊天缓冲，不重发全文。播放完成回执必须在输出关闭之后处理；检查等待同一把 Turn 锁，避免快速客户端在 synth_finished 发送返回前回执而被误拒绝。已有 Turn 清理同时撤销 writer，后续调用拒绝；发送中途断开仍须由既有失败/打断路径终止该 Turn，不能尝试在另一连接重放。
 
-已验证真实 Python 协调器/本地 WebSocket 与桌面解析器/SessionStore 的协议边界，使用合成 PCM 和探针回执；另有 Core producer 的隐藏标记过滤、文本增量、PCM 和动作 update 边界 smoke。上述检查未证明桌面播放排空、真实 Provider、ModelEngine 或 Live2D 已连通；动作融合和公开能力协商仍待现场验收。
+真实 Python 协调器/本地 WebSocket 与桌面 transport/Store/worker 已完成协议边界验证，Core producer 有安全文本、PCM 与动作 update 边界检查；使用隔离 PCM/身体 sink。已有 audio_credit 双端协商不等于独立公开能力登记，局部回执/排空验证也不等于真实设备和 Live2D 验收。
 
 ## 公共字段
 
@@ -60,17 +58,13 @@ start、append、end 均等待实际发送，成功后推进序号与采样位�
 
 Core 是文本生产状态的唯一所有者。复用 Persona 小记录协议：完整 speech_delta 记录闭合即可下发，不等待 segment_end；无需先开放未经解码的 JSON token。跨增量的隐藏标记/转义由同一流的过滤状态处理，最终 Hook 不能改写已提交前缀。
 
-## 动作更新事件（2026-10-17）
-
-`output.motion_stream_update` 只能用于已经 start 且仍 open 的 motion 流。payload 复用公共身份字段并携带 `motion_payload`；每次更新只推进该 motion 流自己的 `seq`，允许在文本和 PCM 已经开始后到达。Adapter 的 Persona 动作 Future 完成后发送 update，随后发送 motion end；无结果或超时只发送带原因的 failed end。桌面先用既有 `normalizeMotionPayload` 校验，再把最新合法 payload 写入段状态，交给现有 PlaybackTimeline/ModelEngine 的动作启动边界。update 不能改写已结束流；动作失败不影响文本和音频收口。
-
-动作 update 的接入只证明协议和状态承接，不代表动作一定在首音频前完成。动作 Provider 仍有自己的 deadline，桌面仍需等待音频时间线满足现有 motion start 条件；真正的动作融合、迟到替换策略和现场 Live2D 表现仍需单独验收。
+### 文本增量预处理
 
 Core 现提供 `PreOutputProcessor.create_incremental_text_preparer(event)` 预处理入口：每个已解码 Persona 段创建一份状态，feed 返回本次可立即提交的新文本；跨 delta 的 system_reminder 标记和嵌套块不会泄露到显示/TTS。既有 Core 内容安全检查覆盖整个可见前缀，拒绝后保留已经接受的前缀。finish 只返回最终全文供校验，不是额外增量；未闭合的标记或标记前缀会使该段失败，不能跨 Persona 段闭合。单段原始输入最多 1 MiB UTF-8，可见文本最多 65536 UTF-16 单元，保留首尾空白并将连续换行限制为两个。该入口不执行整段 decorating Hook，避免重复副作用与撤回已提交文本；生产路径隔离旧整段修饰，不能在结尾重新改写此前已交付内容。真实运行中的 Provider、桌面和 Live2D 仍未现场验收。
 
 桌面正式入站已接收文本 start/delta/end。SessionStore 注册增量段，保存完整前缀和独立流状态，delta 原样显示，end 校验 Unicode 码点长度并记录该段历史；生成终态与音频播放终态分别保存。同一 Turn 不混用完整 output.segment 与增量交付，旧完整段执行器不再释放增量段。每 Turn 最多 256 段、文本最多 262144 个 UTF-16 单元，每段最多 65536 个 UTF-16 单元；这些限制不改变 text_length 的码点计数。Core 的增量预处理已接入 producer，桌面身份/结构校验仍不能代替它。
 
-段头先给出身份，动作/情绪后续发布；turn_action 仍须在可见回复前完成准入。最终段校验与流结束校验继续执行，失败时保留已经交付的前缀并显式报错。
+当前 Persona segment_start 仍包含 actions/tendency；轻量段头先发身份、动作/情绪后置是待评估的协议优化，不能从文本 start 事件推断已经实现。turn_action 在可见回复前完成准入；最终段及流结束校验继续执行，失败保留已交付前缀并显式报错。
 
 ## 音频事件与二进制帧
 
@@ -113,6 +107,8 @@ Core 语音服务入口为 `synthesize_pcm_stream(context, event, PCMTextPart �
 | `output.motion_stream_end` | `status`、`reason` | 动作生产结束，可选动作失败不覆盖已成功交付的核心文本/音频 |
 
 `payload` 使用现有可执行动作契约，由 ModelEngine 校验/编译，不直接写未经校验的 Live2D 参数。`profile_revision` 仍表示模型资源版本，不能替代这里的动作修订号。
+
+Adapter 的 Persona 动作 Future 完成后发送 update，再发送 motion end；无结果或超时以带原因的 failed end 收口。update 仅用于已 start 且仍 open 的流，复用公共身份，推进该 motion 流的 seq；不能改写已结束流。桌面经 `normalizeMotionPayload` 校验后交给现有 PlaybackTimeline/ModelEngine；是否实际启动还取决于当前音频/独立动作时间线及有效窗口，不保证先于首音频。
 
 后续 T6 的 `anchor` 设计候选为 `audio_sample` 或 `segment_now`，尚不是当前 update 的已实现字段。前者应携带目标采样位置，后者表示当前姿态上的短预览；不能使用两个进程各自的 monotonic 时间进行比较。后续修订与预览融合必须先定义同一参数控制权，不能把候选字段直接塞入旧 payload。
 
