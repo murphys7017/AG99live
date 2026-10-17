@@ -99,13 +99,25 @@ export function createIncrementalSegmentWriter(options: {
     if (id.seq !== 0) throw new Error("incremental_output_start_sequence_invalid");
     let segment = session.segments.get(id.messageId);
     if (!segment) {
-      if (id.segmentIndex !== session.segmentOrder.length || session.segmentOrder.length >= MAX_SEGMENTS) {
+      if (session.segmentOrder.length >= MAX_SEGMENTS) {
         throw new Error("incremental_output_segment_order_or_capacity_invalid");
       }
       for (const prior of session.segments.values()) {
-        if (!prior.incremental || prior.incremental.coreTurnId !== id.coreTurnId
-          || prior.incremental.personaResultId !== id.personaResultId) {
+        if (!prior.incremental || prior.incremental.coreTurnId !== id.coreTurnId) {
           throw new Error("incremental_output_mixed_delivery_or_result");
+        }
+      }
+      const resultSegments = [...session.segments.values()].filter(
+        (prior) => prior.incremental?.personaResultId === id.personaResultId,
+      );
+      if (id.segmentIndex !== resultSegments.length) {
+        throw new Error("incremental_output_result_segment_order_invalid");
+      }
+      const previous = session.segments.get(session.segmentOrder[session.segmentOrder.length - 1] ?? "");
+      if (previous?.incremental?.personaResultId !== id.personaResultId) {
+        if (resultSegments.length || (previous?.incremental && Object.values(previous.incremental.streams)
+          .some((stream) => !stream || stream.status === "open"))) {
+          throw new Error("incremental_output_previous_result_unclosed");
         }
       }
       segment = createTurnPlaybackSegment(id.messageId, id.turnId);
@@ -172,7 +184,7 @@ export function createIncrementalSegmentWriter(options: {
     const session = sessionFor(id);
     const segment = segmentFor(session, id);
     const stream = streamFor(segment, "audio", id);
-    for (const messageId of session.segmentOrder.slice(0, id.segmentIndex)) {
+    for (const messageId of session.segmentOrder.slice(0, session.segmentOrder.indexOf(id.messageId))) {
       const prior = session.segments.get(messageId)?.incremental?.streams.audio;
       if (!prior || prior.status === "open") throw new Error("incremental_output_audio_segment_order_invalid");
     }

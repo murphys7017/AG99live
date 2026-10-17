@@ -25,13 +25,14 @@ from ..protocol.builder import (
 )
 from ..protocol.constants import TYPE_ENGINE_MOTION_INTENT
 from ..protocol.schema_versions import MOTION_INTENT_V4_SCHEMA_VERSION
+from .audio_credit import AudioCredit
+from .deferred_motion import DeferredMotionDelivery
+from .incremental_output import IncrementalOutputSession, SendPayload
 from .message_utils import (
     extract_outbound_message_parts,
     iter_platform_motion_client_objects,
     resolve_platform_segment_message_id,
 )
-from .incremental_output import IncrementalOutputSession, SendPayload
-from .deferred_motion import DeferredMotionDelivery
 from .motion_observation_recorder import MotionObservationRecorder
 from .output_segment import (
     PASSIVE_BEHAVIOR_MOTION_SOURCE,
@@ -77,15 +78,20 @@ class OutputSegmentCoordinator:
         self._emitted_turn_ids: set[str] = set()
         self._output_failures: dict[str, str] = {}
         self._turn_level_motion_consumed: set[str] = set()
-        self._incremental_outputs: dict[str, IncrementalOutputSession] = {}
+        self._incremental_outputs: dict[str, dict[str, IncrementalOutputSession]] = {}
+        self._turn_audio_credit: dict[str, AudioCredit] = {}
         self.deferred_motion = DeferredMotionDelivery(
             send_json=send_json, is_turn_terminal=is_turn_terminal,
         )
 
     def reset(self) -> None:
         self.deferred_motion.clear()
-        for writer in self._incremental_outputs.values():
-            writer.invalidate()
+        for writers in self._incremental_outputs.values():
+            for writer in writers.values():
+                writer.invalidate()
+        for credit in self._turn_audio_credit.values():
+            credit.close()
+        self._turn_audio_credit.clear()
         self._incremental_outputs.clear()
         self._pending_segments.clear()
         self._segment_sequences.clear()
@@ -113,9 +119,11 @@ class OutputSegmentCoordinator:
 
     def clear_turn(self, turn_id: str) -> None:
         self.deferred_motion.clear(turn_id)
-        writer = self._incremental_outputs.pop(turn_id, None)
-        if writer is not None:
+        for writer in self._incremental_outputs.pop(turn_id, {}).values():
             writer.invalidate()
+        credit = self._turn_audio_credit.pop(turn_id, None)
+        if credit is not None:
+            credit.close()
         self._output_failures.pop(turn_id, None)
         prefix = f"{turn_id}|"
         for key in tuple(self._pending_segments):
@@ -134,7 +142,13 @@ class OutputSegmentCoordinator:
         self._turn_level_motion_consumed.discard(turn_id)
 
     def release_audio_credit(self, *, turn_id: str, payload: dict[str, Any]) -> None:
-        writer = self._incremental_outputs.get(turn_id)
+        writers = self._incremental_outputs.get(turn_id, {})
+        persona_result_id = str(payload.get("persona_result_id") or "").strip()
+        writer = writers.get(persona_result_id) if persona_result_id else None
+        if writer is None and not persona_result_id and len(writers) == 1:
+            # Older desktop clients scoped credit only by Turn. Keep that
+            # protocol compatible while still rejecting ambiguous late credit.
+            writer = next(iter(writers.values()))
         if writer is None:
             return  # Late credit for an already retired Turn grants nothing.
         writer.release_audio_credit(
@@ -148,13 +162,23 @@ class OutputSegmentCoordinator:
     ) -> IncrementalOutputSession:
         async with self._get_turn_lock(turn_id):
             require_turn_active()
-            self._require_output_queue_open(turn_id)
+            self._require_output_queue_open(turn_id, incremental=True)
+            writers = self._incremental_outputs.setdefault(turn_id, {})
+            if persona_result_id in writers:
+                raise RuntimeError("incremental_output_duplicate_result")
+            for prior in writers.values():
+                if prior.core_turn_id != core_turn_id:
+                    raise RuntimeError("incremental_output_core_turn_mismatch")
+                prior.require_complete()
+            segment_offset = sum(prior.segment_count for prior in writers.values())
+            if segment_offset >= 256 or len(writers) >= 256:
+                raise RuntimeError("incremental_output_segment_capacity_invalid")
             if self._first_pending_segment(turn_id) is not None or turn_id in self._emitted_turn_ids:
                 raise RuntimeError("incremental_output_mixed_delivery")
 
             def require_current() -> None:
                 require_turn_active()
-                if self._incremental_outputs.get(turn_id) is not writer:
+                if self._incremental_outputs.get(turn_id, {}).get(persona_result_id) is not writer:
                     raise RuntimeError("incremental_output_owner_stale")
 
             def require_open() -> None:
@@ -166,9 +190,15 @@ class OutputSegmentCoordinator:
                 persona_result_id=persona_result_id, lock=self._get_turn_lock(turn_id),
                 send_payload=send_payload, require_open=require_open,
                 require_current=require_current,
+                turn_audio_credit=self._turn_audio_credit.setdefault(turn_id, AudioCredit()),
+                segment_offset=segment_offset,
                 on_text_complete=lambda text: self.chat_buffer.add("assistant", text),
+                on_audio_sent=lambda: self._mark_turn_timing(
+                    turn_id,
+                    "audio_payload_sent_at",
+                ),
             )
-            self._incremental_outputs[turn_id] = writer
+            writers[persona_result_id] = writer
             return writer
 
     async def emit_message_chain(
@@ -421,7 +451,11 @@ class OutputSegmentCoordinator:
         self, *, turn_id: str, failure_reason: str | None = None
     ) -> None:
         normalized_turn_id = _require_turn_id_value(turn_id)
-        await self.deferred_motion.drain(normalized_turn_id)
+        # Deferred motion is an optional side channel.  Waiting for its model
+        # result here makes synth_finished depend on a slow action provider and
+        # can keep the whole Turn open for its 30 second timeout.  The pending
+        # segment already advertises `motion: pending`; the delivery task may
+        # publish the eventual result while the Turn is still playable.
         if self._is_turn_terminal(normalized_turn_id):
             return
         async with self._get_turn_lock(normalized_turn_id):
@@ -429,15 +463,18 @@ class OutputSegmentCoordinator:
                 return
             if normalized_turn_id in self._closing_turn_ids:
                 return
-            incremental = self._incremental_outputs.get(normalized_turn_id)
-            if incremental is not None:
+            writers = self._incremental_outputs.get(normalized_turn_id, {})
+            incremental = next(reversed(writers.values()), None)
+            for result_writer in writers.values():
                 # All resources must explicitly close; text/audio EOF alone
                 # cannot settle a still-pending optional motion producer.
-                incremental.require_complete()
-                if incremental.has_output:
+                result_writer.require_complete()
+                if result_writer.has_output:
                     self._emitted_turn_ids.add(normalized_turn_id)
-                if incremental.failure_reason:
-                    self._output_failures[normalized_turn_id] = incremental.failure_reason
+                if result_writer.failure_reason and getattr(
+                    result_writer, "failure_fatal", True
+                ):
+                    self._output_failures[normalized_turn_id] = result_writer.failure_reason
             self._closing_turn_ids.add(normalized_turn_id)
             if failure_reason:
                 self._output_failures[normalized_turn_id] = failure_reason
@@ -634,7 +671,19 @@ class OutputSegmentCoordinator:
 
         motion_slot = self.build_motion_slot(segment)
         if self.deferred_motion.contains(segment.turn_id, segment.message_id):
-            motion_slot = {"state": "pending"}
+            ready_slot = await self.deferred_motion.wait_ready(
+                segment.turn_id,
+                segment.message_id,
+                timeout_seconds=0.25,
+            )
+            if ready_slot is not None:
+                motion_slot = ready_slot
+                self.deferred_motion.mark_inline(
+                    segment.turn_id,
+                    segment.message_id,
+                )
+            else:
+                motion_slot = {"state": "pending"}
         logger.debug(
             "WIRING output_motion_slot_built turn_id=%s message_id=%s "
             "state=%s source=%s schema=%s",

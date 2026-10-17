@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Awaitable
 
 
 class TextChatStreamUnavailable(RuntimeError):
@@ -57,8 +58,16 @@ async def read_text_chat_stream(
     system_prompt: str,
     contexts: list[dict[str, str]] | tuple[dict[str, str], ...] | None = None,
     on_first_chunk: Callable[[], None] | None = None,
+    on_complete_json: Callable[[dict[str, Any]], Awaitable[None] | None] | None = None,
 ) -> str:
-    """Collect a Provider chat stream without a non-streaming fallback."""
+    """Collect a Provider chat stream without a non-streaming fallback.
+
+    ``on_complete_json`` is called as soon as the first complete top-level JSON
+    object appears in the accumulated delta.  The stream is still consumed to
+    EOF so the caller retains the Provider's normal lifecycle, but consumers
+    that only need a validated action can start before trailing whitespace or
+    provider metadata arrives.
+    """
 
     if not supports_text_chat_stream(provider):
         raise TextChatStreamUnavailable("text_chat_stream_unsupported")
@@ -68,6 +77,19 @@ async def read_text_chat_stream(
     final_text = ""
     saw_chunk = False
     first_chunk_reported = False
+    complete_json_reported = False
+
+    async def report_complete_json() -> None:
+        nonlocal complete_json_reported
+        if complete_json_reported or on_complete_json is None:
+            return
+        candidate = _first_complete_json_object(streamed_text)
+        if candidate is None:
+            return
+        complete_json_reported = True
+        callback_result = on_complete_json(candidate)
+        if inspect.isawaitable(callback_result):
+            await callback_result
     try:
         iterator = provider.text_chat_stream(
             prompt=prompt,
@@ -92,6 +114,7 @@ async def read_text_chat_stream(
                             on_first_chunk()
                     # AstrBot is_chunk responses carry deltas, including repeats.
                     streamed_text += chunk_text
+                    await report_complete_json()
                 continue
             if chunk_text:
                 final_text = chunk_text
@@ -105,6 +128,25 @@ async def read_text_chat_stream(
         return (streamed_text or final_text).strip()
     finally:
         await _close_stream_iterator(iterator)
+
+
+def _first_complete_json_object(value: str) -> dict[str, Any] | None:
+    """Return the first complete JSON object in a streamed text prefix.
+
+    ``JSONDecoder.raw_decode`` handles braces inside quoted strings and escaped
+    characters for us.  Searching for the first opening brace keeps this
+    tolerant of an optional Markdown fence while still refusing arrays or
+    scalar values as action records.
+    """
+
+    start = value.find("{")
+    if start < 0:
+        return None
+    try:
+        parsed, _ = json.JSONDecoder().raw_decode(value[start:])
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
 
 
 __all__ = [

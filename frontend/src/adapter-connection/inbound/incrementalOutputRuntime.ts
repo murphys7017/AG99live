@@ -48,6 +48,7 @@ export function createIncrementalOutputRuntime(options: {
   let releasedBytes = 0;
   let releasedFrames = 0;
   let textObserved = false;
+  const resultCredits = new Map<string, { bytes: number; frames: number }>();
 
   function isLive(id: IncrementalIdentity, production = true): boolean {
     const session = options.getStore().getSession(id.turnId);
@@ -58,7 +59,7 @@ export function createIncrementalOutputRuntime(options: {
 
   function requireScope(id: IncrementalIdentity): void {
     if (!scope) scope = id;
-    if (scope.turnId !== id.turnId || scope.coreTurnId !== id.coreTurnId || scope.personaResultId !== id.personaResultId) {
+    if (scope.turnId !== id.turnId || scope.coreTurnId !== id.coreTurnId) {
       throw new Error("incremental_audio_scope_changed_without_retirement");
     }
   }
@@ -94,7 +95,11 @@ export function createIncrementalOutputRuntime(options: {
           signal.throwIfAborted();
           releasedBytes += job.pcm.byteLength;
           releasedFrames += 1;
-          options.sendAudioCredit(job.id, releasedBytes, releasedFrames);
+          const credit = resultCredits.get(job.id.personaResultId) ?? { bytes: 0, frames: 0 };
+          credit.bytes += job.pcm.byteLength;
+          credit.frames += 1;
+          resultCredits.set(job.id.personaResultId, credit);
+          options.sendAudioCredit(job.id, credit.bytes, credit.frames);
         } else {
           if (!active || active.turnId !== job.id.turnId || active.messageId !== job.id.messageId) {
             throw new Error("incremental_audio_end_without_playback");
@@ -182,6 +187,7 @@ export function createIncrementalOutputRuntime(options: {
     scope = null;
     receivedBytes = receivedFrames = releasedBytes = releasedFrames = 0;
     textObserved = false;
+    resultCredits.clear();
   }
   return { handleAudio, handleEvent, beginTurn, cancelTurn, reset };
 }

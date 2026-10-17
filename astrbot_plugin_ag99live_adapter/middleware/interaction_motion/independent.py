@@ -91,6 +91,7 @@ async def _request_motion_provider_text(
     motion_request_id: str,
     persona_result_id: str | None,
     segment_index: int | None,
+    on_complete_json: Any | None = None,
 ) -> tuple[str, str]:
     """Read the motion Provider incrementally without a complete-chat fallback."""
 
@@ -120,6 +121,7 @@ async def _request_motion_provider_text(
             system_prompt=system_prompt,
             contexts=contexts,
             on_first_chunk=_on_first_chunk,
+            on_complete_json=on_complete_json,
         )
         status = "completed"
         return text, "stream"
@@ -743,9 +745,13 @@ async def generate_independent_motion_for_segments(
                         "provider": provider,
                         "assistant_text": speech,
                         "segment_intent": segment_intents[index] if index < len(segment_intents) else {},
-                        "persona_result_id": persona_result_id,
-                        "segment_index": index,
                     }
+                    # The indexed identity is only meaningful on the streamed
+                    # Persona path. Keep the legacy batch call compatible with
+                    # providers and test doubles that implement the older API.
+                    if persona_result_id is not None or stream_active:
+                        kwargs["persona_result_id"] = persona_result_id
+                        kwargs["segment_index"] = index
                     if shared_context is not None:
                         kwargs["prepared_context"] = shared_context
                     return await generate_independent_motion(
@@ -1158,6 +1164,12 @@ async def generate_independent_motion(
         if bool(getattr(bundle.runtime_state, "independent_motion_parallel", False))
         else "serial"
     )
+    get_extra = getattr(event, "get_extra", None)
+    stream_active = bool(
+        get_extra("_interaction_persona_segment_stream_active", False)
+        if callable(get_extra)
+        else False
+    )
 
     def finish(
         *,
@@ -1198,6 +1210,83 @@ async def generate_independent_motion(
         )
         return result
 
+    async def publish_completed_motion_record(raw_arguments: dict[str, Any]) -> None:
+        """Validate and publish a closed JSON action before Provider EOF."""
+
+        if not stream_active or type(segment_index) is not int:
+            return
+        publish_motion = getattr(
+            event,
+            "publish_interaction_incremental_motion",
+            None,
+        )
+        if not callable(publish_motion):
+            return
+        unknown_fields = sorted(
+            set(raw_arguments)
+            - {
+                "intent_tags",
+                "axis_levels",
+                "motion_steps",
+                "duration_hint_ms",
+                "expression_resource_id",
+                "motion_resource_id",
+            }
+        )
+        if unknown_fields:
+            logger.warning(
+                "DIAG latency.motion_record_rejected turn_id=%s "
+                "segment_index=%s reason=unknown_output_fields",
+                turn_id,
+                segment_index,
+            )
+            return
+        try:
+            motion_payload, reason = normalize_motion_arguments_payload(
+                raw_arguments,
+                bundle.runtime_state,
+                base_reason="independent_provider_early",
+                append_resolution_reason=_append_resolution_reason,
+                sanitize_reason_fragment=_sanitize_reason_fragment,
+            )
+            if motion_payload is None:
+                logger.warning(
+                    "DIAG latency.motion_record_rejected turn_id=%s "
+                    "segment_index=%s reason=%s",
+                    turn_id,
+                    segment_index,
+                    reason,
+                )
+                return
+            accepted = await publish_motion(
+                persona_result_id=persona_result_id,
+                segment_index=segment_index,
+                motion_payload=motion_payload,
+                reason=reason,
+                final=False,
+            )
+            if accepted:
+                logger.info(
+                    "DIAG latency.motion_record_ready turn_id=%s "
+                    "motion_request_id=%s persona_result_id=%s segment_index=%s "
+                    "elapsed_ms=%.1f timestamp_epoch_ms=%s",
+                    turn_id,
+                    motion_request_id,
+                    persona_result_id or "<none>",
+                    segment_index,
+                    (perf_counter() - generation_started) * 1000,
+                    time_ns() // 1_000_000,
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - early motion is supplementary output.
+            logger.debug(
+                "WIRING independent_motion.early_publish_failed turn_id=%s "
+                "segment_index=%s",
+                turn_id,
+                segment_index,
+                exc_info=True,
+            )
     logger.debug(
         "WIRING independent_motion.generation_started turn_id=%s mode=%s "
         "provider=%s input_text_present=%s image_count=%s",
@@ -1319,6 +1408,7 @@ async def generate_independent_motion(
             motion_request_id=motion_request_id,
             persona_result_id=persona_result_id,
             segment_index=segment_index,
+            on_complete_json=publish_completed_motion_record,
         )
         logger.debug(
             "WIRING independent_motion.provider_response_received turn_id=%s "

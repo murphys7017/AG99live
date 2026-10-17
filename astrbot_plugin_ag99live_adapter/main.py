@@ -520,6 +520,16 @@ class MyPlugin(Star):
         )
         from .middleware.interaction_motion.shared import _resolve_motion_runtime_bundle
 
+        def motion_budget_seconds() -> float:
+            try:
+                return resolve_stream_motion_budget_seconds(
+                    bundle.runtime_state, event=event
+                )
+            except TypeError as exc:
+                if "unexpected keyword argument" not in str(exc):
+                    raise
+                return resolve_stream_motion_budget_seconds(bundle.runtime_state)
+
         bundle = _resolve_motion_runtime_bundle(event)
         if (
             bundle is None
@@ -595,7 +605,7 @@ class MyPlugin(Star):
             "tendency": dict(tendency) if isinstance(tendency, Mapping) else {},
         }
         work.setdefault("segment_deadlines", {})[segment_index] = (
-            loop.time() + resolve_stream_motion_budget_seconds(bundle.runtime_state, event=event)
+            loop.time() + motion_budget_seconds()
         )
 
         if not isinstance(work.get("context_task"), asyncio.Task):
@@ -607,7 +617,7 @@ class MyPlugin(Star):
                             bundle,
                             persona_result_id=normalized_result_id,
                         ),
-                        resolve_stream_motion_budget_seconds(bundle.runtime_state, event=event),
+                        motion_budget_seconds(),
                         background_tasks=work["tasks"],
                     )
                 except asyncio.TimeoutError:
@@ -660,9 +670,7 @@ class MyPlugin(Star):
                 if provider is None:
                     result = IndependentMotionResult("", None, "provider_unavailable", 0)
                 else:
-                    timeout_seconds = resolve_stream_motion_budget_seconds(
-                        bundle.runtime_state, event=event,
-                    )
+                    timeout_seconds = motion_budget_seconds()
                     deadline = work.get("segment_deadlines", {}).get(segment_index)
                     if not isinstance(deadline, (int, float)):
                         deadline = loop.time() + timeout_seconds
@@ -740,6 +748,7 @@ class MyPlugin(Star):
                 if result is not None and callable(publish_motion):
                     try:
                         await publish_motion(
+                            persona_result_id=normalized_result_id,
                             segment_index=segment_index,
                             motion_payload=result.motion_payload,
                             reason=result.reason or "motion_payload_missing",
@@ -814,6 +823,16 @@ class MyPlugin(Star):
         from .middleware.interaction_motion.shared import (
             _resolve_motion_runtime_bundle,
         )
+
+        def motion_budget_seconds() -> float:
+            try:
+                return resolve_stream_motion_budget_seconds(
+                    bundle.runtime_state, event=event
+                )
+            except TypeError as exc:
+                if "unexpected keyword argument" not in str(exc):
+                    raise
+                return resolve_stream_motion_budget_seconds(bundle.runtime_state)
 
         bundle = _resolve_motion_runtime_bundle(event)
         if (
@@ -958,7 +977,7 @@ class MyPlugin(Star):
         work.setdefault("segment_deadlines", {}).setdefault(
             segment_index,
             asyncio.get_running_loop().time()
-            + resolve_stream_motion_budget_seconds(bundle.runtime_state, event=event),
+            + motion_budget_seconds(),
         )
         preview_tasks = work.get("preview_tasks")
         if isinstance(preview_tasks, dict) and segment_index in preview_tasks:
@@ -975,9 +994,7 @@ class MyPlugin(Star):
                     )
                     return await await_with_hard_deadline(
                         context_preparation,
-                        resolve_stream_motion_budget_seconds(
-                            bundle.runtime_state, event=event,
-                        ),
+                        motion_budget_seconds(),
                         background_tasks=self._independent_motion_tasks,
                     )
                 except asyncio.TimeoutError:
@@ -1022,9 +1039,7 @@ class MyPlugin(Star):
                         remaining = (
                             deadline - asyncio.get_running_loop().time()
                             if isinstance(deadline, (int, float))
-                            else resolve_stream_motion_budget_seconds(
-                                bundle.runtime_state, event=event,
-                            )
+                            else motion_budget_seconds()
                         )
                         if remaining <= 0:
                             raise asyncio.TimeoutError
@@ -1113,6 +1128,7 @@ class MyPlugin(Star):
                 if result is not None and callable(publish_motion):
                     try:
                         await publish_motion(
+                            persona_result_id=normalized_result_id,
                             segment_index=segment_index,
                             motion_payload=result.motion_payload,
                             reason=result.reason or "motion_payload_missing",

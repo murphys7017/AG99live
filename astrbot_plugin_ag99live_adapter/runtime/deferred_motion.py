@@ -14,7 +14,10 @@ from ..protocol.schema_versions import OUTPUT_SEGMENT_SCHEMA_VERSION
 @dataclass
 class _Delivery:
     sent: asyncio.Event
+    ready: asyncio.Event
     task: asyncio.Task | None = None
+    slot: dict[str, Any] | None = None
+    inline: bool = False
 
 
 class DeferredMotionDelivery:
@@ -36,7 +39,7 @@ class DeferredMotionDelivery:
             raise ValueError("deferred_motion_registration_invalid")
         if len(self._entries) >= 64:
             raise ValueError("deferred_motion_capacity_exceeded")
-        entry = _Delivery(sent=asyncio.Event())
+        entry = _Delivery(sent=asyncio.Event(), ready=asyncio.Event())
         self._entries[key] = entry
         entry.task = asyncio.create_task(self._deliver(key, entry, resolve, timeout_seconds))
         entry.task.add_done_callback(lambda task: None if task.cancelled() else task.exception())
@@ -51,9 +54,25 @@ class DeferredMotionDelivery:
         except Exception as exc:
             logger.warning("Deferred motion failed: turn_id=%s message_id=%s error=%s", turn_id, message_id, exc)
             slot = {"state": "failed", "reason": "deferred_motion_generation_failed"}
-        async with asyncio.timeout(30):
-            await entry.sent.wait()
+        entry.slot = slot
+        entry.ready.set()
+        deadline = asyncio.get_running_loop().time() + 30.0
+        while not entry.sent.is_set():
+            if self._is_terminal(turn_id):
+                return
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                raise TimeoutError("deferred_motion_send_window_timeout")
+            try:
+                await asyncio.wait_for(
+                    asyncio.shield(entry.sent.wait()),
+                    timeout=min(0.25, remaining),
+                )
+            except asyncio.TimeoutError:
+                continue
         if self._entries.get(key) is not entry or self._is_terminal(turn_id):
+            return
+        if entry.inline:
             return
         sent = await self._send(build_message_envelope(
             "output.segment_motion", source="adapter", turn_id=turn_id,
@@ -67,6 +86,30 @@ class DeferredMotionDelivery:
         entry = self._entries.get((turn_id, message_id))
         if entry is not None:
             entry.sent.set()
+
+    async def wait_ready(
+        self,
+        turn_id: str,
+        message_id: str,
+        *,
+        timeout_seconds: float,
+    ) -> dict[str, Any] | None:
+        entry = self._entries.get((turn_id, message_id))
+        if entry is None:
+            return None
+        try:
+            await asyncio.wait_for(
+                asyncio.shield(entry.ready.wait()),
+                timeout=max(0.0, timeout_seconds),
+            )
+        except asyncio.TimeoutError:
+            return None
+        return dict(entry.slot) if isinstance(entry.slot, dict) else None
+
+    def mark_inline(self, turn_id: str, message_id: str) -> None:
+        entry = self._entries.get((turn_id, message_id))
+        if entry is not None:
+            entry.inline = True
 
     async def drain(self, turn_id: str) -> None:
         tasks = [entry.task for key, entry in self._entries.items() if key[0] == turn_id and entry.task]

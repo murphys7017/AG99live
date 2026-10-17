@@ -9,7 +9,8 @@ WINDOW_FRAMES = 64
 
 
 class AudioCredit:
-    def __init__(self) -> None:
+    def __init__(self, parent: AudioCredit | None = None) -> None:
+        self._parent = parent
         self.sent_bytes = 0
         self.sent_frames = 0
         self.released_bytes = 0
@@ -29,6 +30,8 @@ class AudioCredit:
                 and self.sent_frames + 1 <= self.released_frames + WINDOW_FRAMES):
                 self.sent_bytes += size
                 self.sent_frames += 1
+                if self._parent is not None:
+                    await self._parent.reserve(size)
                 return
             self._changed.clear()
             try:
@@ -46,6 +49,11 @@ class AudioCredit:
             return  # Duplicate/old cumulative acknowledgement; never grant twice.
         if byte_count < self.released_bytes or frame_count < self.released_frames:
             raise ValueError("incremental_audio_credit_inconsistent")
+        if self._parent is not None:
+            self._parent.release(
+                self._parent.released_bytes + byte_count - self.released_bytes,
+                self._parent.released_frames + frame_count - self.released_frames,
+            )
         self.released_bytes = byte_count
         self.released_frames = frame_count
         self._changed.set()

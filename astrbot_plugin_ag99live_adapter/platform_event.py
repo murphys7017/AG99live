@@ -176,26 +176,112 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         self,
         *,
         segment_index: int,
+        persona_result_id: str | None = None,
         motion_payload: dict[str, Any] | None,
         reason: str = "",
+        final: bool = True,
+        anchor: str = "segment_start",
     ) -> bool:
-        """Publish one optional motion result without blocking core text/audio."""
+        """Publish one optional motion result without blocking core text/audio.
+
+        A closed JSON action may arrive before the Provider stream reaches EOF.
+        Such a preview updates the still-open motion stream; the later final
+        result closes it and is idempotent when it carries the same payload.
+        """
         if self._is_stop_requested():
             return False
-        writer = self.get_extra("_interaction_incremental_output_writer")
-        started = self.get_extra("_interaction_incremental_motion_started", {})
+        normalized_result_id = str(persona_result_id or "").strip()
+        states = self.get_extra("_interaction_incremental_motion_states", {})
+        state = (
+            states.get(normalized_result_id)
+            if isinstance(states, dict) and normalized_result_id
+            else None
+        )
+        writer = state.get("writer") if isinstance(state, dict) else None
+        if writer is None:
+            writer = self.get_extra("_interaction_incremental_output_writer")
+        writer_result_id = (
+            str(getattr(writer, "persona_result_id", "") or "").strip()
+            if writer is not None
+            else ""
+        )
+        if not normalized_result_id:
+            normalized_result_id = writer_result_id
+        if writer is None or (
+            writer_result_id
+            and normalized_result_id
+            and writer_result_id != normalized_result_id
+        ):
+            return False  # A late result cannot mutate the next expression's motion.
+        if not isinstance(state, dict):
+            state = {
+                "writer": writer,
+                "started": self.get_extra("_interaction_incremental_motion_started", {}),
+                "pending": self.get_extra("_interaction_incremental_motion_pending", {}),
+                "delivered": self.get_extra("_interaction_incremental_motion_delivered", {}),
+                "futures": self.get_extra("_interaction_incremental_motion_futures", {}),
+            }
+        started = state.get("started", {})
         if not isinstance(started, dict) or started.get(segment_index) is not True:
-            pending = self.get_extra("_interaction_incremental_motion_pending", {})
+            pending = state.get("pending", {})
             if not isinstance(pending, dict):
                 pending = {}
-            pending[segment_index] = (motion_payload, reason)
+            pending[segment_index] = (motion_payload, reason, final)
+            state["pending"] = pending
+            if isinstance(states, dict) and normalized_result_id:
+                states[normalized_result_id] = state
             self.set_extra("_interaction_incremental_motion_pending", pending)
             return True
-        if writer is None:
-            return False
+        delivered = state.get("delivered", {})
+        if not isinstance(delivered, dict):
+            delivered = {}
+        state["delivered"] = delivered
+        if isinstance(states, dict) and normalized_result_id:
+            states[normalized_result_id] = state
+        previous = delivered.get(segment_index)
         try:
             if isinstance(motion_payload, dict) and motion_payload:
-                await writer.update_motion(segment_index, motion_payload)
+                if isinstance(previous, dict) and previous.get("payload") == motion_payload:
+                    if final and not previous.get("closed", False):
+                        await writer.end_stream("motion", segment_index)
+                        previous["closed"] = True
+                elif isinstance(previous, dict) and previous.get("closed", False):
+                    # The first accepted action is immutable after the stream
+                    # closes; do not replay a late revision into a new stream.
+                    logger.warning(
+                        "Discarded late incremental motion revision: turn_id=%s "
+                        "segment_index=%s",
+                        self.get_extra("_turn_id", "<missing>"),
+                        segment_index,
+                    )
+                    return False
+                else:
+                    revision = (
+                        int(previous.get("revision", 0)) + 1
+                        if isinstance(previous, dict)
+                        else 1
+                    )
+                    try:
+                        await writer.update_motion(
+                            segment_index,
+                            motion_payload,
+                            revision=revision,
+                            anchor=anchor,
+                        )
+                    except TypeError as exc:
+                        if "unexpected keyword argument" not in str(exc):
+                            raise
+                        await writer.update_motion(segment_index, motion_payload)
+                    delivered[segment_index] = {
+                        "payload": dict(motion_payload),
+                        "closed": False,
+                        "revision": revision,
+                        "anchor": anchor,
+                    }
+                    previous = delivered[segment_index]
+                    if final:
+                        await writer.end_stream("motion", segment_index)
+                        previous["closed"] = True
                 first_output_at = self.get_extra(
                     "_interaction_personal_stream_first_output_monotonic"
                 )
@@ -204,8 +290,9 @@ class OLVPetPlatformEvent(AstrMessageEvent):
                         "_interaction_personal_stream_first_output_monotonic",
                         time.monotonic(),
                     )
-                await writer.end_stream("motion", segment_index)
             else:
+                if not final:
+                    return True
                 await writer.end_stream(
                     "motion",
                     segment_index,
@@ -214,32 +301,71 @@ class OLVPetPlatformEvent(AstrMessageEvent):
                 )
         except (RuntimeError, ValueError):
             return False
-        futures = self.get_extra("_interaction_incremental_motion_futures", {})
+        futures = state.get("futures", {})
         future = futures.get(segment_index) if isinstance(futures, dict) else None
-        if isinstance(future, asyncio.Future) and not future.done():
+        if final and isinstance(future, asyncio.Future) and not future.done():
             future.set_result(True)
         return True
 
-    def get_interaction_incremental_motion_deadline(self, *, segment_index: int) -> float | None:
+    def get_interaction_incremental_motion_deadline(
+        self, *, segment_index: int, persona_result_id: str | None = None
+    ) -> float | None:
         """Expose the producer's existing deadline, never a fresh wait budget."""
         registry = getattr(getattr(self.adapter, "runtime_state", None), "persona_stream_motion", None)
         work = registry.get(str(self.get_extra("_turn_id") or "").strip()) if registry is not None else None
-        writer = self.get_extra("_interaction_incremental_output_writer")
+        normalized_result_id = str(persona_result_id or "").strip()
+        states = self.get_extra("_interaction_incremental_motion_states", {})
+        state = (
+            states.get(normalized_result_id)
+            if isinstance(states, dict) and normalized_result_id
+            else None
+        )
+        writer = state.get("writer") if isinstance(state, dict) else None
+        if writer is None:
+            writer = self.get_extra("_interaction_incremental_output_writer")
         if not isinstance(work, dict) or writer is None or work.get("persona_result_id") != writer.persona_result_id:
             return None
         deadline = work.get("segment_deadlines", {}).get(segment_index)
         return float(deadline) if isinstance(deadline, (int, float)) and math.isfinite(deadline) else None
 
-    async def flush_interaction_incremental_motion(self, *, segment_index: int) -> None:
-        pending = self.get_extra("_interaction_incremental_motion_pending", {})
+    async def flush_interaction_incremental_motion(
+        self, *, segment_index: int, persona_result_id: str | None = None
+    ) -> None:
+        normalized_result_id = str(persona_result_id or "").strip()
+        states = self.get_extra("_interaction_incremental_motion_states", {})
+        state = (
+            states.get(normalized_result_id)
+            if isinstance(states, dict) and normalized_result_id
+            else None
+        )
+        pending = (
+            state.get("pending", {})
+            if isinstance(state, dict)
+            else self.get_extra("_interaction_incremental_motion_pending", {})
+        )
         if not isinstance(pending, dict) or segment_index not in pending:
             return
-        motion_payload, reason = pending.pop(segment_index)
+        value = pending.pop(segment_index)
+        if isinstance(state, dict):
+            state["pending"] = pending
         self.set_extra("_interaction_incremental_motion_pending", pending)
+        if isinstance(value, tuple) and len(value) == 3:
+            motion_payload, reason, final = value
+        else:
+            motion_payload, reason = value
+            final = True
+        writer = state.get("writer") if isinstance(state, dict) else None
+        if writer is None:
+            writer = self.get_extra("_interaction_incremental_output_writer")
+        if writer is None:
+            return
         await self.publish_interaction_incremental_motion(
+            persona_result_id=normalized_result_id
+            or getattr(writer, "persona_result_id", None),
             segment_index=segment_index,
             motion_payload=motion_payload,
             reason=reason,
+            final=final,
         )
 
     async def send_message_with_extras(

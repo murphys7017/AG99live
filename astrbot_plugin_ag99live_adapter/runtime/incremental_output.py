@@ -5,8 +5,8 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any, Literal
 from time import perf_counter, time_ns
+from typing import Any, Literal
 from uuid import uuid4
 
 from astrbot.api import logger
@@ -63,6 +63,9 @@ class IncrementalOutputSession:
         require_open: Callable[[], None],
         require_current: Callable[[], None],
         on_text_complete: Callable[[str], None],
+        on_audio_sent: Callable[[], None] | None = None,
+        turn_audio_credit: AudioCredit | None = None,
+        segment_offset: int = 0,
     ) -> None:
         self.turn_id = _identity(turn_id)
         self.core_turn_id = _identity(core_turn_id)
@@ -72,13 +75,19 @@ class IncrementalOutputSession:
         self._guard_open = require_open
         self._require_current = require_current
         self._on_text_complete = on_text_complete
+        self._on_audio_sent = on_audio_sent
         self._segments: dict[int, _Segment] = {}
         self._text_units = 0
         self.has_output = False
         self.failure_reason: str | None = None
+        # Progress/interjection streams are supplementary. The Core marks
+        # those writers non-fatal so an optional media failure cannot fail the
+        # owning conversational Turn.
+        self.failure_fatal = True
         self._broken = False
         self._audio_lock = asyncio.Lock()
-        self._audio_credit = AudioCredit()
+        self._audio_credit = AudioCredit(turn_audio_credit)
+        self._segment_offset = segment_offset
         self._created_at = perf_counter()
         self._observed_resources: set[str] = set()
 
@@ -103,6 +112,10 @@ class IncrementalOutputSession:
             if segment.motion_delivered
         )
 
+    @property
+    def segment_count(self) -> int:
+        return len(self._segments)
+
     def invalidate(self) -> None:
         self._audio_credit.close()
 
@@ -118,7 +131,12 @@ class IncrementalOutputSession:
             raise RuntimeError("incremental_output_failed_no_retry")
         self._guard_open()
 
-    async def _send_once(self, payload: dict[str, Any] | bytes) -> None:
+    async def _send_once(
+        self,
+        payload: dict[str, Any] | bytes,
+        *,
+        counts_as_output: bool = True,
+    ) -> None:
         try:
             self._require_open()
             if not await self._send_payload(payload):
@@ -129,7 +147,8 @@ class IncrementalOutputSession:
             # Never retry the same sequence or replay its accepted samples.
             self._broken = True
             raise
-        self.has_output = True
+        if counts_as_output:
+            self.has_output = True
 
     def require_complete(self) -> None:
         self._require_open()
@@ -186,7 +205,8 @@ class IncrementalOutputSession:
                 source=SOURCE_ADAPTER,
                 turn_id=self.turn_id,
                 payload=payload,
-            )
+            ),
+            counts_as_output=kind in {"delta", "update"},
         )
 
     async def start_stream(
@@ -197,7 +217,7 @@ class IncrementalOutputSession:
             if resource not in {"text", "audio", "motion"}:
                 raise ValueError("incremental_output_resource_invalid")
             _identity(message_id)
-            if type(segment_index) is not int or not 0 <= segment_index < 256:
+            if type(segment_index) is not int or not 0 <= segment_index < 256 - self._segment_offset:
                 raise ValueError("incremental_output_segment_order_invalid")
             segment = self._segments.get(segment_index)
             if segment is None:
@@ -252,12 +272,6 @@ class IncrementalOutputSession:
                 or len(pcm) > 1024 * 1024
             ):
                 raise ValueError("incremental_output_audio_chunk_invalid")
-            if any(
-                (prior := self._segments[index].streams.get("audio")) is None
-                or prior.status == "open"
-                for index in range(segment_index)
-            ):
-                raise ValueError("incremental_output_audio_segment_order_invalid")
             for offset in range(0, len(pcm), MAX_OUTPUT_AUDIO_BYTES):
                 block = pcm[offset : offset + MAX_OUTPUT_AUDIO_BYTES]
                 await self._audio_credit.reserve(len(block))
@@ -270,18 +284,34 @@ class IncrementalOutputSession:
                         encoding="pcm16le", sample_rate=32000, channels=1,
                     )
                     await self._send_once(build_output_audio_frame(payload, block))
+                    first_pcm_frame = "pcm" not in self._observed_resources
                     self._observe_first("pcm", segment_index, segment.message_id)
+                    if first_pcm_frame and self._on_audio_sent is not None:
+                        self._on_audio_sent()
                     stream.samples += len(block) // 2
                     stream.seq += 1
 
-    async def update_motion(self, segment_index: int, motion_payload: dict[str, Any]) -> None:
+    async def update_motion(
+        self,
+        segment_index: int,
+        motion_payload: dict[str, Any],
+        *,
+        revision: int = 1,
+        anchor: str = "segment_start",
+    ) -> None:
         async with self._lock:
             self._require_open()
             segment, stream = self._stream("motion", segment_index)
             if not isinstance(motion_payload, dict) or not motion_payload:
                 raise ValueError("incremental_output_motion_payload_invalid")
+            if type(revision) is not int or not 1 <= revision <= 2**31 - 1:
+                raise ValueError("incremental_output_motion_revision_invalid")
+            if not isinstance(anchor, str) or not anchor.strip() or len(anchor) > 64:
+                raise ValueError("incremental_output_motion_anchor_invalid")
             payload = self._payload(segment_index, segment, stream)
             payload["motion_payload"] = dict(motion_payload)
+            payload["motion_revision"] = revision
+            payload["motion_anchor"] = anchor.strip()
             await self._send_event("motion", "update", payload)
             segment.motion_delivered = True
             self._observe_first("motion", segment_index, segment.message_id)
