@@ -114,11 +114,6 @@
         "default": "",
         "_special": "select_provider"
       },
-      "state_key": {
-        "description": "读取的 NeuroBrain 状态键。留空时仅在 NeuroBrain 能明确返回唯一状态时使用。",
-        "type": "string",
-        "default": ""
-      },
       "request_interval_ms": {
         "description": "两次后台 Provider 请求之间的最短间隔；任务检查频率与请求频率分离。",
         "type": "int",

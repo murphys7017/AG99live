@@ -51,7 +51,8 @@ _MAX_RETAINED_RESULT_TURNS = 64
 _PARALLEL_MOTION_WAIT_SECONDS = 2.0
 _DEFAULT_SEGMENT_MAX_CONCURRENCY = 4
 _DEFAULT_SEGMENT_TIMEOUT_SECONDS = 5.0
-_NEUROBRAIN_RESULT_WAIT_SECONDS = 1.0
+
+
 def resolve_stream_motion_budget_seconds(runtime_state: Any, *, event: Any = None) -> float:
     """Bound configured motion work by the remaining owning Turn budget."""
 
@@ -223,7 +224,6 @@ class IndependentMotionContext:
     capability_payload: dict[str, Any]
     runtime_payload: dict[str, Any]
     reference_diagnostics: tuple[str, ...]
-    neurobrain_state: dict[str, Any] | None = None
 
 
 _NEUROBRAIN_EMOTION_KEYS = (
@@ -302,16 +302,8 @@ def _project_neurobrain_state(snapshot: Any) -> dict[str, Any] | None:
     }
 
 
-async def _wait_for_neurobrain_state(
-    bundle: _MotionRuntimeBundle,
-    *,
-    persona_result_id: str | None,
-) -> dict[str, Any] | None:
-    """Read the snapshot produced by this Persona result, without advancing it."""
-
-    result_id = str(persona_result_id or "").strip()
-    if not result_id:
-        return None
+def _read_neurobrain_state(bundle: _MotionRuntimeBundle) -> dict[str, Any] | None:
+    """Read current state immediately, independently of input processing."""
     context = getattr(bundle.runtime_state, "plugin_context", None)
     get_registered_star = getattr(context, "get_registered_star", None)
     if not callable(get_registered_star):
@@ -319,16 +311,13 @@ async def _wait_for_neurobrain_state(
     try:
         metadata = get_registered_star("astrbot_plugin_neurobrain")
         plugin = getattr(metadata, "star_cls", None)
-        if not bool(getattr(plugin, "enabled", True)):
+        if plugin is None or not bool(getattr(plugin, "enabled", True)):
             return None
         readonly_api = getattr(plugin, "readonly_api", None)
-        wait_for_result = getattr(readonly_api, "wait_for_persona_result", None)
-        if not callable(wait_for_result):
+        get_state = getattr(readonly_api, "get_state", None)
+        if not callable(get_state):
             return None
-        snapshot = await wait_for_result(
-            result_id,
-            timeout_seconds=_NEUROBRAIN_RESULT_WAIT_SECONDS,
-        )
+        snapshot = get_state()
     except Exception as exc:  # noqa: BLE001
         logger.debug("NeuroBrain state unavailable to motion provider: %s", exc)
         return None
@@ -490,8 +479,6 @@ def untrack_motion_generation_task(
 async def _prepare_independent_motion_context(
     event: Any,
     bundle: _MotionRuntimeBundle,
-    *,
-    persona_result_id: str | None,
 ) -> IndependentMotionContext | None:
     """Build one stable context snapshot for all segments in a turn."""
     current_user_text = _dialogue_text(str(getattr(event, "message_str", "") or ""))
@@ -542,22 +529,6 @@ async def _prepare_independent_motion_context(
         source_route="independent_provider",
     )
     runtime_payload["recent_executed_motions"] = _resolve_prompt_motion_history(bundle.turn_coordinator)[-3:]
-    if event.get_extra("_interaction_persona_segment_stream_active", False):
-        # NeuroBrain advances only at the terminal result. Waiting here makes
-        # early segments depend on the complete model response (up to 1s).
-        # Stream motion already has this segment's tendency; omit the optional
-        # terminal snapshot rather than reading stale state or delaying speech.
-        neurobrain_state = None
-        logger.debug(
-            "WIRING independent_motion.neurobrain_state_omitted "
-            "turn_id=%s reason=stream_segment_precedes_terminal_state",
-            event.get_extra("_turn_id", "<missing>"),
-        )
-    else:
-        neurobrain_state = await _wait_for_neurobrain_state(
-            bundle,
-            persona_result_id=persona_result_id,
-        )
     return IndependentMotionContext(
         current_user_text=current_user_text,
         memories=_motion_memory_summaries(event),
@@ -565,7 +536,6 @@ async def _prepare_independent_motion_context(
         capability_payload=capability_payload,
         runtime_payload=runtime_payload,
         reference_diagnostics=tuple(reference_diagnostics),
-        neurobrain_state=neurobrain_state,
     )
 
 
@@ -655,7 +625,6 @@ async def generate_independent_motion_for_segments(
             context_preparation = _prepare_independent_motion_context(
                 event,
                 bundle,
-                persona_result_id=persona_result_id,
             )
             if stream_active:
                 remaining = min(stream_deadlines.values()) - monotonic()
@@ -1366,9 +1335,7 @@ async def generate_independent_motion(
             runtime_payload = prepared_context.runtime_payload
 
         neurobrain_state = (
-            prepared_context.neurobrain_state
-            if prepared_context is not None
-            else None
+            _read_neurobrain_state(bundle) if segment_intent is not None else None
         )
 
         prompt = _build_current_turn_prompt(

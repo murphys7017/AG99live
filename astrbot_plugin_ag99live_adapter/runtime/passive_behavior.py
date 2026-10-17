@@ -425,10 +425,7 @@ class PassiveBehaviorRuntime:
             get_state = getattr(readonly_api, "get_state", None)
             if not callable(get_state):
                 return None
-            state_key = str(
-                getattr(self.runtime_state, "passive_behavior_state_key", "") or ""
-            ).strip()
-            snapshot = get_state(state_key or None)
+            snapshot = get_state()
         except Exception as exc:
             logger.debug("NeuroBrain passive state read failed: %s", exc)
             return None

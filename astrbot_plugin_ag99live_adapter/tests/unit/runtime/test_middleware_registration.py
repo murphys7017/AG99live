@@ -658,7 +658,7 @@ def test_independent_motion_segment_results_preserve_speech_indexes(
         (None, None),
     ],
 )
-def test_segment_motion_uses_only_the_matching_neurobrain_result(
+def test_segment_motion_reads_current_neurobrain_state(
     install_fake_astrbot,
     monkeypatch,
     matched_snapshot,
@@ -669,23 +669,11 @@ def test_segment_motion_uses_only_the_matching_neurobrain_result(
         "astrbot_plugin_ag99live_adapter.middleware.interaction_motion.independent"
     )
     module = importlib.reload(module)
-    wait_calls: list[tuple[str, float]] = []
-    cached_reads: list[str | None] = []
     prompts: list[dict[str, object]] = []
 
     class ReadOnlyAPI:
-        async def wait_for_persona_result(
-            self,
-            persona_result_id,
-            *,
-            timeout_seconds,
-        ):
-            wait_calls.append((persona_result_id, timeout_seconds))
+        def get_state(self):
             return matched_snapshot
-
-        def get_state(self, state_key=None):
-            cached_reads.append(state_key)
-            return {"step": 99, "emotion": {"joy": 1.0}}
 
     class PluginContext:
         def get_registered_star(self, plugin_id):
@@ -756,8 +744,6 @@ def test_segment_motion_uses_only_the_matching_neurobrain_result(
 
     asyncio.run(run_generation())
 
-    assert wait_calls == [("result-1", 1.0)]
-    assert cached_reads == []
     assert len(prompts) == 2
     for prompt in prompts:
         if expected_step is None:

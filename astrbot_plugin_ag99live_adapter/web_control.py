@@ -282,14 +282,6 @@ CONFIG_SCHEMA: tuple[ConfigSection, ...] = (
                 options_from="providers",
             ),
             ConfigField(
-                key="state_key",
-                kind="text",
-                label="NeuroBrain 状态键",
-                description="留空时只在 NeuroBrain 存在唯一状态时读取；多状态时请填写明确的状态键。",
-                default="",
-                max_length=255,
-            ),
-            ConfigField(
                 key="request_interval_ms",
                 kind="int",
                 label="最小请求间隔（毫秒）",

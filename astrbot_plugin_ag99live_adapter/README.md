@@ -60,19 +60,19 @@ AG99 Persona
 
 ### NeuroBrain 状态上下文
 
-当同一 AstrBot 进程加载并启用 `astrbot_plugin_neurobrain` 时，普通完整结果路径中按 Persona speech 分段的独立动作会等待当前 `persona_result_id` 对应的状态更新，最多等待 1 秒。OLV 分段流式路径直接使用当前段的 `speech`、`actions`、`tendency`，省略 NeuroBrain 终态快照：该快照只在整轮结果完成后更新，等待它会推迟首段动作及语音。动作 prompt 中的 NeuroBrain 数据仅包含经过范围校验的 `emotion`、`behavior`、`last_tendency` 和 `step`；未取得对应更新时省略，不回退到上一轮缓存。整条回复独立动作链路不读取 NeuroBrain。AG99live 不会直接连接 NeuroBrain WebSocket，也不会推进状态。
+当同一 AstrBot 进程加载并启用 `astrbot_plugin_neurobrain` 时，按 Persona speech 分段的独立动作（包括 OLV 分段流式路径）直接通过无参数 `get_state()` 读取当前完整快照。读取不等待本轮情绪输入处理完成，不触发推理；模型在独立线程中持续演化。动作 prompt 中仅包含经过范围校验的 `emotion`、`behavior`、`last_tendency` 和 `step`。模型未就绪时省略状态。整条回复独立动作链路不读取 NeuroBrain。AG99live 不直接连接 NeuroBrain WebSocket，也不提交刺激。
 
 NeuroBrain 状态只是动作选择的辅助信号，不是动作命令；动作结果仍必须通过现有校验、`engine.motion_intent.v4` 和 `output.segment.v6` 发送链路。该接入不增加协议字段、不改变段身份、不改变播放时钟。
 
 ### OLV 后台被动动作实验链路
 
-`passive_behavior.enabled` 默认关闭。开启后，OLV 桌宠 Adapter 自己维护一个异步后台任务；只有桌面端在线、没有活动 Turn 或正在采集/转写的语音输入、请求间隔和冷却条件都满足时，才读取 NeuroBrain 只读 API 的当前快照并调用所选 AstrBot Provider。`state_key` 留空时 NeuroBrain 只会在状态唯一时返回快照。该链路不读取或写入聊天历史，不等待 Persona，也不参与普通回复、TTS 或用户消息处理。
+`passive_behavior.enabled` 默认关闭。开启后，OLV 桌宠 Adapter 自己维护一个异步后台任务；只有桌面端在线、没有活动 Turn 或正在采集/转写的语音输入、请求间隔和冷却条件都满足时，才读取 NeuroBrain 只读 API 的当前快照并调用所选 AstrBot Provider。读取无需状态键或人格 ID。该链路不读取或写入聊天历史，不等待 Persona，也不参与普通回复、TTS 或用户消息处理。
 
 后台 Provider 全程使用 AstrBot 的 `text_chat_stream()`。模型按 NDJSON 逐行返回动作决策；每一行完整后立即校验当前 Semantic Axis Profile，并作为独立 motion-only `output.segment.v6` 段按序发送，不等待整段模型输出结束。单次流最多接收 3 个动作；超时、过期、断线、Turn 被打断或无效动作都会停止或丢弃对应结果。被动动作不会写入聊天缓冲、普通动作 Prompt 历史、Motion Lab 对话样例或 performance curve 状态。该链路复用现有协议和前端播放能力，不修改 AstrBot 核心。
 
 PTT 采集开始、VAD 检测到开口以及新输入提交时会打断被动播放并取消在途生成；语音采集和转写期间暂停新的被动请求。
 
-配置项包括 `provider_id`、`state_key`、`request_interval_ms`、`cooldown_ms`、`result_ttl_ms` 和 `timeout_seconds`。启用后请为 Provider 选择支持 AstrBot 流式输出的聊天模型；没有流式实现的 Provider 会记录失败并跳过，不会退回非流式请求。
+配置项包括 `provider_id`、`request_interval_ms`、`cooldown_ms`、`result_ttl_ms` 和 `timeout_seconds`。启用后请为 Provider 选择支持 AstrBot 流式输出的聊天模型；没有流式实现的 Provider 会记录失败并跳过，不会退回非流式请求。
 
 Persona `segments[].speech` 是 TTS 文本分段，不是协议中的 speech cues。协议 slot 仍可承载可选 speech cues，但当前 Adapter 输出 `speech: absent`。详见[动作生成与 Persona 分段关联](../docs/01-架构与结构/07-动作生成与Persona分段关联.md)。
 

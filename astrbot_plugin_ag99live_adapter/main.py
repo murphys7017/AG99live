@@ -615,7 +615,6 @@ class MyPlugin(Star):
                         _prepare_independent_motion_context(
                             event,
                             bundle,
-                            persona_result_id=normalized_result_id,
                         ),
                         motion_budget_seconds(),
                         background_tasks=work["tasks"],
@@ -990,7 +989,7 @@ class MyPlugin(Star):
             async def _prepare_context():
                 try:
                     context_preparation = _prepare_independent_motion_context(
-                        event, bundle, persona_result_id=normalized_result_id
+                        event, bundle
                     )
                     return await await_with_hard_deadline(
                         context_preparation,

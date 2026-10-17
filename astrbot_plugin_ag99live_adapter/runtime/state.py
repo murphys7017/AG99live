@@ -125,7 +125,6 @@ class RuntimeState:
         self.persona_stream_motion = PersonaStreamMotionRegistry()
         self.passive_behavior_enabled = False
         self.passive_behavior_provider_id = ""
-        self.passive_behavior_state_key = ""
         self.passive_behavior_request_interval_ms = 500
         self.passive_behavior_cooldown_ms = 3000
         self.passive_behavior_result_ttl_ms = 2500
@@ -274,9 +273,6 @@ class RuntimeState:
         )
         self.passive_behavior_provider_id = str(
             get_config_value(passive_behavior_config, "provider_id", "") or ""
-        ).strip()
-        self.passive_behavior_state_key = str(
-            get_config_value(passive_behavior_config, "state_key", "") or ""
         ).strip()
         self.passive_behavior_request_interval_ms = int(
             _bounded_config_number(

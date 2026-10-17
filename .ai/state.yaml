@@ -1005,3 +1005,25 @@ olv_action_only_playback_ack_20261017:
   scope: "Expose a bounded wait for the existing playback_finished -> turn_finished result. Core uses it only for action-only replies; desktop execution failure and missing acknowledgement become failed Core turns."
   validation: "Public TurnCoordinator wait resolved both successful playback and terminal failure. PlatformEvent closed synth output then waited for the result and raised on failure. Actual incremental motion publish records first-output time at accepted update. Focused adapter tests and scoped Ruff passed."
   evidence_gap: "No Electron/Live2D runtime run, provider run, or 30 s timeout run. The frontend's existing local timeline remains the authority for execution result."
+
+neurobrain_current_state_application_20261018:
+  class: refactor
+  risk: high
+  scope: >-
+    User-authorized parameterless NeuroBrain current-state reads for segment
+    motion, passive behavior and pre-action. Remove result-wait and state-key
+    configuration; read at each segment request rather than in shared context.
+    Preserve existing pre-action/streaming work and the disabled passive toggle.
+  validation: >-
+    Two existing segment prompt boundary checks passed with current-state reads.
+    Paired plugin CUDA checkpoint smoke passed idle evolution, input clamping,
+    immediate detached reads and invalid input rejection. Scoped static checks
+    passed; source and deployed copies have matching NeuroBrain changes.
+  evidence_gap: >-
+    No live plugin reload, Provider call or Electron/Live2D acceptance. Requires
+    paired NeuroBrain plugin and adapter reload. No commit or publication.
+  review_validation: >-
+    Fixed independent tick scheduling and worker liveness reporting. Real CUDA
+    checkpoint recheck passed ordered inputs on separate ticks, subsequent idle
+    advancement, nonblocking reads, clamp/rejection and clean worker shutdown.
+    No live application reload or desktop acceptance.
