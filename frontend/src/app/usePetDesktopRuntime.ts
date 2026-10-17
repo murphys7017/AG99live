@@ -333,6 +333,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       return (
         !segment.motion.failed
         && !segment.motion.pending
+        && segment.incremental?.streams.motion?.status !== "open"
         && segment.motion.payload === null
         && !segment.motion.released
         && !segment.motion.started

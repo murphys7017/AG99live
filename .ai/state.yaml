@@ -955,3 +955,11 @@ olv_stream_local_interrupt_20261017:
   scope: "T3 review correction: a locally interrupted/retired Turn must quietly retire its PCM worker before the server interrupt echo, rather than treating the expected append rejection as a fatal connection error. New Turn start retires any older queue generation."
   validation: "Actual loopback flow still passed. Its real wire start/chunk replayed through a fresh public consumer: local Store interruption followed by blocked append rejection produced no fatal callback and no late credit. Renderer typecheck passed."
   evidence_gap: "No actual microphone barge-in/device run. The isolated cancellation acceptance does not verify hardware cancellation timing."
+
+olv_stream_speech_only_admission_20261017:
+  class: bugfix
+  risk: medium
+  status: source_type_validated_pending_live_acceptance
+  scope: "T2 review correction: the actual model app's speech-only preparation/start admission now also rejects an open incremental motion production stream. Existing M0 pending guard remains. Avoid reserving the body for a default speech-only plan while semantic motion is still being produced."
+  validation: "Traced real app -> ModelEngine preparePlaybackTimeline/handlePlaybackTimelineStarted -> shared canStartSpeechOnlyMotion callback. Public Store contract records motion stream status independently of M0 pending; renderer typecheck passed."
+  evidence_gap: "No full model app or Live2D run. The earlier M0 historical missing-start sample is not claimed as reproduced or solved by this M2-specific condition."
