@@ -101,6 +101,14 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     dependencies.pushHistory?.(role, text);
   }
 
+  function rejectDeferredMotionWindow(): false {
+    const reason = "late_motion_audio_window_unavailable";
+    state.lastCompileReason = reason;
+    setState("failed", `动作启动失败：${reason}`, null);
+    pushHistory("error", `动作启动失败：${reason}`);
+    return false;
+  }
+
   const motionStartDependencies: MotionStartDependencies = {
     getSelectedModel: dependencies.getSelectedModel,
     getSettings: dependencies.getSettings,
@@ -182,8 +190,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
           || clock.durationMs === null || !Number.isFinite(clock.durationMs)
           || clock.durationMs <= originMs
         ) {
-          state.lastCompileReason = "late_motion_audio_window_unavailable";
-          return false;
+          return rejectDeferredMotionWindow();
         }
         // A deferred payload missed duration-ready preparation. Prepare it now,
         // with both the plan and its clock measured from this same audio sample.
@@ -218,6 +225,15 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
           runtimeStateController,
         );
         if (!prepared) return false;
+        // The device clock advances even while synchronous compilation blocks
+        // the renderer. Do not start a now-expired plan or a retired timeline.
+        const preparedAtMs = reader.getElapsedMs();
+        if (
+          preparedAtMs === null || !Number.isFinite(preparedAtMs)
+          || preparedAtMs >= clock.durationMs
+        ) {
+          return rejectDeferredMotionWindow();
+        }
       }
       return startNormalizedMotionPayload(
         payload,

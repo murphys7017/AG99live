@@ -152,6 +152,7 @@ await nextTick();
 orchestrator.flush();
 assert.equal(motionStarts, 1, "an exhausted audio window must not play deferred motion");
 assert.equal(store.getSession("turn:1")?.segments.get("segment:2")?.motion.reason, "late_motion_audio_window_unavailable");
+assert.equal(engine.state.status, "failed", "rejected deferred motion must not leave the engine pending");
 orchestrator.dispose();
 runtime.stopAllTimelines("test_complete");
 console.log("Complete-audio/late-motion timeline boundary passed.");

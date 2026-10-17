@@ -23,6 +23,8 @@ Core、Adapter 和桌面已接通增量文本/PCM/动作 update，并实现双�
 
 已知时长音频中的后到动作现由 ModelEngine 在启动前同步准备，校验原音频 reader、有效播放阶段及剩余窗口；计划时长与传给播放器的 reader 都从同一接入采样归零，暂停和后续消费仍跟随原音频。校验/编译失败不会调用播放器，已耗尽或不可用窗口返回 `late_motion_audio_window_unavailable`。此修正经 M0 公共边界验证；M2 未知总时长暂不由此路径准入，不能宣称所有增量动作准备已完成。
 
+窗口在编译后、调用播放器前再次检查，避免同步编译期间设备已播完仍启动过期动作。窗口拒绝同时收口 ModelEngine 的失败状态；若另一个 run 仍活动，保留其 playing 状态及所有权，仅记录候选失败诊断。不能只标记会话 motion.failed 而让空引擎永久显示 pending。
+
 真实 model app 的默认 speech-only 动作准入也检查 motion stream：open 时不准备/启动默认动作，防止在语义动作生成期间预占身体。它与普通段 `motion.pending` 使用同一准入回调，不能只改一个隔离播放器而遗漏正式 app。
 
 ## 身份与协商
