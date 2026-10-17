@@ -980,3 +980,12 @@ olv_nonstream_deferred_motion_preparation_20261017:
   validation: "Upgraded the same public protocol -> Store -> orchestrator -> timeline -> real ModelEngine/compiler boundary, with only audio/device execution isolated. Previous ModelEngine reproduces first-motion failure; corrected implementation starts it at relative zero, follows subsequent audio samples without replay, and rejects an exhausted window. Narrow test compile and final npm run build passed."
   evidence_gap: "No process restart, real Provider request or device/Live2D verification after this fix. Unknown-duration M2 preparation remains outside this repair; the earlier 03:12 historical failure is not retrospectively assigned this cause."
   review_correction: "Public expired-window case reproduced ModelEngine stuck pending after session motion failed. Window rejection now sets failed through the existing active-run state guard; re-read the original device clock after compilation to reject an exhausted/retired window before invoking the player. The same boundary asserts engine failure as well as session terminal state."
+
+olv_stream_open_pcm_motion_preparation_20261017:
+  class: bugfix
+  risk: high
+  status: real_model_engine_boundary_and_build_validated_pending_live_acceptance
+  scope: "Accept an active, identity-bound PCM clock whose final duration is still null. Prepare the action with existing bounded semantic timing, retain valid performance curves, and rebase to the same audio sample; known exhausted windows, failed preparation and retirement still reject. No synthetic audio duration or EOF wait."
+  evidence: "Two real M2 turns at 15:54 delivered text/PCM and generated five motion payloads, but all five failed with late_motion_audio_window_unavailable. This identifies the known-duration-only preparation logic in the runtime; exact loaded commit remains unverified despite the user not manually updating."
+  validation: "Same public incremental event -> Store -> orchestrator -> timeline -> actual ModelEngine/compiler case fails before this change and starts before audio EOF afterward. Relative clock, preserved curve, open audio production state and user interruption checked; existing M0 success/expiry case retained. Narrow compile and full npm run build passed."
+  evidence_gap: "Final audio/device and motion execution interfaces remain isolated in the boundary check. No new real conversation or Live2D result after this change; original 03:12 sample cause is not retroactively asserted. Exact process version must be recorded on next live acceptance."

@@ -187,8 +187,8 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
           || !reader
           || originMs === null || originMs === undefined
           || !Number.isFinite(originMs) || originMs < 0
-          || clock.durationMs === null || !Number.isFinite(clock.durationMs)
-          || clock.durationMs <= originMs
+          || (clock.durationMs !== null
+            && (!Number.isFinite(clock.durationMs) || clock.durationMs <= originMs))
         ) {
           return rejectDeferredMotionWindow();
         }
@@ -201,7 +201,9 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
           playbackClock: {
             ...clock,
             currentTimeMs: 0,
-            durationMs: clock.durationMs - originMs,
+            // Open PCM has no total yet. Keep it unknown: the compiler uses
+            // the action's bounded timing rather than inventing an audio EOF.
+            durationMs: clock.durationMs === null ? null : clock.durationMs - originMs,
           },
           playbackClockReader: {
             getElapsedMs() {
@@ -230,7 +232,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
         const preparedAtMs = reader.getElapsedMs();
         if (
           preparedAtMs === null || !Number.isFinite(preparedAtMs)
-          || preparedAtMs >= clock.durationMs
+          || (clock.durationMs !== null && preparedAtMs >= clock.durationMs)
         ) {
           return rejectDeferredMotionWindow();
         }

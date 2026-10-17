@@ -242,6 +242,15 @@ function prepareCompilableMotionPayload(
       targetDurationMs = curveTimeline.targetDurationMs;
       speechActive = curveTimeline.speechActive;
       runtimeWarnings.push(`performance_curve_timeline:${curveTimeline.clockSource}`);
+    } else if (
+      curveTimeline.reason === "playback_timeline_duration_missing"
+      && context.playbackClock?.source === "audio"
+      && context.playbackClock.durationMs === null
+      && (context.playbackClock.phase === "playing" || context.playbackClock.phase === "paused")
+    ) {
+      // A curve can shape the action's own bounded duration while PCM is open;
+      // it does not require the not-yet-produced audio's final length.
+      runtimeWarnings.push("performance_curve_timeline:open_audio");
     } else {
       const failureReason = `performance_curve_timeline_unavailable:${curveTimeline.reason}`;
       runtimeWarnings.push(`performance_curve_skipped:${curveTimeline.reason}`);

@@ -6,7 +6,9 @@ import { createPlaybackTimelineRuntime } from "../src/playback-timeline/playback
 import { normalizeMotionPayload } from "../src/model-engine/normalize.js";
 import { applyDeferredMotion } from "../src/adapter-connection/inbound/deferredMotionProtocol.js";
 import type { NormalizedMotionPayload } from "../src/types/motion.js";
-import type { ProtocolEnvelope } from "../src/types/protocol.js";
+import type { MotionPlanPayload, ProtocolEnvelope } from "../src/types/protocol.js";
+import { SCHEMA_PERFORMANCE_CURVE_HINT_V1 } from "../src/types/protocol.js";
+import { createIncrementalOutputRuntime } from "../src/adapter-connection/inbound/incrementalOutputRuntime.js";
 import { useModelEngine } from "../src/model-engine/useModelEngine.js";
 import { parseSemanticParameterPlan } from "../src/model-engine/planParser.js";
 import type { MotionPlaybackClockReader } from "../src/model-engine/contracts.js";
@@ -43,11 +45,12 @@ assert.ok(modelSync.ok);
 const model = modelSync.payload.model_info.models[0];
 assert.ok(model);
 
-const store = useTurnPlaybackSessionStore();
+const store = useTurnPlaybackSessionStore({ normalizeMotionPayload });
 let audioStarts = 0;
 let motionStarts = 0;
 let audioElapsedMs = 500;
 const motionClocks: MotionPlaybackClockReader[] = [];
+const motionPlans: MotionPlanPayload[] = [];
 const handoffs: string[] = [];
 const engine = useModelEngine({
   getSelectedModel: () => model,
@@ -57,6 +60,7 @@ const engine = useModelEngine({
     assert.ok(parsed.ok);
     assert.ok(options.playbackClockReader);
     motionClocks.push(options.playbackClockReader);
+    motionPlans.push(parsed.value);
     motionStarts++;
     options.onStarted(parsed.value, `run:${motionStarts}`);
     return { status: "started", runId: `run:${motionStarts}` };
@@ -153,6 +157,46 @@ orchestrator.flush();
 assert.equal(motionStarts, 1, "an exhausted audio window must not play deferred motion");
 assert.equal(store.getSession("turn:1")?.segments.get("segment:2")?.motion.reason, "late_motion_audio_window_unavailable");
 assert.equal(engine.state.status, "failed", "rejected deferred motion must not leave the engine pending");
+runtime.markAudioTimelineTerminal("turn:1", "segment:2", "completed", "audio_ended");
+
+// M2 has a valid consuming audio clock before its total duration or EOF exists.
+store.markTurnStarted("turn:2");
+const inbound = createIncrementalOutputRuntime({
+  getStore: () => store, currentTurnId: () => "turn:2",
+  openPcm: async () => { throw new Error("Unexpected audio replay"); },
+  displayText() {}, recordText() {}, sendAudioCredit() {},
+  onAsyncError(error) { throw error; },
+});
+const identity = (resource: string, seq: number) => ({
+  turnId: "turn:2", coreTurnId: "core:2", personaResultId: "persona:2", segmentIndex: 0,
+  messageId: "segment:pcm", streamId: `pcm:${resource}`, seq,
+});
+for (const resource of ["text", "audio", "motion"] as const) {
+  inbound.handleEvent({ kind: "start", resource, identity: identity(resource, 0) });
+}
+inbound.handleEvent({ kind: "delta", resource: "text", identity: identity("text", 1), text: "hello" });
+audioElapsedMs = 500;
+runtime.startAudioTimelineSink("turn:2", "segment:pcm", { start: () => true });
+runtime.markAudioTimelineStarted("turn:2", "segment:pcm", performance.now(), null, {
+  getCurrentTimeMs: () => audioElapsedMs, getDurationMs: () => null, getPlaybackRate: () => 1, isPlaying: () => true,
+});
+inbound.handleEvent({ kind: "update", resource: "motion", identity: identity("motion", 1), motionPayload: {
+  schema_version: "engine.motion_intent.v4", profile_id: "profile:1", profile_revision: 1,
+  model_id: "model:1", mode: "expressive", emotion_label: "happy", intent_tags: ["happy"], axis_levels: { head_yaw: 2 },
+  performance_curve_hint: { schema_version: SCHEMA_PERFORMANCE_CURVE_HINT_V1, curve_family: "default", entry: "quick", hold: "steady", exit: "soft", emphasis: "none", energy: "calm" },
+} });
+await nextTick();
+orchestrator.flush();
+assert.equal(motionStarts, 2, "open PCM must start motion without waiting for EOF/total duration");
+assert.equal(motionClocks[1]!.getElapsedMs(), 0);
+audioElapsedMs = 750;
+assert.equal(motionClocks[1]!.getElapsedMs(), 250);
+assert.ok(motionPlans[1]!.timing.curve_preset, "open PCM must retain the declared action curve");
+assert.equal(store.getSession("turn:2")?.segments.get("segment:pcm")?.incremental?.streams.audio?.status, "open");
+assert.equal(store.getSession("turn:2")?.segments.get("segment:pcm")?.motion.started, true);
+runtime.stopTimelinesForTurn("turn:2", "user_interrupt");
+assert.ok(handoffs.includes("user_interrupt"));
+inbound.reset();
 orchestrator.dispose();
 runtime.stopAllTimelines("test_complete");
 console.log("Complete-audio/late-motion timeline boundary passed.");
