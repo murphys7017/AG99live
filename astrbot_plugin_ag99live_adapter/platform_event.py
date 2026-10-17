@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import math
+import time
 from copy import copy
 from typing import Any, Protocol
 
@@ -447,6 +448,14 @@ class OLVPetPlatformEvent(AstrMessageEvent):
                 delivered_indexes,
             )
             delivered_indexes.add(motion_segment_index)
+            first_output_at = self.get_extra(
+                "_interaction_personal_stream_first_output_monotonic"
+            )
+            if not isinstance(first_output_at, (int, float)):
+                self.set_extra(
+                    "_interaction_personal_stream_first_output_monotonic",
+                    time.monotonic(),
+                )
         if not record_send_operation:
             self._has_send_oper = previous_has_send_oper
         else:

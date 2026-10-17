@@ -272,6 +272,10 @@ def test_streaming_output_joins_motion_future_by_segment_identity(
     assert event.get_extra(
         "_interaction_persona_stream_motion_downlink_indexes"
     ) == {0}
+    assert isinstance(
+        event.get_extra("_interaction_personal_stream_first_output_monotonic"),
+        float,
+    )
 
 
 def test_streaming_empty_motion_placeholder_is_not_marked_as_downlinked(
@@ -304,6 +308,9 @@ def test_streaming_empty_motion_placeholder_is_not_marked_as_downlinked(
     assert event.get_extra(
         "_interaction_persona_stream_motion_downlink_indexes", set()
     ) == set()
+    assert event.get_extra(
+        "_interaction_personal_stream_first_output_monotonic"
+    ) is None
     assert "persona_segment_count" not in extras
 
 
