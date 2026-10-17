@@ -269,6 +269,41 @@ def test_streaming_output_joins_motion_future_by_segment_identity(
         }
     ]
     assert extras["metadata"]["ag99live_motion_schedule"]["persona_segmented"] is True
+    assert event.get_extra(
+        "_interaction_persona_stream_motion_downlink_indexes"
+    ) == {0}
+
+
+def test_streaming_empty_motion_placeholder_is_not_marked_as_downlinked(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_platform_event_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    event = _build_event(_load_platform_event_module(), images=[])
+    event.set_extra("_turn_id", "backend-turn-1")
+
+    async def run() -> None:
+        await event.send_message_with_extras(
+            [Plain("")],
+            platform_extras={
+                "logical_message_id": "stream-segment-0",
+                "persona_incremental_delivery": True,
+                "persona_delivery_parent_message_id": "stream-parent",
+                "persona_result_id": "persona-result-1",
+                "persona_segment_index": 0,
+                "persona_streaming": True,
+                "semantic_text": "",
+                "persona_motion_only": True,
+            },
+            record_send_operation=False,
+        )
+
+    asyncio.run(run())
+    extras = event.adapter.emit_calls[0]["platform_extras"]
+    assert extras["client_objects"] == []
+    assert event.get_extra(
+        "_interaction_persona_stream_motion_downlink_indexes", set()
+    ) == set()
     assert "persona_segment_count" not in extras
 
 

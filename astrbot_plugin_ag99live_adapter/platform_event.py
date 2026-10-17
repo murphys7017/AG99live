@@ -411,6 +411,19 @@ class OLVPetPlatformEvent(AstrMessageEvent):
             turn_id=turn_id,
             parent_message_id=explicit_parent_id or parent_message_id,
         )
+        motion_segment_index = resolved_platform_extras.get("persona_segment_index")
+        motion_downlink_accepted = (
+            resolved_platform_extras.get("persona_streaming") is True
+            and type(motion_segment_index) is int
+            and any(
+                isinstance(item, dict)
+                and item.get("type") == "ag99live.motion_payload"
+                and item.get("persona_segment_index") == motion_segment_index
+                and isinstance(item.get("motion_payload"), dict)
+                and bool(item["motion_payload"])
+                for item in resolved_platform_extras.get("client_objects", [])
+            )
+        )
         await self.adapter.emit_message_chain(
             message_chain=message,
             turn_id=turn_id,
@@ -423,6 +436,17 @@ class OLVPetPlatformEvent(AstrMessageEvent):
             or None,
             platform_extras=resolved_platform_extras,
         )
+        if motion_downlink_accepted:
+            delivered_indexes = self.get_extra(
+                "_interaction_persona_stream_motion_downlink_indexes", set()
+            )
+            if not isinstance(delivered_indexes, set):
+                delivered_indexes = set()
+            self.set_extra(
+                "_interaction_persona_stream_motion_downlink_indexes",
+                delivered_indexes,
+            )
+            delivered_indexes.add(motion_segment_index)
         if not record_send_operation:
             self._has_send_oper = previous_has_send_oper
         else:
