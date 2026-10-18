@@ -48,6 +48,10 @@ export function createSpeechOutputRuntime(): SpeechOutputRuntime {
     }
     audioContext = new AudioContextCtor({
       latencyHint: "interactive",
+      // PCM chunks are 32 kHz. Keep their source and context rates identical:
+      // resampling each short AudioBuffer independently introduces boundary
+      // artifacts. Device-rate conversion then happens on the continuous mix.
+      sampleRate: 32000,
     } as AudioContextOptions);
     return audioContext;
   }
@@ -124,6 +128,7 @@ export function createSpeechOutputRuntime(): SpeechOutputRuntime {
     lastOutputActivityAtMs = performance.now();
     console.info("[SpeechOutput] output runtime prepared.", {
       audioContextState: context.state,
+      sampleRate: context.sampleRate,
       resumed,
       primerMs: needsPrimer ? SPEECH_OUTPUT_PRIMER_DURATION_SECONDS * 1000 : 0,
     });

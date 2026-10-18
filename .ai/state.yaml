@@ -1,3 +1,24 @@
+pcm_chunk_resampling_noise_20261018:
+  class: bugfix
+  risk: medium
+  scope: >-
+    Request 32000 Hz for the speech AudioContext to match PCM source buffers,
+    avoiding independent resampler edges on each short AudioBuffer. Log actual
+    context sample rate. Keep streaming, clock, volume and buffering unchanged.
+  validation: >-
+    User heard no noise in the direct TTS WAV sample. Real Electron offline
+    rendering of that PCM reproduced split-buffer differences at 48000 Hz
+    (1000-sample chunks: error RMS 0.002027, peak 0.245911). At 32000 Hz, split
+    versus whole rendering was identical for 512/1000/2048-sample chunks.
+    Production runtime loaded into hidden Electron yielded a 32000 Hz PCM
+    session and disposed cleanly. Renderer typecheck passed.
+  acceptance: >-
+    User confirmed the audible playback issue is fixed in actual use on
+    2026-10-18 and requested committing this scoped fix.
+  evidence_gap: >-
+    Acceptance covers the reported noise on the user's device; other audio
+    devices and sample rates have not been assessed.
+
 ptt_audio_tail_and_press_ownership_20261018:
   class: bugfix
   risk: high
