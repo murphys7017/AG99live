@@ -188,6 +188,15 @@ function applyOutputTranscription(
     timestampEpochMs: Date.now(),
   });
   deps.state.lastTranscription = text;
-  deps.state.statusMessage = "已收到语音转写。";
-  deps.pushHistory("transcription", text);
+  const stage = envelope.payload.stage ?? "final";
+  if (stage === "streaming") {
+    deps.state.statusMessage = "正在实时识别。";
+    return;
+  }
+  deps.state.statusMessage = stage === "review"
+    ? "任务输入已完成语音复核。"
+    : "已收到语音转写。";
+  if (stage === "final") {
+    deps.pushHistory("transcription", text);
+  }
 }

@@ -281,12 +281,13 @@ def build_output_transcription(
     *,
     turn_id: str | None,
     text: str,
+    stage: str = "final",
 ) -> dict[str, Any]:
     return build_message_envelope(
         TYPE_OUTPUT_TRANSCRIPTION,
         turn_id=turn_id,
         source=SOURCE_ADAPTER,
-        payload={"text": text},
+        payload={"text": text, "stage": stage},
     )
 
 

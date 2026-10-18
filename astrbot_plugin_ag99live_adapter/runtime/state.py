@@ -129,6 +129,10 @@ class RuntimeState:
         self.passive_behavior_cooldown_ms = 3000
         self.passive_behavior_result_ttl_ms = 2500
         self.passive_behavior_timeout_seconds = 3.0
+        self.fast_asr_enabled = False
+        self.fast_asr_model_dir = ""
+        self.fast_asr_provider = "cpu"
+        self.fast_asr_num_threads = 4
         self.interaction_contributors_available = supports_interaction_contributors(
             plugin_context
         )
@@ -222,6 +226,7 @@ class RuntimeState:
             "passive_behavior",
             {},
         )
+        fast_asr_config = get_config_value(self.plugin_config, "fast_asr", {})
         vad_config = get_config_value(self.plugin_config, "vad", {})
         self.client_uid = normalize_client_uid(
             get_config_value(general_config, "client_uid", self.client_uid),
@@ -314,6 +319,19 @@ class RuntimeState:
                 integer=False,
             )
         )
+        self.fast_asr_enabled = bool(get_config_value(fast_asr_config, "enabled", False))
+        self.fast_asr_model_dir = str(
+            get_config_value(fast_asr_config, "model_dir", "") or ""
+        ).strip()
+        provider = str(get_config_value(fast_asr_config, "provider", "cpu") or "cpu").strip().lower()
+        self.fast_asr_provider = provider if provider in {"cpu", "cuda"} else "cpu"
+        try:
+            self.fast_asr_num_threads = max(
+                1,
+                min(int(get_config_value(fast_asr_config, "num_threads", 4)), 16),
+            )
+        except (TypeError, ValueError):
+            self.fast_asr_num_threads = 4
         try:
             self.independent_motion_history_turns = max(
                 0,

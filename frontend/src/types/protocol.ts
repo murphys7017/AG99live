@@ -105,6 +105,7 @@ export interface OutputSegmentPayload {
 
 export interface OutputTranscriptionPayload {
   text: string;
+  stage?: "streaming" | "final" | "review";
 }
 
 export interface ControlTurnFinishedPayload {

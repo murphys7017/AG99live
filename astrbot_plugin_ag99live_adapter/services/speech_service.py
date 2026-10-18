@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 import os
 import re
 import time
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -26,6 +27,89 @@ from ..protocol.builder import (
     build_control_error,
     build_output_transcription,
 )
+
+
+class StreamingASRError(RuntimeError):
+    """Raised when the optional local recognizer cannot be initialized."""
+
+
+class StreamingASR:
+    """One online decode stream backed by a shared sherpa recognizer."""
+
+    def __init__(
+        self,
+        *,
+        model_dir: str,
+        provider: str = "cpu",
+        num_threads: int = 4,
+    ) -> None:
+        try:
+            import sherpa_onnx
+        except ImportError as exc:  # pragma: no cover - depends on local install
+            raise StreamingASRError("sherpa_onnx_not_installed") from exc
+
+        directory = Path(model_dir).expanduser()
+        tokens = directory / "tokens.txt"
+        candidates = (
+            ("model.fp16.onnx", "model.onnx", "model.int8.onnx")
+            if provider == "cuda"
+            else ("model.int8.onnx", "model.onnx", "model.fp16.onnx")
+        )
+        model = next(
+            (directory / name for name in candidates if (directory / name).is_file()),
+            None,
+        )
+        if model is None or not tokens.is_file():
+            raise StreamingASRError("streaming_asr_model_files_missing")
+
+        try:
+            self._recognizer = sherpa_onnx.OnlineRecognizer.from_zipformer2_ctc(
+                tokens=str(tokens),
+                model=str(model),
+                num_threads=max(1, int(num_threads)),
+                sample_rate=16000,
+                feature_dim=80,
+                enable_endpoint_detection=False,
+                provider=provider,
+            )
+        except Exception as exc:
+            raise StreamingASRError("streaming_asr_initialization_failed") from exc
+        self.model_path = str(model)
+        self.provider = provider
+        self._stream = self._recognizer.create_stream()
+        self._last_text = ""
+
+    def new_session(self) -> StreamingASR:
+        session = object.__new__(StreamingASR)
+        session._recognizer = self._recognizer
+        session._stream = self._recognizer.create_stream()
+        session.model_path = self.model_path
+        session.provider = self.provider
+        session._last_text = ""
+        return session
+
+    def reset(self) -> None:
+        self._stream = self._recognizer.create_stream()
+        self._last_text = ""
+
+    def accept(self, samples: Any, sample_rate: int) -> str:
+        waveform = np.asarray(samples, dtype=np.float32).reshape(-1)
+        if waveform.size == 0:
+            return self._last_text
+        self._stream.accept_waveform(sample_rate, waveform)
+        self._decode_ready()
+        self._last_text = self._recognizer.get_result(self._stream).strip()
+        return self._last_text
+
+    def finish(self) -> str:
+        self._stream.input_finished()
+        self._decode_ready()
+        self._last_text = self._recognizer.get_result(self._stream).strip()
+        return self._last_text
+
+    def _decode_ready(self) -> None:
+        while self._recognizer.is_ready(self._stream):
+            self._recognizer.decode_stream(self._stream)
 
 
 @dataclass
@@ -43,6 +127,11 @@ class AudioStreamState:
     transcription_task: asyncio.Task[str | None] | None = None
     context_timeout_task: asyncio.Task[None] | None = None
     sample_count: int = 0
+    streaming_asr: StreamingASR | None = None
+    streaming_text: str = ""
+    vad_pcm_chunks: list[bytes] = field(default_factory=list)
+    fast_final_text: str = ""
+    sealed: bool = False
 
 
 @dataclass
@@ -79,6 +168,9 @@ TEMP_AUDIO_CLEANUP_DELAY_TURNS = 3
 TEMP_AUDIO_CLEANUP_WARNING_THRESHOLD = 5
 SEALED_INPUT_CONTEXT_TIMEOUT_SECONDS = 15
 MAX_SEALED_INPUTS = 4
+REVIEW_AUDIO_TTL_SECONDS = 120
+MAX_REVIEW_AUDIO_ENTRIES = 8
+MAX_REVIEW_AUDIO_BYTES = 12 * 1024 * 1024
 
 
 class SpeechIngressService:
@@ -118,7 +210,38 @@ class SpeechIngressService:
         self._on_valid_transcription = on_valid_transcription
         self._audio_streams: dict[str, AudioStreamState] = {}
         self._pending_temp_audio_files: dict[str, PendingTempAudioFile] = {}
+        self._review_audio: dict[str, tuple[bytes, int, float]] = {}
+        self._streaming_asr_template: StreamingASR | None = None
+        self._streaming_asr_template_key: tuple[str, str, int] | None = None
         self._completed_transcription_turns = 0
+
+    def _create_streaming_asr(self) -> StreamingASR | None:
+        if not self.runtime_state.fast_asr_enabled:
+            return None
+        template_key = (
+            self.runtime_state.fast_asr_model_dir,
+            self.runtime_state.fast_asr_provider,
+            self.runtime_state.fast_asr_num_threads,
+        )
+        try:
+            if self._streaming_asr_template_key != template_key:
+                self._streaming_asr_template = StreamingASR(
+                    model_dir=template_key[0],
+                    provider=template_key[1],
+                    num_threads=template_key[2],
+                )
+                self._streaming_asr_template_key = template_key
+            assert self._streaming_asr_template is not None
+            session = self._streaming_asr_template.new_session()
+        except StreamingASRError as exc:
+            logger.warning("Optional streaming ASR unavailable: %s", exc)
+            return None
+        logger.info(
+            "AG99live streaming ASR session created model=%s provider=%s",
+            session.model_path,
+            session.provider,
+        )
+        return session
 
     async def handle_audio_stream_start(self, message) -> None:
         """处理 input.audio_stream_start：登记一条新的、唯一的流状态。"""
@@ -151,6 +274,7 @@ class SpeechIngressService:
             encoding=payload["encoding"],
             capture_mode=capture_mode,
             vad_engine=vad_engine,
+            streaming_asr=await asyncio.to_thread(self._create_streaming_asr),
         )
 
     async def handle_audio_stream_binary_chunk(self, frame: BinaryAudioChunkFrame):
@@ -162,7 +286,7 @@ class SpeechIngressService:
         if stream is None:
             raise ValueError(f"binary_audio_chunk_without_start:{stream_id}")
         self._validate_capture_turn(stream, frame.turn_id)
-        if stream.transcription_task is not None:
+        if stream.transcription_task is not None or stream.sealed:
             raise ValueError(f"binary_audio_chunk_after_seal:{stream_id}")
 
         if frame.seq <= stream.last_seq:
@@ -210,6 +334,26 @@ class SpeechIngressService:
             return built_message
         else:
             stream.chunks.append(frame.payload)
+            if stream.streaming_asr is not None:
+                try:
+                    text = await asyncio.to_thread(
+                        stream.streaming_asr.accept,
+                        self._pcm16_bytes_to_float32([frame.payload]),
+                        stream.sample_rate,
+                    )
+                except Exception:
+                    logger.exception("Streaming ASR failed for PTT stream_id=%s", stream_id)
+                    stream.streaming_asr = None
+                    text = ""
+                if text and text != stream.streaming_text:
+                    stream.streaming_text = text
+                    await self._send_json(
+                        build_output_transcription(
+                            turn_id=stream.capture_turn_id,
+                            text=text,
+                            stage="streaming",
+                        )
+                    )
         stream.last_seq = frame.seq
         return None
 
@@ -226,11 +370,42 @@ class SpeechIngressService:
             raise ValueError(f"audio_stream_duplicate_seal:{stream_id}")
         if message.payload.get("last_seq") != stream.last_seq or not stream.chunks:
             raise ValueError(f"audio_stream_seal_sequence_mismatch:{stream_id}")
-        if sum(s.transcription_task is not None for s in self._audio_streams.values()) >= MAX_SEALED_INPUTS:
+        if sum(s.sealed for s in self._audio_streams.values()) >= MAX_SEALED_INPUTS:
             raise ValueError("audio_stream_sealed_input_limit")
         audio_buffer = self._pcm16_bytes_to_float32(stream.chunks)
-        stream.chunks.clear()
         stream.sample_count = int(audio_buffer.size)
+        stream.sealed = True
+        stream.context_timeout_task = asyncio.create_task(
+            self._expire_sealed_input(stream), name=f"audio-context:{stream_id}"
+        )
+        stream.context_timeout_task.add_done_callback(self._observe_input_task)
+        if stream.streaming_asr is not None:
+            try:
+                stream.fast_final_text = (
+                    await asyncio.to_thread(stream.streaming_asr.finish)
+                ).strip()
+            except Exception:
+                logger.exception("Streaming ASR seal failed: stream_id=%s", stream_id)
+                stream.streaming_asr = None
+            if stream.fast_final_text:
+                self._cache_review_audio(
+                    stream.capture_turn_id, b"".join(stream.chunks), stream.sample_rate
+                )
+                if stream.fast_final_text != stream.streaming_text:
+                    stream.streaming_text = stream.fast_final_text
+                    await self._send_json(
+                        build_output_transcription(
+                            turn_id=stream.capture_turn_id,
+                            text=stream.fast_final_text,
+                            stage="streaming",
+                        )
+                    )
+                stream.chunks.clear()
+                return
+        if self.runtime_state.fast_asr_enabled:
+            stream.chunks.clear()
+            return
+        stream.chunks.clear()
         stream.transcription_task = asyncio.create_task(
             self._transcribe_audio_buffer(
                 audio_buffer,
@@ -241,10 +416,6 @@ class SpeechIngressService:
             name=f"audio-asr:{stream_id}",
         )
         stream.transcription_task.add_done_callback(self._observe_input_task)
-        stream.context_timeout_task = asyncio.create_task(
-            self._expire_sealed_input(stream), name=f"audio-context:{stream_id}"
-        )
-        stream.context_timeout_task.add_done_callback(self._observe_input_task)
 
     async def handle_audio_stream_end(self, message):
         """处理 input.audio_stream_end：取走流、组装一轮消息。
@@ -327,6 +498,33 @@ class SpeechIngressService:
                 stream_id=stream_id,
             )
 
+        if stream.fast_final_text:
+            return await self._build_message_from_fast_transcription(
+                stream.fast_final_text,
+                raw_message=message.raw,
+                turn_id=message.turn_id,
+                sample_count=stream.sample_count,
+                sample_rate=stream.sample_rate,
+                stream_id=stream_id,
+            )
+
+        fast_text = ""
+        if stream.streaming_asr is not None:
+            try:
+                fast_text = (await asyncio.to_thread(stream.streaming_asr.finish)).strip()
+            except Exception:
+                logger.exception("Streaming ASR finalization failed: stream_id=%s", stream_id)
+                stream.streaming_asr = None
+            if fast_text and fast_text != stream.streaming_text:
+                stream.streaming_text = fast_text
+                await self._send_json(
+                    build_output_transcription(
+                        turn_id=stream.capture_turn_id,
+                        text=fast_text,
+                        stage="streaming",
+                    )
+                )
+
         if not stream.chunks:
             await self._emit_input_error(
                 turn_id=message.turn_id,
@@ -335,6 +533,26 @@ class SpeechIngressService:
             return None
 
         audio_buffer = self._pcm16_bytes_to_float32(stream.chunks)
+        if stream.streaming_asr is not None and fast_text:
+            self._cache_review_audio(
+                stream.capture_turn_id,
+                b"".join(stream.chunks),
+                stream.sample_rate,
+            )
+            return await self._build_message_from_fast_transcription(
+                fast_text,
+                raw_message=message.raw,
+                turn_id=message.turn_id,
+                sample_count=int(audio_buffer.size),
+                sample_rate=stream.sample_rate,
+                stream_id=stream_id,
+            )
+        if self.runtime_state.fast_asr_enabled:
+            await self._emit_input_error(
+                turn_id=message.turn_id,
+                error_message="Local streaming speech recognition did not produce text.",
+            )
+            return None
         return await self._build_message_from_audio_buffer(
             audio_buffer,
             raw_message=message.raw,
@@ -354,6 +572,7 @@ class SpeechIngressService:
             if turn_id is not None and stream.capture_turn_id != turn_id:
                 continue
             self._audio_streams.pop(key, None)
+            self._review_audio.pop(str(stream.capture_turn_id or "").strip(), None)
             for task in (stream.transcription_task, stream.context_timeout_task):
                 if task is not None:
                     task.cancel()
@@ -414,13 +633,40 @@ class SpeechIngressService:
         segment_id = self._resolve_audio_segment_id(message)
         for audio_bytes in vad_engine.detect_speech(audio_data.tolist()):
             if audio_bytes == b"<|PAUSE|>":
+                stream.vad_pcm_chunks.clear()
+                stream.streaming_text = ""
+                if stream.streaming_asr is not None:
+                    stream.streaming_asr.reset()
                 await self._notify_vad_speech_started(message)
             elif audio_bytes == b"<|RESUME|>":
                 continue
             elif len(audio_bytes) > 1024:
+                stream.vad_pcm_chunks.append(audio_bytes)
                 chunk = (
                     np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
                 )
+                if stream.streaming_asr is not None:
+                    try:
+                        text = (
+                            await asyncio.to_thread(
+                                stream.streaming_asr.accept,
+                                chunk,
+                                sample_rate,
+                            )
+                        ).strip()
+                    except Exception:
+                        logger.exception("Streaming ASR failed for VAD stream_id=%s", stream_id)
+                        stream.streaming_asr = None
+                        text = ""
+                    if text and text != stream.streaming_text:
+                        stream.streaming_text = text
+                        await self._send_json(
+                            build_output_transcription(
+                                turn_id=self._next_vad_turn_id(stream, upcoming=True),
+                                text=text,
+                                stage="streaming",
+                            )
+                        )
                 await self.media_service.append_audio_chunk(chunk, segment_id=segment_id)
                 built_message = None
                 try:
@@ -570,6 +816,98 @@ class SpeechIngressService:
             text=text, raw_message=normalized_raw_message, images=images
         )
 
+    async def _build_message_from_fast_transcription(
+        self,
+        text: str,
+        *,
+        raw_message: dict[str, Any],
+        turn_id: str | None,
+        sample_count: int,
+        sample_rate: int,
+        stream_id: str | None,
+    ):
+        normalized_text = str(text or "").strip()
+        if not normalized_text:
+            return None
+        should_drop, drop_reason = should_drop_transcription(normalized_text)
+        if should_drop:
+            logger.info("Dropped streaming transcription `%s`: %s", normalized_text, drop_reason)
+            await self._emit_input_error(
+                turn_id=turn_id,
+                error_message=f"Audio transcription dropped: {drop_reason}",
+            )
+            return None
+        if self._on_valid_transcription is not None:
+            try:
+                await self._on_valid_transcription(normalized_text, turn_id)
+            except Exception:
+                logger.exception("Optional ASR pre-action scheduling failed")
+        return await self._build_message_from_transcription(
+            normalized_text,
+            raw_message=raw_message,
+            turn_id=turn_id,
+            sample_count=sample_count,
+            sample_rate=sample_rate,
+            stream_id=stream_id,
+        )
+
+    def _cache_review_audio(
+        self,
+        turn_id: str | None,
+        pcm_bytes: bytes,
+        sample_rate: int,
+    ) -> None:
+        key = str(turn_id or "").strip()
+        if not key or not pcm_bytes or len(pcm_bytes) > MAX_REVIEW_AUDIO_BYTES:
+            return
+        now = time.monotonic()
+        for old_key, (_audio, _rate, stored_at) in list(self._review_audio.items()):
+            if now - stored_at > REVIEW_AUDIO_TTL_SECONDS:
+                self._review_audio.pop(old_key, None)
+        self._review_audio[key] = (pcm_bytes, sample_rate, now)
+        while len(self._review_audio) > MAX_REVIEW_AUDIO_ENTRIES:
+            self._review_audio.pop(next(iter(self._review_audio)))
+
+    async def review_audio_for_turn(self, turn_id: str) -> str | None:
+        """Run configured AstrBot STT only after Core selected task execution."""
+        key = str(turn_id or "").strip()
+        cached = self._review_audio.pop(key, None)
+        if cached is None:
+            return None
+        pcm_bytes, sample_rate, stored_at = cached
+        if time.monotonic() - stored_at > REVIEW_AUDIO_TTL_SECONDS:
+            return None
+        samples = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+        if not samples.size:
+            return None
+        logger.info(
+            "DIAG latency.handoff_asr_review_started turn_id=%s sample_count=%s sample_rate=%s",
+            key,
+            int(samples.size),
+            sample_rate,
+        )
+        try:
+            text = (await self._transcribe_audio(samples, sample_rate=sample_rate)).strip()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Handoff-triggered AstrBot STT review failed: turn_id=%s", key)
+            return None
+        if not text:
+            return None
+        should_drop, _reason = should_drop_transcription(text)
+        if should_drop:
+            return None
+        await self._send_json(
+            build_output_transcription(turn_id=key, text=text, stage="review")
+        )
+        logger.info(
+            "DIAG latency.handoff_asr_review_ready turn_id=%s text_length=%s",
+            key,
+            len(text),
+        )
+        return text
+
     async def _build_message_from_vad_segment(self, message):
         segment_id = self._resolve_audio_segment_id(message)
         audio_buffer = await self.media_service.drain_audio_buffer(segment_id=segment_id)
@@ -584,6 +922,39 @@ class SpeechIngressService:
             await self._emit_input_error(
                 turn_id=vad_turn_id,
                 error_message="Microphone audio segment was empty before transcription.",
+            )
+            return None
+
+        if stream.streaming_asr is not None:
+            try:
+                fast_text = (await asyncio.to_thread(stream.streaming_asr.finish)).strip()
+            except Exception:
+                logger.exception(
+                    "Streaming ASR finalization failed for VAD stream_id=%s",
+                    message.stream_id,
+                )
+                fast_text = ""
+                stream.streaming_asr = None
+            pcm_bytes = b"".join(stream.vad_pcm_chunks)
+            stream.vad_pcm_chunks.clear()
+            stream.streaming_text = ""
+            if stream.streaming_asr is not None:
+                stream.streaming_asr.reset()
+            if fast_text:
+                self._cache_review_audio(vad_turn_id, pcm_bytes, message.sample_rate)
+                return await self._build_message_from_fast_transcription(
+                    fast_text,
+                    raw_message=self._clone_raw_message_with_turn_id(message.raw, vad_turn_id),
+                    turn_id=vad_turn_id,
+                    sample_count=int(audio_buffer.size),
+                    sample_rate=message.sample_rate,
+                    stream_id=message.stream_id,
+                )
+
+        if self.runtime_state.fast_asr_enabled:
+            await self._emit_input_error(
+                turn_id=vad_turn_id,
+                error_message="Local streaming speech recognition did not produce text.",
             )
             return None
 
@@ -602,11 +973,16 @@ class SpeechIngressService:
         return None
 
     @staticmethod
-    def _next_vad_turn_id(stream: AudioStreamState) -> str | None:
+    def _next_vad_turn_id(
+        stream: AudioStreamState,
+        *,
+        upcoming: bool = False,
+    ) -> str | None:
         normalized = str(stream.capture_turn_id or "").strip()
         if not normalized:
             return None
-        return f"{normalized}:vad:{stream.vad_turn_count}"
+        index = stream.vad_turn_count + (1 if upcoming else 0)
+        return f"{normalized}:vad:{index}"
 
     @staticmethod
     def _clone_raw_message_with_turn_id(

@@ -1,4 +1,32 @@
 {
+  "fast_asr": {
+    "description": "Adapter 内部可选的 sherpa-onnx 流式识别。开启后普通输入使用本地结果，原有 AstrBot STT 只在 Core 任务交接时复核。",
+    "type": "object",
+    "items": {
+      "enabled": {
+        "description": "启用后，PTT 与 VAD PCM 流都进行本地增量识别；只有 Core 判定任务交接时，才用 AstrBot STT 复核原始音频。",
+        "type": "bool",
+        "default": false
+      },
+      "model_dir": {
+        "description": "包含 model*.onnx 和 tokens.txt 的 sherpa-onnx 模型目录。",
+        "type": "string",
+        "default": ""
+      },
+      "provider": {
+        "description": "推理后端。当前原型推荐 cpu。",
+        "type": "string",
+        "default": "cpu"
+      },
+      "num_threads": {
+        "description": "本地 sherpa-onnx 推理线程数。",
+        "type": "int",
+        "default": 4,
+        "minimum": 1,
+        "maximum": 16
+      }
+    }
+  },
   "general": {
     "description": "客户端与会话身份（桌宠连接实例与桌面端消息客户端是两套不同身份）",
     "type": "object",

@@ -55,6 +55,32 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         super().__init__(message_str, message_obj, platform_meta, session_id)
         self.adapter = adapter
         runtime_state = getattr(adapter, "runtime_state", None)
+        if bool(getattr(runtime_state, "fast_asr_enabled", False)):
+            raw_message = getattr(message_obj, "raw_message", None)
+            raw_payload = (
+                raw_message.get("payload", {})
+                if isinstance(raw_message, dict)
+                else {}
+            )
+            review_turn_id = (
+                str(raw_message.get("turn_id") or "").strip()
+                if isinstance(raw_message, dict)
+                else ""
+            )
+            if review_turn_id and isinstance(raw_payload, dict) and raw_payload.get("stream_id"):
+                speech_ingress = getattr(
+                    getattr(getattr(adapter, "turn_coordinator", None), "speech_ingress", None),
+                    "review_audio_for_turn",
+                    None,
+                )
+                if callable(speech_ingress):
+                    async def review_handoff_audio() -> str | None:
+                        return await speech_ingress(review_turn_id)
+
+                    self.set_extra(
+                        "_ag99live_handoff_asr_review",
+                        review_handoff_audio,
+                    )
         persona_segment_stream_enabled = (
             getattr(adapter, "desktop_persona_segment_stream_enabled", False) is True
         )

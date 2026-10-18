@@ -304,7 +304,18 @@ export function parseOutputTranscriptionPayload(
   const record = parseObjectPayload(envelope);
   if (!record.ok) return record;
   const text = requiredString(envelope.type, record.payload, "text");
-  return text.ok ? { ok: true, payload: { text: text.payload } } : text;
+  if (!text.ok) return text;
+  const stage = record.payload.stage;
+  if (stage !== undefined && !["streaming", "final", "review"].includes(String(stage))) {
+    return invalidPayload(envelope.type, "payload.stage", "streaming | final | review");
+  }
+  return {
+    ok: true,
+    payload: {
+      text: text.payload,
+      stage: (stage as OutputTranscriptionPayload["stage"]) ?? "final",
+    },
+  };
 }
 
 export function parseControlCompletionPayload(
