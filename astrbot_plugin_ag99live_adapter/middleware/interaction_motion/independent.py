@@ -1393,7 +1393,14 @@ async def generate_independent_motion(
                 image_count=len(images),
             )
         try:
-            raw_arguments = _parse_motion_json(response_text)
+            from astrbot.core.prompt.json_recovery import recover_json_record
+
+            raw_arguments = await recover_json_record(
+                response_text, plugin_context=bundle.runtime_state.plugin_context,
+                event=event, scope="independent_motion",
+            )
+            if raw_arguments is None:
+                raise ValueError("independent_motion_json_unrecoverable")
         except (TypeError, ValueError, json.JSONDecodeError) as exc:
             logger.warning(
                 "WIRING independent_motion.json_parse_failed turn_id=%s "
@@ -1787,18 +1794,6 @@ def _motion_guidance_for_prompt(
         "examples": project((runtime.get("reference_examples") or [])[:2], executed=False),
         "recent_executed": project((runtime.get("recent_executed_motions") or [])[-3:], executed=True),
     }
-
-
-def _parse_motion_json(value: str) -> dict[str, Any]:
-    normalized = value.strip()
-    if normalized.startswith("```"):
-        lines = normalized.splitlines()
-        if len(lines) >= 3 and lines[-1].strip() == "```":
-            normalized = "\n".join(lines[1:-1]).strip()
-    payload = json.loads(normalized)
-    if not isinstance(payload, dict):
-        raise ValueError("independent_motion_output_not_object")
-    return payload
 
 
 def _motion_output_shape(value: Mapping[str, Any]) -> str:

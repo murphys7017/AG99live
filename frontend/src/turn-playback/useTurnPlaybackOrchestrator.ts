@@ -45,25 +45,24 @@ export function useTurnPlaybackOrchestrator(
         options.timelineRuntime.handoffSpeechMotionTail(previous.turnId, previous.messageId);
       }
     }
-    // Late motion belongs to an already playing audio timeline. It must be
-    // attached before checking blockers, including that very audio timeline.
+    // Motion follows segment order independently of text/PCM production.
+    // An unfinished earlier action must not overwrite a later action on arrival.
     for (const session of options.sessionStore.getSessions()) {
       if (session.interrupted || session.phase === "completed" || session.phase === "failed") continue;
-      for (const segment of session.segments.values()) {
-        if (segment.incremental && segment.motion.payload && !segment.motion.released
-          && !segment.motion.failed && !segment.motion.completed
-          && (segment.audio.terminal === "failed" || segment.audio.terminal === "completed")) {
+      for (const segmentId of session.segmentOrder) {
+        const segment = session.segments.get(segmentId);
+        if (!segment?.incremental) continue;
+        if (segment.motion.failed || segment.motion.completed || segment.motion.absent) continue;
+        if (segment.motion.payload && !segment.motion.released
+          && segment.audio.terminal === "failed") {
           options.timelineRuntime.rejectMotionBeforeStart(
             segment.turnId, segment.messageId,
-            segment.audio.terminal === "failed"
-              ? `audio_failed_before_motion_release:${segment.audio.reason || "audio_failed"}`
-              : "incremental_motion_speech_window_ended",
+            `audio_failed_before_motion_release:${segment.audio.reason || "audio_failed"}`,
           );
           continue;
         }
         if (segment.audio.started && segment.audio.terminal === "idle"
           && segment.motion.payload && !segment.motion.released
-          && !segment.motion.failed && !segment.motion.completed
           && segment.motion.receivedAtMs !== null) {
           options.timelineRuntime.startIncrementalMotion({
             turnId: segment.turnId, messageId: segment.messageId,
@@ -72,14 +71,9 @@ export function useTurnPlaybackOrchestrator(
             assistantText: segment.text.content ?? "", speechCues: segment.speech.cues,
           });
         }
+        // Pending motion retains its place, but never blocks the PCM consumer.
+        break;
       }
-    }
-    const blockers = options.timelineRuntime.findPlaybackReleaseBlockers();
-    if (blockers.length > 0) {
-      console.debug("[TurnPlaybackOrchestrator] playback release blocked by active timeline.", {
-        blockers,
-      });
-      return;
     }
     let segment: DeepReadonly<TurnPlaybackSegment> | null = null;
     for (const session of options.sessionStore.getSessions()) {
@@ -98,21 +92,35 @@ export function useTurnPlaybackOrchestrator(
         return;
       }
     }
-    // Text/PCM remain owned by the stream consumer. A confirmed audio-free
-    // segment can use the existing independent motion timeline without replay.
+    const blockers = options.timelineRuntime.findPlaybackReleaseBlockers().filter((blocker) => !(
+      segment?.incremental
+      && segment.audio.terminal === "completed"
+      && segment.motion.payload
+      && !segment.motion.released
+      && blocker.turnId === segment.turnId
+      && blocker.messageId === segment.messageId
+    ));
+    if (blockers.length > 0) {
+      console.debug("[TurnPlaybackOrchestrator] playback release blocked by active timeline.", { blockers });
+      return;
+    }
+    // Text/PCM remain owned by the stream consumer. Once audio is absent or
+    // complete, a valid action gets its own motion timeline without audio replay.
     if (segment?.incremental) {
       if (
         segment.motion.payload
         && !segment.motion.released
         && !segment.motion.failed
         && !segment.motion.completed
-        && segment.audio.terminal === "absent"
+        && (segment.audio.terminal === "absent" || segment.audio.terminal === "completed")
         && segment.motion.receivedAtMs !== null
       ) {
         options.timelineRuntime.startSegmentJob({
           turnId: segment.turnId,
           messageId: segment.messageId,
-          reason: "incremental_motion_without_audio",
+          reason: segment.audio.terminal === "completed"
+            ? "incremental_motion_after_audio"
+            : "incremental_motion_without_audio",
           text: { release: false, content: segment.text.content },
           audio: { release: false, url: null, noAudioConfirmed: true },
           motion: {

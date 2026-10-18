@@ -636,7 +636,7 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     options: PlaybackTimelineSinkStartOptions = {},
   ): PlaybackTimelineSnapshot | null {
     const existing = getTimeline(turnId, messageId);
-    if (existing) {
+    if (existing && !existing.engine.hasSink(AUDIO_TIMELINE_SINK_ID)) {
       existing.projectsMotionSession = true;
       const ensured = ensureMotionTimelineSink(turnId, messageId, options);
       console.info("[PlaybackTimelineRuntime] motion-only timeline reused.", {
@@ -646,6 +646,15 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
         timeline: existing.engine.getSnapshot(),
       });
       return ensured ? existing.engine.getSnapshot() : null;
+    }
+    if (existing) {
+      const snapshot = existing.engine.getSnapshot();
+      const audio = snapshot?.sinks.find((sink) => sink.id === AUDIO_TIMELINE_SINK_ID);
+      const motion = snapshot?.sinks.find((sink) => sink.id === MOTION_TIMELINE_SINK_ID);
+      if (audio?.terminal !== "completed" || (motion && motion.terminal !== "idle")) return null;
+      // The finished audio clock cannot time a new action. Replace only its
+      // unstarted motion owner with a fresh synthetic clock; never replay audio.
+      clearAudioStartTimeout(existing);
     }
     const engine = createPlaybackTimelineEngine();
     engine.load(

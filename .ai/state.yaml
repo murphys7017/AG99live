@@ -1,3 +1,66 @@
+json_record_recovery_and_stream_eof_20261018:
+  class: bugfix
+  risk: high
+  scope: >-
+    Add shared complete-record syntax recovery: strict parse, existing repair
+    library, then one configured local model attempt per Turn. Preserve literal
+    values/order/nesting; reject duplicates, invented content and unterminated
+    strings. Retain schema/protocol validation, cancellation and owning deadlines.
+    Persona consumes repaired complete JSONL records incrementally and dispatches
+    the final no-newline record. Verified normal Provider stop may close existing
+    speech with empty thought and finish, marked stream_recovered_at_eof; no EOF
+    recovery after error, cancellation, length/content filtering or tool calls.
+    Independent motion uses the same recovery API. User-requested duration weights
+    clamp finite numeric values to 1..3; in-range fractional, missing, boolean and
+    nonnumeric values remain invalid. Per user clarification, missing/null motion
+    axes are omitted while other valid axes remain; never replace a null axis
+    with zero or default a missing duration_weight to one. Native Ollama forwards request-local JSON
+    schema/thinking/sampling options. Expected plugin skips are DEBUG; runtime
+    diagnostics explicitly say settling and separate session_id from UMO.
+  configuration: >-
+    Added Chinese-labelled JSON repair provider/timeout settings. Library-only
+    default; local default and Alice profile select ollama/qwen3.5:0.8b with a
+    three-second repair cap additionally bounded by the original owning budget.
+  validation: >-
+    Twelve focused Persona parser/protocol cases passed. Changed-file Ruff,
+    compilation and whitespace checks passed. Source/deployment motion files
+    match. Actual native Ollama Provider recovered a complete record that the
+    library could not preserve, without changing keys/values/nesting. Observed
+    3372ms under a ten-second smoke cap; this is not proof of production latency
+    within the configured three-second request cap. Public clamp/rejection smoke
+    passed for 9 -> 3, '-2' -> 1 and boolean rejection. Public null-axis/clamp
+    boundary passed: null axes omitted, other axes retained, all-null map empty.
+    The focused repaired-stream/EOF boundary passed again after fingerprint
+    hardening, including preservation of empty objects versus empty arrays.
+    Final review: both repaired-stream boundaries and the 1.1-second late-motion
+    boundary passed (3 cases); renderer typecheck passed. Long complete memory
+    JSON keeps its 256K bound; huge integer weights clamp without float overflow.
+  limitations: >-
+    No AstrBot restart or frontend deployment. End-to-end TTS/Live2D
+    acceptance pending. Background memory timeouts are separate: failed durable
+    jobs retain their journal and are recovered on restart; no blind timeout
+    increase or automatic retry added. Timing fields overlap and cannot be summed
+    to establish an unmeasured remainder. Existing unrelated dirty work preserved.
+
+motion_deadline_playback_repair_20261018:
+  class: bugfix
+  risk: high
+  scope: >-
+    Preserve incremental motion ordering independently of PCM release. Permit a
+    valid action after its speech completed using the existing motion-only path;
+    exclude that pending action's own timeline from release blockers. Replace a
+    completed audio timeline with an unstarted action by a fresh synthetic-clock
+    timeline. Keep failed audio, interrupted/terminal turns and motion terminal
+    protection. Core separately removes its conflicting one-second drain limit.
+  validation: >-
+    Renderer typecheck passed. Public store/orchestrator/timeline boundary smoke
+    confirmed a late action after completed audio starts once in motion-only
+    mode with a fresh synthetic clock, and interrupted turns reject later input.
+    Whitespace checks passed. This is boundary evidence, not Live2D acceptance.
+  evidence_gap: >-
+    No renderer deployment or live MiniMax/TTS/hardware/Live2D acceptance.
+    Ordinary conversational motion outputs from M3 remain a separate issue.
+
 olv_desktop_image_annotation_20261018:
   class: bugfix
   risk: medium

@@ -1,16 +1,16 @@
 from __future__ import annotations
 
+import math
 import re
 from typing import Any
 
 from ..prompts.semantic_axis_prompt import profile_prompt_axes
-from .performance_curve import normalize_performance_curve_hint
-from .resource_catalog import ModelInfoRuntimeContext
-
 from ..protocol.schema_versions import (
     MOTION_INTENT_V4_SCHEMA_VERSION,
     SEMANTIC_AXIS_PROFILE_SCHEMA_VERSION,
 )
+from .performance_curve import normalize_performance_curve_hint
+from .resource_catalog import ModelInfoRuntimeContext
 
 DEFAULT_MOTION_INTENT_DURATION_MS = 1000
 
@@ -195,6 +195,9 @@ def normalize_motion_axis_levels(
     normalized_levels: dict[str, int] = {}
     rejected_levels: list[str] = []
     for axis_id_raw, level in value.items():
+        # Missing/null means this axis was not requested, never a zero pose.
+        if level is None:
+            continue
         axis_id = str(axis_id_raw or "").strip()
         if not axis_id:
             rejected_levels.append("empty_axis_id")
@@ -244,6 +247,19 @@ def normalize_motion_steps(
         if not levels:
             return None, f"motion_step_axis_levels_empty:{index}"
         duration_weight = step.get("duration_weight")
+        # Duration weights saturate at the documented range. Fractional
+        # in-range values remain invalid; do not invent a rounding policy.
+        if isinstance(duration_weight, int) and not isinstance(duration_weight, bool):
+            duration_weight = min(3, max(1, duration_weight))
+        elif isinstance(duration_weight, float | str):
+            try:
+                number = float(duration_weight)
+            except (ValueError, OverflowError):
+                number = math.nan
+            if math.isfinite(number):
+                bounded = min(3.0, max(1.0, number))
+                if bounded.is_integer():
+                    duration_weight = int(bounded)
         if (
             isinstance(duration_weight, bool)
             or not isinstance(duration_weight, int)
