@@ -1100,3 +1100,33 @@ neurobrain_current_state_application_20261018:
     checkpoint recheck passed ordered inputs on separate ticks, subsequent idle
     advancement, nonblocking reads, clamp/rejection and clean worker shutdown.
     No live application reload or desktop acceptance.
+
+idle_motion_isolation_20261018:
+  class: bugfix
+  risk: high
+  scope: >-
+    User requires slower idle motion, no foreground status/history changes or Turn
+    ownership, and parameter-mixer blending rather than active plan replacement.
+    Add optional output.idle_motion with null Turn and existing motion payload.
+    Remove passive Turn/segment path. Add a lower-priority SDK idle source, smooth
+    entry/release and response continuity at foreground handoff.
+  validation: >-
+    Renderer/WebSDK/Electron types pass. Isolated backend stream emits exactly one
+    idle packet without touching a frozen Session; frontend accepts that packet
+    and rejects Turn-bound idle packets. Mixer handoff has zero first-frame jump
+    in both directions and foreground target wins.
+  evidence_gap: >-
+    No live model/Provider/Desktop acceptance, service restart or feature
+    enablement. Keep unrelated working changes.
+  build: >-
+    Electron production build completed. Isolated SDK mixer runtime advances and
+    retires idle state automatically; maximum per-frame delta 0.126 on a simulated
+    60 Hz parameter surface. Overlapping idle plans are rejected rather than
+    replacing the active layer. Visual acceptance still requires paired reload.
+  review_validation: >-
+    Corrected idle-error retry to avoid advancing foreground time twice. Exclude
+    idle targets from parameters already driven by foreground bindings so idle
+    cannot alter foreground release/settling. Public mixer smoke verifies both
+    properties; the existing VAD case passes after completing its fixture imports
+    and input-preparation state. Renderer/WebSDK/Electron types and production
+    build pass. Commit only in AG99live; its post-commit hook deploys to data.

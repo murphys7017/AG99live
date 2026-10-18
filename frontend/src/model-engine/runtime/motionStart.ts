@@ -272,6 +272,7 @@ function prepareCompilableMotionPayload(
     targetDurationMs,
     speechActive,
     source: context.startReason,
+    motionSource: context.motionSource,
     settings: dependencies.getSettings(),
     runtimeWarnings,
     samplingIdentity: {

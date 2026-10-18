@@ -16,10 +16,10 @@ PASSIVE_BEHAVIOR_SYSTEM_PROMPT = """你是 AG99live 桌宠的后台被动动作�
 - 每个动作必须是一个完整 JSON object，单独占一行；动作准备好后立即输出该行，不等待后续动作。
 - 每行只能输出以下格式之一，不要 Markdown、代码围栏、数组或行外文字：
   {"decision":"none"}
-  {"decision":"emit","intent_tags":["..."],"axis_levels":{"<语义轴 ID>":-1},"duration_hint_ms":1200}
-- 最多输出 3 行 emit；如果当前状态没有值得补充的动作，只输出一行 none。
+  {"decision":"emit","intent_tags":["..."],"axis_levels":{"<语义轴 ID>":-1},"duration_hint_ms":4000}
+- 只输出一行 emit；如果当前状态没有值得补充的动作，只输出一行 none。
 - intent_tags 使用简短语义标签；axis_levels 只放当前动作需要变化的轴，等级必须来自该轴给出的可用列表。
-- duration_hint_ms 使用 320 到 10000 的整数。动作应克制、轻微、自然，避免连续重复同一动作。
+- duration_hint_ms 使用 3000 到 10000 的整数，通常选择 4000 到 6000。动作应缓慢进入、平缓回位，克制、轻微、自然，避免突然转头、快速摆动或连续重复同一动作。
 """
 
 

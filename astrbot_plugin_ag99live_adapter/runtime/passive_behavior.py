@@ -20,11 +20,12 @@ from ..prompts.passive_behavior import (
     PASSIVE_BEHAVIOR_SYSTEM_PROMPT,
     build_passive_behavior_prompt,
 )
+from ..protocol.parser import build_message_envelope
 from .output_segment import PASSIVE_BEHAVIOR_MOTION_SOURCE
 
 
 _POLL_INTERVAL_SECONDS = 0.1
-_MAX_ACTIONS_PER_STREAM = 3
+_MAX_ACTIONS_PER_STREAM = 1
 _MAX_STREAM_CHARS = 16000
 _MAX_ACTION_LINE_CHARS = 4096
 _EMOTION_KEYS = (
@@ -67,11 +68,13 @@ class PassiveBehaviorRuntime:
         session_state: Any,
         turn_coordinator: Any,
         is_desktop_connected: Callable[[], bool],
+        send_json: Callable[[dict[str, Any]], Awaitable[bool]],
     ) -> None:
         self.runtime_state = runtime_state
         self.session_state = session_state
         self.turn_coordinator = turn_coordinator
         self.is_desktop_connected = is_desktop_connected
+        self._send_json = send_json
         self._task: asyncio.Task[None] | None = None
         self._active_stream_task: asyncio.Task[None] | None = None
         self._stopping = False
@@ -214,11 +217,7 @@ class PassiveBehaviorRuntime:
             30000,
         ) / 1000
 
-        turn_id: str | None = None
-        sequence = 0
         emitted_count = 0
-        output_failed = False
-        cancelled = False
         started = time.monotonic()
 
         def can_continue() -> bool:
@@ -232,11 +231,10 @@ class PassiveBehaviorRuntime:
                 return False
             if time.monotonic() - request_started_at > result_ttl_seconds:
                 return False
-            current_turn_id = getattr(self.session_state, "current_turn_id", None)
-            return current_turn_id is None if turn_id is None else current_turn_id == turn_id
+            return getattr(self.session_state, "current_turn_id", None) is None
 
         async def process_line(raw_line: str) -> bool:
-            nonlocal turn_id, sequence, emitted_count, output_failed
+            nonlocal emitted_count
             line = raw_line.strip()
             if not line:
                 return True
@@ -261,7 +259,7 @@ class PassiveBehaviorRuntime:
             decision = action.get("decision")
             if decision == "none" and set(action) == {"decision"}:
                 logger.debug("NeuroBrain passive behavior decision=none")
-                return True
+                return False
             if decision != "emit":
                 logger.warning(
                     "NeuroBrain passive action line rejected: reason=decision_invalid"
@@ -291,32 +289,27 @@ class PassiveBehaviorRuntime:
             if not can_continue():
                 return False
 
-            if turn_id is None:
-                turn_id = await self.turn_coordinator.begin_passive_output_turn()
-                if turn_id is None:
-                    return False
-            if not can_continue():
+            message_id = f"idle_action:{uuid4().hex}"
+            sent = await self._send_json(build_message_envelope(
+                "output.idle_motion",
+                source="adapter",
+                turn_id=None,
+                message_id=message_id,
+                payload={
+                    "motion": motion_payload,
+                    "expires_at_epoch_ms": int((time.time() + max(
+                        0.0, result_ttl_seconds - (time.monotonic() - request_started_at)
+                    )) * 1000),
+                },
+            ))
+            if not sent:
                 return False
-
-            message_id = f"passive_action:{uuid4().hex}"
-            try:
-                await self.turn_coordinator.emit_passive_motion_segment(
-                    turn_id=turn_id,
-                    message_id=message_id,
-                    sequence=sequence,
-                    motion_payload=motion_payload,
-                )
-            except Exception:
-                output_failed = True
-                raise
-            sequence += 1
             emitted_count += 1
             self._last_action_at = time.monotonic()
             logger.info(
-                "WIRING passive_behavior.action_streamed turn_id=%s sequence=%s "
+                "WIRING passive_behavior.action_streamed message_id=%s "
                 "tags=%s axes=%s latency_ms=%s",
-                turn_id,
-                sequence - 1,
+                message_id,
                 ",".join(motion_payload.get("intent_tags") or []),
                 ",".join(motion_payload.get("axis_levels", {}).keys()),
                 int((time.monotonic() - started) * 1000),
@@ -348,7 +341,6 @@ class PassiveBehaviorRuntime:
             self._consecutive_provider_failures = 0
             self._retry_not_before = 0.0
         except asyncio.CancelledError:
-            cancelled = True
             raise
         except asyncio.TimeoutError:
             self._schedule_retry()
@@ -378,27 +370,6 @@ class PassiveBehaviorRuntime:
         finally:
             if self._active_stream_task is stream_task:
                 self._active_stream_task = None
-            if turn_id and self.session_state.current_turn_id == turn_id:
-                try:
-                    if output_failed or cancelled or not emitted_count:
-                        await self.turn_coordinator.fail_proactive_output_turn(
-                            turn_id=turn_id,
-                            reason="passive_behavior_output_failed"
-                            if output_failed
-                            else "passive_behavior_stream_cancelled"
-                            if cancelled
-                            else "passive_behavior_no_output",
-                        )
-                    else:
-                        await self.turn_coordinator.close_turn_output_queue(
-                            turn_id=turn_id,
-                        )
-                except Exception:
-                    logger.debug(
-                        "NeuroBrain passive output cleanup skipped: turn_id=%s",
-                        turn_id,
-                        exc_info=True,
-                    )
 
     def _schedule_retry(self) -> None:
         self._consecutive_provider_failures += 1
@@ -495,9 +466,9 @@ def _normalize_motion_action(
         "intent_tags": action.get("intent_tags"),
         "axis_levels": action.get("axis_levels"),
     }
-    if "duration_hint_ms" in action:
-        contract_payload["duration_hint_ms"] = action["duration_hint_ms"]
+    contract_payload["duration_hint_ms"] = action.get("duration_hint_ms", 4000)
     normalized = normalize_motion_intent_v4_payload(contract_payload)
+    normalized["duration_hint_ms"] = max(3000, normalized["duration_hint_ms"])
     if not any(level != 0 for level in normalized.get("axis_levels", {}).values()):
         raise ValueError("motion_has_no_non_neutral_axis")
     validated, reason = validate_normalized_motion_intent_payload(

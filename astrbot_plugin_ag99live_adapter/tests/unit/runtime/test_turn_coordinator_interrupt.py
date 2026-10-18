@@ -276,10 +276,16 @@ def test_disconnect_reset_cancels_orphaned_motion_work(install_fake_astrbot) -> 
     asyncio.run(run_case())
 
 
-def test_vad_speech_start_interrupts_passive_turn_and_blocks_new_one(
+def test_vad_speech_start_cancels_idle_request_without_interrupting_turn(
     install_fake_astrbot,
+    monkeypatch,
 ) -> None:
     install_fake_astrbot()
+    components_module = types.ModuleType("astrbot.api.message_components")
+    components_module.Image = type("Image", (), {})
+    components_module.Plain = type("Plain", (), {})
+    components_module.Record = type("Record", (), {})
+    monkeypatch.setitem(sys.modules, "astrbot.api.message_components", components_module)
     from astrbot_plugin_ag99live_adapter.runtime.turn_coordinator import (
         TurnCoordinator,
     )
@@ -287,7 +293,7 @@ def test_vad_speech_start_interrupts_passive_turn_and_blocks_new_one(
     async def run_case() -> None:
         interrupted_turns: list[str] = []
         cancelled_passive_requests: list[bool] = []
-        session_state = types.SimpleNamespace(current_turn_id="passive:turn-1")
+        session_state = types.SimpleNamespace(current_turn_id="dialogue:turn-1")
         runtime = types.SimpleNamespace(
             session_state=session_state,
             _require_turn_id_value=TurnCoordinator._require_turn_id_value,
@@ -295,6 +301,7 @@ def test_vad_speech_start_interrupts_passive_turn_and_blocks_new_one(
             _events_by_turn_id={},
             _active_speech_capture_turns=set(),
             _passive_behavior_interrupt_handler=None,
+            _input_preparation=None,
         )
 
         async def interrupt_turn(turn_id: str) -> None:
@@ -312,13 +319,9 @@ def test_vad_speech_start_interrupts_passive_turn_and_blocks_new_one(
         runtime._passive_behavior_interrupt_handler = cancel_passive_request
         await TurnCoordinator._handle_vad_speech_started(runtime, "capture-1")
 
-        assert interrupted_turns == ["passive:turn-1"]
+        assert interrupted_turns == []
         assert cancelled_passive_requests == [True]
         assert runtime._active_speech_capture_turns == {"capture-1"}
-
-        runtime._turn_lock = asyncio.Lock()
-        runtime._begin_proactive_output_turn_locked = lambda _prefix: None
-        assert await TurnCoordinator.begin_passive_output_turn(runtime) is None
 
         await TurnCoordinator._handle_vad_speech_ended(runtime, "capture-1")
         assert not runtime._active_speech_capture_turns

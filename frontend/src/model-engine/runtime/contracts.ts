@@ -171,6 +171,8 @@ export interface MotionRuntimeStateController {
 }
 
 export interface ModelEngineDependencies extends MotionStartDependencies {
+  startIdlePlan?: (plan: MotionPlanPayload) => boolean;
+  stopIdlePlan?: () => void;
   stopPlan: (reason?: string) => void;
   startInteractionSway: (input: InteractionSwayInput) => boolean;
   canStartSpeechOnlyMotion: (

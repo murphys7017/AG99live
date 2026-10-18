@@ -77,6 +77,16 @@ python scripts/check_protocol_schema_manifest.py
 
 本次契约要求配套更新 Adapter 与桌面客户端；旧的空 payload 不再是有效的 `synth_finished`。`output.segment.v5` 保持不变。
 
+## 独立待机动作
+
+`output.idle_motion` 是轮次之外的可选输出，信封 `turn_id` 必须为 `null`。
+payload 仅包含 `motion`（已有 `engine.motion_intent.v4`）和
+`expires_at_epoch_ms`（绝对过期时间，毫秒）。不创建 Session、播放队列或
+合成/轮次结束信号；不发送播放确认。过期、重复、前台忙碌或 Profile 不匹配时直接丢弃。
+
+桌面只把它编译为参数混合器的低优先级待机层，不调用正式动作替换入口。
+权重缓慢进入、退出，当前对话、视线及口型优先。必须配套更新 Adapter 和桌面端。
+
 ## 代码位置
 
 - Schema 清单：`astrbot_plugin_ag99live_adapter/protocol/schema_manifest.json`

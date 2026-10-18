@@ -305,6 +305,8 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     }
   }
   const modelEngine = useModelEngine({
+    startIdlePlan: (plan) => window.getLAppAdapter?.()?.startIdleParameterPlan?.(plan) ?? false,
+    stopIdlePlan: () => window.getLAppAdapter?.()?.stopIdleParameterPlan?.(),
     getSelectedModel: () => selectedModel.value,
     getSettings: () => cloneModelEngineSettings(motionEngineSettings),
     playPlan: (plan, model, options) => motionPlayer.playPlan(plan, model, {
@@ -539,6 +541,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
   );
   adapter.setTurnLifecycleObserver((event) => {
     if (event.phase === "started") {
+      modelEngine.cancelIdleMotion();
       modelEngine.startThinkingSway(event.turnId);
       return;
     }
@@ -546,6 +549,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     modelEngine.cancelPreAction(event.turnId);
   });
   adapter.setPreActionObserver((event) => {
+    modelEngine.cancelIdleMotion();
     if (event.action === "ready") {
       const started = modelEngine.startPreAction(event.motion, event.turnId, event.requestId);
       console.info("[PreAction] execution admission.", { turnId: event.turnId, requestId: event.requestId, started });
@@ -553,11 +557,32 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       modelEngine.cancelPreAction(event.action === "input" ? null : event.turnId);
     }
   });
+  const idleMotionAllowed = computed(() => {
+    const s = adapter.state;
+    return s.status === "connected" && !s.isPlayingAudio
+      && !(s.micCapturing && !s.microphoneStandby) && !manualPreviewText.value
+      && (!s.currentTurnId || s.turnFinishedTurnId === s.currentTurnId)
+      && !sessionStore.getSessions().some((session) => !isTerminalPhase(session.phase));
+  });
+  adapter.setIdleMotionObserver((event) => {
+    if (!idleMotionAllowed.value) return;
+    try {
+      modelEngine.startIdleMotion(event.motion, event.expiresAt);
+    } catch (error) {
+      console.warn("[IdleMotion] optional playback failed.", error);
+    }
+  });
+  watch(idleMotionAllowed, (allowed) => {
+    if (!allowed) modelEngine.cancelIdleMotion();
+  }, { flush: "sync" });
   watch(() => {
     const model = selectedModel.value;
     const profile = model?.semantic_axis_profile;
     return [model?.model_path, profile?.profile_id, profile?.revision, profile?.source_hash].join(":");
-  }, () => modelEngine.cancelPreAction());
+  }, () => {
+    modelEngine.cancelIdleMotion();
+    modelEngine.cancelPreAction();
+  });
   const pushToTalk = usePushToTalkController(adapter);
   let snapshotPublisher: ReturnType<typeof createPetRuntimeSnapshotPublisher> | null = null;
   const bilibiliLive = useBilibiliLiveRuntime({

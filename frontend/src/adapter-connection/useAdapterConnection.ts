@@ -83,6 +83,7 @@ import {
 } from "./runtime/connectionRuntimeState.js";
 import { createAdapterConnectionState } from "./state/adapterConnectionState.js";
 import { createAdapterInboundRuntime } from "./inbound/adapterInboundRuntime.js";
+import type { IdleMotionEvent } from "./inbound/idleMotionProtocol.js";
 import type { PreActionEvent } from "./inbound/preActionProtocol.js";
 
 type SessionStore = ReturnType<typeof useTurnPlaybackSessionStore>;
@@ -96,6 +97,7 @@ export interface AdapterTurnLifecycleEvent {
 
 export interface AdapterConnectionInstance {
   setPreActionObserver: (observer: ((event: PreActionEvent) => void) | null) => void;
+  setIdleMotionObserver: (observer: ((event: IdleMotionEvent) => void) | null) => void;
   readonly state: DeepReadonly<ReturnType<typeof createAdapterConnectionState>>;
   readonly modelSync: ModelSyncInstance;
   initialize: () => Promise<void>;
@@ -199,6 +201,8 @@ export function createAdapterConnection(
   ) => void) | null = null;
   let turnLifecycleObserver: ((event: AdapterTurnLifecycleEvent) => void) | null = null;
   let preActionObserver: ((event: PreActionEvent) => void) | null = null;
+  let idleMotionObserver: ((event: IdleMotionEvent) => void) | null = null;
+  const receivedIdleMotionIds = new Set<string>();
   let preActionInputId: string | null = null;
   const preActionReceived = new Set<string>();
   let detachPttHookStatusListener: (() => void) | null = null;
@@ -408,6 +412,14 @@ export function createAdapterConnection(
   );
 
   const inboundRuntime = createAdapterInboundRuntime({
+    onIdleMotion: (event) => {
+      if (receivedIdleMotionIds.has(event.messageId)) return;
+      receivedIdleMotionIds.add(event.messageId);
+      if (receivedIdleMotionIds.size > 256) {
+        receivedIdleMotionIds.delete(receivedIdleMotionIds.values().next().value!);
+      }
+      idleMotionObserver?.(event);
+    },
     onPreAction: (event) => {
       if (event.action === "ready") {
         if (!preActionInputId || (event.turnId !== preActionInputId
@@ -1060,6 +1072,9 @@ export function createAdapterConnection(
     setTurnLifecycleObserver,
     setPreActionObserver: (observer: ((event: PreActionEvent) => void) | null) => {
       preActionObserver = observer;
+    },
+    setIdleMotionObserver: (observer: ((event: IdleMotionEvent) => void) | null) => {
+      idleMotionObserver = observer;
     },
     interruptCurrentTurn,
     sendSemanticAxisProfileSave,

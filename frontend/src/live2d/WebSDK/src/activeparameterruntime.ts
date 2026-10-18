@@ -37,11 +37,26 @@ export class ActiveParameterRuntime {
     this.speechSignals.getSpeechAudioGain(axisId);
   private interactionSway: ActiveInteractionSwayState | null = null;
   private interactionGaze: ActiveInteractionGazeState | null = null;
+  private idlePlan: ActiveDirectParameterFrameState | null = null;
+
+  public startIdlePlan(state: ActiveDirectParameterFrameState): boolean {
+    if (this.idlePlan) return false;
+    this.idlePlan = state;
+    return true;
+  }
+
+  public stopIdlePlan(): void {
+    if (this.idlePlan && this.idlePlan.releaseStartedAtMs === null) {
+      this.idlePlan.releaseStartedAtMs = this.idlePlan.presentationElapsedMs;
+    }
+  }
 
   public reset(): void {
     this.speechSignals.reset();
     this.interactionSway = null;
     this.interactionGaze = null;
+    this.idlePlan = null;
+    this.mixer.reset();
   }
 
   public startInteractionSway(state: ActiveInteractionSwayState): void {
@@ -115,12 +130,21 @@ export class ActiveParameterRuntime {
     if (this.interactionGaze) {
       this.interactionGaze.elapsedMs += Math.max(0, input.deltaTimeSeconds) * 1000;
     }
-    const execution = this.mixer.resolveActiveFrame({
+    let execution = this.mixer.resolveActiveFrame({
       ...input,
+      idlePlan: this.idlePlan,
       interactionSway: this.interactionSway,
       interactionGaze: this.interactionGaze,
       getSpeechAudioGain: this.getSpeechAudioGain,
     });
+    if (execution.ok === false && execution.owner === "idle_motion") {
+      console.warn("[IdleMotion] mixer source rejected.", execution.reason);
+      this.idlePlan = null;
+      execution = this.mixer.resolveActiveFrame({
+        ...input, deltaTimeSeconds: 0, idlePlan: null, interactionSway: this.interactionSway,
+        interactionGaze: this.interactionGaze, getSpeechAudioGain: this.getSpeechAudioGain,
+      });
+    }
     if (execution.ok === false) {
       return {
         failure: {
@@ -130,6 +154,7 @@ export class ActiveParameterRuntime {
         directPlanReleased: false,
       };
     }
+    if (execution.idlePlan.released) this.idlePlan = null;
 
     const planState = input.directPlan;
     const lipSyncDiagnosticSourceId = execution.directPlan.contributions.length === 0

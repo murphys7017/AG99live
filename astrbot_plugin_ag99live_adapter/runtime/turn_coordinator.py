@@ -62,7 +62,6 @@ from .image_diagnostics import (
 )
 from .motion_observation_recorder import MotionObservationRecorder
 from .output_segment_coordinator import OutputSegmentCoordinator
-from .output_segment import PASSIVE_BEHAVIOR_MOTION_SOURCE
 from .performance_curve_coordinator import PerformanceCurveCoordinator
 from .incremental_output import IncrementalOutputSession, SendPayload
 
@@ -452,16 +451,6 @@ class TurnCoordinator:
         async with self._turn_lock:
             return await self._begin_proactive_output_turn_locked("proactive")
 
-    async def begin_passive_output_turn(self) -> str | None:
-        """Start a passive playback Turn only while the OLV session is idle."""
-        async with self._turn_lock:
-            if (
-                self.session_state.current_turn_id is not None
-                or self._active_speech_capture_turns
-            ):
-                return None
-            return await self._begin_proactive_output_turn_locked("passive")
-
     @property
     def has_active_speech_input(self) -> bool:
         return bool(self._active_speech_capture_turns)
@@ -503,24 +492,6 @@ class TurnCoordinator:
         """Forward output closure to the segment owner."""
         await self.output_segments.close_turn_output_queue(
             turn_id=turn_id, failure_reason=failure_reason
-        )
-
-    async def emit_passive_motion_segment(
-        self,
-        *,
-        turn_id: str,
-        message_id: str,
-        sequence: int,
-        motion_payload: dict[str, Any],
-    ) -> None:
-        if self.session_state.current_turn_id != turn_id:
-            raise RuntimeError(f"passive_output_turn_interrupted:{turn_id}")
-        await self.output_segments.emit_motion_only(
-            turn_id=turn_id,
-            message_id=message_id,
-            sequence=sequence,
-            motion_payload=motion_payload,
-            source=PASSIVE_BEHAVIOR_MOTION_SOURCE,
         )
 
     async def finalize_output_segment(
@@ -1034,9 +1005,6 @@ class TurnCoordinator:
             await self._interrupt_passive_work()
 
     async def _interrupt_passive_work(self) -> None:
-        current_turn_id = getattr(self.session_state, "current_turn_id", None)
-        if isinstance(current_turn_id, str) and current_turn_id.startswith("passive:"):
-            await self._handle_interrupt_signal(current_turn_id)
         interrupt_handler = self._passive_behavior_interrupt_handler
         if callable(interrupt_handler):
             await interrupt_handler()

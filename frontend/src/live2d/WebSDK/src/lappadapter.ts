@@ -155,6 +155,13 @@ export class LAppAdapter {
   public startInteractionSway(input: InteractionSwayInput): boolean {
     return this.getModel()?.startInteractionSway(input) ?? false;
   }
+  public startIdleParameterPlan(plan: DirectParameterPlanInput): boolean {
+    return this.getModel()?.startIdleParameterPlan(plan) ?? false;
+  }
+
+  public stopIdleParameterPlan(): void {
+    this.getModel()?.stopIdleParameterPlan();
+  }
 
   public stopInteractionSway(): void {
     this.getModel()?.stopInteractionSway();

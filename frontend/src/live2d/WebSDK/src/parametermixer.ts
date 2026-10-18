@@ -10,13 +10,14 @@ import {
 } from "./parameterpresentation";
 
 export const PARAMETER_MIX_PRIORITY = {
+  idleMotion: 20,
   interactionSway: 50,
   interactionGaze: 60,
   directPlan: 100,
   lipSync: 200,
 } as const;
 
-export type ParameterContributionOwner = "interaction_sway" | "interaction_gaze" | "direct_plan" | "lip_sync";
+export type ParameterContributionOwner = "idle_motion" | "interaction_sway" | "interaction_gaze" | "direct_plan" | "lip_sync";
 export type ParameterFrameOwner = ParameterContributionOwner | "mixed";
 
 export interface DirectSemanticParameterBinding {
@@ -175,6 +176,7 @@ const EMPTY_PARAMETER_BASE_SNAPSHOTS: ReadonlyMap<number, ParameterBaseSnapshot>
   new Map();
 
 export interface ActiveParameterFrameInput {
+  idlePlan?: ActiveDirectParameterFrameState | null;
   model: CubismModel | null;
   directPlan: ActiveDirectParameterFrameState | null;
   deltaTimeSeconds: number;
@@ -192,6 +194,7 @@ export type ActiveParameterFrameExecution =
       ok: true;
       parameters: ResolvedParameterFrameEntry[];
       directPlan: DirectPlanContributionCollection;
+      idlePlan: DirectPlanContributionCollection;
       lipSyncContributionCount: number;
     }
   | {
@@ -205,6 +208,11 @@ export type ActiveParameterFrameExecution =
  * one frozen Cubism base snapshot, and the final pre-Physics parameter write.
  */
 export class ActiveParameterMixer {
+  private lastPresentations = new Map<number, {
+    node: ParameterPresentationNode; owner: ParameterContributionOwner;
+  }>();
+
+  public reset(): void { this.lastPresentations.clear(); }
   public resolveActiveFrame(
     input: ActiveParameterFrameInput,
   ): ActiveParameterFrameExecution {
@@ -218,16 +226,19 @@ export class ActiveParameterMixer {
       && input.lipSyncParameterIds.getSize() > 0;
     if (
       input.directPlan === null
+      && !input.idlePlan
       && input.interactionSway === null
       && input.interactionGaze === null
       && !hasLipSyncSource
     ) {
       // Most idle frames have no active parameter source. Avoid rebuilding the
       // contribution graph and base snapshots when there is nothing to write.
+      this.reset();
       return {
         ok: true,
         parameters: [],
         directPlan: EMPTY_DIRECT_PLAN_COLLECTION,
+        idlePlan: EMPTY_DIRECT_PLAN_COLLECTION,
         lipSyncContributionCount: 0,
       };
     }
@@ -240,6 +251,32 @@ export class ActiveParameterMixer {
     if (directPlan.failure) {
       return { ok: false, owner: "direct_plan", reason: directPlan.failure };
     }
+    const idlePlan = this.collectDirectPlanContributions(
+      input.idlePlan ?? null, () => 0, input.deltaTimeSeconds,
+    );
+    if (idlePlan.failure) {
+      return { ok: false, owner: "idle_motion", reason: idlePlan.failure };
+    }
+    const idleState = input.idlePlan;
+    if (idleState && idlePlan.elapsedMs !== null) {
+      const foregroundParameters = new Set(
+        directPlan.contributions.map((contribution) => contribution.parameterIndex),
+      );
+      const attackElapsed = idleState.releaseStartedAtMs === null
+        ? idlePlan.elapsedMs : Math.min(idlePlan.elapsedMs, idleState.releaseStartedAtMs);
+      const attack = smoothstep(Math.min(1, attackElapsed / Math.max(1, idleState.timing.blendInMs)));
+      // A foreground binding owns its parameter through its complete release;
+      // idle targets must not delay that plan's settled/terminal result.
+      idlePlan.contributions = idlePlan.contributions
+        .filter((c) => !foregroundParameters.has(c.parameterIndex))
+        .map((c) => ({
+        ...c, owner: "idle_motion", source: `idle_motion:${c.parameterIdRaw}`,
+        priority: PARAMETER_MIX_PRIORITY.idleMotion, weight: c.weight * attack,
+      }));
+      if (idleState.releaseStartedAtMs === null && idlePlan.nominalReleaseReached) {
+        idleState.releaseStartedAtMs = idlePlan.elapsedMs;
+      }
+    }
     const interactionSway = this.collectInteractionSwayContributions(input.interactionSway);
     const interactionGaze = this.collectInteractionGazeContributions(input.interactionGaze);
     const lipSyncContributions = this.collectLipSyncContributions(input, model);
@@ -248,6 +285,7 @@ export class ActiveParameterMixer {
     }
 
     const contributions = [
+      ...idlePlan.contributions,
       ...interactionSway.contributions,
       ...interactionGaze.contributions,
       ...directPlan.contributions,
@@ -268,6 +306,13 @@ export class ActiveParameterMixer {
     const directPlanExecution = {
       ...directPlan,
       released: directPlan.releaseEligible && resolution.directPresentationSettled,
+    };
+    const idlePlanExecution = {
+      ...idlePlan,
+      released: idlePlan.releaseEligible && (input.idlePlan?.semanticBindings.every((b) =>
+        (Math.abs(b.presentation.drivenOffset ?? 0) <= 0.001 && Math.abs(b.presentation.velocity) <= 0.001)
+        || contributions.some((c) => c.parameterIndex === b.parameterIndex && c.owner !== "idle_motion"),
+      ) ?? true),
     };
 
     if (
@@ -296,6 +341,7 @@ export class ActiveParameterMixer {
       ok: true,
       parameters: resolution.parameters,
       directPlan: directPlanExecution,
+      idlePlan: idlePlanExecution,
       lipSyncContributionCount: lipSyncContributions.length,
     };
   }
@@ -346,6 +392,7 @@ export class ActiveParameterMixer {
     }
 
     const parameters: ResolvedParameterFrameEntry[] = [];
+    const nextPresentations = new Map<number, { node: ParameterPresentationNode; owner: ParameterContributionOwner }>();
     let directPresentationSettled = true;
     const orderedGroups = [...grouped.entries()]
       .sort(([leftIndex], [rightIndex]) => leftIndex - rightIndex);
@@ -432,6 +479,15 @@ export class ActiveParameterMixer {
         : undefined;
       let presentedValue = directOnlyTargetValue;
       if (presentationContribution?.presentation) {
+        const node = presentationContribution.presentation.node;
+        const previous = this.lastPresentations.get(parameterIndex);
+        if (previous && previous.node !== node
+          && (previous.owner === "idle_motion" || presentationContribution.owner === "idle_motion")) {
+          node.drivenOffset = previous.node.drivenOffset;
+          node.velocity = previous.node.velocity;
+          node.lastElapsedMs = null;
+        }
+        nextPresentations.set(parameterIndex, { node, owner: presentationContribution.owner });
         const presentation = resolveParameterPresentationFrame(
           presentationContribution.presentation.node,
           directOnlyTargetValue,
@@ -461,6 +517,7 @@ export class ActiveParameterMixer {
       });
     }
 
+    this.lastPresentations = nextPresentations;
     return { ok: true, parameters, directPresentationSettled };
   }
 
@@ -764,7 +821,8 @@ function validateContribution(
 function isParameterContributionOwner(
   owner: unknown,
 ): owner is ParameterContributionOwner {
-  return owner === "interaction_sway"
+  return owner === "idle_motion"
+    || owner === "interaction_sway"
     || owner === "interaction_gaze"
     || owner === "direct_plan"
     || owner === "lip_sync";

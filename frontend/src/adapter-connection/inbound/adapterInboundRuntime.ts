@@ -7,6 +7,7 @@ import { dispatchInboundRuntimeEvent } from "./inboundRuntimeDispatcher.js";
 import { parseIncrementalOutputEvent } from "./incrementalOutputProtocol.js";
 import { createIncrementalOutputRuntime } from "./incrementalOutputRuntime.js";
 import { parsePreAction, type PreActionEvent } from "./preActionProtocol.js";
+import { parseIdleMotion, type IdleMotionEvent } from "./idleMotionProtocol.js";
 import type { PcmTimelineStream } from "../../playback-timeline/pcmTimelinePlayback.js";
 import {
   mapInboundEnvelopeToEvent,
@@ -28,6 +29,7 @@ import type { ModelSyncInstance } from "../model-sync/useModelSync.js";
 import type { useTurnPlaybackSessionStore } from "../../turn-playback/useTurnPlaybackSessionStore.js";
 
 export interface AdapterInboundRuntimeDeps {
+  onIdleMotion?: (event: IdleMotionEvent) => void;
   onPreAction: (event: PreActionEvent) => void;
   state: AdapterConnectionState;
   getSessionStore: () => ReturnType<typeof useTurnPlaybackSessionStore>;
@@ -125,6 +127,16 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
     }
 
     const envelope = parsed.envelope;
+    if (envelope.type === "output.idle_motion") {
+      if (deps.state.serverInfo === null) return;
+      try {
+        const event = parseIdleMotion(envelope, deps.normalizeMotionPayload);
+        if (Date.now() < event.expiresAt) deps.onIdleMotion?.(event);
+      } catch (error) {
+        console.warn("[IdleMotion] optional action rejected.", error);
+      }
+      return;
+    }
     if (envelope.type === "output.pre_action") {
       if (deps.state.serverInfo === null) return;
       try {

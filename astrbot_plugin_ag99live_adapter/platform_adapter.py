@@ -245,6 +245,7 @@ class OLVPetPlatformAdapter(Platform):
             session_state=self.session_state,
             turn_coordinator=self.turn_coordinator,
             is_desktop_connected=lambda: self.transport._ws_client is not None,
+            send_json=self.transport.send_json,
         )
         self.turn_coordinator.set_passive_behavior_interrupt_handler(
             self.passive_behavior_runtime.interrupt_active_request

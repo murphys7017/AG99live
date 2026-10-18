@@ -31,6 +31,21 @@ export function runTimingStage(
     speechActive: context.options.speechActive === true,
     performanceCurveHint: context.intent.performance_curve_hint ?? null,
   });
+  if (context.options.motionSource === "neurobrain_passive_stream") {
+    const durationMs = Math.max(3000, context.state.timing.resolvedDurationMs);
+    const transitionMs = Math.round(durationMs * 0.35);
+    context.state.timing = {
+      ...context.state.timing,
+      resolvedDurationMs: durationMs,
+      timing: {
+        ...context.state.timing.timing,
+        duration_ms: durationMs,
+        blend_in_ms: transitionMs,
+        hold_ms: durationMs - transitionMs * 2,
+        blend_out_ms: transitionMs,
+      },
+    };
+  }
   if (context.state.timing.performanceCurveFamily) {
     context.state.warnings.push(
       `performance_curve_applied:${context.state.timing.performanceCurveFamily}`,

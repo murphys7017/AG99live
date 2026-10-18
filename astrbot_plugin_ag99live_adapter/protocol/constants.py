@@ -70,6 +70,7 @@ INPUT_TYPES = {
 }
 
 OUTPUT_TYPES = {
+    "output.idle_motion",
     "output.pre_action",
     "output.segment_motion",
     TYPE_OUTPUT_SEGMENT,

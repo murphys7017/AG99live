@@ -72,6 +72,8 @@ declare global {
         plan: DirectParameterPlanInput,
         options?: DirectParameterPlanStartOptions,
       ) => boolean;
+      startIdleParameterPlan?: (plan: DirectParameterPlanInput) => boolean;
+      stopIdleParameterPlan?: () => void;
       stopDirectParameterPlan?: (reason?: string, status?: DirectParameterPlanTerminalStatus) => void;
       getDirectParameterPlanError?: () => string;
       startInteractionSway?: (input: InteractionSwayInput) => boolean;

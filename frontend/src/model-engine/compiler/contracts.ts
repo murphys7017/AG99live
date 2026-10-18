@@ -23,6 +23,7 @@ export interface CompileOptions {
   targetDurationMs?: number | null;
   speechActive?: boolean;
   source?: string;
+  motionSource?: string | null;
   settings?: Partial<ModelEngineSettings>;
   runtimeWarnings?: readonly string[];
   samplingIdentity?: {
