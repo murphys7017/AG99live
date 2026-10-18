@@ -1,3 +1,39 @@
+desktop_observation_large_change_repair_20261019:
+  class: bugfix
+  risk: high
+  status: reviewed_built_selectively_synced_pending_paired_reload
+  scope: >-
+    Bound shared screenshot operations rather than raw IPC promises. Timeouts
+    release the slot, pause automatic retries, allow explicit foreground recovery
+    and discard late image results. Native IPC itself is not forcibly cancelled.
+    Add a geometric changed-area filter (15 percent initial configurable gate,
+    24/255 RGB channel delta on 192x108 frames); run image work off the event loop.
+    Only large-area candidates reach the boolean-only vision model. Small
+    notifications/popups and minor avatar motion may be ignored; no pet masking
+    or Windows notification integration. Same-content resize is not a large change.
+    Timestamp capture requests using local monotonic time. Capture/send waits,
+    filtering, model and admission consume one lifetime; only remaining TTL is
+    submitted. Core separately pins Sensor expiry before permission waits.
+  validation: >-
+    Final call-path review found no additional blockers.
+    Renderer/WebSDK/Node typechecks and full Electron production build passed.
+    Changed Python Ruff/compilation passed. Controlled public capture-boundary
+    smoke reproduced hang recovery, paused automatic retries and late-result
+    rejection. Synthetic small/large changed areas were 0.59 and 63.02 percent;
+    the 15 percent gate rejects the small sample. Same visible content at
+    slightly different image sizes measured zero changed area. Actual native
+    Ollama with new large-change guidance returned true in 540ms warm on a
+    synthetic large change. Expired frame and delayed-admission deadline smoke
+    passed. These are boundary checks, not live desktop/Policy/TTS acceptance.
+  limitations: >-
+    Five related adapter files selectively synced after baseline verification;
+    whole-directory post-commit deployment bypassed to preserve unrelated work.
+    No process restart. Keep feature disabled until paired frontend/adapter/Core load. A complete AstrBot restart is
+    required for the private Sensor callback timing change; plugin-only hot
+    reload is insufficient. Real desktop threshold calibration/accuracy pending.
+    Already-admitted facts retain existing Core TTL semantics, not source retraction.
+    Preserve unrelated dirty state and deployed plugin edits.
+
 desktop_change_observation_20261019:
   class: feature
   risk: high

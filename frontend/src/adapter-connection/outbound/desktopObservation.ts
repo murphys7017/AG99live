@@ -3,7 +3,7 @@ import { captureRealtimeDesktopScreenshot } from "./desktopCapture.js";
 export async function captureObservationFrame(): Promise<
   { ok: true; data: string; mime_type: "image/jpeg" } | { ok: false; error: string }
 > {
-  const image = await captureRealtimeDesktopScreenshot();
+  const image = await captureRealtimeDesktopScreenshot("observation");
   if (!image) return { ok: false, error: "desktop_capture_unavailable" };
   const bitmap = await createImageBitmap(await (await fetch(image.data)).blob());
   try {

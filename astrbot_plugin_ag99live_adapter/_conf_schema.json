@@ -239,11 +239,18 @@
         "maximum": 60
       },
       "event_ttl_seconds": {
-        "description": "变化事件有效期（秒），过期后由本体丢弃。",
+        "description": "变化事件有效期（秒），从截图请求开始计算，包含截图、模型及提交等待；过期不触发。",
         "type": "int",
         "default": 60,
         "minimum": 5,
         "maximum": 300
+      },
+      "changed_area_threshold_percent": {
+        "description": "桌面大范围变化面积阈值（%）。默认15%；低于阈值不请求模型，允许忽略小通知、弹窗和桌宠轻微动作。",
+        "type": "float",
+        "default": 15.0,
+        "minimum": 1.0,
+        "maximum": 100.0
       }
     }
   }

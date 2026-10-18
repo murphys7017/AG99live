@@ -2,3 +2,4 @@ websockets
 pydub
 numpy
 silero-vad
+Pillow
