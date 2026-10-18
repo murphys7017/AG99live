@@ -130,6 +130,7 @@ export type DesktopSettingsAction = "list" | "set";
 
 /** Desktop-owned runtime choices sent on connection and whenever they change. */
 export interface SystemDesktopRuntimeSettingsPayload {
+  desktop_observation_schema?: "ag99live.desktop_observation.v1";
   audio_credit_schema: "olv.audio_credit.v1";
   persona_segment_stream_enabled: boolean;
 }
@@ -657,4 +658,9 @@ export interface SystemHistoryDataPayload {
 export interface SystemHistoryDeletedPayload {
   history_uid: string;
   success: boolean;
+}
+
+export interface SystemDesktopObservationRequestPayload {
+  schema_version: "ag99live.desktop_observation.v1";
+  request_id: string;
 }

@@ -23,6 +23,7 @@ import type {
   SystemModelSyncPayload,
   SystemMotionTuningSamplesStatePayload,
   SystemDesktopSettingsQueryPayload,
+  SystemDesktopObservationRequestPayload,
   SystemServerInfoPayload,
 } from "../../types/protocol.js";
 import type { InboundAdapterEvent, InboundEventMappingContext } from "./inboundEvents.js";
@@ -91,6 +92,7 @@ export interface InboundDispatchDeps {
   motionTuningAdapter: { applyMotionTuningSamplesState: (envelope: ProtocolEnvelope<SystemMotionTuningSamplesStatePayload>) => void } | null;
   acknowledgeMotionLabRawEventPersisted: (eventId: string) => void;
   // machine-local settings the control page drives through the adapter
+  handleDesktopObservationRequest: (envelope: ProtocolEnvelope<SystemDesktopObservationRequestPayload>) => void;
   handleDesktopSettingsQuery: (envelope: ProtocolEnvelope<SystemDesktopSettingsQueryPayload>) => void;
   // url rewriting
   rewriteModelSyncEnvelope: (envelope: ProtocolEnvelope<SystemModelSyncPayload>) => ProtocolEnvelope<SystemModelSyncPayload>;
@@ -146,6 +148,9 @@ export async function dispatchInboundEvent(
       } else {
         dispatchInboundFeatureEvent(deps, event);
       }
+      return;
+    case "desktop_observation_request":
+      deps.handleDesktopObservationRequest(event.envelope);
       return;
     case "desktop_settings_query":
       deps.handleDesktopSettingsQuery(event.envelope);

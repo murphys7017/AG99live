@@ -27,6 +27,7 @@ import type {
   SystemMotionTuningSamplesStatePayload,
   SystemMotionLabRawEventRecordedPayload,
   SystemDesktopSettingsQueryPayload,
+  SystemDesktopObservationRequestPayload,
   SystemSemanticAxisProfileSavedPayload,
   SystemSemanticAxisProfileSaveFailedPayload,
   SystemServerInfoPayload,
@@ -43,6 +44,7 @@ import {
   parseMotionTuningSamplesStatePayload,
   parseSystemMotionLabRawEventRecordedPayload,
   parseSystemDesktopSettingsQueryPayload,
+  parseSystemDesktopObservationRequestPayload,
   parseOutputSegmentPayload,
   parseOutputTranscriptionPayload,
   parseSemanticAxisProfileSaveFailedPayload,
@@ -129,6 +131,7 @@ type InboundPassthroughEvent =
     kind: "desktop_settings_query";
     envelope: ProtocolEnvelope<SystemDesktopSettingsQueryPayload>;
   }
+  | { kind: "desktop_observation_request"; envelope: ProtocolEnvelope<SystemDesktopObservationRequestPayload> }
   | { kind: "history_list"; envelope: ProtocolEnvelope<SystemHistoryListPayload> }
   | { kind: "history_created"; envelope: ProtocolEnvelope<SystemHistoryCreatedPayload> }
   | { kind: "history_data"; envelope: ProtocolEnvelope<SystemHistoryDataPayload> }
@@ -250,6 +253,11 @@ export function mapInboundEnvelopeToEvent(
         kind: "motion_lab_raw_event_recorded",
         envelope: withPayload(envelope, parsed.payload),
       };
+    }
+    case INBOUND_MESSAGE_TYPES.SYSTEM_DESKTOP_OBSERVATION_REQUEST: {
+      const parsed = parseSystemDesktopObservationRequestPayload(envelope);
+      if (!parsed.ok) return protocolPayloadError(envelope, parsed.error);
+      return { kind: "desktop_observation_request", envelope: withPayload(envelope, parsed.payload) };
     }
     case INBOUND_MESSAGE_TYPES.SYSTEM_DESKTOP_SETTINGS_QUERY: {
       const parsed = parseSystemDesktopSettingsQueryPayload(envelope);

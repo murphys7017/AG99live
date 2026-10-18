@@ -13,6 +13,7 @@ import type {
   SystemMotionTuningSamplesStatePayload,
   SystemMotionLabRawEventRecordedPayload,
   SystemDesktopSettingsQueryPayload,
+  SystemDesktopObservationRequestPayload,
   SystemServerInfoPayload,
 } from "../../types/protocol.js";
 import {
@@ -631,4 +632,20 @@ export function parseHistoryDeletedPayload(
       success: success.payload,
     },
   };
+}
+
+export function parseSystemDesktopObservationRequestPayload(
+  envelope: ProtocolEnvelope<unknown>,
+): PayloadParseResult<SystemDesktopObservationRequestPayload> {
+  const record = parseObjectPayload(envelope);
+  if (!record.ok) return record;
+  if (envelope.turn_id !== null || record.payload.schema_version !== "ag99live.desktop_observation.v1") {
+    return invalidPayload(envelope.type, "payload.schema_version", "observation v1 without turn");
+  }
+  const id = requiredString(envelope.type, record.payload, "request_id");
+  if (!id.ok) return id;
+  if (!id.payload.trim() || id.payload.length > 128) {
+    return invalidPayload(envelope.type, "payload.request_id", "1..128 characters");
+  }
+  return { ok: true, payload: { schema_version: "ag99live.desktop_observation.v1", request_id: id.payload } };
 }

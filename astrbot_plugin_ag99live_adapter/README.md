@@ -126,3 +126,14 @@ python -m pip install -r astrbot_plugin_ag99live_adapter/requirements.txt
 ### 普通模式的后到动作
 
 普通文件音频已就绪、同段动作仍在生成时，`output.segment.v6` 使用 `motion.state=pending` 先交付文本和完整音频；后续 `output.segment_motion` 使用相同 turn_id/message_id 交付一次终态动作槽位。它不复用 PCM 增量事件。后端在动作结果发送完成后才关闭 synth；断连/取消回收任务。桌面端将播放中的后到动作挂到原音频时间线，音频已经结束的过期动作显式失败，不重播声音。纯动作和音频合成失败继续按既有完整交付处理。两端须匹配 v6 manifest，旧桌面会在握手拒绝，升级后再重连。
+
+
+## 桌面变化观察
+
+在插件配置的“桌面变化观察”中启用 `desktop_observation.enabled`，并显式选择支持视觉输入的 `provider_id`（例如已部署的 Qwen3.5 0.8B）。默认关闭；间隔默认30秒，模型超时15秒，变化事件有效期60秒。
+
+需要配套重新构建并加载 AG99live 前端、加载新版适配器。仅 Electron 声明采集能力后才请求截图，首帧建立基准不触发事件。模型只判断有无变化，图片不落盘、不写入聊天历史；没有变化不提交事件。功能关闭、断连或插件卸载后停止比较。
+
+变化事实通过 AstrBot 已有 RuntimeObservationSensor 接入 Personal Policy；是否说话由本体决定，主动决策模型仍在本体设置（可选择 MiniMax 3.1），这里不另建主动会话系统，也不自动分析桌面内容。小模型可能误判，完全相同图片直接跳过；真实桌面识别与主动语音/Live2D效果须配套加载后验收。
+
+设计与验收见仓库 `docs/desktop-observation-plan.md`。

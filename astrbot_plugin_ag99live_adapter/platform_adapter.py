@@ -44,6 +44,7 @@ from .protocol.constants import (
     TYPE_SYSTEM_DESKTOP_SETTINGS_RESULT,
 )
 from .runtime.desktop_settings_broker import DesktopSettingsBroker
+from .runtime.desktop_observation import DesktopFrameBroker, SCHEMA
 from .runtime.session_state import SessionState
 from .runtime.turn_identity_map import TurnIdentityMap
 from .transport.websocket_server import WebSocketTransport
@@ -210,6 +211,7 @@ class OLVPetPlatformAdapter(Platform):
             send_motion_tuning_samples_state=self._send_motion_tuning_samples_state,
             on_disconnect=self._handle_transport_disconnect,
         )
+        self.desktop_observation = DesktopFrameBroker(self.transport.send_json)
         self.desktop_settings_broker = DesktopSettingsBroker(
             send_json=self.transport.send_json,
             is_connected=lambda: self.transport._ws_client is not None,
@@ -291,6 +293,7 @@ class OLVPetPlatformAdapter(Platform):
             logger.exception("AG99live adapter failed during run()")
             raise
         finally:
+            self.desktop_observation.disconnect()
             await self.passive_behavior_runtime.stop()
             unregister_control_platform(self.platform_id, self)
             self._event_loop = None
@@ -447,7 +450,11 @@ class OLVPetPlatformAdapter(Platform):
 
     async def _handle_frontend_system(self, message: Any) -> None:
         # TurnCoordinator hands over a parsed ProtocolMessage, not the raw dict.
+        if message.type == "system.desktop_observation_result":
+            self.desktop_observation.resolve(message.payload)
+            return
         if message.type == TYPE_SYSTEM_DESKTOP_RUNTIME_SETTINGS:
+            self.desktop_observation.supported = message.payload.get("desktop_observation_schema") == SCHEMA
             self.desktop_audio_credit_enabled = message.payload.get("audio_credit_schema") == "olv.audio_credit.v1"
             self.desktop_persona_segment_stream_enabled = message.payload[
                 "persona_segment_stream_enabled"
@@ -491,6 +498,7 @@ class OLVPetPlatformAdapter(Platform):
         各连接级所有者按固定顺序释放资源；任一所有者失败都必须留下诊断，但不能阻止
         后续所有者清理。全部尝试结束后再把失败汇总交回 transport。
         """
+        self.desktop_observation.disconnect()
         cleanup_failures: list[tuple[str, Exception]] = []
         self.desktop_persona_segment_stream_enabled = False
         self.desktop_audio_credit_enabled = False

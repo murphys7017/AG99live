@@ -1,4 +1,4 @@
-import type { ProtocolEnvelope, SystemModelSyncPayload, SystemDesktopSettingsQueryPayload } from "../../types/protocol.js";
+import type { ProtocolEnvelope, SystemModelSyncPayload, SystemDesktopSettingsQueryPayload, SystemDesktopObservationRequestPayload } from "../../types/protocol.js";
 import type { MotionPayloadNormalizer } from "../../types/motion.js";
 import type { AdapterConnectionState } from "../state/adapterConnectionState.js";
 import { parseInboundEnvelope } from "./inboundProtocol.js";
@@ -45,6 +45,7 @@ export interface AdapterInboundRuntimeDeps {
   stopAudioAndSettleTurn: (turnId: string | null, reason: string) => void;
   findActiveAudioSegment: () => { turnId: string | null; messageId: string } | null;
   acknowledgeMotionLabRawEventPersisted: (eventId: string) => void;
+  handleDesktopObservationRequest: (envelope: ProtocolEnvelope<SystemDesktopObservationRequestPayload>) => void;
   handleDesktopSettingsQuery: (envelope: ProtocolEnvelope<SystemDesktopSettingsQueryPayload>) => void;
   startMicrophoneCapture: (origin?: "manual" | "ptt" | "auto") => Promise<boolean>;
   normalizeMotionPayload: MotionPayloadNormalizer;
@@ -213,6 +214,7 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
         : null,
       acknowledgeMotionLabRawEventPersisted: (eventId) =>
         deps.acknowledgeMotionLabRawEventPersisted(eventId),
+      handleDesktopObservationRequest: (envelope) => deps.handleDesktopObservationRequest(envelope),
       handleDesktopSettingsQuery: (envelope) =>
         deps.handleDesktopSettingsQuery(envelope),
       rewriteModelSyncEnvelope: (env) => rewriteModelSyncEnvelope(env),

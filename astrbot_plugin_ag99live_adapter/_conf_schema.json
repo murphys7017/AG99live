@@ -208,5 +208,43 @@
         "default": 24
       }
     }
+  },
+  "desktop_observation": {
+    "description": "桌面变化观察（复用本体主动会话流程）",
+    "type": "object",
+    "items": {
+      "enabled": {
+        "description": "启用桌面变化观察。需要配套 AG99live 前端；只提交变化事实，不直接发言。",
+        "type": "bool",
+        "default": false
+      },
+      "provider_id": {
+        "description": "画面比较模型：需支持图片输入，建议选择已部署的 Qwen3.5 0.8B。只判断有无变化。",
+        "type": "string",
+        "default": "",
+        "_special": "select_provider"
+      },
+      "interval_seconds": {
+        "description": "截图比较间隔（秒），每个连接串行执行。",
+        "type": "int",
+        "default": 30,
+        "minimum": 10,
+        "maximum": 3600
+      },
+      "timeout_seconds": {
+        "description": "单次模型比较超时（秒）。失败不作为变化事件。",
+        "type": "int",
+        "default": 15,
+        "minimum": 1,
+        "maximum": 60
+      },
+      "event_ttl_seconds": {
+        "description": "变化事件有效期（秒），过期后由本体丢弃。",
+        "type": "int",
+        "default": 60,
+        "minimum": 5,
+        "maximum": 300
+      }
+    }
   }
 }

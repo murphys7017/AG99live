@@ -5,6 +5,8 @@ export interface DesktopCaptureImagePayload {
   captured_at: string;
 }
 
+let pendingNativeCapture: Promise<DesktopCaptureImagePayload | null> | null = null;
+
 export async function captureRealtimeDesktopScreenshot(): Promise<DesktopCaptureImagePayload | null> {
   const capture = window.ag99desktop?.captureDesktopScreenshot;
   if (!capture) {
@@ -15,8 +17,15 @@ export async function captureRealtimeDesktopScreenshot(): Promise<DesktopCapture
   try {
     // The input must settle even if Electron's capture request never returns.
     // This is shorter than Adapter's 15 s sealed-input assembly deadline.
+    if (pendingNativeCapture === null) {
+      const pending = capture();
+      pendingNativeCapture = pending;
+      void pending.finally(() => {
+        if (pendingNativeCapture === pending) pendingNativeCapture = null;
+      }).catch(() => undefined);
+    }
     const result = await Promise.race([
-      capture(),
+      pendingNativeCapture,
       new Promise<never>((_resolve, reject) => {
         timeout = setTimeout(() => reject(new Error("desktop_capture_timeout")), 10_000);
       }),

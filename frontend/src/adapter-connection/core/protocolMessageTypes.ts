@@ -1,4 +1,5 @@
 export const INBOUND_MESSAGE_TYPES = {
+  SYSTEM_DESKTOP_OBSERVATION_REQUEST: "system.desktop_observation_request",
   SYSTEM_SERVER_INFO: "system.server_info",
   SYSTEM_MODEL_SYNC: "system.model_sync",
   SYSTEM_SEMANTIC_AXIS_PROFILE_SAVED: "system.semantic_axis_profile_saved",
@@ -21,6 +22,7 @@ export const INBOUND_MESSAGE_TYPES = {
 } as const;
 
 export const OUTBOUND_MESSAGE_TYPES = {
+  SYSTEM_DESKTOP_OBSERVATION_RESULT: "system.desktop_observation_result",
   CONTROL_AUDIO_CREDIT: "control.audio_credit",
   INPUT_TEXT: "input.text",
   INPUT_AUDIO_STREAM_START: "input.audio_stream_start",

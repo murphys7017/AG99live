@@ -1,3 +1,4 @@
+import { captureObservationFrame } from "./outbound/desktopObservation.js";
 import { readonly } from "vue";
 import type {
   DeepReadonly,
@@ -182,6 +183,7 @@ export function createAdapterConnection(
   const state = createAdapterConnectionState();
 
   let socket: WebSocket | null = null;
+  let observationCaptureBusy = false;
   let initializePromise: Promise<void> | null = null;
   let connectAttemptSerial = 0;
   let disposed = false;
@@ -480,6 +482,25 @@ export function createAdapterConnection(
       }, envelope.turn_id);
     },
     notifyTurnLifecycle: (event) => turnLifecycleObserver?.(event),
+    handleDesktopObservationRequest: (envelope) => {
+      const connection = socket;
+      const respond = (result: { ok: false; error: string } | { ok: true; data: string; mime_type: "image/jpeg" }) => {
+        if (socket === connection && connection?.readyState === WebSocket.OPEN) {
+          outboundClient.send(OUTBOUND_MESSAGE_TYPES.SYSTEM_DESKTOP_OBSERVATION_RESULT, {
+            schema_version: "ag99live.desktop_observation.v1",
+            request_id: envelope.payload.request_id, ...result,
+          });
+        }
+      };
+      if (observationCaptureBusy) {
+        respond({ ok: false, error: "desktop_observation_busy" });
+        return;
+      }
+      observationCaptureBusy = true;
+      void captureObservationFrame().then(respond).catch(() => {
+        respond({ ok: false, error: "desktop_observation_capture_failed" });
+      }).finally(() => { observationCaptureBusy = false; });
+    },
     handleDesktopSettingsQuery: (envelope) => {
       void desktopSettingsResponder(envelope);
     },
@@ -524,6 +545,8 @@ export function createAdapterConnection(
 
   function syncDesktopRuntimeSettings(): void {
     const payload: SystemDesktopRuntimeSettingsPayload = {
+      ...(window.ag99desktop?.captureDesktopScreenshot
+        ? { desktop_observation_schema: "ag99live.desktop_observation.v1" as const } : {}),
       audio_credit_schema: "olv.audio_credit.v1",
       persona_segment_stream_enabled: state.personaSegmentStreamEnabled,
     };

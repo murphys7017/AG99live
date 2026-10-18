@@ -79,6 +79,8 @@ def parse_inbound_message(
     timestamp = _normalize_optional_string(raw.get("timestamp")) or _utc_now_iso()
 
     _validate_payload(message_type, payload)
+    if message_type == "system.desktop_observation_result" and turn_id is not None:
+        raise ProtocolError("desktop_observation_result_must_not_have_turn")
 
     normalized_raw = {
         "type": message_type,
@@ -156,6 +158,13 @@ def build_message_envelope(
 
 
 def _validate_payload(message_type: str, payload: dict[str, Any]) -> None:
+    if message_type == "system.desktop_observation_result":
+        from .desktop_observation import validate_frame_result
+        try:
+            validate_frame_result(payload)
+        except ValueError as exc:
+            raise ProtocolError(str(exc)) from exc
+        return
     if message_type == TYPE_CONTROL_AUDIO_CREDIT:
         if payload.get("schema_version") != "olv.audio_credit.v1":
             raise ProtocolError("control.audio_credit schema invalid")

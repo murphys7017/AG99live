@@ -1,3 +1,40 @@
+desktop_change_observation_20261019:
+  class: feature
+  risk: high
+  status: reviewed_built_selectively_synced_pending_paired_reload
+  scope: >-
+    AG99live owns opt-in desktop sampling and Qwen-compatible vision comparison.
+    Reuse Electron capture with shared single-flight IPC and resize to 768px.
+    Dedicated versioned request/result system messages have no chat Turn;
+    negotiate capability only on Electron. Plugin lifecycle owns workers and
+    existing RuntimeObservationSensor registration; submit changed boolean and
+    frame hash with TTL/coalescing. Core queue/gate/Policy/output are unchanged.
+    Configuration changes, disconnect generations and unload cancel workers;
+    stale results do not cross connections. No screenshots persisted or placed
+    into chat history. Default disabled; model selected explicitly.
+  plan: docs/desktop-observation-plan.md
+  validation: >-
+    Renderer typecheck, changed Python Ruff and compilation passed. Plugin
+    structural checker returned zero errors/warnings. Real Ollama advertises
+    vision capability. Actual native Provider compared synthetic visible change
+    and returned true in 362ms warm; direct identical-image model comparison
+    earlier incorrectly returned true after 12233ms. Exact identical inputs now
+    bypass inference. This guards the exact case but does not establish model
+    accuracy on real desktops. Wire acceptance/rejection smoke passed.
+    Capture wire roundtrip, disconnect cancellation and real Core sensor payload
+    validation passed. No changed-frame content or screenshots logged. Review
+    fixed pre-capture session configuration/disable snapshot and discards
+    pending comparisons when client identity changes. Existing public
+    session-disabled capability boundary passed (one case). Full Electron main,
+    preload and renderer production build passed. Eight reviewed adapter files
+    selectively synced with source-HEAD prechecks; no whole-folder overwrite.
+  limitations: >-
+    No process restart or real Electron desktop, MiniMax Policy,
+    microphone, TTS or Live2D acceptance. No automatic desktop-content analysis;
+    Policy receives change facts, not screenshot understanding. Need paired
+    frontend/adapter reload and explicit opt-in/model selection. Preserve all
+    unrelated working-tree changes and deployed plugin edits.
+
 json_record_recovery_and_stream_eof_20261018:
   class: bugfix
   risk: high
