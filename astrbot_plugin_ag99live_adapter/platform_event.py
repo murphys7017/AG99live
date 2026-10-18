@@ -1460,9 +1460,7 @@ class OLVPetPlatformEvent(AstrMessageEvent):
                     continue
                 annotations[capabilities.build_message_annotation_key(index)] = {
                     "semantic_type": "desktop_snapshot",
-                    "explanation": (
-                        "This image is an optional desktop snapshot captured around the same turn."
-                    ),
+                    "explanation": "这是用户当前桌面截图。",
                     "explanation_source": "platform",
                     "context_role": "supporting",
                 }

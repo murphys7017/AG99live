@@ -1,3 +1,20 @@
+olv_desktop_image_annotation_20261018:
+  class: bugfix
+  risk: medium
+  scope: >-
+    Label the screenshot attachment as the user's current desktop screenshot,
+    without OCR or analysis instructions. Sync only platform_event.py to the
+    AstrBot deployment after confirming the files match. Core separately keeps
+    OLV current-turn images without text-triggered ambient screenshot filtering.
+  validation: >-
+    Source and deployed platform_event.py are byte-identical. Python compile
+    and scoped Ruff checks passed.
+  evidence_gap: >-
+    Requires AstrBot/plugin reload and live image-request acceptance. No restart,
+    frontend rebuild or Provider API invocation. Commit-time whole-directory
+    deployment hook bypassed to preserve unrelated dirty deployed plugin files;
+    the changed source/deployment file is already byte-identical.
+
 pcm_chunk_resampling_noise_20261018:
   class: bugfix
   risk: medium
