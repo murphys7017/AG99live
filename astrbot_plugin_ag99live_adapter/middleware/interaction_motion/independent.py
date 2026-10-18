@@ -1397,9 +1397,15 @@ async def generate_independent_motion(
         except (TypeError, ValueError, json.JSONDecodeError) as exc:
             logger.warning(
                 "WIRING independent_motion.json_parse_failed turn_id=%s "
-                "error=%s",
+                "motion_request_id=%s error=%s parse_position=%s "
+                "response_len=%s response_preview=%r response_truncated=%s",
                 turn_id,
+                motion_request_id,
                 type(exc).__name__,
+                getattr(exc, "pos", None),
+                len(response_text),
+                response_text[:256],
+                len(response_text) > 256,
             )
             return finish(
                 motion_payload=None,
