@@ -225,6 +225,13 @@
         "minimum": 10,
         "maximum": 3600
       },
+      "conversation_quiet_seconds": {
+        "description": "对话后观察等待时间（秒）。用户输入、AI思考执行和播放期间暂停；回复播放结束后再等待，默认60秒。恢复时重新建立截图基准。设为0仅取消等待，仍不会在对话中采样。",
+        "type": "int",
+        "default": 60,
+        "minimum": 0,
+        "maximum": 3600
+      },
       "event_ttl_seconds": {
         "description": "变化事件有效期（秒），从截图请求开始计算，包含截图、数学比对及提交等待；过期不触发。",
         "type": "int",

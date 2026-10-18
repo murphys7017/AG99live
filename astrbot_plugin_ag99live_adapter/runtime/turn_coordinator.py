@@ -57,6 +57,7 @@ from ..protocol.constants import (
 from ..protocol.parser import parse_inbound_message
 from ..services.speech_service import SpeechIngressService
 from .pre_action import PreActionRuntime
+from .conversation_observation_window import ConversationObservationWindow
 from .image_diagnostics import (
     emit_image_input_diagnostics,
 )
@@ -171,6 +172,16 @@ class TurnCoordinator:
         ] = {}
         self._terminating_turn_ids: set[str] = set()
         self._active_vad_turn_by_capture_turn: dict[str, str] = {}
+        self._preparing_inputs: set[str] = set()
+        self.observation_window = ConversationObservationWindow(
+            lambda: bool(
+                self._active_speech_capture_turns
+                or self._events_by_turn_id
+                or self._turn_timings
+                or self._preparing_inputs
+                or self._turn_lock.locked()
+            )
+        )
         self.output_segments = OutputSegmentCoordinator(
             runtime_state=self.runtime_state,
             media_service=self.media_service,
@@ -228,13 +239,17 @@ class TurnCoordinator:
             if message.type == TYPE_INPUT_AUDIO_STREAM_START:
                 self._active_vad_turn_by_capture_turn.pop(turn_id, None)
                 self._active_speech_capture_turns.discard(turn_id)
+                is_ptt = message.payload.get("capture_mode", "ptt") == "ptt"
+                if is_ptt:
+                    self.observation_window.note_input()
+                    self._preparing_inputs.add(turn_id)
                 await self.speech_ingress.handle_audio_stream_start(message)
                 self._pre_action_input_id = turn_id
                 await self.pre_action.begin(turn_id)
-                if message.payload.get("capture_mode", "ptt") == "ptt":
+                if is_ptt:
+                    self._active_speech_capture_turns.add(turn_id)
                     if self._input_preparation is not None:
                         self._input_preparation.start(turn_id)
-                    self._active_speech_capture_turns.add(turn_id)
                     async with self._turn_lock:
                         await self._interrupt_passive_work()
                 return
@@ -259,6 +274,8 @@ class TurnCoordinator:
                 return
 
             if message.type == TYPE_INPUT_TEXT:
+                self.observation_window.note_input()
+                self._preparing_inputs.add(turn_id)
                 message_obj = self._convert_message(message.raw)
                 self._pre_action_input_id = turn_id
                 await self.pre_action.begin(turn_id)
@@ -283,8 +300,14 @@ class TurnCoordinator:
             )
             raise
 
+        finally:
+            if message.type in {TYPE_INPUT_TEXT, TYPE_INPUT_AUDIO_STREAM_START}:
+                self._preparing_inputs.discard(turn_id)
+
     def reset_turn_tracking(self) -> None:
         """Stop active AstrBot events before discarding connection-scoped state."""
+        self.observation_window.note_input()
+        self._preparing_inputs.clear()
         self.pre_action.reset()
         self._pre_action_input_id = None
         if self._input_preparation is not None:
@@ -601,6 +624,7 @@ class TurnCoordinator:
                 future.cancel()
 
     async def _commit_inbound_message(self, message_obj, *, turn_id: str | None = None) -> None:
+        self.observation_window.note_input()
         async with self._turn_lock:
             normalized_turn_id = self._require_turn_id_value(turn_id)
             await self._interrupt_passive_work()
@@ -848,6 +872,7 @@ class TurnCoordinator:
             raise
 
         self._turn_terminal_results[resolved_turn_id] = terminal_result
+        self.observation_window.note_output_finished()
         for waiter in self._turn_terminal_waiters.pop(resolved_turn_id, []):
             if not waiter.done():
                 waiter.set_result(terminal_result)
@@ -984,6 +1009,7 @@ class TurnCoordinator:
             excess -= 1
 
     async def _handle_vad_speech_started(self, capture_turn_id: str) -> None:
+        self.observation_window.note_input()
         normalized_capture_turn_id = self._require_turn_id_value(capture_turn_id)
         if self._input_preparation is not None:
             self._input_preparation.cancel()
@@ -1010,6 +1036,7 @@ class TurnCoordinator:
             await interrupt_handler()
 
     async def _handle_vad_speech_ended(self, capture_turn_id: str) -> None:
+        self.observation_window.note_input()
         normalized_capture_turn_id = self._require_turn_id_value(capture_turn_id)
         self._active_speech_capture_turns.discard(normalized_capture_turn_id)
 

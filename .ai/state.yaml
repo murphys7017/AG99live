@@ -1,3 +1,37 @@
+desktop_observation_conversation_priority_20261019:
+  class: feature
+  risk: high
+  status: reviewed_selectively_synced_pending_paired_restart_and_acceptance
+  scope: >-
+    Conversation takes priority over desktop sampling. Add configurable 60-second
+    quiet wait, default on startup/reconnect too. Text preparation, real PTT/VAD
+    speech, queued/active turns and unfinished playback pause screenshot requests.
+    Silent continuous microphone frames do not keep the window busy. Input resets
+    a source cancellation event; playback completion resets the quiet timer and
+    baseline revision without cancelling its own acknowledgement. Check before
+    capture and after capture/comparison; resumed sampling establishes a new frame.
+    Pass optional generic Sensor cancel_event through paired Core. Intake/Inbox
+    drops withdrawn facts; Policy/expression work cancels, action deadlines/signals
+    reach final output events. Preserve unrelated mixed-batch facts and avoid old
+    transient material watermarks settling them. No frontend or quiet-hour change.
+  validation: >-
+    Changed Python Ruff/compilation passed; plugin structure check zero errors or
+    warnings. Public window boundary checks busy/wait rejection, completion revision
+    and input invalidation. Public Sensor/Inbox boundary removes/rejects cancelled
+    desktop facts while retaining unrelated task material. Action/Event boundary
+    carries deadline/cancellation to stopped output. Review fixed PTT preparation
+    cleanup and mixed-batch restore/replacement material handling; two changed
+    modules pass Ruff/compilation. Public Inbox restore and ordinary coalescing
+    boundaries passed. Five related adapter targets
+    matched source HEAD baselines before selective sync and now byte-match source.
+  limitations: >-
+    No process restart; whole-directory commit hook bypassed to preserve work. Full AstrBot restart required for new Sensor
+    argument and paired cancellation handling; plugin hot reload is insufficient.
+    Real async Provider cancellation, VAD/normal dialogue, playback and policy
+    acceptance still require live logs. Already-sent client fragments cannot be
+    recalled; normal input interruption still owns existing playback. No new
+    frontend build required; preserve unrelated deployed and governance edits.
+
 desktop_observation_math_only_20261019:
   class: refactor
   risk: medium

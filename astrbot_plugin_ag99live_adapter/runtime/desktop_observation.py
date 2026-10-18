@@ -135,7 +135,10 @@ class DesktopObservationRuntime:
                 area_threshold = _bounded_number(
                     settings, "changed_area_threshold_percent", 15, 1, 100
                 )
-                signature = (interval, ttl, area_threshold)
+                quiet_seconds = _bounded_number(
+                    settings, "conversation_quiet_seconds", 60, 0, 3600
+                )
+                signature = (interval, ttl, area_threshold, quiet_seconds)
                 platforms = reconcile_control_platforms(self.context)
                 active = {
                     p.platform_id: p
@@ -183,15 +186,37 @@ class DesktopObservationRuntime:
             await asyncio.sleep(2)
 
     async def _observe(self, platform: Any, settings: tuple) -> None:
-        interval, ttl, area_threshold = settings
+        interval, ttl, area_threshold, quiet_seconds = settings
         broker = platform.desktop_observation
         generation = broker.generation
         client_uid = platform.client_uid
         previous: DesktopFrame | None = None
+        previous_token: asyncio.Event | None = None
+        previous_revision: int | None = None
+        window = platform.turn_coordinator.observation_window
+        paused = False
         while True:
             current: DesktopFrame | None = None
             phase = "admission"
             try:
+                token = window.snapshot(quiet_seconds)
+                revision = window.revision
+                if token is None:
+                    previous = None
+                    previous_token = None
+                    if not paused:
+                        logger.debug(
+                            "DIAG desktop_observation.paused platform=%s reason=conversation_or_quiet_wait wait_seconds=%.1f",
+                            platform.platform_id, quiet_seconds,
+                        )
+                    paused = True
+                    await asyncio.sleep(1)
+                    continue
+                paused = False
+                if previous_token is not token or previous_revision != revision:
+                    previous = None
+                previous_token = token
+                previous_revision = revision
                 # Check the same sensor's session admission before collecting images.
                 event = platform._build_platform_event(
                     platform.message_factory.build_message_object(
@@ -210,6 +235,9 @@ class DesktopObservationRuntime:
                 if not admitted:
                     previous = None
                 else:
+                    if not window.is_current(token, quiet_seconds, revision):
+                        previous = None
+                        continue
                     phase = "capture"
                     current = await broker.capture()
                     if (
@@ -217,6 +245,9 @@ class DesktopObservationRuntime:
                         or client_uid != platform.client_uid
                     ):
                         return
+                    if not window.is_current(token, quiet_seconds, revision):
+                        previous = None
+                        continue
                     remaining = current.remaining_seconds(ttl)
                     if remaining <= 0:
                         logger.debug(
@@ -225,6 +256,10 @@ class DesktopObservationRuntime:
                         )
                     elif previous is None:
                         previous = current
+                        logger.debug(
+                            "DIAG desktop_observation.baseline platform=%s",
+                            platform.platform_id,
+                        )
                     else:
                         phase = "compare"
                         started = perf_counter()
@@ -236,6 +271,9 @@ class DesktopObservationRuntime:
                             or client_uid != platform.client_uid
                         ):
                             return
+                        if not window.is_current(token, quiet_seconds, revision):
+                            previous = None
+                            continue
                         changed = area >= area_threshold
                         logger.debug(
                             "DIAG desktop_observation.area platform=%s method=block_ssim changed_percent=%.2f threshold_percent=%.2f changed=%s elapsed_ms=%.1f",
@@ -261,6 +299,7 @@ class DesktopObservationRuntime:
                                     },
                                     expires_in_seconds=remaining,
                                     coalesce_key="desktop",
+                                    cancel_event=token,
                                 )
                             logger.debug(
                                 "DIAG desktop_observation.changed platform=%s status=%s",
