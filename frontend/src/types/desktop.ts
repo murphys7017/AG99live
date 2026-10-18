@@ -400,6 +400,7 @@ export interface DesktopMicrophoneDevice {
 }
 
 export interface DesktopMicrophoneAudioChunk {
+  flushId?: string;
   audio?: number[];
   pcm16le?: ArrayBuffer;
   sampleRate: number;

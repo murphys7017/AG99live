@@ -21,6 +21,7 @@ export interface PushToTalkController {
 }
 
 export function usePushToTalkController(adapter: PushToTalkAdapterPort): PushToTalkController {
+  let pressedKeycode: number | null = null;
   function onPttKeyDown(event: KeyboardEvent): void {
     console.info("[PTT] keydown key=%s repeat=%s pttMode=%s", event.key, event.repeat, adapter.state.pttModeEnabled);
     if (!adapter.state.pttModeEnabled) {
@@ -60,12 +61,22 @@ export function usePushToTalkController(adapter: PushToTalkAdapterPort): PushToT
       reportPttEvent(payload, "ignored", "ptt mode disabled");
       return;
     }
+    if (pressedKeycode !== null || payload.keycode !== adapter.state.pttKeyBinding.uiohookKeycode) {
+      reportPttEvent(payload, "ignored", "duplicate or unmatched keydown");
+      return;
+    }
+    pressedKeycode = payload.keycode;
     console.info("[PTT] IPC keydown");
     reportPttEvent(payload, "received");
     void handlePttIpcCaptureStart(payload);
   }
 
   function onPttIpcKeyUp(payload: DesktopPttEventPayload): void {
+    if (pressedKeycode !== payload.keycode) {
+      reportPttEvent(payload, "ignored", "keyup without matching press");
+      return;
+    }
+    pressedKeycode = null;
     if (!adapter.state.pttModeEnabled) {
       reportPttEvent(payload, "ignored", "ptt mode disabled");
       return;
@@ -170,8 +181,13 @@ export function usePushToTalkController(adapter: PushToTalkAdapterPort): PushToT
       return;
     }
     installed = true;
-    installPttKeyboardListeners();
-    installPttIpcListeners();
+    // Electron owns global keyboard capture; browser-only clients use DOM.
+    // Feeding both into the same capture session creates duplicate press cycles.
+    if (window.ag99desktop?.onIpc) {
+      installPttIpcListeners();
+    } else {
+      installPttKeyboardListeners();
+    }
   }
 
   function dispose(): void {
@@ -179,6 +195,7 @@ export function usePushToTalkController(adapter: PushToTalkAdapterPort): PushToT
       return;
     }
     installed = false;
+    pressedKeycode = null;
     removePttKeyboardListeners();
     removePttIpcListeners();
   }

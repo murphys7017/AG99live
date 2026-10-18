@@ -52,6 +52,7 @@ export interface Ag99DesktopApi {
     deviceId: string | null,
   ) => Promise<{ ok: true; sessionId: string } | { ok: false; error: string }>;
   stopNativeMicrophoneCapture: (sessionId: string) => Promise<boolean>;
+  flushNativeMicrophoneCapture: (sessionId: string, flushId: string) => Promise<boolean>;
   toggleAuxWindow: (target: DesktopAuxWindowRole) => void;
   closeCurrentWindow: () => void;
   minimizeCurrentWindow: () => void;

@@ -1,3 +1,24 @@
+ptt_audio_tail_and_press_ownership_20261018:
+  class: bugfix
+  risk: high
+  scope: >-
+    Preserve PTT capture tails with a bounded ordered PCM flush marker from
+    AudioWorklet or native IPC before closing the input. Flush the native
+    partial PCM16 frame and retain microphone standby. Admit the next press
+    after the capture boundary closes without waiting for the previous image.
+    Use one keyboard source per host and reject unpaired global key events.
+    Pad streaming CTC finalization with one second of synthetic silence at
+    the input sample rate, outside the raw review audio. Make finish idempotent,
+    reject duplicate seals, and retain real PCM when sealed recognition fails.
+  validation: >-
+    Python syntax, scoped Ruff, renderer and Electron Node typechecks passed.
+    Full desktop build (main, preload, renderer) and WebSDK typecheck passed.
+    No automated tests requested or run.
+  evidence_gap: >-
+    No real microphone, native IPC, rapid key cycle, screenshot or ASR device
+    acceptance. No process restart. Main, preload and renderer must be rebuilt
+    and loaded together. Existing concurrent motion changes remain separate.
+
 ptt_screenshot_asr_overlap_and_preaction_draft_20261018:
   class: feature
   risk: high

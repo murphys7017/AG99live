@@ -1,6 +1,7 @@
 import type { DesktopHistoryEntry } from "../../types/desktop";
 import type { ProtocolEnvelope } from "../../types/protocol";
 import {
+  flushMicrophoneCaptureRuntime,
   isMicrophoneCaptureRuntimeActive,
   startMicrophoneCaptureRuntime,
   stopMicrophoneCaptureRuntime,
@@ -97,6 +98,10 @@ export function createAdapterMicrophoneRuntime(
   let pendingPttRelease = false;
   let lastStartFailureReason: MicrophoneStartFailureReason = "none";
   let audioStreamEndChain: Promise<void> = Promise.resolve();
+  let captureStopPromise: Promise<boolean> | null = null;
+  let captureBoundaryPromise: Promise<void> | null = null;
+  let pttPressed = false;
+  let pttPressGeneration = 0;
 
   function enqueueAudioStreamEnd(task: () => Promise<void>): Promise<void> {
     const scheduledTask = audioStreamEndChain.then(task);
@@ -254,6 +259,14 @@ export function createAdapterMicrophoneRuntime(
     origin: MicrophoneCaptureOrigin = "manual",
     retryAfterSupersededStart = false,
   ): Promise<boolean> {
+    const pressGeneration = pttPressGeneration;
+    if (captureBoundaryPromise) {
+      await captureBoundaryPromise;
+    }
+    if (origin === "ptt" && (!pttPressed || pressGeneration !== pttPressGeneration)) {
+      lastStartFailureReason = "ptt_release_before_ready";
+      return false;
+    }
     if (deps.state.micCapturing) {
       return true;
     }
@@ -284,6 +297,10 @@ export function createAdapterMicrophoneRuntime(
       pendingPttRelease = false;
       lastStartFailureReason = "ptt_release_before_ready";
       deps.state.statusMessage = "按键时间过短，未开始识别。";
+      return false;
+    }
+    if (origin === "ptt" && (!pttPressed || pressGeneration !== pttPressGeneration)) {
+      lastStartFailureReason = "ptt_release_before_ready";
       return false;
     }
 
@@ -355,9 +372,12 @@ export function createAdapterMicrophoneRuntime(
     if (!deps.state.pttModeEnabled) {
       return "ignored";
     }
-    if (deps.state.micCapturing) {
+    if (pttPressed) {
       return "started";
     }
+    pttPressed = true;
+    pttPressGeneration += 1;
+    pendingPttRelease = false;
     const started = await startMicrophoneCapture("ptt", true);
     if (started) {
       return "started";
@@ -366,6 +386,7 @@ export function createAdapterMicrophoneRuntime(
   }
 
   async function stopPttCapture(): Promise<PttCaptureCommandResult> {
+    pttPressed = false;
     if (!deps.state.pttModeEnabled) {
       return "ignored";
     }
@@ -389,11 +410,47 @@ export function createAdapterMicrophoneRuntime(
     return ensureMicrophoneRuntime(true);
   }
 
-  async function stopMicrophoneCapture(
+  function stopMicrophoneCapture(
     reason = "manual_stop",
     releaseRuntime = !deps.state.pttModeEnabled,
   ): Promise<boolean> {
+    pttPressed = false;
+    if (captureStopPromise) {
+      return captureStopPromise;
+    }
+    let resolveBoundary!: () => void;
+    const boundary = new Promise<void>((resolve) => { resolveBoundary = resolve; });
+    captureBoundaryPromise = boundary;
+    const closeBoundary = () => {
+      if (captureBoundaryPromise === boundary) {
+        captureBoundaryPromise = null;
+        captureStopPromise = null;
+      }
+      resolveBoundary();
+    };
+    const stopping = Promise.resolve().then(
+      () => finishMicrophoneCapture(reason, releaseRuntime, closeBoundary),
+    );
+    captureStopPromise = stopping;
+    void stopping.then(closeBoundary, closeBoundary);
+    return stopping;
+  }
+
+  async function finishMicrophoneCapture(
+    reason: string,
+    releaseRuntime: boolean,
+    closeBoundary: () => void,
+  ): Promise<boolean> {
     const captureEndedAtMonotonicMs = performance.now();
+    let captureStopError: unknown = null;
+    if (reason === "ptt_release" && deps.state.micCapturing) {
+      try {
+        await flushMicrophoneCaptureRuntime();
+      } catch (error) {
+        captureStopError = error;
+        audioSequenceBroken = true;
+      }
+    }
     deps.state.micCapturing = false;
     const inputTurnId = activeMicTurnId ?? createRootInputTurnId();
     const inputStreamId = activeMicStreamId;
@@ -422,7 +479,6 @@ export function createAdapterMicrophoneRuntime(
       : Promise.resolve(null);
     clearMicCaptureSession();
 
-    let captureStopError: unknown = null;
     if (releaseRuntime) {
       invalidateMicrophoneRuntimeStart();
       if (isMicrophoneCaptureRuntimeActive()) {
@@ -436,6 +492,8 @@ export function createAdapterMicrophoneRuntime(
         deps.state.microphoneStandby = false;
       }
     }
+    // The next press may capture while this input waits for its screenshot.
+    closeBoundary();
 
     let protocolError: unknown = null;
     reportLatencyStage("capture_runtime_stopped", inputTurnId, inputStreamId);
@@ -527,6 +585,10 @@ export function createAdapterMicrophoneRuntime(
       || reason === "connection_reset"
       || reason === "connection_closed"
     ) {
+      return true;
+    }
+
+    if (deps.state.micCapturing) {
       return true;
     }
 
@@ -629,6 +691,8 @@ export function createAdapterMicrophoneRuntime(
 
   function invalidateMicrophoneRuntimeStart(): void {
     micStartCancelled = true;
+    pttPressed = false;
+    pttPressGeneration += 1;
     microphoneRuntimeGeneration += 1;
   }
 
@@ -674,7 +738,6 @@ export function createAdapterMicrophoneRuntime(
     audioStreamStarted = false;
     micCaptureOrigin = null;
     audioSequenceBroken = false;
-    pendingPttRelease = false;
   }
 
   return {

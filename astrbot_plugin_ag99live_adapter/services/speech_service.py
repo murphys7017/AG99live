@@ -78,6 +78,8 @@ class StreamingASR:
         self.provider = provider
         self._stream = self._recognizer.create_stream()
         self._last_text = ""
+        self._finished = False
+        self._sample_rate = 16000
 
     def new_session(self) -> StreamingASR:
         session = object.__new__(StreamingASR)
@@ -86,25 +88,38 @@ class StreamingASR:
         session.model_path = self.model_path
         session.provider = self.provider
         session._last_text = ""
+        session._finished = False
+        session._sample_rate = 16000
         return session
 
     def reset(self) -> None:
         self._stream = self._recognizer.create_stream()
         self._last_text = ""
+        self._finished = False
+        self._sample_rate = 16000
 
     def accept(self, samples: Any, sample_rate: int) -> str:
         waveform = np.asarray(samples, dtype=np.float32).reshape(-1)
         if waveform.size == 0:
             return self._last_text
+        self._sample_rate = sample_rate
         self._stream.accept_waveform(sample_rate, waveform)
         self._decode_ready()
         self._last_text = self._recognizer.get_result(self._stream).strip()
         return self._last_text
 
     def finish(self) -> str:
+        if self._finished:
+            return self._last_text
+        # CTC readiness still requires a complete model chunk after input_finished.
+        # Flush the right context without adding synthetic audio to the review PCM.
+        self._stream.accept_waveform(
+            self._sample_rate, np.zeros(self._sample_rate, dtype=np.float32)
+        )
         self._stream.input_finished()
         self._decode_ready()
         self._last_text = self._recognizer.get_result(self._stream).strip()
+        self._finished = True
         return self._last_text
 
     def _decode_ready(self) -> None:
@@ -366,7 +381,7 @@ class SpeechIngressService:
         self._validate_capture_turn(stream, message.turn_id)
         if stream.capture_mode != "ptt" or message.payload.get("capture_mode") != "ptt":
             raise ValueError(f"audio_stream_seal_requires_ptt:{stream_id}")
-        if stream.transcription_task is not None:
+        if stream.sealed:
             raise ValueError(f"audio_stream_duplicate_seal:{stream_id}")
         if message.payload.get("last_seq") != stream.last_seq or not stream.chunks:
             raise ValueError(f"audio_stream_seal_sequence_mismatch:{stream_id}")
@@ -403,7 +418,8 @@ class SpeechIngressService:
                 stream.chunks.clear()
                 return
         if self.runtime_state.fast_asr_enabled:
-            stream.chunks.clear()
+            # Preserve real PCM on failure; end must report an ASR error, not
+            # mistake a nonempty recording for an empty microphone capture.
             return
         stream.chunks.clear()
         stream.transcription_task = asyncio.create_task(

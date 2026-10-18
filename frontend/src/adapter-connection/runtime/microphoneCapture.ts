@@ -32,6 +32,15 @@ const MIC_TARGET_SAMPLE_RATE = 16000;
 const MIC_AUDIO_WORKLET_PROCESSOR_NAME = "ag99live-microphone-capture";
 const MIC_AUDIO_WORKLET_SOURCE = `
 class Ag99liveMicrophoneCaptureProcessor extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this.port.onmessage = (event) => {
+      if (typeof event.data?.flushId === "string") {
+        this.port.postMessage({ flushId: event.data.flushId });
+      }
+    };
+  }
+
   process(inputs, outputs) {
     const input = inputs[0] && inputs[0][0];
     if (input && input.length > 0) {
@@ -53,6 +62,46 @@ registerProcessor("${MIC_AUDIO_WORKLET_PROCESSOR_NAME}", Ag99liveMicrophoneCaptu
 
 let microphoneRuntime: MicrophoneCaptureRuntime | NativeMicrophoneCaptureRuntime | null = null;
 let microphoneStopPromise: Promise<void> | null = null;
+const microphoneFlushWaiters = new Map<string, {
+  resolve: () => void;
+  reject: (error: Error) => void;
+}>();
+
+function acknowledgeMicrophoneFlush(flushId: string): void {
+  microphoneFlushWaiters.get(flushId)?.resolve();
+}
+
+export async function flushMicrophoneCaptureRuntime(): Promise<void> {
+  const runtime = microphoneRuntime;
+  if (!runtime) {
+    throw new Error("microphone_flush_without_runtime");
+  }
+  const flushId = crypto.randomUUID();
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const flushed = new Promise<void>((resolve, reject) => {
+    microphoneFlushWaiters.set(flushId, { resolve, reject });
+    timeout = setTimeout(() => reject(new Error("microphone_flush_timeout")), 1500);
+  });
+  try {
+    if (runtime.kind === "native") {
+      // Completion is the marker in the PCM channel, not the invoke response.
+      void window.ag99desktop!.flushNativeMicrophoneCapture(runtime.sessionId, flushId).then(
+        (accepted) => {
+          if (!accepted) microphoneFlushWaiters.get(flushId)?.reject(new Error("microphone_flush_rejected"));
+        },
+        (error: unknown) => microphoneFlushWaiters.get(flushId)?.reject(
+          error instanceof Error ? error : new Error(String(error)),
+        ),
+      );
+    } else {
+      runtime.processorNode.port.postMessage({ flushId });
+    }
+    await flushed;
+  } finally {
+    clearTimeout(timeout);
+    microphoneFlushWaiters.delete(flushId);
+  }
+}
 
 export function isMicrophoneCaptureRuntimeActive(): boolean {
   return Boolean(microphoneRuntime);
@@ -253,6 +302,10 @@ async function tryStartNativeMicrophoneCaptureRuntime(
     if (chunk.sessionId !== sessionId || microphoneRuntime?.kind !== "native") {
       return;
     }
+    if (chunk.flushId) {
+      acknowledgeMicrophoneFlush(chunk.flushId);
+      return;
+    }
     options.onChunk({
       audio: chunk.audio,
       pcm16le: chunk.pcm16le,
@@ -359,9 +412,11 @@ async function createMicrophoneProcessorNode(
         outputChannelCount: [1],
       },
     );
-    workletNode.port.onmessage = (event: MessageEvent<Float32Array>) => {
+    workletNode.port.onmessage = (event: MessageEvent<Float32Array | { flushId: string }>) => {
       if (event.data instanceof Float32Array) {
         onChunk(event.data);
+      } else if (typeof event.data?.flushId === "string") {
+        acknowledgeMicrophoneFlush(event.data.flushId);
       }
     };
     workletNode.port.onmessageerror = (event) => {

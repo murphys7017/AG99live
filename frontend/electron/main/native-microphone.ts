@@ -49,6 +49,28 @@ let activeCapture: NativeCaptureRuntime | null = null;
 const captureEvents = new EventEmitter();
 
 export function setupNativeMicrophoneIpc(): void {
+  ipcMain.handle("desktop:flush-native-microphone-capture", (event, sessionId: string, flushId: string) => {
+    const runtime = activeCapture;
+    if (!runtime || runtime.sessionId !== sessionId || runtime.ownerId !== event.sender.id
+      || runtime.stopping || !runtime.ready || !runtime.forwardingEnabled
+      || typeof flushId !== "string" || !flushId || flushId.length > 128) {
+      return false;
+    }
+    const size = runtime.pendingBytes.length - runtime.pendingBytes.length % 2;
+    if (size > 0) {
+      event.sender.send("desktop:native-microphone-chunk", {
+        sessionId, pcm16le: bufferToExactArrayBuffer(runtime.pendingBytes.subarray(0, size)),
+        sampleRate: FFMPEG_SAMPLE_RATE, channels: FFMPEG_CHANNELS,
+      });
+      runtime.pendingBytes = runtime.pendingBytes.subarray(size);
+    }
+    // The marker follows all preceding PCM on the same IPC channel.
+    event.sender.send("desktop:native-microphone-chunk", {
+      sessionId, flushId, pcm16le: new ArrayBuffer(0),
+      sampleRate: FFMPEG_SAMPLE_RATE, channels: FFMPEG_CHANNELS,
+    });
+    return true;
+  });
   ipcMain.handle("desktop:list-native-microphones", async () => {
     return listNativeMicrophones();
   });

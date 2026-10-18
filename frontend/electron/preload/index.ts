@@ -107,6 +107,9 @@ const api = {
   stopNativeMicrophoneCapture: (sessionId: string) => {
     return ipcRenderer.invoke("desktop:stop-native-microphone-capture", sessionId) as Promise<boolean>;
   },
+  flushNativeMicrophoneCapture: (sessionId: string, flushId: string) => {
+    return ipcRenderer.invoke("desktop:flush-native-microphone-capture", sessionId, flushId) as Promise<boolean>;
+  },
   toggleAuxWindow: (target: DesktopAuxWindowRole) => {
     ipcRenderer.send("desktop:toggle-aux-window", target);
   },
