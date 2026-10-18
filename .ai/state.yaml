@@ -1,3 +1,30 @@
+desktop_observation_math_only_20261019:
+  class: refactor
+  risk: medium
+  status: reviewed_selectively_synced_pending_runtime_load
+  scope: >-
+    User requested mathematical-only desktop change detection. Remove visual
+    provider calls, JSON parsing, provider selection and model timeout settings.
+    Estimate area using 144 RGB 12x12 blocks at 192x108; count a block only if
+    mean SSIM is below 0.85 and mean absolute RGB difference is at least 12/255.
+    Existing user area threshold, sampling interval and TTL remain in use.
+    Preserve admission, connection ownership, remaining lifetime and Core policy.
+    No frontend or Core behavior changes; quiet-hours settings belong to user.
+  validation: >-
+    Changed modules passed Ruff and compilation; plugin structure check found
+    zero errors/warnings. Public comparison boundary produced 1.39 percent for
+    a small patch, 68.75 for a large patch, zero for identical data and zero for
+    an unchanged-layout synthetic +32 brightness shift. No model in this path.
+    Four related adapter files matched source HEAD baseline before selective
+    synchronization, and now match working source bytes. Unrelated edits kept.
+    Whole-directory post-commit deployment bypassed to preserve deployed edits.
+  limitations: >-
+    Review found no additional blockers. No process restart or plugin reload. Actual desktop accuracy and
+    active Policy/TTS/Live2D playback not accepted yet. Block-area estimates
+    differ from old pixel-area percentages; calibrate on actual desktop.
+    Videos/scrolling can be genuine changes without requiring proactive speech.
+    Quiet hours previously held all three admitted events; user handles them.
+
 desktop_observation_large_change_repair_20261019:
   class: bugfix
   risk: high
