@@ -12,7 +12,6 @@ from uuid import uuid4
 
 from astrbot.api import logger
 
-from ...core_compatibility import get_motion_prompt_context_projection
 from ...motion.output_sanitizer import sanitize_assistant_output_text
 from ...motion.payload_validation import (
     normalize_motion_arguments_payload,
@@ -52,10 +51,6 @@ _MAX_RETAINED_RESULT_TURNS = 64
 _PARALLEL_MOTION_WAIT_SECONDS = 2.0
 _DEFAULT_SEGMENT_MAX_CONCURRENCY = 4
 _DEFAULT_SEGMENT_TIMEOUT_SECONDS = 5.0
-_MOTION_PERSONA_ITEM_MAX_CHARS = 240
-_MOTION_MEMORY_ITEM_MAX_CHARS = 240
-_MOTION_MEMORY_ITEM_LIMIT = 6
-_MOTION_MEMORY_SCAN_DEPTH = 4
 
 
 def resolve_stream_motion_budget_seconds(runtime_state: Any, *, event: Any = None) -> float:
@@ -229,7 +224,6 @@ class IndependentMotionContext:
     capability_payload: dict[str, Any]
     runtime_payload: dict[str, Any]
     reference_diagnostics: tuple[str, ...]
-    prompt_context: dict[str, Any]
 
 
 _NEUROBRAIN_EMOTION_KEYS = (
@@ -486,30 +480,34 @@ async def _prepare_independent_motion_context(
     event: Any,
     bundle: _MotionRuntimeBundle,
 ) -> IndependentMotionContext | None:
-    """Build one stable Motion projection for all segments in a turn."""
-    projected = get_motion_prompt_context_projection(event)
-    if projected is None:
-        logger.debug(
-            "WIRING independent_motion.shared_context_unavailable turn_id=%s "
-            "reason=canonical_motion_projection_missing",
-            event.get_extra("_turn_id") if callable(getattr(event, "get_extra", None)) else "<missing>",
-        )
-        return None
-    current_user_text, persona_summary, memories = _extract_motion_context_payload(
-        projected,
+    """Build one stable context snapshot for all segments in a turn."""
+    current_user_text = _dialogue_text(str(getattr(event, "message_str", "") or ""))
+
+    history_turns = max(
+        0,
+        min(
+            int(getattr(bundle.runtime_state, "independent_motion_history_turns", 6)),
+            20,
+        ),
     )
-    contexts: tuple[dict[str, str], ...] = ()
-    if not current_user_text:
-        current_user_text = _dialogue_text(str(getattr(event, "message_str", "") or ""))
+    contexts = tuple(
+        await _load_recent_history(
+            event,
+            bundle,
+            history_turns=history_turns,
+            current_user_text=current_user_text,
+        )
+    )
     logger.debug(
         "WIRING independent_motion.shared_context_prepared turn_id=%s "
-        "history_source=canonical_motion_projection message_count=%s image_count=%s",
+        "requested_turns=%s message_count=%s image_count=%s",
         (
             event.get_extra("_turn_id")
             if callable(getattr(event, "get_extra", None))
             else "<missing>"
         )
         or "<missing>",
+        history_turns,
         len(contexts),
         0,
     )
@@ -533,75 +531,12 @@ async def _prepare_independent_motion_context(
     runtime_payload["recent_executed_motions"] = _resolve_prompt_motion_history(bundle.turn_coordinator)[-3:]
     return IndependentMotionContext(
         current_user_text=current_user_text,
-        memories=memories,
+        memories=_motion_memory_summaries(event),
         contexts=contexts,
         capability_payload=capability_payload,
         runtime_payload=runtime_payload,
         reference_diagnostics=tuple(reference_diagnostics),
-        prompt_context={"persona": persona_summary},
     )
-
-
-def _extract_motion_context_payload(
-    pack: Any,
-) -> tuple[str, dict[str, Any], tuple[str, ...]]:
-    """Extract only compact model-facing fields from the Motion projection."""
-    slots = getattr(pack, "slots", {})
-    if not isinstance(slots, dict):
-        return "", {}, ()
-
-    def value(name: str) -> Any:
-        slot = slots.get(name)
-        return getattr(slot, "value", None) if slot is not None else None
-
-    current = value("input.text")
-    current_text = current.strip() if isinstance(current, str) else ""
-    persona = value("persona.summary")
-    persona_summary = _compact_motion_persona_summary(persona)
-    memories: list[str] = []
-    for slot_name in ("memory.topic_state", "memory.short_term", "memory.persona_state"):
-        _collect_motion_memory_text(value(slot_name), memories)
-    return current_text, persona_summary, tuple(memories[:_MOTION_MEMORY_ITEM_LIMIT])
-
-
-def _compact_motion_persona_summary(value: Any) -> dict[str, list[str]]:
-    if not isinstance(value, Mapping):
-        return {}
-    compact: dict[str, list[str]] = {}
-    for key in ("identity", "core_persona", "dialogue_style", "stable_rules"):
-        raw_items = value.get(key)
-        if not isinstance(raw_items, (list, tuple)):
-            continue
-        items = [
-            str(item).strip()[:_MOTION_PERSONA_ITEM_MAX_CHARS]
-            for item in raw_items
-            if str(item).strip()
-        ]
-        if items:
-            compact[key] = items[:6]
-    return compact
-
-
-def _collect_motion_memory_text(value: Any, output: list[str]) -> None:
-    def collect(node: Any, depth: int) -> None:
-        if len(output) >= _MOTION_MEMORY_ITEM_LIMIT or depth > _MOTION_MEMORY_SCAN_DEPTH:
-            return
-        if isinstance(node, Mapping):
-            for key, child in node.items():
-                if key in text_keys and isinstance(child, str):
-                    text = _dialogue_text(child)[:_MOTION_MEMORY_ITEM_MAX_CHARS]
-                    if text and text not in output:
-                        output.append(text)
-                elif isinstance(child, (Mapping, list, tuple)):
-                    collect(child, depth + 1)
-        elif isinstance(node, (list, tuple)):
-            for child in node:
-                collect(child, depth + 1)
-
-    if len(output) >= _MOTION_MEMORY_ITEM_LIMIT:
-        return
-    text_keys = {"current_topic", "topic_summary", "short_summary", "active_focus", "summary", "detail_summary"}
-    collect(value, 0)
 
 
 async def generate_independent_motion_for_segments(
@@ -1350,17 +1285,54 @@ async def generate_independent_motion(
             )
 
         if prepared_context is None:
-            prepared_context = await _prepare_independent_motion_context(event, bundle)
-        if prepared_context is None:
-            return finish(
-                motion_payload=None,
-                reason="motion_context_unavailable",
-                image_count=0,
+            history_turns = max(
+                0,
+                min(
+                    int(
+                        getattr(
+                            bundle.runtime_state,
+                            "independent_motion_history_turns",
+                            6,
+                        )
+                    ),
+                    20,
+                ),
             )
-        contexts = prepared_context.contexts
-        current_user_text = prepared_context.current_user_text
-        capability_payload = prepared_context.capability_payload
-        runtime_payload = prepared_context.runtime_payload
+            contexts = await _load_recent_history(
+                event,
+                bundle,
+                history_turns=history_turns,
+                current_user_text=current_user_text,
+            )
+            logger.debug(
+                "WIRING independent_motion.history_loaded turn_id=%s "
+                "requested_turns=%s message_count=%s",
+                turn_id,
+                history_turns,
+                len(contexts),
+            )
+            capability_payload = _build_motion_static_capability_payload(
+                bundle.runtime_state
+            )
+            runtime_payload, reference_diagnostics = _build_motion_runtime_payload(
+                event,
+                bundle.turn_coordinator,
+                bundle.runtime_state,
+                capability_payload=capability_payload,
+            )
+            _record_motion_prompt_reference_observation(
+                bundle=bundle,
+                event=event,
+                capability_payload=capability_payload,
+                runtime_payload=runtime_payload,
+                reference_diagnostics=reference_diagnostics,
+                source_route="independent_provider",
+            )
+            runtime_payload["recent_executed_motions"] = _resolve_prompt_motion_history(bundle.turn_coordinator)[-3:]
+        else:
+            contexts = prepared_context.contexts
+            capability_payload = prepared_context.capability_payload
+            runtime_payload = prepared_context.runtime_payload
 
         neurobrain_state = (
             _read_neurobrain_state(bundle) if segment_intent is not None else None
@@ -1369,8 +1341,7 @@ async def generate_independent_motion(
         prompt = _build_current_turn_prompt(
             current_user_text=current_user_text,
             assistant_text=assistant_text,
-            memories=prepared_context.memories,
-            persona_summary=prepared_context.prompt_context.get("persona", {}),
+            memories=prepared_context.memories if prepared_context is not None else _motion_memory_summaries(event),
             segment_intent=segment_intent,
             neurobrain_state=neurobrain_state,
         )
@@ -1487,7 +1458,7 @@ async def generate_independent_motion(
             logger.warning(
                 "WIRING independent_motion.normalization_failed turn_id=%s "
                 "reason=%s shape=%s root_axis_count=%s step_count=%s "
-                "step_axis_counts=%s unique_axis_count=%s step_duration_weights=%s",
+                "step_axis_counts=%s unique_axis_count=%s",
                 turn_id,
                 reason,
                 shape_summary["shape"],
@@ -1495,7 +1466,6 @@ async def generate_independent_motion(
                 shape_summary["step_count"],
                 ",".join(str(value) for value in shape_summary["step_axis_counts"]),
                 shape_summary["unique_axis_count"],
-                shape_summary["step_duration_weights"],
             )
             return finish(
                 motion_payload=None,
@@ -1540,6 +1510,95 @@ async def generate_independent_motion(
             reason="independent_provider_failed:" + type(exc).__name__,
             image_count=len(images),
         )
+
+
+async def _load_recent_history(
+    event: Any,
+    bundle: _MotionRuntimeBundle,
+    *,
+    history_turns: int,
+    current_user_text: str,
+) -> list[dict[str, str]]:
+    if history_turns <= 0:
+        return []
+    plugin_context = getattr(bundle.runtime_state, "plugin_context", None)
+    conversation_manager = getattr(plugin_context, "conversation_manager", None)
+    if conversation_manager is None:
+        return []
+    try:
+        origin = str(getattr(event, "unified_msg_origin", "") or "").strip()
+        if not origin:
+            return []
+        conversation_id = await conversation_manager.get_curr_conversation_id(origin)
+        if not conversation_id:
+            return []
+        conversation = await conversation_manager.get_conversation(origin, conversation_id)
+        history = getattr(conversation, "history", None)
+        if isinstance(history, str):
+            history = json.loads(history)
+        if isinstance(history, Mapping):
+            history = history.get("messages", history.get("history", []))
+        if not isinstance(history, list):
+            return []
+
+        rounds = _group_history_rounds(history)
+        if rounds and current_user_text:
+            current_round_user = rounds[-1][0]["content"]
+            if current_round_user == current_user_text:
+                rounds.pop()
+        contexts = [message for turn in rounds[-history_turns:] for message in turn]
+        logger.debug(
+            "WIRING independent_motion.history_resolved turn_id=%s "
+            "round_count=%s message_count=%s",
+            event.get_extra("_turn_id") or "<missing>",
+            min(len(rounds), history_turns),
+            len(contexts),
+        )
+        return contexts
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "WIRING independent_motion.history_unavailable turn_id=%s error=%s",
+            event.get_extra("_turn_id") or "<missing>",
+            exc,
+        )
+        return []
+
+
+def _group_history_rounds(history: list[Any]) -> list[list[dict[str, str]]]:
+    rounds: list[list[dict[str, str]]] = []
+    current_round: list[dict[str, str]] = []
+    for raw_message in history:
+        if not isinstance(raw_message, Mapping):
+            continue
+        role = str(raw_message.get("role") or "").strip().lower()
+        content = _history_message_text(raw_message.get("content"))
+        if role == "user":
+            if current_round:
+                rounds.append(current_round)
+            current_round = [{"role": role, "content": content}]
+        elif role == "assistant" and current_round:
+            current_round.append({"role": role, "content": content})
+    if current_round:
+        rounds.append(current_round)
+    return [turn for turn in rounds if any(message["content"] for message in turn)]
+
+
+def _history_message_text(value: Any) -> str:
+    if isinstance(value, str):
+        return _dialogue_text(value)
+    if isinstance(value, list):
+        fragments = []
+        for part in value:
+            if isinstance(part, str):
+                fragments.append(part)
+            elif isinstance(part, Mapping):
+                text = part.get("text")
+                if isinstance(text, str) and str(part.get("type") or "text") == "text":
+                    fragments.append(text)
+        return _dialogue_text("\n".join(fragment.strip() for fragment in fragments if fragment.strip()))
+    return ""
+
+
 def _dialogue_text(value: str) -> str:
     """Remove the platform's screenshot wrapper, retaining dialogue text."""
     value = re.sub(
@@ -1548,19 +1607,47 @@ def _dialogue_text(value: str) -> str:
     )
     return sanitize_assistant_output_text(value).strip()
 
+
+def _motion_memory_summaries(event: Any) -> tuple[str, ...]:
+    """Reuse exposed memory from this turn, without another retrieval."""
+    state = getattr(event, "_interaction_turn_state", None)
+    material = getattr(state, "context_material", None)
+    pack = getattr(material, "prompt_context_pack", None)
+    summaries: list[str] = []
+    text_keys = {"current_topic", "topic_summary", "short_summary", "active_focus", "summary", "detail_summary"}
+
+    def collect(value: Any, depth: int = 0) -> None:
+        if depth > 6 or len(summaries) >= 6:
+            return
+        if isinstance(value, Mapping):
+            for key, child in value.items():
+                if key in text_keys and isinstance(child, str):
+                    text = _dialogue_text(child)[:240]
+                    if text and text not in summaries and len(summaries) < 6:
+                        summaries.append(text)
+                elif isinstance(child, (Mapping, list, tuple)):
+                    collect(child, depth + 1)
+        elif isinstance(value, (list, tuple)):
+            for child in value:
+                collect(child, depth + 1)
+
+    for slot in getattr(pack, "slots", {}).values():
+        if slot.name.startswith("memory.") and slot.llm_exposure == "allowed":
+            collect(slot.value)
+    return tuple(summaries)
+
+
 def _build_current_turn_prompt(
     *,
     current_user_text: str,
     assistant_text: str,
     memories: tuple[str, ...] = (),
-    persona_summary: Mapping[str, Any] | None = None,
     segment_intent: Mapping[str, Any] | None = None,
     neurobrain_state: Mapping[str, Any] | None = None,
 ) -> str:
     intent = segment_intent or {}
     payload: dict[str, Any] = {
         "user": current_user_text,
-        "persona": dict(persona_summary) if isinstance(persona_summary, Mapping) else {},
         "memory": memories,
         "segment": {
             "speech": assistant_text,
@@ -1615,25 +1702,6 @@ def _build_independent_system_prompt(
             levels = list(raw_levels) if isinstance(raw_levels, (list, tuple)) else []
             level = 0 if 0 in levels else levels[0]
             contract["axis_levels"] = {str(first_axis["id"]): level}
-    sequence_example = ""
-    for axis in capability.get("axes", []):
-        if not isinstance(axis, Mapping) or not axis.get("id"):
-            continue
-        levels = [level for level in axis.get("available_levels", []) if type(level) is int]
-        if len(levels) < 2:
-            continue
-        sequence = {
-            "intent_tags": ["动作衔接"],
-            "motion_steps": [
-                {"axis_levels": {str(axis["id"]): levels[0]}, "duration_weight": 1},
-                {"axis_levels": {str(axis["id"]): levels[-1]}, "duration_weight": 2},
-            ],
-        }
-        sequence_example = (
-            "\n动作序列格式示例（方向和等级按当前语义选择，不照搬示例动作）："
-            + json.dumps(sequence, ensure_ascii=False, separators=(",", ":"))
-        )
-        break
     return (
         "你负责为 AG99live 的 Live2D 角色生成动作参数。"
         "根据纯文本对话、简短记忆和当前 segment 的 speech、actions、tendency，"
@@ -1652,11 +1720,8 @@ def _build_independent_system_prompt(
         "参考示例的 output 就是输出格式；最近执行动作只用于衔接和避免机械重复，勿照搬。"
         "只输出一个 JSON 对象，不要 Markdown、解释文字、工具调用或额外字段。"
         "必需字段 intent_tags 是 1 到 6 个简短关键词。执行形状必须且只能选择一种："
-        "axis_levels（单个姿态）、motion_steps（2 到 4 个动作步骤，每步必须包含 axis_levels 和 duration_weight），"
-        "或 motion_resource_id（完整动作资源）。"
-        "duration_weight 是相对时长权重，必须是 JSON 整数 1、2 或 3；"
-        "不能省略，不能使用小数、字符串、毫秒或归一化比例。"
-        "axis_levels 的值必须是能力数据里对应轴可用的等级。"
+        "axis_levels（单个姿态）、motion_steps（2 到 4 个动作步骤，每步必须包含 axis_levels 和 1 到 3 的 duration_weight），"
+        "或 motion_resource_id（完整动作资源）。axis_levels 的值必须是能力数据里对应轴可用的等级。"
         "动作序列采用稀疏语义：每一步只写新开始控制或需要改变的轴，后续步骤可以新增或省略轴；"
         "不设整段动作的固定轴数量上限，但每个轴 ID 和等级都必须来自能力数据。"
         "可选字段只有 duration_hint_ms、expression_resource_id、motion_resource_id；"
@@ -1664,8 +1729,7 @@ def _build_independent_system_prompt(
         "expression_resource_id 不得和 motion_resource_id 同时使用。"
         "不要输出 profile_id、profile_revision、model_id、schema_version，这些由程序补入。"
         f"JSON 形状示例：{json.dumps(contract, ensure_ascii=False, separators=(',', ':'))}\n\n"
-        + sequence_example + "\n\n"
-        + "Live2D 能力：\n"
+        "Live2D 能力：\n"
         f"{json.dumps(capability, ensure_ascii=False, separators=(',', ':'))}\n\n"
         "精简参考（所有 output 使用同一输出契约）：\n"
         f"{json.dumps(guidance, ensure_ascii=False, separators=(',', ':'))}"
@@ -1774,19 +1838,6 @@ def _motion_output_shape_summary(value: Mapping[str, Any]) -> dict[str, Any]:
         "step_count": len(raw_steps) if isinstance(raw_steps, list) else 0,
         "step_axis_counts": step_axis_counts,
         "unique_axis_count": len(unique_axis_ids),
-        "step_duration_weights": [
-            {
-                "index": index,
-                "type": type(step.get("duration_weight")).__name__,
-                "value": (
-                    repr(step.get("duration_weight"))[:48]
-                    if isinstance(step.get("duration_weight"), (int, float, str, bool))
-                    else None
-                ),
-            }
-            for index, step in enumerate(raw_steps[:4])
-            if isinstance(step, Mapping)
-        ] if isinstance(raw_steps, list) else [],
     }
 
 

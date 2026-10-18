@@ -180,39 +180,11 @@ def get_prompt_annotation_capabilities() -> PromptAnnotationCapabilities:
     )
 
 
-def get_motion_prompt_context_projection(event: Any) -> Any | None:
-    """Return AstrBot's canonical compact context for Live2D motion.
-
-    Motion is supplementary output, so an older Core that does not expose the
-    target/view contract simply makes the motion contributor unavailable. It
-    must not reconstruct conversation history through a second data path.
-    """
-
-    turn_state = getattr(event, "_interaction_turn_state", None)
-    material = getattr(turn_state, "context_material", None)
-    pack = getattr(material, "prompt_context_pack", None)
-    if pack is None:
-        return None
-    try:
-        from astrbot.core.prompt import (
-            PromptContextView,
-            PromptTarget,
-            project_context_pack,
-            project_prompt_context_view,
-        )
-
-        view_pack = project_prompt_context_view(pack, PromptContextView.MOTION)
-        return project_context_pack(view_pack, PromptTarget.MOTION)
-    except (AttributeError, ImportError, ModuleNotFoundError, ValueError):
-        return None
-
-
 __all__ = [
     "InteractionCapabilities",
     "PromptAnnotationCapabilities",
     "get_interaction_capabilities",
     "get_prompt_annotation_capabilities",
-    "get_motion_prompt_context_projection",
     "supports_llm_response_hook",
     "supports_interaction_contributors",
 ]
