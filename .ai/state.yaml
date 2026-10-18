@@ -10,6 +10,10 @@ ptt_audio_tail_and_press_ownership_20261018:
     Pad streaming CTC finalization with one second of synthetic silence at
     the input sample rate, outside the raw review audio. Make finish idempotent,
     reject duplicate seals, and retain real PCM when sealed recognition fails.
+    Follow-up review upgrades an in-flight PTT stop when device change or
+    disposal requests hardware release. Keyboard admission follows actual
+    global-hook availability, preserves foreground keys when unavailable,
+    releases a held capture on source change, and ignores stale status reads.
   validation: >-
     Python syntax, scoped Ruff, renderer and Electron Node typechecks passed.
     Full desktop build (main, preload, renderer) and WebSDK typecheck passed.

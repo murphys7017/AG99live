@@ -99,6 +99,7 @@ export function createAdapterMicrophoneRuntime(
   let lastStartFailureReason: MicrophoneStartFailureReason = "none";
   let audioStreamEndChain: Promise<void> = Promise.resolve();
   let captureStopPromise: Promise<boolean> | null = null;
+  let captureStopRequest: { releaseRuntime: boolean } | null = null;
   let captureBoundaryPromise: Promise<void> | null = null;
   let pttPressed = false;
   let pttPressGeneration = 0;
@@ -416,8 +417,13 @@ export function createAdapterMicrophoneRuntime(
   ): Promise<boolean> {
     pttPressed = false;
     if (captureStopPromise) {
+      if (releaseRuntime && captureStopRequest) {
+        captureStopRequest.releaseRuntime = true;
+      }
       return captureStopPromise;
     }
+    const request = { releaseRuntime };
+    captureStopRequest = request;
     let resolveBoundary!: () => void;
     const boundary = new Promise<void>((resolve) => { resolveBoundary = resolve; });
     captureBoundaryPromise = boundary;
@@ -425,11 +431,12 @@ export function createAdapterMicrophoneRuntime(
       if (captureBoundaryPromise === boundary) {
         captureBoundaryPromise = null;
         captureStopPromise = null;
+        captureStopRequest = null;
       }
       resolveBoundary();
     };
     const stopping = Promise.resolve().then(
-      () => finishMicrophoneCapture(reason, releaseRuntime, closeBoundary),
+      () => finishMicrophoneCapture(reason, request, closeBoundary),
     );
     captureStopPromise = stopping;
     void stopping.then(closeBoundary, closeBoundary);
@@ -438,7 +445,7 @@ export function createAdapterMicrophoneRuntime(
 
   async function finishMicrophoneCapture(
     reason: string,
-    releaseRuntime: boolean,
+    request: { releaseRuntime: boolean },
     closeBoundary: () => void,
   ): Promise<boolean> {
     const captureEndedAtMonotonicMs = performance.now();
@@ -479,7 +486,7 @@ export function createAdapterMicrophoneRuntime(
       : Promise.resolve(null);
     clearMicCaptureSession();
 
-    if (releaseRuntime) {
+    if (request.releaseRuntime) {
       invalidateMicrophoneRuntimeStart();
       if (isMicrophoneCaptureRuntimeActive()) {
         try {
@@ -592,7 +599,7 @@ export function createAdapterMicrophoneRuntime(
       return true;
     }
 
-    deps.state.statusMessage = !releaseRuntime && deps.state.pttModeEnabled
+    deps.state.statusMessage = !request.releaseRuntime && deps.state.pttModeEnabled
       ? "按键说话已就绪，麦克风保持开启。"
       : reason === "manual_stop"
         ? "麦克风已关闭。"

@@ -3,6 +3,7 @@ import type {
   DesktopPttEventKind,
   DesktopPttEventPayload,
   DesktopPttKeyBinding,
+  DesktopPttHookStatus,
 } from "../types/desktop";
 import { matchesPttKeyBinding } from "../adapter-connection/core/pttKeyBinding.js";
 
@@ -22,27 +23,31 @@ export interface PushToTalkController {
 
 export function usePushToTalkController(adapter: PushToTalkAdapterPort): PushToTalkController {
   let pressedKeycode: number | null = null;
+  let domPressedCode: string | null = null;
+  let useGlobalPtt = false;
+  let hookStatusGeneration = 0;
   function onPttKeyDown(event: KeyboardEvent): void {
+    if (useGlobalPtt) return;
     console.info("[PTT] keydown key=%s repeat=%s pttMode=%s", event.key, event.repeat, adapter.state.pttModeEnabled);
     if (!adapter.state.pttModeEnabled) {
       return;
     }
-    if (matchesPttKeyBinding(event, adapter.state.pttKeyBinding) && !event.repeat) {
+    if (matchesPttKeyBinding(event, adapter.state.pttKeyBinding) && !event.repeat && domPressedCode === null) {
+      domPressedCode = event.code;
       console.info("[PTT] starting mic capture");
       void adapter.startPttCapture();
     }
   }
 
   function onPttKeyUp(event: KeyboardEvent): void {
+    if (useGlobalPtt || domPressedCode !== event.code) return;
+    domPressedCode = null;
     console.info("[PTT] keyup key=%s pttMode=%s", event.key, adapter.state.pttModeEnabled);
-    const matchesBinding = matchesPttKeyBinding(event, adapter.state.pttKeyBinding);
     if (!adapter.state.pttModeEnabled) {
       return;
     }
-    if (matchesBinding) {
-      console.info("[PTT] stopping mic capture");
-      void adapter.stopPttCapture();
-    }
+    console.info("[PTT] stopping mic capture");
+    void adapter.stopPttCapture();
   }
 
   function installPttKeyboardListeners(): void {
@@ -57,6 +62,10 @@ export function usePushToTalkController(adapter: PushToTalkAdapterPort): PushToT
   }
 
   function onPttIpcKeyDown(payload: DesktopPttEventPayload): void {
+    if (!useGlobalPtt) {
+      reportPttEvent(payload, "ignored", "foreground keyboard owns PTT");
+      return;
+    }
     if (!adapter.state.pttModeEnabled) {
       reportPttEvent(payload, "ignored", "ptt mode disabled");
       return;
@@ -72,6 +81,10 @@ export function usePushToTalkController(adapter: PushToTalkAdapterPort): PushToT
   }
 
   function onPttIpcKeyUp(payload: DesktopPttEventPayload): void {
+    if (!useGlobalPtt) {
+      reportPttEvent(payload, "ignored", "foreground keyboard owns PTT");
+      return;
+    }
     if (pressedKeycode !== payload.keycode) {
       reportPttEvent(payload, "ignored", "keyup without matching press");
       return;
@@ -128,7 +141,22 @@ export function usePushToTalkController(adapter: PushToTalkAdapterPort): PushToT
 
   let detachPttIpcKeyDown: (() => void) | undefined;
   let detachPttIpcKeyUp: (() => void) | undefined;
+  let detachPttHookStatus: (() => void) | undefined;
   let installed = false;
+
+  function selectKeyboardSource(status: DesktopPttHookStatus): void {
+    if (!installed) return;
+    const globalEnabled = status.available && status.enabled && status.keycode !== null;
+    if (globalEnabled === useGlobalPtt) return;
+    useGlobalPtt = globalEnabled;
+    if (pressedKeycode !== null || domPressedCode !== null) {
+      pressedKeycode = null;
+      domPressedCode = null;
+      void adapter.stopPttCapture().catch((error: unknown) => {
+        console.error("[PTT] failed to release capture on keyboard source change", error);
+      });
+    }
+  }
 
   function installPttIpcListeners(): void {
     const onIpc = window.ag99desktop?.onIpc as
@@ -181,12 +209,24 @@ export function usePushToTalkController(adapter: PushToTalkAdapterPort): PushToT
       return;
     }
     installed = true;
-    // Electron owns global keyboard capture; browser-only clients use DOM.
-    // Feeding both into the same capture session creates duplicate press cycles.
+    installPttKeyboardListeners();
+    // Exactly one source is admitted. Foreground keys remain usable if the
+    // native hook is unavailable or the binding has no native keycode.
     if (window.ag99desktop?.onIpc) {
+      useGlobalPtt = true;
       installPttIpcListeners();
+      detachPttHookStatus = window.ag99desktop.onPttHookStatus?.((status) => {
+        hookStatusGeneration += 1;
+        selectKeyboardSource(status);
+      });
+      const generation = hookStatusGeneration;
+      void window.ag99desktop.getPttHookStatus?.().then((status) => {
+        if (generation === hookStatusGeneration) selectKeyboardSource(status);
+      }).catch((error: unknown) => {
+        console.warn("[PTT] could not read global hook status", error);
+      });
     } else {
-      installPttKeyboardListeners();
+      useGlobalPtt = false;
     }
   }
 
@@ -196,6 +236,10 @@ export function usePushToTalkController(adapter: PushToTalkAdapterPort): PushToT
     }
     installed = false;
     pressedKeycode = null;
+    domPressedCode = null;
+    hookStatusGeneration += 1;
+    detachPttHookStatus?.();
+    detachPttHookStatus = undefined;
     removePttKeyboardListeners();
     removePttIpcListeners();
   }
