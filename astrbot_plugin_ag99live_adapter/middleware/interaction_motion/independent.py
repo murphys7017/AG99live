@@ -1358,6 +1358,7 @@ async def generate_independent_motion(
                 image_count=0,
             )
         contexts = prepared_context.contexts
+        current_user_text = prepared_context.current_user_text
         capability_payload = prepared_context.capability_payload
         runtime_payload = prepared_context.runtime_payload
 
@@ -1486,7 +1487,7 @@ async def generate_independent_motion(
             logger.warning(
                 "WIRING independent_motion.normalization_failed turn_id=%s "
                 "reason=%s shape=%s root_axis_count=%s step_count=%s "
-                "step_axis_counts=%s unique_axis_count=%s",
+                "step_axis_counts=%s unique_axis_count=%s step_duration_weights=%s",
                 turn_id,
                 reason,
                 shape_summary["shape"],
@@ -1494,6 +1495,7 @@ async def generate_independent_motion(
                 shape_summary["step_count"],
                 ",".join(str(value) for value in shape_summary["step_axis_counts"]),
                 shape_summary["unique_axis_count"],
+                shape_summary["step_duration_weights"],
             )
             return finish(
                 motion_payload=None,
@@ -1613,6 +1615,25 @@ def _build_independent_system_prompt(
             levels = list(raw_levels) if isinstance(raw_levels, (list, tuple)) else []
             level = 0 if 0 in levels else levels[0]
             contract["axis_levels"] = {str(first_axis["id"]): level}
+    sequence_example = ""
+    for axis in capability.get("axes", []):
+        if not isinstance(axis, Mapping) or not axis.get("id"):
+            continue
+        levels = [level for level in axis.get("available_levels", []) if type(level) is int]
+        if len(levels) < 2:
+            continue
+        sequence = {
+            "intent_tags": ["动作衔接"],
+            "motion_steps": [
+                {"axis_levels": {str(axis["id"]): levels[0]}, "duration_weight": 1},
+                {"axis_levels": {str(axis["id"]): levels[-1]}, "duration_weight": 2},
+            ],
+        }
+        sequence_example = (
+            "\n动作序列格式示例（方向和等级按当前语义选择，不照搬示例动作）："
+            + json.dumps(sequence, ensure_ascii=False, separators=(",", ":"))
+        )
+        break
     return (
         "你负责为 AG99live 的 Live2D 角色生成动作参数。"
         "根据纯文本对话、简短记忆和当前 segment 的 speech、actions、tendency，"
@@ -1631,8 +1652,11 @@ def _build_independent_system_prompt(
         "参考示例的 output 就是输出格式；最近执行动作只用于衔接和避免机械重复，勿照搬。"
         "只输出一个 JSON 对象，不要 Markdown、解释文字、工具调用或额外字段。"
         "必需字段 intent_tags 是 1 到 6 个简短关键词。执行形状必须且只能选择一种："
-        "axis_levels（单个姿态）、motion_steps（2 到 4 个动作步骤，每步必须包含 axis_levels 和 1 到 3 的 duration_weight），"
-        "或 motion_resource_id（完整动作资源）。axis_levels 的值必须是能力数据里对应轴可用的等级。"
+        "axis_levels（单个姿态）、motion_steps（2 到 4 个动作步骤，每步必须包含 axis_levels 和 duration_weight），"
+        "或 motion_resource_id（完整动作资源）。"
+        "duration_weight 是相对时长权重，必须是 JSON 整数 1、2 或 3；"
+        "不能省略，不能使用小数、字符串、毫秒或归一化比例。"
+        "axis_levels 的值必须是能力数据里对应轴可用的等级。"
         "动作序列采用稀疏语义：每一步只写新开始控制或需要改变的轴，后续步骤可以新增或省略轴；"
         "不设整段动作的固定轴数量上限，但每个轴 ID 和等级都必须来自能力数据。"
         "可选字段只有 duration_hint_ms、expression_resource_id、motion_resource_id；"
@@ -1640,7 +1664,8 @@ def _build_independent_system_prompt(
         "expression_resource_id 不得和 motion_resource_id 同时使用。"
         "不要输出 profile_id、profile_revision、model_id、schema_version，这些由程序补入。"
         f"JSON 形状示例：{json.dumps(contract, ensure_ascii=False, separators=(',', ':'))}\n\n"
-        "Live2D 能力：\n"
+        + sequence_example + "\n\n"
+        + "Live2D 能力：\n"
         f"{json.dumps(capability, ensure_ascii=False, separators=(',', ':'))}\n\n"
         "精简参考（所有 output 使用同一输出契约）：\n"
         f"{json.dumps(guidance, ensure_ascii=False, separators=(',', ':'))}"
@@ -1749,6 +1774,19 @@ def _motion_output_shape_summary(value: Mapping[str, Any]) -> dict[str, Any]:
         "step_count": len(raw_steps) if isinstance(raw_steps, list) else 0,
         "step_axis_counts": step_axis_counts,
         "unique_axis_count": len(unique_axis_ids),
+        "step_duration_weights": [
+            {
+                "index": index,
+                "type": type(step.get("duration_weight")).__name__,
+                "value": (
+                    repr(step.get("duration_weight"))[:48]
+                    if isinstance(step.get("duration_weight"), (int, float, str, bool))
+                    else None
+                ),
+            }
+            for index, step in enumerate(raw_steps[:4])
+            if isinstance(step, Mapping)
+        ] if isinstance(raw_steps, list) else [],
     }
 
 
