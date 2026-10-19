@@ -248,7 +248,7 @@ class PassiveBehaviorRuntime:
                 action = json.loads(line)
             except json.JSONDecodeError:
                 logger.warning(
-                    "NeuroBrain passive action line rejected: reason=invalid_json line=%s",
+                    "NeuroBrain passive action line rejected: reason=invalid_json record=%r",
                     line[:240],
                 )
                 return True
@@ -262,7 +262,11 @@ class PassiveBehaviorRuntime:
                 return False
             if decision != "emit":
                 logger.warning(
-                    "NeuroBrain passive action line rejected: reason=decision_invalid"
+                    "NeuroBrain passive action line rejected: reason=decision_invalid "
+                    "decision=%s fields=%s record=%r",
+                    repr(decision)[:80],
+                    ",".join(sorted(action)),
+                    line[:240],
                 )
                 return True
             allowed_fields = {
@@ -495,6 +499,7 @@ async def _consume_provider_stream(
         system_prompt=system_prompt,
     )
     pending = ""
+    decoder = json.JSONDecoder()
     streamed_text = ""
     saw_text_chunk = False
 
@@ -507,10 +512,19 @@ async def _consume_provider_stream(
             return False
         streamed_text += value
         pending += value
-        lines = pending.split("\n")
-        pending = lines.pop()
-        for line in lines:
-            if not await on_line(line):
+        # Whitespace within an object is legal JSON. Decode a complete value
+        # instead of treating each model-generated newline as a record boundary.
+        pending = pending.lstrip()
+        while pending:
+            try:
+                _, end = decoder.raw_decode(pending)
+            except json.JSONDecodeError:
+                if len(pending) > _MAX_ACTION_LINE_CHARS:
+                    await on_line(pending)
+                    return False
+                break
+            record, pending = pending[:end], pending[end:].lstrip()
+            if not await on_line(record):
                 return False
         return True
 
