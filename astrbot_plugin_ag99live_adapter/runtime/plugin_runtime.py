@@ -19,6 +19,43 @@ _control_platforms: dict[str, Any] = {}
 ADAPTER_PLATFORM_NAME = "olv_pet_adapter"
 ADAPTER_DISPLAY_NAME = "AG99live 桌宠适配器"
 PLUGIN_CONFIG_BASENAME = "astrbot_plugin_ag99live_adapter_config.json"
+_RETIRED_PLUGIN_CONFIG_PATHS = {
+    "independent_motion": ("segment_stream_enabled",),
+    "desktop_observation": ("provider_id", "timeout_seconds"),
+}
+_RETIRED_PLUGIN_CONFIG_KEYS = (
+    "live2d_model_name",
+    "image_cooldown_seconds",
+    "stt_provider_id",
+    "enable_performance_curve",
+    "performance_curve_provider_id",
+    "vad_model",
+    "vad_prob_threshold",
+    "vad_db_threshold",
+    "vad_required_hits",
+    "vad_required_misses",
+    "vad_smoothing_window",
+    "persona_id",
+    "motion_analysis_provider_id",
+    "enable_action_llm_filter",
+    "action_llm_filter_timeout_seconds",
+    "action_llm_filter_min_selected_channels",
+    "action_llm_filter_max_atoms_per_channel",
+    "action_llm_filter_chunk_max_channels",
+    "action_llm_filter_chunk_max_candidates",
+    "motion_prompt_instruction",
+    "enable_realtime_motion_plan",
+    "realtime_motion_mode",
+    "realtime_motion_timeout_seconds",
+    "realtime_motion_fewshot_enabled",
+    "realtime_motion_fewshot_count",
+    "realtime_motion_user_fewshot_count",
+    "realtime_motion_fixed_fewshot_with_reference_templates",
+    "realtime_motion_platform_context_enabled",
+    "realtime_motion_platform_description",
+    "motion_generation_mode",
+    "enable_inline_motion_contract",
+)
 _default_plugin_config_paths = tuple(
     os.path.join(get_astrbot_config_path(), filename)
     for filename in (PLUGIN_CONFIG_BASENAME,)
@@ -38,6 +75,24 @@ def get_config_value(config: Mapping[str, Any] | None, key: str, default: Any) -
         return default
     value = config.get(key, default)
     return default if value is None else value
+
+
+def prune_retired_plugin_config_fields(config: dict[str, Any]) -> list[str]:
+    """Remove known Adapter config keys superseded by the current nested schema."""
+    removed: list[str] = []
+    for key in _RETIRED_PLUGIN_CONFIG_KEYS:
+        if key in config:
+            del config[key]
+            removed.append(key)
+    for section, keys in _RETIRED_PLUGIN_CONFIG_PATHS.items():
+        values = config.get(section)
+        if not isinstance(values, dict):
+            continue
+        for key in keys:
+            if key in values:
+                del values[key]
+                removed.append(f"{section}.{key}")
+    return removed
 
 
 def set_plugin_context(context: Any) -> None:

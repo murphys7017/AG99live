@@ -6,7 +6,7 @@
  * descriptions, so a new setting only has to be declared once on the server.
  */
 
-export type ConfigFieldKind = "text" | "int" | "float" | "bool" | "model" | "provider";
+export type ConfigFieldKind = "text" | "int" | "float" | "bool" | "model" | "provider" | "choice";
 
 export type ConfigField = {
   key: string;
@@ -20,6 +20,7 @@ export type ConfigField = {
   maxLength?: number;
   required: boolean;
   optionsFrom?: "providers" | "models";
+  options?: Array<{ value: string; label: string }>;
 };
 
 export type ConfigSection = {
@@ -66,6 +67,7 @@ export const CONFIG_ERROR_FALLBACKS: Record<string, string> = {
   settings_provider_unknown: "所选 Provider 在 AstrBot 中已不存在，请重新选择。",
   performance_curve_provider_required: "启用表演曲线后必须选择一个 Provider。",
   independent_motion_provider_required: "启用独立动作生成后必须选择一个 Provider。",
+  passive_behavior_provider_required: "启用后台被动动作后必须选择一个 Provider。",
   plugin_config_persistence_unavailable: "当前无法写入插件配置，请在 AstrBot 中检查插件状态。",
   settings_save_failed: "保存失败，配置已回滚到修改前的状态。",
 };

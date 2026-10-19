@@ -58,8 +58,12 @@ import {
   saveStoredAdapterAddress,
 } from "./core/preferences.js";
 import {
+  loadModelViewOffsetX,
+  loadModelViewOffsetY,
   loadModelViewScale,
   loadSpeechVolume,
+  saveModelViewOffsetX,
+  saveModelViewOffsetY,
   saveModelViewScale,
   saveSpeechVolume,
 } from "../app/petPreferences.js";
@@ -391,6 +395,10 @@ export function createAdapterConnection(
       applySpeechVolume: saveSpeechVolume,
       currentModelViewScale: loadModelViewScale,
       applyModelViewScale: saveModelViewScale,
+      currentModelViewOffsetX: loadModelViewOffsetX,
+      applyModelViewOffsetX: saveModelViewOffsetX,
+      currentModelViewOffsetY: loadModelViewOffsetY,
+      applyModelViewOffsetY: saveModelViewOffsetY,
       currentBilibiliLiveSettings: () => loadBilibiliLiveSettings(),
       applyBilibiliLiveSettings: (settings: BilibiliLiveSettings) => {
         saveBilibiliLiveSettings(settings);

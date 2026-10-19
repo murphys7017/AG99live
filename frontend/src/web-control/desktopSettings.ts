@@ -25,6 +25,7 @@ export type DesktopSettingKind =
 
 export type DesktopSettingEntry = {
   key: string;
+  group: string;
   order: number;
   label: string;
   description: string;

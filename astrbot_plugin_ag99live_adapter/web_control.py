@@ -56,6 +56,7 @@ class ConfigField:
     max_length: int | None = None
     required: bool = True
     options_from: str | None = None
+    options: tuple[tuple[str, str], ...] = ()
 
     def to_json(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -76,6 +77,11 @@ class ConfigField:
         for name, value in optional.items():
             if value is not None:
                 payload[name] = value
+        if self.options:
+            payload["options"] = [
+                {"value": value, "label": label}
+                for value, label in self.options
+            ]
         return payload
 
 
@@ -96,6 +102,47 @@ class ConfigSection:
 
 
 CONFIG_SCHEMA: tuple[ConfigSection, ...] = (
+    ConfigSection(
+        key="fast_asr",
+        label="本地流式语音识别",
+        description="在桌面端本地增量识别 PTT/VAD 音频；AstrBot STT 只在任务交接时复核。",
+        fields=(
+            ConfigField(
+                key="enabled",
+                kind="bool",
+                label="启用本地流式 ASR",
+                description="启用后，本地识别用于普通输入；Core 任务交接时再复核原始音频。",
+                default=False,
+            ),
+            ConfigField(
+                key="model_dir",
+                kind="text",
+                label="Sherpa ONNX 模型目录",
+                description="包含 model*.onnx 与 tokens.txt 的目录。",
+                default="",
+                max_length=1024,
+                required=False,
+            ),
+            ConfigField(
+                key="provider",
+                kind="choice",
+                label="推理后端",
+                description="选择本地推理设备。",
+                default="cpu",
+                options=(("cpu", "CPU"), ("cuda", "CUDA")),
+            ),
+            ConfigField(
+                key="num_threads",
+                kind="int",
+                label="CPU 线程数",
+                description="CPU 推理使用的线程数。",
+                default=4,
+                minimum=1,
+                maximum=16,
+                step=1,
+            ),
+        ),
+    ),
     ConfigSection(
         key="general",
         label="客户端与会话身份",
@@ -260,6 +307,29 @@ CONFIG_SCHEMA: tuple[ConfigSection, ...] = (
         ),
     ),
     ConfigSection(
+        key="pre_action",
+        label="输入预动作",
+        description="有效转写到达后，独立生成一个轻量动作；不等待主对话生成。",
+        fields=(
+            ConfigField(
+                key="enabled",
+                kind="bool",
+                label="启用输入预动作",
+                description="需要同时启用独立动作生成。",
+                default=True,
+            ),
+            ConfigField(
+                key="character_core",
+                kind="text",
+                label="动作性格摘要",
+                description="可选；留空时从当前人设中提取适合指导动作的章节。",
+                default="",
+                max_length=8000,
+                required=False,
+            ),
+        ),
+    ),
+    ConfigSection(
         key="passive_behavior",
         label="NeuroBrain 后台被动动作（实验）",
         description="OLV 桌宠空闲时读取 NeuroBrain 当前状态，并通过流式 Provider 生成独立动作段；不读取对话或 Persona 内容。",
@@ -324,6 +394,114 @@ CONFIG_SCHEMA: tuple[ConfigSection, ...] = (
         ),
     ),
     ConfigSection(
+        key="desktop_return",
+        label="返回电脑互动",
+        description="检测锁屏/休眠及长时间空闲后的恢复操作，并提交一次主动互动机会。",
+        fields=(
+            ConfigField(
+                key="enabled",
+                kind="bool",
+                label="启用返回互动",
+                description="只读取空闲时长和锁屏/休眠状态，不采集按键内容或截图。",
+                default=False,
+            ),
+            ConfigField(
+                key="idle_after_seconds",
+                kind="int",
+                label="空闲阈值（秒）",
+                description="桌面输入空闲达到此时长后，恢复操作可形成互动机会。",
+                default=300,
+                minimum=30,
+                maximum=3600,
+                step=10,
+            ),
+            ConfigField(
+                key="minimum_away_seconds",
+                kind="int",
+                label="离开最短时长（秒）",
+                description="锁屏或休眠需持续达到此时长才形成返回机会。",
+                default=60,
+                minimum=10,
+                maximum=3600,
+                step=10,
+            ),
+            ConfigField(
+                key="confirmation_seconds",
+                kind="int",
+                label="恢复操作确认时间（秒）",
+                description="恢复后需要在此窗口内再次出现输入。",
+                default=3,
+                minimum=3,
+                maximum=10,
+                step=1,
+            ),
+            ConfigField(
+                key="cooldown_seconds",
+                kind="int",
+                label="互动机会冷却（秒）",
+                description="两次返回互动机会之间的最短间隔。",
+                default=900,
+                minimum=0,
+                maximum=86400,
+                step=60,
+            ),
+        ),
+    ),
+    ConfigSection(
+        key="desktop_observation",
+        label="桌面变化观察",
+        description="按间隔截取桌面画面并用本地数学方法判断大范围变化，不识别文字或语义。",
+        fields=(
+            ConfigField(
+                key="enabled",
+                kind="bool",
+                label="启用桌面变化观察",
+                description="需要配套桌面端支持截图协议。",
+                default=False,
+            ),
+            ConfigField(
+                key="interval_seconds",
+                kind="int",
+                label="截图比较间隔（秒）",
+                description="两次桌面画面比较之间的等待时间。",
+                default=30,
+                minimum=10,
+                maximum=3600,
+                step=5,
+            ),
+            ConfigField(
+                key="conversation_quiet_seconds",
+                kind="int",
+                label="对话后等待（秒）",
+                description="对话和播放结束后等待多久再恢复观察；0 仍会避开活动轮次。",
+                default=60,
+                minimum=0,
+                maximum=3600,
+                step=5,
+            ),
+            ConfigField(
+                key="event_ttl_seconds",
+                kind="int",
+                label="变化事件有效期（秒）",
+                description="从截图请求开始计算；超时的变化事件不会提交。",
+                default=60,
+                minimum=5,
+                maximum=300,
+                step=5,
+            ),
+            ConfigField(
+                key="changed_area_threshold_percent",
+                kind="float",
+                label="变化面积阈值（%）",
+                description="变化区域达到此比例后提交桌面变化事实。",
+                default=15.0,
+                minimum=1.0,
+                maximum=100.0,
+                step=1.0,
+            ),
+        ),
+    ),
+    ConfigSection(
         key="vad",
         label="语音断句",
         description="Silero VAD 判定当前音频帧为语音的阈值，以及开始/结束所需的连续帧数。",
@@ -380,6 +558,7 @@ class DesktopSetting:
     """
 
     key: str
+    group: str
     label: str
     description: str
     kind: str = "select"
@@ -390,6 +569,7 @@ class DesktopSetting:
     def to_json(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "key": self.key,
+            "group": self.group,
             "label": self.label,
             "description": self.description,
             "kind": self.kind,
@@ -406,47 +586,55 @@ class DesktopSetting:
 DESKTOP_SETTINGS_SPEC: tuple[DesktopSetting, ...] = (
     DesktopSetting(
         key="astrbot_webui_url",
+        group="connection",
         label="AstrBot WebUI 地址",
         description="托盘打开控制面板时使用的 HTTP/HTTPS 基址，可包含反向代理子路径；不含登录信息、查询参数或 #。",
         kind="text",
     ),
     DesktopSetting(
         key="adapter_address",
+        group="connection",
         label="Adapter 地址",
         description="保存到桌面端；不会自动中断当前连接或切换地址，需由桌面端手动重连后生效。",
         kind="text",
     ),
     DesktopSetting(
         key="microphone_device",
+        group="connection",
         label="麦克风设备",
         description="桌宠从这台电脑上的哪个麦克风收音。设备由桌面端枚举，选项以桌面端实际可用为准。",
     ),
     DesktopSetting(
         key="desktop_screenshot_on_send",
+        group="connection",
         label="发送消息时附带桌面截图",
         description="发送文本或按键说话时附带当前桌面截图，帮助模型理解屏幕内容。",
         kind="toggle",
     ),
     DesktopSetting(
         key="persona_segment_stream_enabled",
+        group="connection",
         label="OLV Persona 分段流式",
         description="实验性：允许兼容的 AstrBot Core 在 OLV 对话中逐段校验并交付 Persona。还需开启 AstrBot 的 Persona 分段流式总开关及逐 speech 段独立动作。",
         kind="toggle",
     ),
     DesktopSetting(
         key="ptt_mode_enabled",
+        group="connection",
         label="按键说话模式",
         description="启用后由已绑定的按键控制麦克风采集。",
         kind="toggle",
     ),
     DesktopSetting(
         key="ptt_key_binding",
+        group="connection",
         label="按键说话快捷键",
         description="设置按键说话模式使用的单个键；桌面端会按物理按键代码捕获，不受键盘布局影响。",
         kind="key",
     ),
     DesktopSetting(
         key="speech_volume",
+        group="appearance",
         label="语音播放音量",
         description="调整桌面端播放模型语音时的音量；修改会同步到当前及后续播放。",
         kind="range",
@@ -456,6 +644,7 @@ DESKTOP_SETTINGS_SPEC: tuple[DesktopSetting, ...] = (
     ),
     DesktopSetting(
         key="model_view_scale",
+        group="appearance",
         label="模型显示缩放",
         description="调整 Live2D 模型在桌面画布中的显示比例。",
         kind="range",
@@ -464,19 +653,42 @@ DESKTOP_SETTINGS_SPEC: tuple[DesktopSetting, ...] = (
         step=0.05,
     ),
     DesktopSetting(
+        key="model_view_offset_x",
+        group="appearance",
+        label="模型水平位置",
+        description="调整 Live2D 模型在桌面画布中的左右位置。",
+        kind="range",
+        minimum=-1.5,
+        maximum=1.5,
+        step=0.05,
+    ),
+    DesktopSetting(
+        key="model_view_offset_y",
+        group="appearance",
+        label="模型垂直位置",
+        description="调整 Live2D 模型在桌面画布中的上下位置。",
+        kind="range",
+        minimum=-1.5,
+        maximum=1.5,
+        step=0.05,
+    ),
+    DesktopSetting(
         key="live2d_ambient_motion_enabled",
+        group="appearance",
         label="Live2D 默认待机动作",
         description="控制模型没有播放对话动作时是否持续播放默认待机动作。",
         kind="toggle",
     ),
     DesktopSetting(
         key="cursor_gaze_enabled",
+        group="appearance",
         label="鼠标停留凝视",
         description="鼠标停留时让桌宠转向光标；关闭后停止光标轮询。",
         kind="toggle",
     ),
     DesktopSetting(
         key="cursor_gaze_poll_interval_ms",
+        group="appearance",
         label="光标检测间隔（毫秒）",
         description="两次光标检测之间的等待时间；增大可降低检测频率。",
         kind="number",
@@ -486,6 +698,7 @@ DESKTOP_SETTINGS_SPEC: tuple[DesktopSetting, ...] = (
     ),
     DesktopSetting(
         key="cursor_gaze_dwell_ms",
+        group="appearance",
         label="凝视等待时间（毫秒）",
         description="光标保持在附近多久后开始凝视。",
         kind="number",
@@ -495,6 +708,7 @@ DESKTOP_SETTINGS_SPEC: tuple[DesktopSetting, ...] = (
     ),
     DesktopSetting(
         key="cursor_gaze_stationary_distance_px",
+        group="appearance",
         label="光标移动阈值（像素）",
         description="两次检测间的移动距离超过此值时，重新计算停留时间。",
         kind="number",
@@ -504,6 +718,7 @@ DESKTOP_SETTINGS_SPEC: tuple[DesktopSetting, ...] = (
     ),
     DesktopSetting(
         key="live2d_physics_response_scale",
+        group="performance",
         label="Live2D Physics 响应强度",
         description="调整非语义姿态参数的 Cubism Physics 响应倍率。",
         kind="range",
@@ -513,6 +728,7 @@ DESKTOP_SETTINGS_SPEC: tuple[DesktopSetting, ...] = (
     ),
     DesktopSetting(
         key="live2d_render_dpr_cap",
+        group="performance",
         label="Live2D 渲染 DPR 上限",
         description="限制模型画布的设备像素比上限；较低值可减少渲染负载。",
         kind="range",
@@ -522,6 +738,7 @@ DESKTOP_SETTINGS_SPEC: tuple[DesktopSetting, ...] = (
     ),
     DesktopSetting(
         key="motion_engine_intensity_scale",
+        group="performance",
         label="ModelEngine 动作强度",
         description="调整语义动作强度倍率，不影响模型 Profile 中的轴范围。",
         kind="range",
@@ -531,30 +748,35 @@ DESKTOP_SETTINGS_SPEC: tuple[DesktopSetting, ...] = (
     ),
     DesktopSetting(
         key="spout_enabled",
+        group="outputs",
         label="Spout 输出",
         description="将 Live2D 画面发布给本机支持 Spout2 的应用。",
         kind="toggle",
     ),
     DesktopSetting(
         key="bilibili_live_enabled",
+        group="bilibili",
         label="B 站直播弹幕",
         description="启用后连接指定直播间并接收弹幕；这是桌面端本机功能，不会改变 Adapter 连接。",
         kind="toggle",
     ),
     DesktopSetting(
         key="bilibili_live_room_id",
+        group="bilibili",
         label="B 站直播间号",
         description="要监听的 B 站直播间号，只接受数字房间号。",
         kind="text",
     ),
     DesktopSetting(
         key="bilibili_live_cookie",
+        group="bilibili",
         label="B 站 Cookie",
         description="用于直播间鉴权的 Cookie。页面只显示是否已配置，不会回显 Cookie 原文。留空可清除。",
         kind="password",
     ),
     DesktopSetting(
         key="bilibili_live_response_interval",
+        group="bilibili",
         label="B 站弹幕响应间隔",
         description="桌宠自动响应 B 站弹幕的最短间隔；Cookie 等敏感认证信息不在此页面回显。",
         kind="number",
@@ -564,18 +786,21 @@ DESKTOP_SETTINGS_SPEC: tuple[DesktopSetting, ...] = (
     ),
     DesktopSetting(
         key="esp32_display_enabled",
+        group="outputs",
         label="ESP32 小屏输出",
         description="手动连接并向 ESP32 小屏推送画面；桌面应用重启后默认关闭。",
         kind="toggle",
     ),
     DesktopSetting(
         key="esp32_display_host",
+        group="outputs",
         label="ESP32 目标地址",
         description="小屏设备的 IP 地址或主机名；修改后会重新连接。",
         kind="text",
     ),
     DesktopSetting(
         key="esp32_display_port",
+        group="outputs",
         label="ESP32 端口",
         description="小屏设备的 TCP 端口；修改后会重新连接。",
         kind="number",
@@ -585,12 +810,14 @@ DESKTOP_SETTINGS_SPEC: tuple[DesktopSetting, ...] = (
     ),
     DesktopSetting(
         key="esp32_display_fps",
+        group="outputs",
         label="ESP32 帧率",
         description="小屏画面的目标推送帧率。",
         kind="select",
     ),
     DesktopSetting(
         key="esp32_display_jpeg_quality",
+        group="outputs",
         label="ESP32 JPEG 质量",
         description="推送画面的 JPEG 编码质量。",
         kind="range",
@@ -600,18 +827,21 @@ DESKTOP_SETTINGS_SPEC: tuple[DesktopSetting, ...] = (
     ),
     DesktopSetting(
         key="esp32_display_output_size",
+        group="outputs",
         label="ESP32 输出尺寸",
         description="发送到小屏的正方形图像尺寸。",
         kind="select",
     ),
     DesktopSetting(
         key="esp32_display_scale_mode",
+        group="outputs",
         label="ESP32 缩放方式",
         description="裁剪区域适配输出画布的方式。",
         kind="select",
     ),
     DesktopSetting(
         key="esp32_display_crop_x",
+        group="outputs",
         label="ESP32 裁剪 X",
         description="裁剪区域左侧位置，占 Live2D 画布宽度的比例。",
         kind="range",
@@ -621,6 +851,7 @@ DESKTOP_SETTINGS_SPEC: tuple[DesktopSetting, ...] = (
     ),
     DesktopSetting(
         key="esp32_display_crop_y",
+        group="outputs",
         label="ESP32 裁剪 Y",
         description="裁剪区域顶部位置，占 Live2D 画布高度的比例。",
         kind="range",
@@ -630,6 +861,7 @@ DESKTOP_SETTINGS_SPEC: tuple[DesktopSetting, ...] = (
     ),
     DesktopSetting(
         key="esp32_display_crop_w",
+        group="outputs",
         label="ESP32 裁剪宽度",
         description="裁剪区域宽度，占 Live2D 画布宽度的比例。",
         kind="range",
@@ -639,6 +871,7 @@ DESKTOP_SETTINGS_SPEC: tuple[DesktopSetting, ...] = (
     ),
     DesktopSetting(
         key="esp32_display_crop_h",
+        group="outputs",
         label="ESP32 裁剪高度",
         description="裁剪区域高度，占 Live2D 画布高度的比例。",
         kind="range",
@@ -709,6 +942,13 @@ def _field(section_key: str, field_key: str) -> ConfigField:
 
 
 def _normalize_setting_value(path: str, field: ConfigField, value: Any) -> Any:
+    if field.kind == "choice":
+        if not isinstance(value, str):
+            raise ConfigValidationError("settings_value_invalid", path)
+        allowed_values = {option for option, _label in field.options}
+        if value not in allowed_values:
+            raise ConfigValidationError("settings_value_invalid", path)
+        return value
     if field.kind in {"text", "model", "provider"}:
         if not isinstance(value, str):
             raise ConfigValidationError("settings_value_invalid", path)

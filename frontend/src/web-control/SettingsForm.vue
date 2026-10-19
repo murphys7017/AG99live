@@ -7,11 +7,16 @@ import type {
 } from "./configSchema";
 
 const SECTION_GROUPS: Record<string, string> = {
+  fast_asr: "语音输入",
   general: "基础与会话",
   live2d_input: "模型与输入",
   independent_motion: "动作生成",
+  pre_action: "动作生成",
   performance_curve: "动作节奏",
+  passive_behavior: "动作生成",
   vad: "语音输入",
+  desktop_return: "主动互动",
+  desktop_observation: "主动互动",
 };
 
 const props = defineProps<{
@@ -38,6 +43,7 @@ function valueAt(field: ConfigField, sectionKey: string): string | number | bool
   }
   if (field.kind === "bool") return false;
   if (field.kind === "int" || field.kind === "float") return 0;
+  if (field.kind === "choice") return field.default;
   return "";
 }
 
@@ -58,6 +64,11 @@ function localError(field: ConfigField, sectionKey: string): string {
       return props.message("errors.settings_value_too_long", "");
     }
     return "";
+  }
+  if (field.kind === "choice") {
+    return field.options?.some((option) => option.value === String(value))
+      ? ""
+      : props.message("errors.settings_value_invalid", "");
   }
   if (field.kind === "int" || field.kind === "float") {
     const numeric = Number(value);
@@ -144,6 +155,17 @@ function onInput(field: ConfigField, sectionKey: string, event: Event): void {
             :disabled="props.disabled"
             @input="onInput(field, section.key, $event)"
           />
+
+          <select
+            v-else-if="field.kind === 'choice'"
+            :value="String(valueAt(field, section.key))"
+            :disabled="props.disabled"
+            @change="onInput(field, section.key, $event)"
+          >
+            <option v-for="option in field.options ?? []" :key="option.value" :value="option.value">
+              {{ option.label }}
+            </option>
+          </select>
 
           <select
             v-else-if="field.kind === 'model'"

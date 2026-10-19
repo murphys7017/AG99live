@@ -20,7 +20,7 @@ AG99 插件 `astrbot_plugin_ag99live_adapter` 将 AG99 的对话、TTS 和动作
 | WebSocket | `12396` | 输入、输出、控制、模型与系统消息。 |
 | HTTP | `12397` | 已扫描模型、缓存音频、图片和允许的静态资源。 |
 
-端口由插件根配置的 `port` 和 `http_port` 设置。其他常用根配置包括 `speaker_name` 和 `auto_start_mic`；运行资料归入 `general`、`live2d_input`、`performance_curve`、`independent_motion`、`passive_behavior` 与 `vad`。请使用 AG99 当前插件 Schema 生成或编辑配置，旧平级路径不再读取。
+端口由 AstrBot 平台启动配置的 `port` 和 `http_port` 设置。其他根配置包括 `speaker_name` 和 `auto_start_mic`，属于启动级设置。Adapter 运行设置统一在 AG99live Web 控制台编辑；AstrBot 插件配置文件由 Adapter 用作持久化，不再提供第二套插件设置表单。桌面本机设置由桌面设置窗口管理，也可从 Web 控制台转发修改。
 
 ### 身份字段
 
@@ -28,8 +28,8 @@ AG99 的平台配置和插件的 `general` 配置使用的是两套身份，不�
 
 - `olv_pet_adapter` 是固定的适配器类型，不是桌宠名称，也不是用户 ID。
 - AG99 平台配置中的 `id`（界面可能标成“机器人名称”）是具体的**桌宠实例 ID**，例如 `aki`。它用于区分连接实例、作为平台路由键，并作为入站消息的 `self_id`；多个桌宠实例必须使用不同值。
-- 插件 `general.client_uid` 是桌面端消息客户端的**会话/发送者 ID**，例如 `desktop-client`。它不是桌宠实例 ID，也不是 AG99 WebUI 登录用户账号。注意它当前属于插件级配置，所有 Adapter 实例共用同一个值；当前不能为每个桌宠实例分别设置。
-- 插件 `general.client_nickname` 是桌面端消息在 AG99 中显示的发送者名称。
+- `general.client_uid` 是桌面端消息客户端的**会话/发送者 ID**，例如 `desktop-client`。它不是桌宠实例 ID，也不是 AG99 WebUI 登录用户账号。它属于 Adapter 运行设置，所有 Adapter 实例共用同一个值；当前不能为每个桌宠实例分别设置。
+- `general.client_nickname` 是桌面端消息在 AG99 中显示的发送者名称。
 - 平台配置的 `speaker_name` 是桌宠回复侧的说话人名称，不承担实例寻址或用户身份作用。
 
 当前适配器实际读取的平台字段是 `id`、`enable`、`port`、`http_port`、`speaker_name` 和 `auto_start_mic`；旧配置中若仍看到 `host`、`debug_port` 或 `conf_name`，它们不会改变当前运行时行为。
@@ -82,7 +82,7 @@ Persona `segments[].speech` 是 TTS 文本分段，不是协议中的 speech cue
 
 麦克风采集由 `input.audio_stream_start`、二进制 PCM16LE chunk 和 `input.audio_stream_end` 组成。后端用 `stream_id` 汇总、严格检查顺序，并根据 PTT 或 VAD 建立正式 Turn。持续收音的 `capture_turn_id` 只标识采集根，每段 VAD 语音使用 `<capture_turn_id>:vad:<n>` 子 Turn。
 
-可选 `fast_asr` 使用 sherpa-onnx 在 Adapter 内对 PTT 和 VAD 音频做本地增量识别。先在 AstrBot 实际运行的 Python 环境安装 `sherpa-onnx` 和 `sherpa-onnx-bin`，再设置 `fast_asr.enabled`、模型目录和推理后端。原有 AstrBot STT 不参与普通语音输入；只有 Core 判定需要任务交接时，才使用同一 Turn 缓存的 PCM 复核，并将修订文本用于任务规划。音频复核缓存最多保留 8 段、每段 12 MiB，120 秒过期。此功能依赖 Core 提供 `_ag99live_handoff_asr_review` 回调。
+可选 `fast_asr` 使用 sherpa-onnx 在 Adapter 内对 PTT 和 VAD 音频做本地增量识别。在 AG99live Web 控制台设置模型目录与推理后端，并先在 AstrBot 实际运行的 Python 环境安装 `sherpa-onnx` 和 `sherpa-onnx-bin`。原有 AstrBot STT 不参与普通语音输入；只有 Core 判定需要任务交接时，才使用同一 Turn 缓存的 PCM 复核，并将修订文本用于任务规划。音频复核缓存最多保留 8 段、每段 12 MiB，120 秒过期。此功能依赖 Core 提供 `_ag99live_handoff_asr_review` 回调。
 
 `control.interrupt` 只停止目标 Turn。连接断开时，Adapter 请求停止全部在飞 AG99 event，再独立清理 Turn、段、曲线请求和身份映射；晚到输出不会重新进入播放。
 
@@ -130,7 +130,7 @@ python -m pip install -r astrbot_plugin_ag99live_adapter/requirements.txt
 
 ## 返回电脑后的主动互动
 
-在插件配置“返回电脑后的主动互动”中启用 `desktop_return.enabled`（默认关闭）。需加载本轮配套的 Electron 主进程、预加载和前端，再重载适配器。复用已有 Personal Policy、Persona、TTS 与 Live2D 动作输出，不另选模型，不强制每次开口。
+在 AG99live Web 控制台的“返回电脑互动”中启用 `desktop_return.enabled`（默认关闭）。需加载本轮配套的 Electron 主进程、预加载和前端，再重载适配器。复用已有 Personal Policy、Persona、TTS 与 Live2D 动作输出，不另选模型，不强制每次开口。
 
 - 锁屏/休眠默认至少60秒；解锁或唤醒后，必须恢复实际输入操作。普通长时间无操作默认300秒，其恢复仅表述为“恢复操作”，不推断用户身体离开。
 - 恢复候选默认确认3秒，期间需再次出现输入；仅自动唤醒或碰一下鼠标不会直接欢迎。15秒未确认就丢弃该候选。
@@ -144,7 +144,7 @@ python -m pip install -r astrbot_plugin_ag99live_adapter/requirements.txt
 
 ## 桌面变化观察
 
-在插件配置的“桌面变化观察”中启用 `desktop_observation.enabled`。默认关闭；间隔默认30秒，变化事件有效期60秒。画面比较完全使用数学方法，不需要配置视觉模型，也不调用0.8B模型。
+在 AG99live Web 控制台的“桌面变化观察”中启用 `desktop_observation.enabled`。默认关闭；间隔默认30秒，变化事件有效期60秒。画面比较完全使用数学方法，不需要配置视觉模型，也不调用0.8B模型。
 
 桌面观察服从对话优先级：用户文字输入、PTT或VAD实际语音、正在处理的轮次和播放期间暂停截图与比较。常驻麦克风的静音收音不算对话。用户输入及AI播放完成后，等待 `conversation_quiet_seconds`（默认60秒，可配置0～3600秒）再观察；设为0仍会避开活动轮次。启动/重连也先等待；恢复时首帧仅建立新基准，不比较对话前的旧截图。
 

@@ -3,7 +3,10 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from astrbot_plugin_ag99live_adapter.runtime import plugin_runtime
-from astrbot_plugin_ag99live_adapter.runtime.plugin_runtime import get_config_value
+from astrbot_plugin_ag99live_adapter.runtime.plugin_runtime import (
+    get_config_value,
+    prune_retired_plugin_config_fields,
+)
 
 
 def test_get_config_value_uses_mapping_values_and_defaults() -> None:
@@ -13,6 +16,38 @@ def test_get_config_value_uses_mapping_values_and_defaults() -> None:
     assert get_config_value(config, "missing", "default") == "default"
     assert get_config_value(config, "empty", "default") == "default"
     assert get_config_value(None, "configured", "default") == "default"
+
+
+def test_prune_retired_plugin_fields_keeps_active_and_unowned_config() -> None:
+    config = {
+        "independent_motion": {
+            "per_speech_segment": True,
+            "segment_stream_enabled": True,
+        },
+        "desktop_observation": {
+            "enabled": True,
+            "provider_id": "retired-provider",
+            "timeout_seconds": 5,
+        },
+        "performance_curve": {"enabled": True, "provider_id": "active-provider"},
+        "image_cooldown_seconds": 10,
+        "memory": {"enabled": True},
+    }
+
+    removed = prune_retired_plugin_config_fields(config)
+
+    assert set(removed) == {
+        "image_cooldown_seconds",
+        "independent_motion.segment_stream_enabled",
+        "desktop_observation.provider_id",
+        "desktop_observation.timeout_seconds",
+    }
+    assert config == {
+        "independent_motion": {"per_speech_segment": True},
+        "desktop_observation": {"enabled": True},
+        "performance_curve": {"enabled": True, "provider_id": "active-provider"},
+        "memory": {"enabled": True},
+    }
 
 
 def test_plugin_config_snapshot_reports_injected_and_file_sources(

@@ -47,6 +47,8 @@ async function run(): Promise<void> {
     },
     speechVolume: 1,
     modelViewScale: 1,
+    modelViewOffsetX: 0,
+    modelViewOffsetY: 0,
     bilibiliSettings: {
       enabled: false,
       roomId: "",
@@ -86,6 +88,14 @@ async function run(): Promise<void> {
     currentModelViewScale: () => scalarSettings.modelViewScale,
     applyModelViewScale: (scale: number) => {
       scalarSettings.modelViewScale = scale;
+    },
+    currentModelViewOffsetX: () => scalarSettings.modelViewOffsetX,
+    applyModelViewOffsetX: (offset: number) => {
+      scalarSettings.modelViewOffsetX = offset;
+    },
+    currentModelViewOffsetY: () => scalarSettings.modelViewOffsetY,
+    applyModelViewOffsetY: (offset: number) => {
+      scalarSettings.modelViewOffsetY = offset;
     },
     currentBilibiliLiveSettings: () => ({ ...scalarSettings.bilibiliSettings }),
     applyBilibiliLiveSettings: (settings: typeof scalarSettings.bilibiliSettings) => {
@@ -156,6 +166,13 @@ async function run(): Promise<void> {
   assert.equal(scalarSettings.speechVolume, 0.35);
   await responder(queryEnvelope("model_view_scale", "set", "1.5"));
   assert.equal(scalarSettings.modelViewScale, 1.5);
+  await responder(queryEnvelope("model_view_offset_x", "set", "-0.75"));
+  assert.equal(scalarSettings.modelViewOffsetX, -0.75);
+  assert.equal(replies.at(-1)?.value, "-0.75");
+  await responder(queryEnvelope("model_view_offset_y", "set", "2"));
+  assert.equal(replies.at(-1)?.ok, false);
+  assert.equal(replies.at(-1)?.error, "desktop_setting_value_out_of_range");
+  assert.equal(scalarSettings.modelViewOffsetY, 0);
   await responder(queryEnvelope("bilibili_live_cookie", "set", "test-cookie-secret"));
   assert.equal(scalarSettings.bilibiliSettings.cookie, "test-cookie-secret");
   assert.equal(replies.at(-1)?.value, "••••••");

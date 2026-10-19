@@ -28,7 +28,13 @@ import {
 import type { DesktopPttKeyBinding } from "../../types/desktop.js";
 import {
   MAX_MODEL_VIEW_SCALE,
+  MAX_MODEL_VIEW_OFFSET,
   MIN_MODEL_VIEW_SCALE,
+  MIN_MODEL_VIEW_OFFSET,
+  loadModelViewOffsetX,
+  loadModelViewOffsetY,
+  saveModelViewOffsetX,
+  saveModelViewOffsetY,
 } from "../../app/petPreferences.js";
 import {
   normalizeBilibiliLiveSettings,
@@ -89,6 +95,10 @@ export interface DesktopSettingAccess {
   applySpeechVolume: (volume: number) => void;
   currentModelViewScale: () => number;
   applyModelViewScale: (scale: number) => void;
+  currentModelViewOffsetX: () => number;
+  applyModelViewOffsetX: (offset: number) => void;
+  currentModelViewOffsetY: () => number;
+  applyModelViewOffsetY: (offset: number) => void;
   currentBilibiliLiveSettings: () => BilibiliLiveSettings;
   applyBilibiliLiveSettings: (settings: BilibiliLiveSettings) => void;
   runtimeSettings: DesktopRuntimeSettingsAccess;
@@ -556,6 +566,20 @@ const DESKTOP_SETTING_HANDLERS: Record<
     access.applyModelViewScale,
     MIN_MODEL_VIEW_SCALE,
     MAX_MODEL_VIEW_SCALE,
+    0.05,
+  ),
+  model_view_offset_x: (access) => boundedNumberSettingHandler(
+    access.currentModelViewOffsetX,
+    access.applyModelViewOffsetX,
+    MIN_MODEL_VIEW_OFFSET,
+    MAX_MODEL_VIEW_OFFSET,
+    0.05,
+  ),
+  model_view_offset_y: (access) => boundedNumberSettingHandler(
+    access.currentModelViewOffsetY,
+    access.applyModelViewOffsetY,
+    MIN_MODEL_VIEW_OFFSET,
+    MAX_MODEL_VIEW_OFFSET,
     0.05,
   ),
   live2d_ambient_motion_enabled: (access) => booleanSettingHandler(

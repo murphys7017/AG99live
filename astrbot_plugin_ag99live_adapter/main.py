@@ -122,13 +122,26 @@ def _optional_decorating_result_hook():
 class MyPlugin(Star):
     def __init__(self, context: Context, config: dict | None = None):
         super().__init__(context)
-        from .runtime.plugin_runtime import set_plugin_config, set_plugin_context
+        from .runtime.plugin_runtime import (
+            prune_retired_plugin_config_fields,
+            set_plugin_config,
+            set_plugin_context,
+        )
 
         self.context = context
         self.config = config if config is not None else {}
         self._independent_motion_tasks: set[asyncio.Task] = set()
 
         _configure_noisy_loggers()
+        removed_config_fields = prune_retired_plugin_config_fields(self.config)
+        if removed_config_fields:
+            save_config = getattr(self.config, "save_config", None)
+            if callable(save_config):
+                save_config()
+            logger.info(
+                "Removed retired AG99live adapter config fields: %s",
+                ",".join(sorted(removed_config_fields)),
+            )
         set_plugin_context(context)
         set_plugin_config(self.config)
 
