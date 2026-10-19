@@ -29,8 +29,20 @@ def test_prune_retired_plugin_fields_keeps_active_and_unowned_config() -> None:
             "provider_id": "retired-provider",
             "timeout_seconds": 5,
         },
+        "remote_operator": {
+            "default_computer": "local",
+            "computer_entries": [{"id": "local"}],
+            "default_profile": "simple",
+            "probe_max_failures": 3,
+            "profiles": {"simple": {}},
+        },
         "performance_curve": {"enabled": True, "provider_id": "active-provider"},
         "image_cooldown_seconds": 10,
+        "remote_operator_default_computer": "local",
+        "remote_operator_computer_entries": [{"id": "local"}],
+        "remote_operator_default_profile": "simple",
+        "remote_operator_probe_max_failures": 3,
+        "remote_operator_profiles": {"simple": {}},
         "memory": {"enabled": True},
     }
 
@@ -41,6 +53,17 @@ def test_prune_retired_plugin_fields_keeps_active_and_unowned_config() -> None:
         "independent_motion.segment_stream_enabled",
         "desktop_observation.provider_id",
         "desktop_observation.timeout_seconds",
+        "remote_operator.default_computer",
+        "remote_operator.computer_entries",
+        "remote_operator.default_profile",
+        "remote_operator.probe_max_failures",
+        "remote_operator.profiles",
+        "remote_operator",
+        "remote_operator_default_computer",
+        "remote_operator_computer_entries",
+        "remote_operator_default_profile",
+        "remote_operator_probe_max_failures",
+        "remote_operator_profiles",
     }
     assert config == {
         "independent_motion": {"per_speech_segment": True},

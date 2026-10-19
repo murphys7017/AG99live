@@ -22,6 +22,13 @@ PLUGIN_CONFIG_BASENAME = "astrbot_plugin_ag99live_adapter_config.json"
 _RETIRED_PLUGIN_CONFIG_PATHS = {
     "independent_motion": ("segment_stream_enabled",),
     "desktop_observation": ("provider_id", "timeout_seconds"),
+    "remote_operator": (
+        "default_computer",
+        "computer_entries",
+        "default_profile",
+        "probe_max_failures",
+        "profiles",
+    ),
 }
 _RETIRED_PLUGIN_CONFIG_KEYS = (
     "live2d_model_name",
@@ -55,6 +62,11 @@ _RETIRED_PLUGIN_CONFIG_KEYS = (
     "realtime_motion_platform_description",
     "motion_generation_mode",
     "enable_inline_motion_contract",
+    "remote_operator_default_computer",
+    "remote_operator_computer_entries",
+    "remote_operator_default_profile",
+    "remote_operator_probe_max_failures",
+    "remote_operator_profiles",
 )
 _default_plugin_config_paths = tuple(
     os.path.join(get_astrbot_config_path(), filename)
@@ -92,6 +104,9 @@ def prune_retired_plugin_config_fields(config: dict[str, Any]) -> list[str]:
             if key in values:
                 del values[key]
                 removed.append(f"{section}.{key}")
+        if not values and section in config:
+            del config[section]
+            removed.append(section)
     return removed
 
 
