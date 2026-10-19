@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import os from "node:os";
+import type { DesktopPresenceRequest, DesktopPresenceSnapshot } from "../../src/types/desktopPresence";
 import type {
   BilibiliDanmakuInfoResult,
   BilibiliLiveSettings,
@@ -41,6 +42,8 @@ function listLocalAdapterHosts(): string[] {
 }
 
 const api = {
+  readDesktopPresence: (request: DesktopPresenceRequest) =>
+    ipcRenderer.invoke("desktop:read-presence", request) as Promise<DesktopPresenceSnapshot>,
   getWebControlUrl: () => ipcRenderer.invoke("desktop:get-web-control-url") as Promise<string>,
   setWebControlUrl: (value: string) => ipcRenderer.invoke("desktop:set-web-control-url", value) as Promise<string>,
   openWebControlPanel: () => ipcRenderer.invoke("desktop:open-web-control") as Promise<boolean>,

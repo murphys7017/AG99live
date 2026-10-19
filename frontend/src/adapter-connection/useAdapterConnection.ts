@@ -184,6 +184,7 @@ export function createAdapterConnection(
 
   let socket: WebSocket | null = null;
   let observationCaptureBusy = false;
+  let presenceReadBusy = false;
   let initializePromise: Promise<void> | null = null;
   let connectAttemptSerial = 0;
   let disposed = false;
@@ -501,6 +502,24 @@ export function createAdapterConnection(
         respond({ ok: false, error: "desktop_observation_capture_failed" });
       }).finally(() => { observationCaptureBusy = false; });
     },
+    handleDesktopPresenceRequest: (envelope) => {
+      const connection = socket;
+      const read = window.ag99desktop?.readDesktopPresence;
+      const respond = (result: { ok: true; snapshot: import("../types/desktopPresence.js").DesktopPresenceSnapshot }
+        | { ok: false; error: string }) => {
+        if (socket === connection && connection?.readyState === WebSocket.OPEN) {
+          outboundClient.send(OUTBOUND_MESSAGE_TYPES.SYSTEM_DESKTOP_PRESENCE_RESULT, {
+            schema_version: "ag99live.desktop_presence.v1", request_id: envelope.payload.request_id, ...result,
+          });
+        }
+      };
+      if (!read) { respond({ ok: false, error: "desktop_presence_unavailable" }); return; }
+      if (presenceReadBusy) { respond({ ok: false, error: "desktop_presence_busy" }); return; }
+      presenceReadBusy = true;
+      void read(envelope.payload).then((snapshot) => respond({ ok: true, snapshot }))
+        .catch(() => respond({ ok: false, error: "desktop_presence_read_failed" }))
+        .finally(() => { presenceReadBusy = false; });
+    },
     handleDesktopSettingsQuery: (envelope) => {
       void desktopSettingsResponder(envelope);
     },
@@ -545,6 +564,8 @@ export function createAdapterConnection(
 
   function syncDesktopRuntimeSettings(): void {
     const payload: SystemDesktopRuntimeSettingsPayload = {
+      ...(window.ag99desktop?.readDesktopPresence
+        ? { desktop_presence_schema: "ag99live.desktop_presence.v1" as const } : {}),
       ...(window.ag99desktop?.captureDesktopScreenshot
         ? { desktop_observation_schema: "ag99live.desktop_observation.v1" as const } : {}),
       audio_credit_schema: "olv.audio_credit.v1",

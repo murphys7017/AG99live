@@ -15,6 +15,9 @@ import type {
 } from "./desktop";
 
 export interface Ag99DesktopApi {
+  readDesktopPresence: (
+    request: import("./desktopPresence").DesktopPresenceRequest,
+  ) => Promise<import("./desktopPresence").DesktopPresenceSnapshot>;
   getWebControlUrl: () => Promise<string>;
   setWebControlUrl: (value: string) => Promise<string>;
   openWebControlPanel: () => Promise<boolean>;

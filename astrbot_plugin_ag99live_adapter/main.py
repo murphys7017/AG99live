@@ -171,6 +171,10 @@ class MyPlugin(Star):
 
         self._desktop_observation = DesktopObservationRuntime(self.context)
         self._desktop_observation.start()
+        from .runtime.desktop_presence import DesktopPresenceRuntime
+
+        self._desktop_presence = DesktopPresenceRuntime(self.context)
+        self._desktop_presence.start()
 
     @_optional_llm_request_hook()
     async def start_independent_motion_generation(
@@ -1484,6 +1488,9 @@ class MyPlugin(Star):
                 event.set_extra(INDEPENDENT_MOTION_RESULT_EXTRA_KEY, None)
 
     async def terminate(self) -> None:
+        presence = getattr(self, "_desktop_presence", None)
+        if presence is not None:
+            await presence.stop()
         observer = getattr(self, "_desktop_observation", None)
         if observer is not None:
             await observer.stop()

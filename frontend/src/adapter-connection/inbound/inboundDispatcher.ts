@@ -93,6 +93,7 @@ export interface InboundDispatchDeps {
   acknowledgeMotionLabRawEventPersisted: (eventId: string) => void;
   // machine-local settings the control page drives through the adapter
   handleDesktopObservationRequest: (envelope: ProtocolEnvelope<SystemDesktopObservationRequestPayload>) => void;
+  handleDesktopPresenceRequest: (envelope: ProtocolEnvelope<import("../../types/desktopPresence.js").DesktopPresenceRequest>) => void;
   handleDesktopSettingsQuery: (envelope: ProtocolEnvelope<SystemDesktopSettingsQueryPayload>) => void;
   // url rewriting
   rewriteModelSyncEnvelope: (envelope: ProtocolEnvelope<SystemModelSyncPayload>) => ProtocolEnvelope<SystemModelSyncPayload>;
@@ -148,6 +149,9 @@ export async function dispatchInboundEvent(
       } else {
         dispatchInboundFeatureEvent(deps, event);
       }
+      return;
+    case "desktop_presence_request":
+      deps.handleDesktopPresenceRequest(event.envelope);
       return;
     case "desktop_observation_request":
       deps.handleDesktopObservationRequest(event.envelope);

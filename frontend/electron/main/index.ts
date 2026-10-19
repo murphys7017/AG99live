@@ -7,6 +7,7 @@ import { setupNativeMicrophoneIpc } from "./native-microphone";
 import { registerEsp32DisplayIpc, shutdownEsp32DisplayBridge } from "./esp32-display-bridge";
 import { registerBilibiliLiveIpc } from "./bilibili-live-bridge";
 import { SpoutSender } from "./spout-sender";
+import { createDesktopPresenceMonitor } from "./desktop-presence";
 import type {
   DesktopPttEventAck,
   DesktopPttEventKind,
@@ -20,6 +21,7 @@ let windowManager: WindowManager;
 let menuManager: MenuManager;
 let webControl: WebControlLauncher;
 let spoutSender: SpoutSender | null = null;
+let desktopPresence: ReturnType<typeof createDesktopPresenceMonitor> | null = null;
 const WM_DWMCOMPOSITIONCHANGED = 0x031e;
 const WINDOW_RECOVERY_DEBOUNCE_MS = 5000;
 
@@ -430,6 +432,14 @@ function watchWindowShortcuts(window: BrowserWindow): void {
 }
 
 function setupIpc(): void {
+  ipcMain.handle("desktop:read-presence", (event, request: unknown) => {
+    const petWindow = windowManager.getWindow("pet");
+    if (!petWindow || petWindow.isDestroyed() || petWindow.webContents !== event.sender) {
+      throw new Error("desktop_presence_sender_invalid");
+    }
+    if (!desktopPresence) throw new Error("desktop_presence_unavailable");
+    return desktopPresence.read(request);
+  });
   const requireSettingsSender = (sender: Electron.WebContents): void => {
     if (!(["pet", "settings"] as const).some((role) =>
       windowManager.getWindow(role)?.webContents === sender,
@@ -740,6 +750,7 @@ app.whenReady().then(async () => {
   spoutSender = new SpoutSender(sendSpoutSenderStatus);
   spoutSender.start();
   windowManager.createWindows();
+  desktopPresence = createDesktopPresenceMonitor();
   setupIpc();
   setupNativeMicrophoneIpc();
   registerEsp32DisplayIpc();
@@ -771,6 +782,7 @@ app.whenReady().then(async () => {
 });
 
 app.on("before-quit", () => {
+  desktopPresence?.stop();
   windowManager?.markAppQuitting();
   menuManager?.dispose();
   spoutSender?.stop();

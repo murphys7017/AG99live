@@ -45,6 +45,7 @@ import {
   parseSystemMotionLabRawEventRecordedPayload,
   parseSystemDesktopSettingsQueryPayload,
   parseSystemDesktopObservationRequestPayload,
+  parseSystemDesktopPresenceRequestPayload,
   parseOutputSegmentPayload,
   parseOutputTranscriptionPayload,
   parseSemanticAxisProfileSaveFailedPayload,
@@ -132,6 +133,7 @@ type InboundPassthroughEvent =
     envelope: ProtocolEnvelope<SystemDesktopSettingsQueryPayload>;
   }
   | { kind: "desktop_observation_request"; envelope: ProtocolEnvelope<SystemDesktopObservationRequestPayload> }
+  | { kind: "desktop_presence_request"; envelope: ProtocolEnvelope<import("../../types/desktopPresence.js").DesktopPresenceRequest> }
   | { kind: "history_list"; envelope: ProtocolEnvelope<SystemHistoryListPayload> }
   | { kind: "history_created"; envelope: ProtocolEnvelope<SystemHistoryCreatedPayload> }
   | { kind: "history_data"; envelope: ProtocolEnvelope<SystemHistoryDataPayload> }
@@ -253,6 +255,11 @@ export function mapInboundEnvelopeToEvent(
         kind: "motion_lab_raw_event_recorded",
         envelope: withPayload(envelope, parsed.payload),
       };
+    }
+    case INBOUND_MESSAGE_TYPES.SYSTEM_DESKTOP_PRESENCE_REQUEST: {
+      const parsed = parseSystemDesktopPresenceRequestPayload(envelope);
+      if (!parsed.ok) return protocolPayloadError(envelope, parsed.error);
+      return { kind: "desktop_presence_request", envelope: withPayload(envelope, parsed.payload) };
     }
     case INBOUND_MESSAGE_TYPES.SYSTEM_DESKTOP_OBSERVATION_REQUEST: {
       const parsed = parseSystemDesktopObservationRequestPayload(envelope);

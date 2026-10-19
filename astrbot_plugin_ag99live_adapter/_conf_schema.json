@@ -209,6 +209,33 @@
       }
     }
   },
+  "desktop_return": {
+    "description": "返回电脑后的主动互动（复用本体人格策略）",
+    "type": "object",
+    "items": {
+      "enabled": {
+        "description": "启用返回互动。需配套Electron前端；只读取系统输入空闲时长和锁屏/休眠状态，不采集按键内容或截图。",
+        "type": "bool",
+        "default": false
+      },
+      "idle_after_seconds": {
+        "description": "长时间无操作阈值（秒）。恢复操作仅作为互动机会，不能据此认定用户身体离开。",
+        "type": "int", "default": 300, "minimum": 30, "maximum": 3600
+      },
+      "minimum_away_seconds": {
+        "description": "锁屏或休眠的最短持续时间（秒）。短暂锁屏不产生欢迎机会。",
+        "type": "int", "default": 60, "minimum": 10, "maximum": 3600
+      },
+      "confirmation_seconds": {
+        "description": "恢复操作确认时间（秒）。期间必须再次出现输入，自动唤醒或仅碰一下鼠标不会直接触发。",
+        "type": "int", "default": 3, "minimum": 3, "maximum": 10
+      },
+      "cooldown_seconds": {
+        "description": "返回互动机会冷却（秒）。默认15分钟；同次返回只提交一次机会，是否说话仍由安静时段、预算和人格策略决定。",
+        "type": "int", "default": 900, "minimum": 0, "maximum": 86400
+      }
+    }
+  },
   "desktop_observation": {
     "description": "桌面变化观察（复用本体主动会话流程）",
     "type": "object",

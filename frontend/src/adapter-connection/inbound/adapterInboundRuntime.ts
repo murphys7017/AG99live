@@ -46,6 +46,7 @@ export interface AdapterInboundRuntimeDeps {
   findActiveAudioSegment: () => { turnId: string | null; messageId: string } | null;
   acknowledgeMotionLabRawEventPersisted: (eventId: string) => void;
   handleDesktopObservationRequest: (envelope: ProtocolEnvelope<SystemDesktopObservationRequestPayload>) => void;
+  handleDesktopPresenceRequest: (envelope: ProtocolEnvelope<import("../../types/desktopPresence.js").DesktopPresenceRequest>) => void;
   handleDesktopSettingsQuery: (envelope: ProtocolEnvelope<SystemDesktopSettingsQueryPayload>) => void;
   startMicrophoneCapture: (origin?: "manual" | "ptt" | "auto") => Promise<boolean>;
   normalizeMotionPayload: MotionPayloadNormalizer;
@@ -215,6 +216,7 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
       acknowledgeMotionLabRawEventPersisted: (eventId) =>
         deps.acknowledgeMotionLabRawEventPersisted(eventId),
       handleDesktopObservationRequest: (envelope) => deps.handleDesktopObservationRequest(envelope),
+      handleDesktopPresenceRequest: (envelope) => deps.handleDesktopPresenceRequest(envelope),
       handleDesktopSettingsQuery: (envelope) =>
         deps.handleDesktopSettingsQuery(envelope),
       rewriteModelSyncEnvelope: (env) => rewriteModelSyncEnvelope(env),

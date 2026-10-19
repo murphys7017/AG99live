@@ -1,3 +1,46 @@
+desktop_return_presence_20261019:
+  class: feature
+  risk: high
+  status: reviewed_selectively_synced_pending_paired_load_and_acceptance
+  scope: >-
+    User approved first implementation of return-to-desktop interaction. Electron
+    main owns a timing-only detector using powerMonitor lock/unlock, suspend/resume
+    and idle seconds. Default lock/suspend minimum 60s, idle threshold 300s and 3s
+    confirmation requiring another input; one bump or automatic wake alone fails.
+    Optional presence.v1 no-chat-turn request/result capability connects matching
+    main/preload/renderer and adapter. Source emits one 30s cancellable return fact,
+    with natural summary/duration only, into existing Gate/Policy/Persona/TTS/motion.
+    Busy dialogue drops the opportunity; new dialogue, inactive/unknown state,
+    disconnect/disable withdraw it. Per-client opportunity cooldown defaults 900s.
+    Stable monitor identity retains observed suspend across ordinary reconnect;
+    first receive aligns sequence and never replays a confirmed old return.
+    Feature/config disable and new desktop/client context reset baseline. No new
+    provider, OCR, screenshot, key contents, forced speech or pure-action policy.
+  validation: >-
+    Renderer/WebSDK/Node typechecks and full Electron main/preload/renderer build
+    passed. Changed Python Ruff/compile and plugin structure checks passed (zero
+    errors/warnings). Public detector checks confirmed unlock and idle return,
+    single-bump rejection, timeout and startup/reconnect baseline; follow-up resume
+    boundary preserved resume rather than mislabeling unlock. Actual public wire
+    parser accepts the presence result and rejects chat-turn attribution; invalid
+    state rejected by validator. Eight adapter targets matched HEAD baselines
+    before selective sync and now byte-match source. Review traced native IPC,
+    reconnect baseline, admission, input cancellation and existing Sensor intake.
+    Corrected presence chat-turn rejection diagnostic; actual public parser success
+    and rejection checks plus changed-file Ruff/compile passed on 2026-10-20.
+    No broad/mock integration suite.
+  limitations: >-
+    Default disabled; no saved user settings modified or process restart.
+    User requested scoped commits; bypass whole-directory deployment hook and
+    selectively sync only the eight related adapter files.
+    Must load the newly built Electron main/preload/renderer and matching adapter;
+    existing Core cancellation API must be loaded through full AstrBot restart.
+    Real Windows lock/suspend events, input confirmation and live Policy/TTS/Live2D
+    output require manual acceptance. Idle recovery is not physical presence proof.
+    Do not lock/suspend the user's machine automatically. Unrelated audit document,
+    deployed plugin/state/J-space edits kept; concurrent passive behavior work is
+    already committed separately and is outside this review.
+
 desktop_observation_conversation_priority_20261019:
   class: feature
   risk: high

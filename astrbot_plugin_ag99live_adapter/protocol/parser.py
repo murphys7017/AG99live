@@ -79,8 +79,9 @@ def parse_inbound_message(
     timestamp = _normalize_optional_string(raw.get("timestamp")) or _utc_now_iso()
 
     _validate_payload(message_type, payload)
-    if message_type == "system.desktop_observation_result" and turn_id is not None:
-        raise ProtocolError("desktop_observation_result_must_not_have_turn")
+    if message_type in {"system.desktop_observation_result", "system.desktop_presence_result"} and turn_id is not None:
+        result_type = message_type.removeprefix("system.")
+        raise ProtocolError(f"{result_type}_must_not_have_turn")
 
     normalized_raw = {
         "type": message_type,
@@ -158,6 +159,13 @@ def build_message_envelope(
 
 
 def _validate_payload(message_type: str, payload: dict[str, Any]) -> None:
+    if message_type == "system.desktop_presence_result":
+        from .desktop_presence import validate_presence_result
+        try:
+            validate_presence_result(payload)
+        except ValueError as exc:
+            raise ProtocolError(str(exc)) from exc
+        return
     if message_type == "system.desktop_observation_result":
         from .desktop_observation import validate_frame_result
         try:

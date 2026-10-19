@@ -1,4 +1,5 @@
 export const INBOUND_MESSAGE_TYPES = {
+  SYSTEM_DESKTOP_PRESENCE_REQUEST: "system.desktop_presence_request",
   SYSTEM_DESKTOP_OBSERVATION_REQUEST: "system.desktop_observation_request",
   SYSTEM_SERVER_INFO: "system.server_info",
   SYSTEM_MODEL_SYNC: "system.model_sync",
@@ -22,6 +23,7 @@ export const INBOUND_MESSAGE_TYPES = {
 } as const;
 
 export const OUTBOUND_MESSAGE_TYPES = {
+  SYSTEM_DESKTOP_PRESENCE_RESULT: "system.desktop_presence_result",
   SYSTEM_DESKTOP_OBSERVATION_RESULT: "system.desktop_observation_result",
   CONTROL_AUDIO_CREDIT: "control.audio_credit",
   INPUT_TEXT: "input.text",

@@ -1,3 +1,4 @@
+import { isDesktopPresenceRequest } from "../../types/desktopPresence.js";
 import type {
   ControlErrorPayload,
   ControlTurnFinishedPayload,
@@ -632,6 +633,15 @@ export function parseHistoryDeletedPayload(
       success: success.payload,
     },
   };
+}
+
+export function parseSystemDesktopPresenceRequestPayload(
+  envelope: ProtocolEnvelope<unknown>,
+): PayloadParseResult<import("../../types/desktopPresence.js").DesktopPresenceRequest> {
+  if (envelope.turn_id !== null || !isDesktopPresenceRequest(envelope.payload)) {
+    return invalidPayload(envelope.type, "payload", "desktop presence v1 request without turn");
+  }
+  return { ok: true, payload: envelope.payload };
 }
 
 export function parseSystemDesktopObservationRequestPayload(
