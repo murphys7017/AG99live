@@ -117,7 +117,7 @@ desktop_busy_or_available
 1. **语义决策**：是否有值得表达的内容、说什么、是否进入长对话，仍由 AG99 的 Observation Inbox、Gate、Policy 和 Persona/Output 决定。
 2. **本地时机/输出准入**：桌面端根据当前交互、播放、安静模式和窗口状态，决定主动表达此刻可直接呈现、短暂延后还是抑制。该层只判断“现在适不适合开口”，不决定表达内容或创建第二套主动策略；目前这层尚未定义或实现。
 3. **事实传递**：若 AG99 的 Policy 需要桌面事实，桌面端只发送经过授权、去抖/合并的低频事件，经新增协议消息进入 Adapter，再调用已注册的 Runtime Observation handle；不发送每帧、鼠标轨迹或连续设备状态。
-4. **输出与收口**：获准的内容继续走现有 `send_by_session()`、`output.segment.v5`、PlaybackTimeline 和 Turn 终态；桌面本地准入需要能延后/抑制输出并保持终态正确，不应伪造播放成功。
+4. **输出与收口**：获准的内容继续走现有 `send_by_session()`、`output.segment.v6`、PlaybackTimeline 和 Turn 终态；桌面本地准入需要能延后/抑制输出并保持终态正确，不应伪造播放成功。
 
 时机层的实现位置仍待选择：可以从现有桌面 turn/playback 状态与本地状态机扩展，也可以独立成小型 Admission Policy；不应先假定需要新的 AG99 scheduler。
 

@@ -377,7 +377,7 @@ schema + `protocol_version = v2`:
 ```
 model_info = live2d_scan.v4                    motion_intent = engine.motion_intent.v4
 motion_tuning_sample = ag99.motion_tuning_sample.v2
-output_segment = output.segment.v5              parameter_plan = engine.parameter_plan.v3
+output_segment = output.segment.v6              parameter_plan = engine.parameter_plan.v3
 parameter_action_library = parameter_action_library.v2
 performance_curve_hint = ag99.performance_curve_hint.v1
 semantic_axis_profile = ag99.semantic_axis_profile.v3

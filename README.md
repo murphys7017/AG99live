@@ -33,7 +33,7 @@ AG99live 为 AG99 提供一具可见、可听、可持续演出的桌面身体�
 用户输入
   -> AG99：Persona 回复与 TTS；动作可来自 Persona Effect 或独立动作 Provider
   -> Adapter：按配置聚合回复级或 Persona 分段级动作
-  -> Adapter：output.segment 消息（Payload Schema 为 output.segment.v5）
+  -> Adapter：output.segment 消息（Payload Schema 为 output.segment.v6）
   -> PlaybackTimeline：同一段时钟和终态
   -> ModelEngine：engine.motion_intent.v4 -> engine.parameter_plan.v3
   -> Live2D runtime：参数、口型、Physics 和绘制
@@ -140,7 +140,7 @@ npm run build:spout-sender
 
 ## 当前状态与验证范围
 
-截至 **2026 年 10 月 12 日**，源码包含 Adapter、`output.segment` 消息（Payload Schema 为 `output.segment.v5`）、播放 Timeline、ModelEngine、Live2D runtime 和 Spout2 输出链路。动作支持 Persona Effect、独立 Provider 整回复生成，以及独立 Provider 按 Persona speech 段生成并关联动作；具体开关与时序见[动作生成与 Persona 分段关联](docs/01-架构与结构/07-动作生成与Persona分段关联.md)。协议版本以 `astrbot_plugin_ag99live_adapter/protocol/schema_manifest.json` 为准。
+截至 **2026 年 10 月 20 日**，源码包含 Adapter、`output.segment.v6` 完整段交付与后到动作更新、M2 增量文本/PCM/动作事件、播放 Timeline、ModelEngine、Live2D runtime 和 Spout2 输出链路。M2 已有实现和局部验证，但真实 Provider、Electron 播放、声卡与 Live2D 的完整体验仍需现场验收；委派后的 Core-final 仍走完整结果路径。动作支持 Persona Effect、独立 Provider 整回复生成，以及按 Persona speech 段并行准备动作；具体边界见[动作生成与 Persona 分段关联](docs/01-架构与结构/07-动作生成与Persona分段关联.md)和[OLV 全生命周期流式计划](docs/02-设计文档/12-OLV全生命周期流式实施计划.md)。桌面变化观察和返回电脑互动均默认关闭，复用 AG99 Personal Policy，不保证每次说话；需配套加载并进行真实验收。协议版本以 `astrbot_plugin_ag99live_adapter/protocol/schema_manifest.json` 为准。
 
 真实桌面环境仍需确认以下体验：
 

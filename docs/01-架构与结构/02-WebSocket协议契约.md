@@ -14,7 +14,7 @@ python scripts/check_protocol_schema_manifest.py
 
 - WebSocket 在解析边界校验协议版本、消息类型、信封基本字段和消息专属必填字段。前端要求 `timestamp` 为非空字符串；后端归一化入站消息时会为缺失的 `timestamp` 补当前 UTC 时间。`turn_id` 是否允许为 `null` 由消息类型决定。
 - 对启用精确键校验的 payload 和 slot，未知字段会被拒绝；不能将这一行为概括为所有后端 payload 的未知字段一律拒绝。
-- 一个完整回复段通过 `type: output.segment` 的消息一次提交，Payload 的 `schema_version` 为 `output.segment.v5`。前端不会等待后续 patch，也不会依赖 `synth_finished` 才播放已完整到达的段。
+- 完整文本/音频段通过 `type: output.segment` 一次提交，Payload 的 `schema_version` 为 `output.segment.v6`。如果同段动作尚未完成，初始动作槽可为 `pending`，随后只允许一次 `output.segment_motion` 终态更新；它补齐动作槽，不重开音频或文本段，也不是 M2 增量事件。
 - 文件、模型和缓存媒体通过 Adapter 的本机 HTTP 静态资源服务提供；前端只接受契约允许的绝对 URL。
 - 麦克风 PCM16LE 使用二进制帧传输。历史的 JSON 数组音频路径已经删除。
 
@@ -35,7 +35,7 @@ python scripts/check_protocol_schema_manifest.py
 
 ## 原子输出段
 
-`output.segment` 消息是回复播放的唯一入站业务单元，其 Payload Schema 为 `output.segment.v5`。它携带段归属和顺序，以及文本、音频状态、动作意图、speech cues 和需要的展示资料。Adapter 只在逻辑消息已满足可发送条件后提交该段；前端先严格解析全部 slot，再写入 SessionStore 并启动段任务。
+`output.segment` 是完整回复的主交付单元，其 Payload Schema 为 `output.segment.v6`。它携带段归属和顺序，以及文本、音频状态、动作意图、speech cues 和需要的展示资料。Adapter 只在逻辑消息已满足可发送条件后提交该段；前端先严格解析全部 slot，再写入 SessionStore 并启动段任务。`motion.state=pending` 表示音频/文本可先播放，Adapter 后续可用同一 `turn_id` 和 `message_id` 发送一次 `output.segment_motion`，补交动作终态。该消息不创建第二个播放段、不重播音频；动作到达时原音频仍播放才可挂入其时间线，已结束段的迟到动作按过期失败结算。
 
 协议的可选 `speech` slot 表示前端表演用的 speech cues；当前 Adapter 构造 `output.segment` 时将其设为 `absent`。AstrBot Persona 的 `segments[].speech` 是上游文本/TTS 分段输入，由 Adapter 在后端用于逐段动作绑定，不会因此变成协议 speech cues。两者名称相近但契约和生命周期不同。
 
@@ -75,7 +75,7 @@ python scripts/check_protocol_schema_manifest.py
 
 `control.synth_finished` 关闭该 Turn 的输出队列，payload 必须包含布尔值 `success`，失败时必须带非空 `reason`。生成失败不会删除已经接受的原子段，也不会立刻把播放 Session 置为失败；这些段仍按原顺序播放。桌面在本地播放收口后发送 `control.playback_finished`，生成失败或本地播放失败时其 `success` 为 false。Adapter 保留生成失败原因，不能被客户端的成功回执覆盖，最终通过 `control.turn_finished` 返回失败。
 
-本次契约要求配套更新 Adapter 与桌面客户端；旧的空 payload 不再是有效的 `synth_finished`。`output.segment.v5` 保持不变。
+本次契约要求配套更新 Adapter 与桌面客户端；旧的空 payload 不再是有效的 `synth_finished`。`output.segment.v6` 及其 `pending` 动作终态更新必须按 manifest 配套加载；它与 `olv.incremental_output.v1` 是不同的交付路径。
 
 ## 独立待机动作
 
