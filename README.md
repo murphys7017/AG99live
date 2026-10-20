@@ -1,167 +1,125 @@
 # AG99live
 
-**让 AG99 真正出现在你的桌面上。**
+**让 AG99 在桌面上成为可见、可听、会回应的 Live2D 角色。**
 
-一个能说话、看向你、做出姿态与表情，并能进入直播画面的 Live2D 桌面伴侣。
+AG99live 是 AG99 的桌面表现端：加载 Live2D 模型，播放语音，并同步字幕与动作；对话、人设和模型调用由 [AG99](https://github.com/murphys7017/AG99) 提供。
 
-Windows 桌面端 · AG99 · Electron · Live2D Cubism · Spout2
+Windows · Electron · Live2D Cubism · Spout2
 
-[开始运行](#快速开始) · [下载预构建版本](#下载预构建版本) · [看看它能做什么](#为创作和直播而生) · [接入 OBS](#在-obs-中使用透明-live2d-源) · [浏览文档](docs/README.md)
+[下载桌面版](https://github.com/murphys7017/AG99live/releases) · [快速开始](#快速开始) · [功能介绍](#体验亮点) · [OBS 设置](#在-obs-中使用) · [开发文档](docs/README.md)
+
+![AG99live 桌面陪伴场景插画](docs/assets/readme/readme-cover.jpg)
+
+## 体验亮点
+
+### 聊天时，角色会跟着回复一起表现
+
+语音播放时，Live2D 角色可以同步做口型、转头、视线和姿态变化。动作可按回复分段关联，让长回复也能边说边表现，而不是等语音播完再统一摆一个姿势。每个模型通过自己的 Profile 映射动作，不必为每个模型重写一套动作语义。
+
+### 没有新消息时，也有基础的待机表现
+
+桌面端提供可配置的待机动作、呼吸、眨眼、鼠标凝视和思考随动。这些本地表现不需要为每次眨眼或光标移动调用大模型；实际效果取决于设置和 Live2D 模型是否提供相应参数。
+
+### 回复还在生成，角色可以先有反应
+
+可选的轻量预动作在有效语音转写后提前请求一个简短反应；正式回复开始后，再由实际动作平滑接管。增量流式路径也可以逐步交付文本、音频和动作，让即时回复不必等整段内容全部完成。预动作、流式播放和真实设备间的完整效果仍需现场验收；当前增量流式覆盖即时回复，委派任务的最终结果仍走完整交付。细节见[流式实施计划](docs/02-设计文档/12-OLV全生命周期流式实施计划.md)与[轻量预动作说明](docs/02-设计文档/14-轻量预动作Prompt与接入.md)。
+
+### 桌面互动遵循对话优先
+
+可选的桌面观察只用数学方法判断画面是否发生大范围变化，不做 OCR、不分析画面内容，也不把截图发给模型。返回互动依据 Windows 锁屏/休眠与输入恢复形成机会。两项功能默认关闭；事件交给 AG99 的主动策略决定是否回应，不保证每次都说话，实机误报、漏报和语音表现仍待验收。规则见[桌面变化观察计划](docs/desktop-observation-plan.md)和[返回电脑互动计划](docs/desktop-return-plan.md)。
+
+### 从桌面表演延伸到直播和外设
+
+Spout2 可把透明 Live2D 画面交给 OBS。桌面端也能把 Bilibili 弹幕按设置合并后送入 AG99；需要小屏展示时，可将桌宠头部画面裁切并推送到 ESP32。弹幕接入不是完整的直播演出调度；ESP32 输出需要兼容设备并单独配置。
+
+## 和 AG99 生态协作
+
+AG99 管理对话、人设、记忆、工具和主动策略；AG99live 负责桌面输入、即时反应、Live2D 表现、音频播放和设备连接。两者协作复用同一条回复和播放链路，不各自维护一套会话或动作播放器。
+
+安装 NeuroBrain 后，按 Persona 分段生成的动作可以读取当前情绪与行为状态，作为动作选择的辅助信息；它不是动作命令，也不是基础对话的依赖。后台被动动作属于实验功能，默认关闭。
+
+Profile Editor 用于校准不同 Live2D 模型，Motion Lab 用于检查动作从输入到执行的过程。仓库还附有独立的 VTube Studio 数据录制工具，供开发者采集和检查原始参数；它不控制 VTube Studio，也不参与桌宠的实时动作播放。
+
+## 界面预览
 
 ![AG99live 桌面运行界面](docs/assets/readme/QQ20260722-021900.png)
 
 ![AG99live Profile Editor](docs/assets/readme/QQ20260722-021910.png)
 
-## 让每一次回应都有存在感
+## 工作方式
 
-AG99live 为 AG99 提供一具可见、可听、可持续演出的桌面身体。
+AG99 负责对话与语音生成，Adapter 把回复交给桌面端。AG99live 在同一播放时间线上协调音频、字幕和动作，再由 Live2D runtime 渲染角色。
 
-当 AG99 生成回答时，AG99live 同时组织语音、字幕、视线、头身姿态、面部细节、口型和物理效果。角色的表现随内容与语气变化，整段演出沿同一播放时钟推进，结束、中断和下一段回复也都有明确的生命周期。
-
-它适合希望把 AI 角色做成长期桌面伴侣、互动角色或直播形象的开发者与创作者：
-
-- 在日常聊天中，让角色用声音、目光和动作表达回应。
-- 为 Live2D 模型建立可复用的语义表现能力，而不是维护大量固定情绪动画。
-- 在 OBS 中获得带透明 Alpha 的 Live2D 图层，用于直播、录屏和虚拟形象场景。
-- 从 Prompt、动作语义、参数计划到播放终态完整观察一次表演，持续调校角色表现。
-
-## 从一句话到一段表演
-
-动作生成模式可由 Persona Effect 提供结构化动作，也可由独立 Provider 按回复或 Persona speech 段生成。无论来源如何，动作输出都不包含 `ParamAngleX`、motion 文件路径或底层播放器指令；AG99live 根据当前模型的能力档案生成实际参数计划。
-
-```text
+~~~text
 用户输入
-  -> AG99：Persona 回复与 TTS；动作可来自 Persona Effect 或独立动作 Provider
-  -> Adapter：按配置聚合回复级或 Persona 分段级动作
-  -> Adapter：output.segment 消息（Payload Schema 为 output.segment.v6）
-  -> PlaybackTimeline：同一段时钟和终态
-  -> ModelEngine：engine.motion_intent.v4 -> engine.parameter_plan.v3
-  -> Live2D runtime：参数、口型、Physics 和绘制
-```
+  -> AG99：生成对话与 TTS
+  -> Adapter：接收回复，并校验 Persona 或独立 Provider 生成的动作
+  -> 播放引擎：同步语音、字幕与动作
+  -> Live2D 画面 -> 可选 Spout2 / OBS
+~~~
 
-例如，“认真解释、稍微偏头、看向用户”会成为模型无关的动作语义；当前 Live2D 模型的 `SemanticAxisProfile` 决定它最终如何映射为头部、身体、视线和面部参数。
-
-## 为创作和直播而生
-
-### 语义驱动的角色表现
-
-用 `-4..4` 的方向和强度描述头部、身体、视线和面部等语义轴。系统支持单姿态、稀疏动作序列和已公开的模型动作资源，让角色能在解释、调侃、强调和停顿时形成不同的表现节奏。
-
-### 声音、字幕、动作同频发生
-
-每个回复由 `turn_id`、`message_id` 和 `sequence` 标识。音频、字幕、参数动作与口型在同一个播放段内协调，避免角色已经转身、语音仍在继续的割裂体验。
-
-### 一套语义，适配不同模型
-
-Profile Editor 保存每个 Live2D 模型的 `SemanticAxisProfile`、参数范围、九级锚点、关系图和响应设置。更换模型后，开发者可以重新校准表现能力，保留上层的动作语言和对话设计。
-
-### 看得见的调校过程
-
-Motion Lab 记录动作输入、编译诊断、参数计划与播放终态。你可以重放一次已编译的动作，比较原始语义和最终参数，筛选高质量样本作为后续 Prompt 参考。
-
-### 直接进入 OBS 的透明角色图层
-
-Windows 桌面端将已经绘制的透明 Live2D canvas 发布为 Spout2 Sender。OBS 获取的是角色图层本身，桌面、设置窗口、终端和输入窗口不会出现在透明区域中。
+完整协议、动作生成和播放时序见[文档中心](docs/README.md)。
 
 ## 快速开始
 
-### 环境
+### 前置条件
 
 - Windows 10 或 11。
-- Node.js 20 或更高版本（仅从源码构建桌面端时需要）。
-- 可运行的 AG99 环境、对话模型和 TTS Provider。
-- 与 AG99 和插件依赖兼容的 Python 环境。
+- 已运行并配置好对话模型与 TTS 的 AG99 环境。
+- 与当前 Live2D runtime 兼容的模型。
+- Node.js 20 或更高版本仅在从源码运行桌面端时需要。
 
-增强链路以维护者的 [AG99 配套分支](https://github.com/murphys7017/AG99) 为集成目标。
+### 使用发布版
 
-### 下载预构建版本
+1. 从 [GitHub Releases](https://github.com/murphys7017/AG99live/releases) 下载并安装 AG99live 桌面版。
+2. 从本仓库或配套源码包取得 <code>astrbot_plugin_ag99live_adapter/</code>，复制到 AG99 的插件目录，并使用 AG99 的 Python 环境安装该插件的 <code>requirements.txt</code>。
+3. 启动 AG99，在插件管理中启用 **AG99live Adapter**。
+4. 启动 AG99live，在设置中连接 Adapter、同步模型并选择要使用的 Live2D 模型。
 
-从 [GitHub Releases](https://github.com/murphys7017/AG99live/releases) 下载 `AG99live-Setup-0.1.0-x64.exe`，按安装向导完成桌面端安装。安装包已经包含 Electron runtime、前端生产依赖、`uiohook-napi` 原生模块，以及 Spout Sender 和 DLL；运行已安装的桌面端不需要另外安装 Node.js。
+Adapter 默认只监听本机回环地址：
 
-Adapter 不嵌入桌面安装包，需要单独安装到 AG99：
+| 服务 | 默认地址 | 用途 |
+| --- | --- | --- |
+| WebSocket | <code>ws://127.0.0.1:12396</code> | 桌面端与 AG99 之间的输入、回复和控制消息 |
+| HTTP | <code>http://127.0.0.1:12397</code> | 模型、图片和缓存媒体 |
 
-1. 从本仓库或对应 Release 的源码中取得 `astrbot_plugin_ag99live_adapter/`。
-2. 将目录复制到 AG99 的插件目录。
-3. 使用 AG99 当前的 Python 环境安装 `astrbot_plugin_ag99live_adapter/requirements.txt`。
+Adapter 运行设置可在 AG99 WebUI 的 **AG99live 控制台**管理；麦克风、快捷键和设备等本机设置由桌面端管理。登录仍由 AG99 处理。
 
-本次 Release 的桌面端版本为 `0.1.0`，配套 Adapter 版本为 `1.1.0`。`runtime-core/` 是独立的原生运行时，不属于本次桌面安装包。
+### 从源码运行
 
-### 1. 安装并启用 Adapter
-
-将 `astrbot_plugin_ag99live_adapter/` 放到 AG99 的插件目录。下面的命令在 AG99live 仓库根目录执行，并使用 AG99 当前的 Python 环境安装依赖：
-
-```powershell
-python -m pip install -r .\astrbot_plugin_ag99live_adapter\requirements.txt
-```
-
-启用 `AG99live Adapter` 后，默认服务只绑定本机回环地址：
-
-| 服务 | 默认地址 |
-| --- | --- |
-| WebSocket | `ws://127.0.0.1:12396` |
-| 静态资源与媒体 | `http://127.0.0.1:12397` |
-
-端口、角色名、自动麦克风及各项运行设置由 AG99 插件配置管理。首次运行后在 AG99 的插件配置界面按当前 Schema 填写，不要沿用旧的平级配置键。
-
-### 2. 启动桌面端
-
-```powershell
+~~~powershell
 cd frontend
 npm install
 npm run dev
-```
+~~~
 
-在设置窗口连接 Adapter，完成模型同步并选择 Live2D 模型后，即可从输入窗口或麦克风发起对话。
+开发桌面端仍需安装并启用 AG99live Adapter。首次启动后，在桌面设置中连接 Adapter 并选择 Live2D 模型。
 
-### Web 控制与托盘
+## 在 OBS 中使用
 
-桌面端启动后常驻托盘。右键托盘或桌宠，选择 **打开 Web 控制面板**，使用默认浏览器打开 AG99 中的 AG99live 控制台；登录仍由 AG99 管理，桌面端不保存登录凭据。
+1. 启动 AG99live。
+2. 在 OBS 添加 **Spout2 Capture**，选择 <code>AG99live.Live2D</code>。
+3. 使用**预乘 Alpha**合成模式。
 
-默认 AG99 WebUI 基址为 `http://127.0.0.1:6185/`，与 Adapter 的 WS/资源端口不同。使用其他地址或反向代理时，可在 **本机工具 > 本机设置 > Web 控制面板** 修改基址，连接后也能在 Web 的桌面本机配置中修改。填写 WebUI 基址而非完整插件页面 URL；支持子路径，不接受账号、查询参数或 `#`。
+如果 Spout2 Sender 无法启动，桌面端仍可运行，但不会提供 Spout 输出。自行构建 Sender 时，在 Windows 安装 Visual Studio Build Tools（MSVC x64），然后运行：
 
-Web 已提供插件配置（包括 VAD）、Profile、动作样例、对话历史和桌面输出参数；鼠标凝视的开关、检测间隔、等待时间和移动阈值也在桌面本机配置中，保存后在 Electron 运行时生效并持久化。
-
-Web 的 **对话历史** 可以查看、新建、载入和删除当前 Adapter 的会话。查看不会改变当前对话，载入或新建会影响后续聊天；删除需要再次确认。历史由 AG99 会话管理器持有，不要求桌面端在线。
-
-四个旧工具窗口不再随启动创建，仅在打开本机工具时加载。连接救援和实时动作预览暂时保留本机入口；历史窗口保留到 Web 历史现场验收完成，旧窗口不会自动同步 Web 会话选择，历史管理请优先使用 Web。配置与 Profile 的主要入口已转向 Web。此批不修改独立开发中的 native runtime，其支持的本机参数以实际返回结果为准。
-
-### 在 OBS 中使用透明 Live2D 源
-
-桌面端会启动名为 `AG99live.Live2D` 的 Spout2 Sender。OBS 中添加 **Spout2 Capture**，选择该 Sender，并使用**预乘 Alpha**合成模式。
-
-开发环境如需重新生成 Sender：
-
-```powershell
+~~~powershell
 cd frontend
 npm run build:spout-sender
-```
+~~~
 
-该构建需要 Windows 上的 Visual Studio Build Tools（MSVC x64）。仓库的 `frontend/resources/spout/` 已包含 Sender 和所需的 Spout2 运行库；自行打包桌面端时，请将该目录复制到运行包的 `resources/spout/`。Sender 无法启动时，桌面端仍可正常运行，但不会提供 Spout 输出。
+## 开发与状态
 
-## 当前状态与验证范围
+从仓库根目录运行协议检查，再检查前端类型：
 
-截至 **2026 年 10 月 20 日**，源码包含 Adapter、`output.segment.v6` 完整段交付与后到动作更新、M2 增量文本/PCM/动作事件、播放 Timeline、ModelEngine、Live2D runtime 和 Spout2 输出链路。M2 已有实现和局部验证，但真实 Provider、Electron 播放、声卡与 Live2D 的完整体验仍需现场验收；委派后的 Core-final 仍走完整结果路径。动作支持 Persona Effect、独立 Provider 整回复生成，以及按 Persona speech 段并行准备动作；具体边界见[动作生成与 Persona 分段关联](docs/01-架构与结构/07-动作生成与Persona分段关联.md)和[OLV 全生命周期流式计划](docs/02-设计文档/12-OLV全生命周期流式实施计划.md)。桌面变化观察和返回电脑互动均默认关闭，复用 AG99 Personal Policy，不保证每次说话；需配套加载并进行真实验收。协议版本以 `astrbot_plugin_ag99live_adapter/protocol/schema_manifest.json` 为准。
-
-真实桌面环境仍需确认以下体验：
-
-- 连续消息的顺序、取消和所有终态。
-- 首段音频、字幕、口型和参数动作的同步。
-- 模型切换、设备切换和断线后的资源释放。
-- Spout2 的透明边缘、帧率以及桌面端重启后的恢复。
-
-## 文档与开发
-
-深入的架构、协议、播放、动作编译、运行验收和 VTube Studio 数据录制说明见[文档中心](docs/README.md)。
-
-```powershell
+~~~powershell
 python scripts/check_protocol_schema_manifest.py
-
 cd frontend
 npm run typecheck
-```
+~~~
 
-这些检查覆盖生成的协议清单和 TypeScript 类型；完整行为仍要通过真实桌面运行验收。
+这些检查不替代 AG99、TTS、桌面端、声卡和 Live2D 的完整联机验收。当前实现范围与待验收项目见[当前状态与验收边界](docs/01-架构与结构/06-当前状态与验收边界.md)。
 
-## 模型与第三方资源
+## 第三方资源
 
-仓库中的 Live2D 模型、贴图、动作和预览图可能具有独立许可。使用、再分发或商用前，请阅读对应模型目录及第三方 SDK 所附的授权文件。
+仓库中的 Live2D 模型、贴图、动作、预览图和第三方 SDK 可能采用不同许可。使用或再分发前，请检查对应资源目录中的授权文件。
