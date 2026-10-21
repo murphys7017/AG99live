@@ -19,7 +19,7 @@ class SileroVADStreamEngine:
         self.window_size_samples = int(kwargs.get("window_size_samples", 512) or 512)
         chunk_ms = max(int(1000 * self.window_size_samples / self.sampling_rate), 1)
         self.min_silence_duration_ms = max(
-            int(kwargs.get("required_misses", 24) or 24) * chunk_ms,
+            int(kwargs.get("required_misses", 16) or 16) * chunk_ms,
             0,
         )
         self.speech_pad_ms = max(

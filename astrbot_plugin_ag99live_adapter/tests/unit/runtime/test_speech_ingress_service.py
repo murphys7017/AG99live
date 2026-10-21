@@ -85,7 +85,10 @@ def test_sealed_ptt_transcribes_before_final_image_commit(install_fake_astrbot) 
 
         service = SpeechIngressService(
             media_service=MediaServiceStub(),
-            runtime_state=SimpleNamespace(resolve_stt_provider=Provider),
+            runtime_state=SimpleNamespace(
+                fast_asr_enabled=False,
+                resolve_stt_provider=Provider,
+            ),
             create_vad_engine=lambda: None,
             send_json=send_json,
             build_message_object=lambda **kwargs: kwargs,
@@ -299,7 +302,10 @@ def test_interrupted_sealed_ptt_cannot_commit(install_fake_astrbot) -> None:
 
         service = SpeechIngressService(
             media_service=MediaServiceStub(),
-            runtime_state=SimpleNamespace(resolve_stt_provider=Provider),
+            runtime_state=SimpleNamespace(
+                fast_asr_enabled=False,
+                resolve_stt_provider=Provider,
+            ),
             create_vad_engine=lambda: None, send_json=send_json,
             build_message_object=lambda **kwargs: kwargs,
             on_vad_speech_started=ignore_vad_speech_started,
@@ -366,7 +372,10 @@ def test_handle_binary_audio_stream_chunk_transcribes_on_stream_end(
 
     service = SpeechIngressService(
         media_service=MediaServiceStub(),
-        runtime_state=SimpleNamespace(resolve_stt_provider=lambda: SttProviderStub()),
+        runtime_state=SimpleNamespace(
+            fast_asr_enabled=False,
+            resolve_stt_provider=lambda: SttProviderStub(),
+        ),
         create_vad_engine=lambda: None,
         send_json=send_json,
         build_message_object=lambda *, text, raw_message, images=None: {
@@ -509,7 +518,10 @@ def test_vad_speech_end_callback_runs_when_transcription_has_no_message(
 
     service = SpeechIngressService(
         media_service=MediaServiceStub(),
-        runtime_state=SimpleNamespace(resolve_stt_provider=lambda: SttProviderStub()),
+        runtime_state=SimpleNamespace(
+            fast_asr_enabled=False,
+            resolve_stt_provider=lambda: SttProviderStub(),
+        ),
         create_vad_engine=lambda: vad_engine,
         send_json=lambda _message: asyncio.sleep(0),
         build_message_object=lambda **_kwargs: None,
@@ -557,7 +569,10 @@ def test_handle_binary_audio_stream_end_dropped_reports_input_error(
 
     service = SpeechIngressService(
         media_service=MediaServiceStub(),
-        runtime_state=SimpleNamespace(resolve_stt_provider=lambda: SttProviderStub()),
+        runtime_state=SimpleNamespace(
+            fast_asr_enabled=False,
+            resolve_stt_provider=lambda: SttProviderStub(),
+        ),
         create_vad_engine=lambda: None,
         send_json=send_json,
         build_message_object=lambda *, text, raw_message, images=None: build_calls.append(

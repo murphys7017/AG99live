@@ -393,7 +393,7 @@ class RuntimeState:
                 get_config_value(vad_config, "required_hits", 3)
             ),
             "required_misses": int(
-                get_config_value(vad_config, "required_misses", 24)
+                get_config_value(vad_config, "required_misses", 16)
             ),
         }
         self.image_cooldown_seconds = max(
