@@ -7,10 +7,8 @@ from typing import Any
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.message_components import Plain
-from astrbot.api.provider import LLMResponse, ProviderRequest
 from astrbot.api.star import Context, Star
 
-from .core_compatibility import supports_llm_response_hook
 from .middleware import register_ag99live_interaction_contributors
 from .motion.output_sanitizer import (
     contains_hidden_output_markup,
@@ -85,30 +83,6 @@ def _optional_persona_segment_intent_ready_hook():
     return _identity
 
 
-def _optional_llm_response_hook():
-    hook = getattr(filter, "on_llm_response", None)
-    if callable(hook):
-        try:
-            return hook(persona_segment_stream_safe=True)
-        except TypeError:
-            return hook()
-
-    def _identity(handler):
-        return handler
-
-    return _identity
-
-
-def _optional_llm_request_hook():
-    hook = getattr(filter, "on_llm_request", None)
-    if not callable(hook):
-        return lambda handler: handler
-    try:
-        return hook(persona_segment_stream_safe=True)
-    except TypeError:
-        return hook()
-
-
 def _optional_decorating_result_hook():
     hook = getattr(filter, "on_decorating_result", None)
     if not callable(hook):
@@ -157,16 +131,12 @@ class MyPlugin(Star):
             context,
             persona_effect_enabled=not independent_motion_enabled,
         )
-        self._llm_response_hook_available = supports_llm_response_hook()
-        self._official_core_compatibility = (
-            not contributors_registered or not self._llm_response_hook_available
-        )
+        self._official_core_compatibility = not contributors_registered
         logger.debug(
             "WIRING interaction.plugin_initialized contributors_registered=%s "
-            "llm_response_hook_available=%s official_core_compatibility=%s "
+            "official_core_compatibility=%s "
             "context_type=%s",
             contributors_registered,
-            self._llm_response_hook_available,
             self._official_core_compatibility,
             type(context).__name__,
         )
@@ -188,245 +158,6 @@ class MyPlugin(Star):
 
         self._desktop_presence = DesktopPresenceRuntime(self.context)
         self._desktop_presence.start()
-
-    @_optional_llm_request_hook()
-    async def start_independent_motion_generation(
-        self,
-        event: AstrMessageEvent,
-        request: ProviderRequest,
-    ) -> None:
-        del request
-        from .middleware.interaction_motion.shared import (
-            _resolve_motion_runtime_bundle,
-        )
-
-        bundle = _resolve_motion_runtime_bundle(event)
-        platform_name = str(event.get_platform_name() or "").strip()
-        turn_id = str(event.get_extra("_turn_id") or "").strip()
-        independent_enabled = bool(
-            bundle is not None
-            and getattr(bundle.runtime_state, "independent_motion_enabled", False)
-        )
-        logger.debug(
-            "WIRING independent_motion.request_hook_entered platform=%s turn_id=%s "
-            "bundle_present=%s independent_enabled=%s official_core_compatibility=%s "
-            "bypass=%s",
-            platform_name or "<missing>",
-            turn_id or "<missing>",
-            bundle is not None,
-            independent_enabled,
-            self._official_core_compatibility,
-            bool(event.get_extra("_interaction_protocol_core_bypass")),
-        )
-        if bundle is None or not independent_enabled:
-            return
-
-        if self._official_core_compatibility:
-            reason = (
-                "llm_response_hook_unavailable"
-                if not self._llm_response_hook_available
-                else "interaction_contributors_unavailable"
-            )
-            logger.warning(
-                "WIRING independent_motion.disabled reason=%s turn_id=%s",
-                reason,
-                turn_id or "<missing>",
-            )
-            return
-
-        if bool(
-            getattr(
-                bundle.runtime_state,
-                "independent_motion_per_speech_segment",
-                False,
-            )
-        ):
-            logger.debug(
-                "WIRING independent_motion.request_hook mode=per_speech_segment "
-                "turn_id=%s; waiting for Persona speech segments",
-                event.get_extra("_turn_id") or "<missing>",
-            )
-            return
-
-        if bool(getattr(bundle.runtime_state, "independent_motion_parallel", False)):
-            from .middleware.interaction_motion.independent import (
-                start_parallel_motion_generation,
-            )
-
-            start_parallel_motion_generation(
-                event,
-                bundle,
-                tasks=self._independent_motion_tasks,
-            )
-            # Let the provider request start while the main model request runs.
-            await asyncio.sleep(0)
-        else:
-            logger.debug(
-                "WIRING independent_motion.request_hook mode=serial "
-                "turn_id=%s provider=%s",
-                event.get_extra("_turn_id") or "<missing>",
-                getattr(
-                    bundle.runtime_state,
-                    "independent_motion_provider_id",
-                    "<missing>",
-                ),
-            )
-
-    @_optional_llm_response_hook()
-    async def resolve_independent_motion_after_llm_response(
-        self,
-        event: AstrMessageEvent,
-        response: LLMResponse,
-    ) -> None:
-        from .middleware.interaction_motion.independent import (
-            INDEPENDENT_MOTION_RESULT_EXTRA_KEY,
-            INDEPENDENT_MOTION_TASK_EXTRA_KEY,
-            resolve_motion_after_llm_response,
-            store_motion_result_for_turn,
-        )
-        from .middleware.interaction_motion.shared import (
-            _resolve_motion_runtime_bundle,
-        )
-
-        bundle = _resolve_motion_runtime_bundle(event)
-        turn_id = str(event.get_extra("_turn_id") or "").strip()
-        response_text = str(getattr(response, "completion_text", "") or "").strip()
-        result_chain = getattr(response, "result_chain", None)
-        chain = getattr(result_chain, "chain", None)
-        logger.debug(
-            "WIRING independent_motion.response_hook_entered turn_id=%s "
-            "bundle_present=%s independent_enabled=%s official_core_compatibility=%s "
-            "bypass=%s completion_text_len=%s result_chain_count=%s",
-            turn_id or "<missing>",
-            bundle is not None,
-            bool(
-                bundle is not None
-                and getattr(bundle.runtime_state, "independent_motion_enabled", False)
-            ),
-            self._official_core_compatibility,
-            bool(event.get_extra("_interaction_protocol_core_bypass")),
-            len(response_text),
-            len(chain) if isinstance(chain, list) else 0,
-        )
-        if bundle is None or not bool(
-            getattr(bundle.runtime_state, "independent_motion_enabled", False)
-        ):
-            logger.debug(
-                "WIRING independent_motion.response_hook_skipped turn_id=%s "
-                "reason=runtime_or_config_unavailable",
-                turn_id or "<missing>",
-            )
-            return
-        if bool(
-            getattr(
-                bundle.runtime_state,
-                "independent_motion_per_speech_segment",
-                False,
-            )
-        ):
-            logger.debug(
-                "WIRING independent_motion.response_hook_skipped turn_id=%s "
-                "reason=per_speech_segment_mode",
-                turn_id or "<missing>",
-            )
-            return
-        if event.get_extra("agent_stop_requested", False):
-            logger.debug(
-                "WIRING independent_motion.response_hook_skipped turn_id=%s "
-                "reason=turn_terminated",
-                turn_id or "<missing>",
-            )
-            event.set_extra(INDEPENDENT_MOTION_RESULT_EXTRA_KEY, None)
-            event.set_extra(INDEPENDENT_MOTION_TASK_EXTRA_KEY, None)
-            return
-        if self._official_core_compatibility:
-            logger.warning(
-                "WIRING independent_motion.response_hook_skipped turn_id=%s "
-                "reason=interaction_contributors_unavailable",
-                turn_id or "<missing>",
-            )
-            return
-        if (
-            event.get_extra(INDEPENDENT_MOTION_RESULT_EXTRA_KEY) is not None
-        ):
-            logger.warning(
-                "WIRING independent_motion.response_hook_skipped turn_id=%s "
-                "reason=event_result_already_present",
-                turn_id or "<missing>",
-            )
-            return
-
-        assistant_text = response_text
-        if not assistant_text:
-            if isinstance(chain, list):
-                assistant_text = "\n".join(
-                    str(getattr(component, "text", "") or "").strip()
-                    for component in chain
-                    if isinstance(component, Plain)
-                    and str(getattr(component, "text", "") or "").strip()
-                ).strip()
-
-        result = await resolve_motion_after_llm_response(
-            event,
-            bundle,
-            assistant_text=assistant_text,
-            tasks=self._independent_motion_tasks,
-        )
-        if result is not None:
-            if event.get_extra("agent_stop_requested", False):
-                logger.debug(
-                    "WIRING independent_motion.result_discarded turn_id=%s "
-                    "reason=turn_terminated",
-                    turn_id or "<missing>",
-                )
-                event.set_extra(INDEPENDENT_MOTION_RESULT_EXTRA_KEY, None)
-                event.set_extra(INDEPENDENT_MOTION_TASK_EXTRA_KEY, None)
-                return
-            stored = store_motion_result_for_turn(
-                bundle.runtime_state,
-                turn_id=str(event.get_extra("_turn_id") or ""),
-                result=result,
-                assistant_text=assistant_text,
-            )
-            if stored:
-                logger.debug(
-                    "WIRING independent_motion.result_cached turn_id=%s "
-                    "mode=%s payload_present=%s reason=%s image_count=%s "
-                    "assistant_text_len=%s",
-                    event.get_extra("_turn_id") or "<missing>",
-                    (
-                        "parallel"
-                        if bool(
-                            getattr(
-                                bundle.runtime_state,
-                                "independent_motion_parallel",
-                                False,
-                            )
-                        )
-                        else "serial"
-                    ),
-                    result.motion_payload is not None,
-                    result.reason,
-                    result.image_count,
-                    len(assistant_text),
-                )
-            else:
-                logger.warning(
-                    "WIRING independent_motion.result_not_cached turn_id=%s "
-                    "reason=assistant_text_empty",
-                    event.get_extra("_turn_id") or "<missing>",
-                )
-            # The result is now owned by the turn cache. Leaving it on the
-            # event would let a Persona hook store it a second time.
-            event.set_extra(INDEPENDENT_MOTION_RESULT_EXTRA_KEY, None)
-            event.set_extra(INDEPENDENT_MOTION_TASK_EXTRA_KEY, None)
-        else:
-            logger.warning(
-                "WIRING independent_motion.result_missing turn_id=%s "
-                "assistant_text_len=%s",
-                turn_id or "<missing>",
-                len(assistant_text),
-            )
 
     @_optional_decorating_result_hook()
     async def sanitize_hidden_output_markup(
@@ -557,7 +288,6 @@ class MyPlugin(Star):
         if (
             bundle is None
             or not bool(getattr(bundle.runtime_state, "independent_motion_enabled", False))
-            or not bool(getattr(bundle.runtime_state, "independent_motion_per_speech_segment", False))
         ):
             return
         request = event.get_extra("provider_request")
@@ -861,13 +591,6 @@ class MyPlugin(Star):
             bundle is None
             or not bool(
                 getattr(bundle.runtime_state, "independent_motion_enabled", False)
-            )
-            or not bool(
-                getattr(
-                    bundle.runtime_state,
-                    "independent_motion_per_speech_segment",
-                    False,
-                )
             )
         ):
             return
@@ -1302,12 +1025,9 @@ class MyPlugin(Star):
             return
 
         from .middleware.interaction_motion.independent import (
-            INDEPENDENT_MOTION_RESULT_EXTRA_KEY,
-            IndependentMotionResult,
             generate_independent_motion_for_segments,
             is_persona_expression_request,
             persona_expression_intent,
-            store_motion_result_for_turn,
             store_persona_motion_work,
             track_motion_generation_task,
             untrack_motion_generation_task,
@@ -1317,19 +1037,8 @@ class MyPlugin(Star):
         )
 
         bundle = _resolve_motion_runtime_bundle(event)
-        if (
-            bundle is not None
-            and bool(
-                getattr(bundle.runtime_state, "independent_motion_enabled", False)
-            )
-        ):
-            if bool(
-                getattr(
-                    bundle.runtime_state,
-                    "independent_motion_per_speech_segment",
-                    False,
-                )
-            ):
+        if bundle is not None:
+            if bool(getattr(bundle.runtime_state, "independent_motion_enabled", False)):
                 turn_id = str(event.get_extra("_turn_id") or "").strip()
                 if not turn_id:
                     logger.warning(
@@ -1479,26 +1188,6 @@ class MyPlugin(Star):
                     len(speech_segments),
                 )
                 return
-
-            generated_result = event.get_extra(INDEPENDENT_MOTION_RESULT_EXTRA_KEY)
-            if (
-                isinstance(generated_result, IndependentMotionResult)
-                and not event.get_extra("agent_stop_requested", False)
-            ):
-                stored = store_motion_result_for_turn(
-                    bundle.runtime_state,
-                    turn_id=str(event.get_extra("_turn_id") or ""),
-                    result=generated_result,
-                    assistant_text=str(getattr(result, "speech", "") or ""),
-                )
-                if not stored:
-                    logger.warning(
-                        "WIRING independent_motion.result_not_stored turn_id=%s",
-                        event.get_extra("_turn_id") or "<missing>",
-                    )
-                event.set_extra(INDEPENDENT_MOTION_RESULT_EXTRA_KEY, None)
-            elif generated_result is not None:
-                event.set_extra(INDEPENDENT_MOTION_RESULT_EXTRA_KEY, None)
 
     async def terminate(self) -> None:
         presence = getattr(self, "_desktop_presence", None)

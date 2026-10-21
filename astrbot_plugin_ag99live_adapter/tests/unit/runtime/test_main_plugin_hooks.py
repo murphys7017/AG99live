@@ -120,6 +120,7 @@ def test_main_plugin_normalizes_output_and_starts_curve_on_tts_generating(
     plugin_runtime.get_live_control_platform = lambda *_args: None
     plugin_runtime.get_plugin_context = lambda: None
     plugin_runtime.reconcile_control_platforms = lambda _context: []
+    plugin_runtime.prune_retired_plugin_config_fields = lambda _config: []
     plugin_runtime.set_plugin_config = lambda _config: None
     plugin_runtime.set_plugin_context = lambda _context: None
     monkeypatch.setitem(
@@ -248,6 +249,7 @@ def test_main_plugin_registers_interaction_contributors_during_init(
     plugin_runtime.get_live_control_platform = lambda *_args: None
     plugin_runtime.get_plugin_context = lambda: None
     plugin_runtime.reconcile_control_platforms = lambda _context: []
+    plugin_runtime.prune_retired_plugin_config_fields = lambda _config: []
     plugin_runtime.set_plugin_config = lambda _config: None
     plugin_runtime.set_plugin_context = lambda _context: None
     monkeypatch.setitem(
@@ -305,6 +307,7 @@ def test_persona_segment_ready_starts_motion_future_for_that_index(
     plugin_runtime.get_live_control_platform = lambda *_args: None
     plugin_runtime.get_plugin_context = lambda: None
     plugin_runtime.reconcile_control_platforms = lambda _context: []
+    plugin_runtime.prune_retired_plugin_config_fields = lambda _config: []
     plugin_runtime.set_plugin_config = lambda _config: None
     plugin_runtime.set_plugin_context = lambda _context: None
     monkeypatch.setitem(
@@ -347,8 +350,8 @@ def test_persona_segment_ready_starts_motion_future_for_that_index(
         def __init__(self, **kwargs) -> None:
             self.__dict__.update(kwargs)
 
-    async def prepare_context(event, bundle, *, persona_result_id):
-        del event, bundle, persona_result_id
+    async def prepare_context(event, bundle):
+        del event, bundle
         return prepared_context
 
     async def generate_for_segments(event, bundle, **kwargs):
@@ -408,7 +411,6 @@ def test_persona_segment_ready_starts_motion_future_for_that_index(
 
     runtime_state = types.SimpleNamespace(
         independent_motion_enabled=True,
-        independent_motion_per_speech_segment=True,
         independent_motion_parallel=False,
         independent_motion_max_concurrency=2,
         independent_motion_segment_timeout_seconds=5,
@@ -452,7 +454,7 @@ def test_persona_segment_ready_starts_motion_future_for_that_index(
                 "tendency": {"Joy": 0.2},
             },
         )
-        assert generation_started.is_set()
+        await asyncio.wait_for(generation_started.wait(), timeout=1)
         work = runtime_state.persona_stream_motion.get("turn-1")
         motion = await work["segment_result_futures"][0]
         await asyncio.gather(*tuple(work["tasks"]))

@@ -33,8 +33,8 @@ flowchart TD
         ROUTE{动作路径配置}:::backend
         LLMENH[Persona 主模型<br/>spoken_reply / speech segments]:::backend
         EFFECT[Persona Effect 路径<br/>仅 independent_motion 关闭时启用]:::backend
-        MOTIONPROVIDER[独立动作 Provider<br/>整回复或逐 Persona speech 段]:::backend
-        CORRELATE[逐段模式按 turn_id + persona_result_id + index 汇合<br/>动作生成与 TTS 物料化重叠]:::backend
+        MOTIONPROVIDER[独立动作 Provider<br/>每个非空 Persona speech 段]:::backend
+        CORRELATE[按 turn_id + persona_result_id + index 汇合<br/>动作生成与 TTS 物料化重叠]:::backend
         SCHEDULE[ag99live_motion_schedule<br/>动作预期与解析结果]:::backend
         CURVEPENDING[登记当前回复阶段的<br/>pending curve input]:::backend
         NORMALIZE[输出规范化<br/>清洗隐藏传输标记]:::backend
@@ -61,8 +61,7 @@ flowchart TD
         LLMENH --> ROUTE
         ROUTE -->|独立动作关闭| EFFECT
         ROUTE -->|独立动作开启| MOTIONPROVIDER
-        MOTIONPROVIDER -->|整回复| SCHEDULE
-        MOTIONPROVIDER -->|per_speech_segment| CORRELATE --> SCHEDULE
+        MOTIONPROVIDER -->|逐段结果| CORRELATE --> SCHEDULE
         LLMENH --> PLAIN
         EFFECT --> SCHEDULE
         EFFECT --> CURVEPENDING

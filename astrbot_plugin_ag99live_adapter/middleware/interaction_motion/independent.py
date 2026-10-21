@@ -5,7 +5,7 @@ import json
 import math
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from time import monotonic, perf_counter, time_ns
 from typing import Any
 from uuid import uuid4
@@ -37,18 +37,12 @@ from .shared import (
     _sanitize_reason_fragment,
 )
 
-INDEPENDENT_MOTION_TASK_EXTRA_KEY = "_ag99live_independent_motion_task"
-INDEPENDENT_MOTION_RESULT_EXTRA_KEY = "_ag99live_independent_motion_result"
 INDEPENDENT_MOTION_TASKS_BY_TURN_ATTRIBUTE = (
     "independent_motion_generation_tasks_by_turn"
 )
 PERSONA_MOTION_WORK_BY_TURN_ATTRIBUTE = "persona_motion_work_by_turn"
 PERSONA_EXPRESSION_INTENT_METADATA_KEY = "interaction.persona_expression_intent"
 PERSONA_RESULT_ID_METADATA_KEY = "interaction.persona_result_id"
-_MAX_RETAINED_RESULT_TURNS = 64
-# Independent motion is supplementary output; it must not hold the main reply
-# indefinitely when the secondary provider is slow.
-_PARALLEL_MOTION_WAIT_SECONDS = 2.0
 _DEFAULT_SEGMENT_MAX_CONCURRENCY = 4
 _DEFAULT_SEGMENT_TIMEOUT_SECONDS = 5.0
 
@@ -717,9 +711,9 @@ async def generate_independent_motion_for_segments(
                         "assistant_text": speech,
                         "segment_intent": segment_intents[index] if index < len(segment_intents) else {},
                     }
-                    # The indexed identity is only meaningful on the streamed
-                    # Persona path. Keep the legacy batch call compatible with
-                    # providers and test doubles that implement the older API.
+                    # Whole-result Persona callbacks may contain multiple
+                    # speech segments. Only the per-segment streaming callback
+                    # supplies incremental identity to the Provider request.
                     if persona_result_id is not None or stream_active:
                         kwargs["persona_result_id"] = persona_result_id
                         kwargs["segment_index"] = index
@@ -852,266 +846,6 @@ async def generate_independent_motion_for_segments(
         (perf_counter() - started) * 1000,
     )
     return results
-
-
-def store_motion_result_for_turn(
-    runtime_state: Any,
-    *,
-    turn_id: str,
-    result: IndependentMotionResult,
-    assistant_text: str,
-) -> bool:
-    normalized_turn_id = str(turn_id or "").strip()
-    normalized_text = sanitize_assistant_output_text(str(assistant_text or ""))
-    if not normalized_turn_id:
-        logger.warning(
-            "WIRING independent_motion.cache_store_rejected reason=turn_id_missing "
-            "assistant_text_len=%s",
-            len(normalized_text),
-        )
-        return False
-
-    cache = getattr(runtime_state, "independent_motion_result_cache", None)
-    if not isinstance(cache, dict):
-        cache = {}
-        runtime_state.independent_motion_result_cache = cache
-    entries = cache.setdefault(normalized_turn_id, [])
-    if not isinstance(entries, list):
-        entries = []
-        cache[normalized_turn_id] = entries
-    entries.append(replace(result, assistant_text=normalized_text))
-    if len(entries) > 8:
-        del entries[:-8]
-    while len(cache) > _MAX_RETAINED_RESULT_TURNS:
-        cache.pop(next(iter(cache)))
-    logger.debug(
-        "WIRING independent_motion.cache_stored turn_id=%s entry_count=%s "
-        "assistant_text_len=%s payload_present=%s reason=%s",
-        normalized_turn_id,
-        len(entries),
-        len(normalized_text),
-        result.motion_payload is not None,
-        result.reason,
-    )
-    return True
-
-
-def take_motion_result_for_turn(
-    runtime_state: Any,
-    *,
-    turn_id: str,
-    assistant_text: str,
-) -> IndependentMotionResult | None:
-    normalized_turn_id = str(turn_id or "").strip()
-    normalized_text = sanitize_assistant_output_text(str(assistant_text or ""))
-    cache = getattr(runtime_state, "independent_motion_result_cache", None)
-    if not normalized_turn_id or not isinstance(cache, dict):
-        logger.warning(
-            "WIRING independent_motion.cache_consume_miss turn_id=%s "
-            "reason=%s requested_text_len=%s",
-            normalized_turn_id or "<missing>",
-            "turn_id_missing" if not normalized_turn_id else "cache_unavailable",
-            len(normalized_text),
-        )
-        return None
-    entries = cache.get(normalized_turn_id)
-    if not isinstance(entries, list) or not entries:
-        logger.warning(
-            "WIRING independent_motion.cache_consume_miss turn_id=%s "
-            "reason=entry_missing requested_text_len=%s",
-            normalized_turn_id,
-            len(normalized_text),
-        )
-        return None
-
-    entries_before = len(entries)
-    selected_index: int | None = None
-    match_mode = "assistant_text_exact"
-    if normalized_text:
-        for index in range(len(entries) - 1, -1, -1):
-            result = entries[index]
-            if (
-                isinstance(result, IndependentMotionResult)
-                and result.assistant_text == normalized_text
-            ):
-                selected_index = index
-                match_mode = "assistant_text_exact"
-                break
-    if selected_index is None:
-        logger.warning(
-            "WIRING independent_motion.cache_consume_miss turn_id=%s "
-            "reason=assistant_text_mismatch entries=%s requested_text_len=%s",
-            normalized_turn_id,
-            entries_before,
-            len(normalized_text),
-        )
-        return None
-
-    selected = entries.pop(selected_index)
-    if not entries:
-        cache.pop(normalized_turn_id, None)
-    logger.debug(
-        "WIRING independent_motion.cache_consumed turn_id=%s mode=%s "
-        "entries_before=%s entries_after=%s requested_text_len=%s "
-        "stored_text_len=%s payload_present=%s reason=%s",
-        normalized_turn_id,
-        match_mode,
-        entries_before,
-        len(entries),
-        len(normalized_text),
-        len(selected.assistant_text),
-        selected.motion_payload is not None,
-        selected.reason,
-    )
-    return selected
-
-
-def start_parallel_motion_generation(
-    event: Any,
-    bundle: _MotionRuntimeBundle,
-    *,
-    tasks: set[asyncio.Task],
-) -> asyncio.Task | None:
-    existing = event.get_extra(INDEPENDENT_MOTION_TASK_EXTRA_KEY)
-    if isinstance(existing, asyncio.Task):
-        logger.debug(
-            "WIRING independent_motion.task_reused turn_id=%s",
-            event.get_extra("_turn_id") or "<missing>",
-        )
-        return existing
-
-    provider = getattr(bundle.runtime_state, "selected_independent_motion_provider", None)
-    if provider is None:
-        logger.warning(
-            "WIRING independent_motion.skipped reason=provider_unavailable turn_id=%s",
-            event.get_extra("_turn_id") or "<missing>",
-        )
-        return None
-
-    task = asyncio.create_task(
-        generate_independent_motion(
-            event,
-            bundle,
-            provider=provider,
-            assistant_text="",
-        ),
-        name="ag99live-independent-motion",
-    )
-    tasks.add(task)
-    task.add_done_callback(tasks.discard)
-    event.set_extra(INDEPENDENT_MOTION_TASK_EXTRA_KEY, task)
-    logger.debug(
-        "WIRING independent_motion.task_started mode=parallel turn_id=%s "
-        "provider=%s",
-        event.get_extra("_turn_id") or "<missing>",
-        getattr(bundle.runtime_state, "independent_motion_provider_id", "<missing>"),
-    )
-    return task
-
-
-async def resolve_motion_after_llm_response(
-    event: Any,
-    bundle: _MotionRuntimeBundle,
-    *,
-    assistant_text: str,
-    tasks: set[asyncio.Task],
-) -> IndependentMotionResult | None:
-    state = bundle.runtime_state
-    if bool(getattr(state, "independent_motion_parallel", False)):
-        task = event.get_extra(INDEPENDENT_MOTION_TASK_EXTRA_KEY)
-        if not isinstance(task, asyncio.Task):
-            logger.warning(
-                "WIRING independent_motion.skipped reason=parallel_task_missing turn_id=%s",
-                event.get_extra("_turn_id") or "<missing>",
-            )
-            return None
-        logger.debug(
-            "WIRING independent_motion.task_await_started mode=parallel turn_id=%s",
-            event.get_extra("_turn_id") or "<missing>",
-        )
-        try:
-            # Keep the task alive on timeout so turn cleanup can still cancel it,
-            # but never let a slow motion provider block the visible reply.
-            result = await asyncio.wait_for(
-                asyncio.shield(task),
-                timeout=_PARALLEL_MOTION_WAIT_SECONDS,
-            )
-        except asyncio.TimeoutError:
-            task.add_done_callback(_consume_background_motion_exception)
-            logger.warning(
-                "WIRING independent_motion.wait_timeout mode=parallel "
-                "turn_id=%s timeout_seconds=%.2f",
-                event.get_extra("_turn_id") or "<missing>",
-                _PARALLEL_MOTION_WAIT_SECONDS,
-            )
-            return None
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "WIRING independent_motion.failed reason=parallel_task_failed error=%s",
-                exc,
-                exc_info=True,
-            )
-            return None
-        logger.debug(
-            "WIRING independent_motion.task_completed mode=parallel turn_id=%s "
-            "payload_present=%s reason=%s image_count=%s",
-            event.get_extra("_turn_id") or "<missing>",
-            result.motion_payload is not None,
-            result.reason,
-            result.image_count,
-        )
-        return replace(result, assistant_text=assistant_text.strip())
-
-    provider = getattr(state, "selected_independent_motion_provider", None)
-    if provider is None:
-        logger.warning(
-            "WIRING independent_motion.skipped reason=provider_unavailable turn_id=%s",
-            event.get_extra("_turn_id") or "<missing>",
-        )
-        return None
-
-    result_task = asyncio.create_task(
-        generate_independent_motion(
-            event,
-            bundle,
-            provider=provider,
-            assistant_text=assistant_text.strip(),
-        ),
-        name="ag99live-independent-motion-serial",
-    )
-    tasks.add(result_task)
-    result_task.add_done_callback(tasks.discard)
-    event.set_extra(INDEPENDENT_MOTION_TASK_EXTRA_KEY, result_task)
-    logger.debug(
-        "WIRING independent_motion.task_started mode=serial turn_id=%s provider=%s",
-        event.get_extra("_turn_id") or "<missing>",
-        getattr(state, "independent_motion_provider_id", "<missing>"),
-    )
-    try:
-        result = await result_task
-        logger.debug(
-            "WIRING independent_motion.task_completed mode=serial turn_id=%s "
-            "payload_present=%s reason=%s image_count=%s",
-            event.get_extra("_turn_id") or "<missing>",
-            result.motion_payload is not None,
-            result.reason,
-            result.image_count,
-        )
-        return result
-    except asyncio.CancelledError:
-        raise
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(
-            "WIRING independent_motion.failed reason=serial_task_failed error=%s",
-            exc,
-            exc_info=True,
-        )
-        return None
-    finally:
-        if event.get_extra(INDEPENDENT_MOTION_TASK_EXTRA_KEY) is result_task:
-            event.set_extra(INDEPENDENT_MOTION_TASK_EXTRA_KEY, None)
 
 
 async def generate_independent_motion(
@@ -1843,8 +1577,6 @@ def _motion_output_shape_summary(value: Mapping[str, Any]) -> dict[str, Any]:
 
 
 __all__ = [
-    "INDEPENDENT_MOTION_RESULT_EXTRA_KEY",
-    "INDEPENDENT_MOTION_TASK_EXTRA_KEY",
     "IndependentMotionResult",
     "PERSONA_MOTION_WORK_BY_TURN_ATTRIBUTE",
     "await_with_hard_deadline",
@@ -1854,12 +1586,8 @@ __all__ = [
     "is_persona_expression_request",
     "persona_expression_intent",
     "remove_persona_motion_work",
-    "resolve_motion_after_llm_response",
     "store_persona_motion_work",
-    "store_motion_result_for_turn",
-    "start_parallel_motion_generation",
     "track_motion_generation_task",
-    "take_motion_result_for_turn",
     "untrack_motion_generation_task",
     "resolve_stream_motion_budget_seconds",
 ]

@@ -57,14 +57,18 @@ sequenceDiagram
             Adapter->>Segment: 写入 ag99live_motion_schedule<br/>区分未安排、成功和动作失败
         else independent_motion.enabled = true
             Persona->>Adapter: Persona 结果钩子
-            alt per_speech_segment = true
-                Adapter->>MotionProvider: 按非空 speech 段启动动作请求
-                MotionProvider-->>Adapter: 按段返回动作结果
-            else per_speech_segment = false
-                Adapter->>MotionProvider: 按整条回复启动动作请求
-                MotionProvider-->>Adapter: 返回整回复动作结果
+            alt OLV Persona 段流启用且 Core 能力可用
+                loop 每个 segment_start
+                    Adapter->>MotionProvider: 启动当前 speech 段动作请求
+                    MotionProvider-->>Adapter: 返回当前段动作结果
+                end
+            else 普通 Persona 结果
+                loop 每个非空 speech 段
+                    Adapter->>MotionProvider: 启动该段动作请求
+                    MotionProvider-->>Adapter: 返回该段动作结果
+                end
             end
-            Adapter->>Segment: 暂存独立动作结果并等待输出物料化汇合
+            Adapter->>Segment: 按段身份关联动作并等待输出物料化
         end
     else 官方 Core
         Persona->>LLM: 生成可见回复

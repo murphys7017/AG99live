@@ -464,7 +464,6 @@ def test_persona_segment_stream_request_requires_explicit_compatible_gates(
         adapter.desktop_persona_segment_stream_enabled = desktop_stream_enabled
         state = {
             "independent_motion_enabled": True,
-            "independent_motion_per_speech_segment": True,
             "interaction_result_event_filter_available": True,
             "persona_segment_stream_hooks_available": True,
             "independent_motion_provider_id": "motion-provider",
@@ -581,7 +580,7 @@ def test_prompt_annotations_mark_cached_desktop_snapshot(
     assert annotations["message.1"]["semantic_type"] == "desktop_snapshot"
 
 
-def test_independent_per_speech_segment_mode_keeps_persona_route(
+def test_independent_motion_keeps_persona_route(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -590,7 +589,6 @@ def test_independent_per_speech_segment_mode_keeps_persona_route(
     adapter = AdapterStub()
     adapter.runtime_state = types.SimpleNamespace(
         independent_motion_enabled=True,
-        independent_motion_per_speech_segment=True,
         independent_motion_provider_id="motion-provider",
     )
     message_obj = type(
@@ -610,41 +608,6 @@ def test_independent_per_speech_segment_mode_keeps_persona_route(
     assert event.get_extra("_interaction_core_bypass_requested") is None
     assert event.get_extra("_interaction_plugin_runtime_target_overrides") == {
         "astrbot_plugin_ag99live_adapter": "personal_expression"
-    }
-
-
-def test_independent_whole_reply_mode_keeps_core_bypass(
-    install_fake_astrbot,
-    monkeypatch,
-) -> None:
-    _install_platform_event_astrbot_stubs(install_fake_astrbot, monkeypatch)
-    module = _load_platform_event_module()
-    adapter = AdapterStub()
-    adapter.runtime_state = types.SimpleNamespace(
-        independent_motion_enabled=True,
-        independent_motion_per_speech_segment=False,
-        independent_motion_parallel=False,
-        independent_motion_provider_id="motion-provider",
-    )
-    message_obj = type(
-        "MessageObjectStub",
-        (),
-        {"message": [Plain("hello")], "raw_message": {"payload": {"text": "hello"}}},
-    )()
-
-    event = module.OLVPetPlatformEvent(
-        "hello",
-        message_obj,
-        {},
-        "desktop-client",
-        adapter,
-    )
-
-    assert event.get_extra("_interaction_core_bypass_requested") == (
-        "ag99live_independent_motion"
-    )
-    assert event.get_extra("_interaction_plugin_runtime_target_overrides") == {
-        "astrbot_plugin_ag99live_adapter": "core"
     }
 
 

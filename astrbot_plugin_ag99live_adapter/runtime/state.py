@@ -113,13 +113,11 @@ class RuntimeState:
         self.performance_curve_provider_id = ""
         self.enable_performance_curve = False
         self.independent_motion_enabled = False
-        self.independent_motion_per_speech_segment = False
         self.independent_motion_provider_id = ""
         self.independent_motion_history_turns = 6
         self.independent_motion_parallel = False
         self.independent_motion_max_concurrency = 4
         self.independent_motion_segment_timeout_seconds = 5.0
-        self.independent_motion_result_cache: dict[str, list[Any]] = {}
         self.independent_motion_generation_tasks_by_turn: dict[str, set[Any]] = {}
         self.persona_motion_work_by_turn: dict[str, dict[str, Any]] = {}
         self.persona_stream_motion = PersonaStreamMotionRegistry()
@@ -263,13 +261,6 @@ class RuntimeState:
                 enabled=persona_effect_enabled,
             )
             self._registered_persona_effect_enabled = persona_effect_enabled
-        self.independent_motion_per_speech_segment = bool(
-            get_config_value(
-                independent_motion_config,
-                "per_speech_segment",
-                False,
-            )
-        )
         self.independent_motion_provider_id = str(
             get_config_value(independent_motion_config, "provider_id", "") or ""
         ).strip()

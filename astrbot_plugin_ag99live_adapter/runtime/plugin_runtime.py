@@ -20,7 +20,7 @@ ADAPTER_PLATFORM_NAME = "olv_pet_adapter"
 ADAPTER_DISPLAY_NAME = "AG99live 桌宠适配器"
 PLUGIN_CONFIG_BASENAME = "astrbot_plugin_ag99live_adapter_config.json"
 _RETIRED_PLUGIN_CONFIG_PATHS = {
-    "independent_motion": ("segment_stream_enabled",),
+    "independent_motion": ("per_speech_segment", "segment_stream_enabled"),
     "desktop_observation": ("provider_id", "timeout_seconds"),
     "remote_operator": (
         "default_computer",

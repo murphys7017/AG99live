@@ -79,25 +79,15 @@ unprotected(line198): RAISED CancelledError out of callback
 
 ---
 
-### P1-4 · 动作生成三套并存,靠三个布尔开关二选一 🔴
+### P1-4 · 动作生成三套并存 —— 已在当前工作区收敛
 
-`_conf_schema.json` 的 `independent_motion.enabled` / `.parallel` / `.per_speech_segment` + `state.py:115-116` ——这些**不是"关一个功能",而是在三条实现间二选一**:
+用户确认的目标是 Persona Effect 与独立 Provider 按 Persona speech 段生成两种来源；独立 Provider 不再生成整回复动作。当前未提交改动已移除 LLM request/response hooks、整回复结果缓存和调度分支，独立动作启用时固定进入分段路径。`per_speech_segment` 从运行设置和界面移除，启动时清理旧配置值。
 
-| 路径 | 实现 | 入口 |
-|---|---|---|
-| A Persona Effect(主模型产出) | `effects.py:28-89` | `state.py:254-257` 在独立模式为真时把 `persona_effect_enabled` 置 False |
-| B 整条回复(串/并行) | `independent.py:969-1009` | `main.py:228-237` |
-| C 逐 speech 段 | `independent.py:542` | `main.py:1303-1335` |
+保留两种分段执行时机：普通 Persona 结果在结果回调后为非空 speech 段启动请求；OLV Persona 段流在 Core 能力检查通过时按 `segment_start` 启动请求。两条都按 `turn_id`、`persona_result_id` 和段索引与 TTS/输出段关联。`parallel` 只控制这些逐段 Provider 请求的并发。
 
-**互斥逻辑散在四处**:`main.py:214-226`、`:297-309`、`platform_event.py:87-107`、`scheduling.py:1320`。
+Persona Effect 仍只在独立动作关闭时注册；动作段失败仍保留原因并继续核心文本/TTS。`output.segment` 完整段交付、增量输出、Persona Effect、预动作和待机动作不属于已删除的整回复生成实现。
 
-**已自认的痕迹**:`independent.py:720-725` 注释——"Keep the legacy batch call compatible with providers and test doubles that implement the older API";`scheduling.py:788-796`——"The legacy full-result binding below requires a known final count"。
-
-**可达性**:B 与 C 都可达(B 在"整条回复模式"下走 `persona_result_id is None and not stream_active` 的 legacy batch 形态);legacy 全量绑定是**默认路径**(流式开关默认关,`preferences.ts:80-91`)。
-
-**收敛方向**:确定唯一保留的分段路径后,删除 B 的 legacy batch 形态与 `__init__.py:38-41` 的 `_include_legacy_motion_result_contributor` 过滤器。
-
-**Confidence**: confirmed(并存)/ needs confirmation(哪条是目标形态)
+**验证状态**：54 个定向 Adapter runtime tests 通过；变更 Python 文件 Ruff、compileall、插件结构检查和 `git diff --check` 均通过。未进行真实 AstrBot 重启、Provider/TTS 对话、OLV 分段流或 Live2D 播放验收；源码验证不等于运行时验收。
 
 ---
 
@@ -171,7 +161,7 @@ unprotected(line198): RAISED CancelledError out of callback
 
 ### P2 · Core 兼容分支 + 一个专门钉住旧 API 的测试
 
-`core_compatibility.py:110-131` 三个能力探测函数(`supports_interaction_result_event_filter` / `supports_llm_response_hook` / `supports_persona_segment_stream_hooks`),`main.py:148` 合成 `_official_core_compatibility`,在 `main.py:163/201/319/449/504/800/1249` **共 7 处早退**。
+当前保留的能力探测为交互结果事件过滤与 Persona 段流钩子；整回复动作路径已删除，因此不再探测或要求 LLM request/response hooks。`_official_core_compatibility` 只代表交互 contributors 是否注册成功，不再承担独立整回复 Provider 的准入判断。
 
 `interaction_motion/__init__.py:29-35` 在支持 `event_filter` 与不支持时注册**两种形态**的同一个 contributor。
 
@@ -212,17 +202,11 @@ unprotected(line198): RAISED CancelledError out of callback
 
 ---
 
-## 四、需要你拍板的问题
+## 四、仍待确认的问题
 
-**1. 动作生成到底保留哪条路径?**(P1-4)
+动作生成路径与流式定位（P1-4）已按用户决定处理，见上文。
 
-Persona Effect / 整条回复 / 逐 speech 段 三条并存,靠 3 个开关二选一,互斥逻辑散在 4 处。其中 legacy 全量绑定还是**默认路径**。这个问题不解决,P1-4 无法收敛——而它下面压着 `scheduling.py:834-842`、`__init__.py:38-41`、以及 7 处 `_official_core_compatibility` 早退。
-
-**2. 流式是目标形态还是实验?**(P1-4 关联)
-
-`independent.py:720-725` 与 `scheduling.py:788-796` 的注释表明新路径尚未夺权。若流式是目标,legacy 批量形态与 legacy 全量绑定可以整块删;若流式还在实验,那这些兼容分支是合理的,但应该显式标注实验边界而不是靠隐式回落。
-
-**3. C++ 原生运行时是长期并存还是终将替换?**(上轮 P0-2)
+**1. C++ 原生运行时是长期并存还是终将替换?**(上轮 P0-2)
 
 `render-core/README.md:110` 写明 "TS desktop remains the stable reference implementation",但 C++ 侧 `CompileMotionPlan` 仍在独立演进。**需要确认它是"终将替换 TS"还是"长期双运行时"**——这决定那 14 个 struct 该留还是该拆。
 

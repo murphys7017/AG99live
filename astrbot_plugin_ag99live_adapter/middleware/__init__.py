@@ -4,7 +4,6 @@ from astrbot.api import logger
 
 from ..core_compatibility import (
     get_interaction_capabilities,
-    supports_llm_response_hook,
     supports_interaction_contributors,
 )
 
@@ -30,10 +29,9 @@ def register_ag99live_interaction_contributors(
         ]
         logger.warning(
             "WIRING interaction.contributors_registration_failed "
-            "capabilities_available=%s llm_response_hook_available=%s "
+            "capabilities_available=%s "
             "missing_context_methods=%s context_type=%s",
             get_interaction_capabilities() is not None,
-            supports_llm_response_hook(),
             ",".join(missing_methods) or "<none>",
             type(context).__name__,
         )

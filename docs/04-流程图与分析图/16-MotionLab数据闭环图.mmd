@@ -10,7 +10,7 @@ flowchart LR
         INPUT[TurnCoordinator<br/>turn.input_received]:::source
         OUTPUT[OutputSegmentCoordinator<br/>turn.assistant_output canonical text]:::source
         PERSONA[Persona Effect（仅关闭 independent_motion）<br/>received / intent_resolved]:::source
-        INDEPENDENT[Independent Motion Provider<br/>整回复/分段 request + result/failure]:::source
+        INDEPENDENT[Independent Motion Provider<br/>逐 speech 段 request + result/failure]:::source
         REFERENCES[Prompt references<br/>selected + projected]:::source
         CURVE[Performance Curve<br/>requested / resolved / failed / attached]:::source
         COMPILE[ModelEngine<br/>PerformanceSchedule / compile_failed / transform trace]:::source

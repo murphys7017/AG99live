@@ -1408,3 +1408,32 @@ idle_motion_isolation_20261018:
     properties; the existing VAD case passes after completing its fixture imports
     and input-preparation state. Renderer/WebSDK/Electron types and production
     build pass. Commit only in AG99live; its post-commit hook deploys to data.
+
+independent_motion_segment_only_20261020:
+  class: refactor
+  risk: high
+  status: local_validation_passed_pending_live_acceptance
+  scope: >-
+    Remove the independent whole-reply action generation route: LLM request and
+    response hooks, whole-reply task/result cache, scheduling and cleanup. Keep
+    Persona Effect when independent motion is disabled. When enabled, generate
+    independent actions per nonempty Persona speech segment. Preserve ordinary
+    Persona-result batching and OLV incremental segment-start execution as two
+    timings of the same segment route. Remove per_speech_segment from runtime UI
+    and state; prune its persisted legacy config key at startup. Preserve complete
+    output.segment delivery, incremental output, Persona Effect, pre-action,
+    idle motion, action failure isolation and turn-owned segment cancellation.
+    Refresh architecture/readme/flow docs and mark the patch audit finding closed.
+  validation: >-
+    54 focused adapter runtime tests passed, including plugin hooks, segment
+    routing, config pruning, prompt annotations and turn cancellation. Changed
+    Python Ruff, compileall, AstrBot plugin structure validation and git diff
+    whitespace checks passed. Repository search found no production whole-reply
+    action hooks/cache/scheduling references or independent_motion per-segment
+    runtime state. Old persisted config-key cleanup remains intentionally present.
+  evidence_gap: >-
+    No live AstrBot restart, real Provider/TTS conversation, OLV segment-stream
+    acceptance or Live2D playback verification. The post-commit hook is expected
+    to sync Adapter files to the AstrBot deployment copy; a successful sync does
+    not prove a running Core or desktop loaded the code. Preserve unrelated dirty
+    AstrBot main-repo files.

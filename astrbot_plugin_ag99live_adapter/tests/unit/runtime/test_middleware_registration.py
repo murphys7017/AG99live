@@ -315,7 +315,7 @@ def test_enhanced_interaction_requires_dynamic_effect_schema_support(
     assert module.get_interaction_capabilities() is None
 
 
-def test_enhanced_interaction_requires_llm_response_hook(
+def test_enhanced_interaction_contributors_do_not_require_llm_response_hook(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
@@ -334,8 +334,7 @@ def test_enhanced_interaction_requires_llm_response_hook(
         unregister_persona_effects=lambda *_args, **_kwargs: None,
     )
 
-    assert not module.supports_llm_response_hook()
-    assert not module.supports_interaction_contributors(context)
+    assert module.supports_interaction_contributors(context)
 
 
 def test_interaction_contributor_and_stream_filter_support_are_separate(
@@ -407,69 +406,6 @@ def test_interaction_registration_keeps_legacy_core_contributor_api(
     assert [item.plugin_id for item in result_contributors] == [
         "ag99live.motion.result",
     ]
-
-
-def test_independent_motion_results_match_each_visible_persona_reply(
-    install_fake_astrbot,
-    monkeypatch,
-) -> None:
-    _install_middleware_astrbot_stubs(install_fake_astrbot, monkeypatch)
-    module = importlib.import_module(
-        "astrbot_plugin_ag99live_adapter.middleware.interaction_motion.independent"
-    )
-    module = importlib.reload(module)
-
-    immediate = module.IndependentMotionResult(
-        assistant_text="我先查一下。",
-        motion_payload={"schema_version": "ag99.motion_intent.v4", "intent_tags": ["thinking"]},
-        reason="ok",
-        image_count=0,
-    )
-    final = module.IndependentMotionResult(
-        assistant_text="已经查到了。",
-        motion_payload={"schema_version": "ag99.motion_intent.v4", "intent_tags": ["happy"]},
-        reason="ok",
-        image_count=1,
-    )
-    runtime_state = SimpleNamespace(independent_motion_result_cache={})
-    persona_request = types.SimpleNamespace(
-        metadata={
-            "interaction.persona_expression_intent": {"phase": "immediate"}
-        }
-    )
-    core_request = types.SimpleNamespace(metadata={"source": "core"})
-
-    assert module.is_persona_expression_request(persona_request)
-    assert not module.is_persona_expression_request(core_request)
-    assert module.store_motion_result_for_turn(
-        runtime_state,
-        turn_id="turn-1",
-        result=immediate,
-        assistant_text=immediate.assistant_text,
-    )
-    assert module.store_motion_result_for_turn(
-        runtime_state,
-        turn_id="turn-1",
-        result=final,
-        assistant_text=final.assistant_text,
-    )
-
-    assert module.take_motion_result_for_turn(
-        runtime_state,
-        turn_id="turn-1",
-        assistant_text="not a reply in this turn",
-    ) is None
-    assert module.take_motion_result_for_turn(
-        runtime_state,
-        turn_id="turn-1",
-        assistant_text=immediate.assistant_text,
-    ) == immediate
-    assert module.take_motion_result_for_turn(
-        runtime_state,
-        turn_id="turn-1",
-        assistant_text=final.assistant_text,
-    ) == final
-    assert runtime_state.independent_motion_result_cache == {}
 
 
 @pytest.mark.parametrize("first_binding_present", [True, False])
@@ -1011,51 +947,24 @@ def test_persona_tts_requests_bind_by_segment_index_and_validate_identity(
     assert work["tts_bindings_by_index"][2]["tts_request_id"] == "tts-2"
 
 
-def test_independent_motion_result_matches_sanitized_visible_reply(
-    install_fake_astrbot,
-    monkeypatch,
-) -> None:
-    _install_middleware_astrbot_stubs(install_fake_astrbot, monkeypatch)
-    module = importlib.import_module(
-        "astrbot_plugin_ag99live_adapter.middleware.interaction_motion.independent"
-    )
-    module = importlib.reload(module)
-    result = module.IndependentMotionResult(
-        assistant_text=(
-            '<system_reminder>hidden</system_reminder>'
-            '已经查到了。<@anim {"motion":"wave"}>'
-        ),
-        motion_payload={
-            "schema_version": "ag99.motion_intent.v4",
-            "intent_tags": ["happy"],
-        },
-        reason="ok",
-        image_count=0,
-    )
-    runtime_state = SimpleNamespace(independent_motion_result_cache={})
-
-    assert module.store_motion_result_for_turn(
-        runtime_state,
-        turn_id="turn-1",
-        result=result,
-        assistant_text=result.assistant_text,
-    )
-    selected = module.take_motion_result_for_turn(
-        runtime_state,
-        turn_id="turn-1",
-        assistant_text='已经查到了。<@anim {"motion":"wave"}>',
-    )
-
-    assert selected is not None
-    assert selected.motion_payload == result.motion_payload
-    assert selected.assistant_text == '已经查到了。<@anim {"motion":"wave"}>'
-
-
 def test_independent_motion_request_uses_text_memory_and_segment_without_images(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
     _install_middleware_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    json_recovery_module = types.ModuleType("astrbot.core.prompt.json_recovery")
+
+    async def recover_json_record(value, **_kwargs):
+        import json
+
+        return json.loads(value)
+
+    json_recovery_module.recover_json_record = recover_json_record
+    monkeypatch.setitem(
+        sys.modules,
+        "astrbot.core.prompt.json_recovery",
+        json_recovery_module,
+    )
     module = importlib.import_module(
         "astrbot_plugin_ag99live_adapter.middleware.interaction_motion.independent"
     )

@@ -1,18 +1,17 @@
 # 动作生成与 Persona 分段关联
 
-本文说明 Adapter 当前三种动作生成模式，以及启用 Persona speech 分段时，动作、TTS 与输出段如何关联。配置字段以 `astrbot_plugin_ag99live_adapter/_conf_schema.json` 为准；钩子与生命周期以 Adapter 和配套 AG99 Core 的实际实现为准。
+本文说明 Adapter 当前的两种动作来源，以及独立 Provider 如何按 Persona speech 段生成动作并与 TTS 输出关联。配置字段以 `astrbot_plugin_ag99live_adapter/_conf_schema.json` 为准；钩子与生命周期以 Adapter 和配套 AG99 Core 的实际实现为准。
 
-## 三种动作路径
+## 动作来源
 
 | 配置 | 文本与动作来源 | 动作粒度 | 行为 |
 | --- | --- | --- | --- |
 | `independent_motion.enabled=false` | Persona 回复及 `ag99live.motion` Persona Effect | 每个 Persona 回复段 | 主 Persona 输出带结构化 Effect；Adapter 校验并将动作归到对应 Persona 段。此时才注册 AG99live 的 Persona Effect。 |
-| `enabled=true`, `per_speech_segment=false` | Persona 回复 + 独立动作 Provider | 整条回复 | 使用专用 Provider 生成一次动作；按回复阶段和可见文本匹配结果。Persona Effect 路径关闭。 |
-| `enabled=true`, `per_speech_segment=true` | Persona 结构化 speech 分段 + 独立动作 Provider | 每个非空 speech 段 | Persona 仍生成并交付回复分段；Adapter 为每段调用专用 Provider，匹配动作到相同索引的 TTS/输出段。Persona Effect 路径关闭。 |
+| `independent_motion.enabled=true` | Persona speech 段 + 独立动作 Provider | 每个非空 speech 段 | Persona Effect 路径关闭。Provider 对每段单独生成动作，并绑定到相同索引的 TTS/输出段。旧配置字段 `per_speech_segment` 已废弃，启动时清除，不再选择动作粒度。 |
 
-`parallel` 在整条回复模式中表示 Provider 与回复文本生成并行；分段模式中表示 Persona 结果到达后，各段动作 Provider 并发运行。分段模式关闭 `parallel` 时按段串行请求。并发数由 `max_concurrency` 限制（默认 4，最大 8）。`segment_timeout_seconds` 是单段动作请求上限（默认 5 秒，最大 60 秒；0 不限制），最终 Core 汇合仍受 30 秒上限约束。
+`parallel` 只控制多个 speech 段的动作 Provider 请求是否并发，与 Persona 主回复模型是否并行无关。并发开启时由 `max_concurrency` 限制并发数（默认 4，最大 8）；关闭时动作请求串行运行。非流式 Persona 结果会在结果回调后启动逐段任务；OLV Persona 段流启用且 Core 能力检查通过时，每个 `segment_start` 到达后启动对应动作任务。后者与后续 speech 生成及 Core 管理的 TTS 合成重叠。`segment_timeout_seconds` 默认 5 秒、最大 60 秒；普通逐段请求使用该上限，流式请求还受 Core Turn 剩余预算约束。普通路径的最终动作汇合上限为 30 秒。
 
-## 分段模式时序
+## 逐段动作时序
 
 Persona 同段 `actions` 表示可同时发生的动作。需要先后配合话语的动作应由 Persona
 拆成不同 `segments`，如“左……”绑定左转头、“右……”绑定右转头；每段的心理想法与
@@ -39,7 +38,11 @@ sequenceDiagram
     A->>A: Persona 生成结构化 segments[].speech
     A-->>H: Persona 结果 + persona_result_id
     H->>P: 读取分段，记录 (turn_id, persona_result_id, index)
-    H-)M: 立即启动各非空段动作任务
+    alt OLV Persona 段流已启用且 Core 能力可用
+        H-)M: 每个 segment_start 到达时启动对应动作任务
+    else 普通 Persona 结果
+        H-)M: 结果到达后启动各非空段动作任务
+    end
     A->>T: 按 Core 的 TTS 生命周期处理 speech 段
     T-->>P: TTS 状态/物料化身份：message_id、tts_request_id、index
     M-->>P: 按 index 返回动作 payload 或明确失败
@@ -48,11 +51,11 @@ sequenceDiagram
     F-->>A: Persona 结果物料化完成
     A->>O: 发送已物料化的文本、TTS 与动作段
     O->>O: 按 turn_id + message_id 聚合，按 sequence 输出
-    O-->>UI: output.segment (schema v5)
+    O-->>UI: output.segment (schema v6)
     UI->>UI: 播放音频、字幕、动作与口型
 ```
 
-图中动作生成与 TTS 的启动可以重叠；图不表示两者必须同步开始或按返回先后排序。`index` 是 Persona 结果内的稳定段序号，因此动作 Provider 的完成顺序不决定播放顺序。Core 仍拥有 TTS 合成和消息物料化；Adapter 不接管 TTS。
+动作请求与 TTS 的启动可以重叠；在 OLV Persona 段流路径中，动作请求还能与后续 speech 段生成重叠。请求不必同时开始或按返回先后排序。`index` 是 Persona 结果内的稳定段序号，因此动作 Provider 的完成顺序不决定播放顺序。Core 仍拥有 TTS 合成和消息物料化；Adapter 不接管 TTS。
 
 ## 身份与汇合
 
@@ -66,7 +69,7 @@ sequenceDiagram
 
 ## 延迟、失败与取消
 
-分段动作任务在 Persona 结果回调中启动，不等待 TTS 文本物料化；Core 的 TTS 继续自行合成，因此两项工作通常能并行。TTS 请求身份到达后 Adapter 完成段级绑定。Persona 结果物料化时，Core 调用 post-materialization finalizer 等待动作任务；Core 按分段数、配置的单段超时计算等待时限，并将总时限封顶 30 秒。finalizer 返回的动作贡献随后参与 Persona 输出交付和 Adapter 原子段聚合。
+普通路径的逐段动作任务在完整 Persona 结果回调中启动，不等待 TTS 文本物料化；Core 的 TTS 继续自行合成，因此两项工作可以并行。OLV Persona 段流路径在 `segment_start` 到达后立即启动该段动作任务，并复用已登记的段级 deadline。TTS 请求身份到达后 Adapter 完成段级绑定。普通 Persona 结果物料化时，Core 调用 post-materialization finalizer 等待动作任务；Core 按段数、单段超时和并发配置计算等待时限，最多等待 30 秒。finalizer 返回的动作贡献随后参与 Persona 输出交付和 Adapter 原子段聚合。
 
 独立 Provider 超时、返回空内容、JSON 解析失败或动作校验失败，只影响对应动作结果；分段文本和索引仍保留，段动作按明确失败状态处理，不会挪用其他段动作。Turn 中断会停止/丢弃该 Turn 的在飞生成任务，迟到结果不能重新绑定到后续 Turn。是否满足目标环境中的延迟和恢复体验仍需使用真实 Core、Provider、TTS 和桌面端验收。
 
@@ -92,4 +95,4 @@ Persona `segments[].speech` 是回复文本和 TTS 的分段输入；它不是 W
 
 ## 排障观察点
 
-优先按同一个 `turn_id` 检查 `persona_result_id`，再核对 `persona_segment_index/count`、TTS 的 `message_id/tts_request_id`、动作生成完成原因、finalizer 结果及最终输出的 `sequence`。缺少前端动作时，要区分未启用分段模式、该 speech 为空、Provider 未配置、生成/校验失败、身份绑定失败、Turn 已取消和前端动作编译失败。
+优先按同一个 `turn_id` 检查 `persona_result_id`，再核对 `persona_segment_index/count`、TTS 的 `message_id/tts_request_id`、动作生成完成原因、finalizer 结果及最终输出的 `sequence`。缺少前端动作时，要区分未启用独立动作、该 speech 为空、Provider 未配置、生成/校验失败、身份绑定失败、Turn 已取消和前端动作编译失败。

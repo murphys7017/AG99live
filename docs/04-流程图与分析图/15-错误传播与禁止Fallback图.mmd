@@ -37,9 +37,9 @@ flowchart TD
         SOURCE -->|Persona Effect| EFFECT
         SOURCE -->|独立 Provider| PROVIDER
         PROVIDER -->|缺失/非法/超时| MFAILED --> SEG
-        PROVIDER -->|整回复或合法分段结果| BIND
-        BIND -->|逐段且身份冲突| MFAILED
-        BIND -->|整回复或身份合法| PROFILE
+        PROVIDER -->|合法逐段结果| BIND
+        BIND -->|段身份冲突| MFAILED
+        BIND -->|身份合法| PROFILE
         EFFECT -->|缺失/非法| MFAILED --> SEG
         EFFECT -->|是| PROFILE
         PROFILE -->|否| MFAILED

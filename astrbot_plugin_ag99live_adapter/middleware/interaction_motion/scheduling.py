@@ -26,7 +26,6 @@ from .independent import (
     IndependentMotionResult,
     get_persona_motion_work,
     remove_persona_motion_work,
-    take_motion_result_for_turn,
 )
 from .shared import (
     INTERACTION_ROUTE_DECISION_EXTRA_KEY,
@@ -787,7 +786,7 @@ def start_deferred_performance_curve_request(
 
     if event.get_extra("_interaction_persona_segment_stream_active", False):
         # Stream delivery binds each TTS part to its runtime-owned motion Future.
-        # The legacy full-result binding below requires a known final count.
+        # The ordinary Persona result path requires the complete segment count.
         logger.debug(
             "WIRING performance_curve.skipped turn_id=%s "
             "reason=persona_stream_delivery_owns_binding",
@@ -1207,113 +1206,28 @@ async def _schedule_motion_from_independent_provider(
             reason=policy.reason,
             motion_resolution_reason=policy.reason,
         )
-    if bool(
-        getattr(
-            bundle.runtime_state,
-            "independent_motion_per_speech_segment",
-            False,
-        )
-    ):
-        metadata = getattr(view, "metadata", None)
-        purpose = (
-            str(metadata.get("purpose") or "").strip()
-            if isinstance(metadata, Mapping)
-            else ""
-        )
-        if phase not in {"immediate", "final"} or purpose not in {
-            "persona_reply",
-            "core_reply",
-        }:
-            return _MotionScheduleAttempt(
-                **common,
-                source=None,
-                scheduled=False,
-                reason="unsupported_persona_result_candidate",
-                motion_resolution_reason="independent_segment_candidate_unsupported",
-            )
-        return _schedule_motion_from_independent_provider_per_segment(
-            view,
-            phase=phase,
-            common=common,
-            identity=identity,
-        )
-    if not assistant_text:
+    metadata = getattr(view, "metadata", None)
+    purpose = (
+        str(metadata.get("purpose") or "").strip()
+        if isinstance(metadata, Mapping)
+        else ""
+    )
+    if phase not in {"immediate", "final"} or purpose not in {
+        "persona_reply",
+        "core_reply",
+    }:
         return _MotionScheduleAttempt(
             **common,
             source=None,
             scheduled=False,
-            reason="assistant_text_empty",
-            motion_resolution_reason="independent_provider_response_text_missing",
+            reason="unsupported_persona_result_candidate",
+            motion_resolution_reason="independent_segment_candidate_unsupported",
         )
-    cache = getattr(bundle.runtime_state, "independent_motion_result_cache", None)
-    cache_entries_before = (
-        len(cache.get(str(_call_event_method(event, "get_extra", "_turn_id", "") or ""), []))
-        if isinstance(cache, dict)
-        else 0
-    )
-    result = take_motion_result_for_turn(
-        bundle.runtime_state,
-        turn_id=str(_call_event_method(event, "get_extra", "_turn_id", "") or ""),
-        assistant_text=assistant_text,
-    )
-    logger.debug(
-        "WIRING independent_motion.cache_lookup phase=%s turn_id=%s hit=%s "
-        "entries_before=%s requested_text_len=%s",
-        phase,
-        identity.event_frontend_turn_id or "<missing>",
-        isinstance(result, IndependentMotionResult),
-        cache_entries_before,
-        len(assistant_text),
-    )
-    motion_payload = (
-        result.motion_payload if isinstance(result, IndependentMotionResult) else None
-    )
-    motion_reason = (
-        result.reason
-        if isinstance(result, IndependentMotionResult)
-        else "independent_result_missing"
-    )
-    _record_independent_motion_result(
-        bundle,
-        view=view,
-        identity=identity,
+    return _schedule_motion_from_independent_provider_per_segment(
+        view,
         phase=phase,
-        assistant_text=assistant_text,
-        motion_payload=motion_payload,
-        motion_reason=motion_reason,
-        image_count=result.image_count if isinstance(result, IndependentMotionResult) else 0,
-    )
-    if motion_payload is None:
-        logger.warning(
-            "WIRING independent_motion.not_scheduled phase=%s "
-            "reason=motion_payload_missing turn_id=%s result_reason=%s",
-            phase,
-            identity.event_frontend_turn_id or "<missing>",
-            motion_reason,
-        )
-        return _MotionScheduleAttempt(
-            **common,
-            source="independent_provider",
-            scheduled=False,
-            reason="motion_payload_missing",
-            motion_resolution_reason=motion_reason,
-        )
-
-    _call_event_method(event, "set_extra", "ag99live_split_motion_scheduled", True)
-    logger.debug(
-        "WIRING independent_motion.schedule_succeeded phase=%s turn_id=%s "
-        "source=independent_provider payload_present=true reason=%s",
-        phase,
-        identity.event_frontend_turn_id or "<missing>",
-        motion_reason,
-    )
-    return _MotionScheduleAttempt(
-        **common,
-        source="independent_provider",
-        scheduled=True,
-        reason="independent_provider_motion_client_object",
-        motion_payload=motion_payload,
-        motion_resolution_reason=motion_reason,
+        common=common,
+        identity=identity,
     )
 
 

@@ -52,15 +52,15 @@ AG99 Persona
 
 ### 动作生成模式
 
-`independent_motion.enabled` 默认关闭。关闭时使用 Persona Effect 为 Persona 回复段生成动作。开启后使用单独选择的聊天 Provider，Persona Effect 动作路径停用；`per_speech_segment` 决定独立 Provider 是每条回复调用一次，还是对 Persona 每个非空 `segments[].speech` 分别调用并绑定到同索引的 TTS/输出段。分段模式保留 Persona 回复和 Core 的 TTS 生命周期。
+`independent_motion.enabled` 默认关闭。关闭时由 Persona Effect 为 Persona 回复段生成动作。开启后停用 Persona Effect，改由单独选择的聊天 Provider 为每个非空 `segments[].speech` 分别生成动作，并绑定到同索引的 TTS/输出段。独立动作没有整回复生成模式；旧配置中的 `per_speech_segment` 会在启动时清除，不再决定动作粒度。
 
-`parallel` 在整回复模式中控制动作 Provider 与回复生成并行/串行；在分段模式中控制 Persona 结果到达后各段动作请求并发/串行。独立动作 Provider 全路径使用 `text_chat_stream()`；OLV 流式分段会在 `segment_start` 的动作意图确认后立即启动请求，并与 speech 生成、Core 控制的 TTS 合成重叠，上下文与 Provider 共用最多 0.75 秒预算。Provider 不支持聊天流、请求超时或失败时，该段跳过动作并保留失败原因，核心文本/TTS 继续。TTS 身份到达后 Adapter 按 `turn_id`、`persona_result_id` 和分段索引绑定动作；支持段级物化时，Core 最大并发 2 准备语音，每段只等待对应动作 Future，按序提交并 flush 原子 `output.segment`，第一段不等整批动作。普通整条消息 finalizer 保留原投递边界。段索引决定对应关系，Provider 的返回先后不决定播放顺序。
+`parallel` 控制非流式 Persona 结果中的逐段动作请求是并发还是串行；并发数由 `max_concurrency` 限制。独立动作 Provider 使用 `text_chat_stream()`。OLV Persona 段流开启且 Core 能力检查通过时，每个 `segment_start` 会启动对应动作请求，与后续 speech 生成及 Core 管理的 TTS 合成重叠；每段使用同一绝对时限约束上下文准备和 Provider 请求。Provider 不支持聊天流、请求超时或失败时，该段跳过动作并保留失败原因，核心文本/TTS 继续。TTS 身份到达后 Adapter 按 `turn_id`、`persona_result_id` 和分段索引绑定动作；支持段级物料化时，Core 最多并发准备 2 段语音，每段只等待对应动作 Future，按序提交并 flush 原子 `output.segment`，首段不等待其余段的动作。Persona 段流未启用或能力检查未通过时，不请求增量动作，继续使用 Core 的普通 Persona 输出流程。段索引决定对应关系，Provider 的返回先后不决定播放顺序。
 
-`history_turns` 控制附带的最近纯文本对话轮数（默认 6，范围 0–20）。动作 Provider 不接收图片、截图上下文说明或工具消息；主回复模型的图片输入不受影响。分段模式输入当前 `speech`、`actions`、`tendency`，并复用本轮已取得、允许模型读取的记忆摘要（最多 6 条，每条 240 字符），不额外检索记忆。Prompt 保留合法轴/等级和资源约束。另保留最多 2 个相关示例和最近 3 个执行动作，全部投影为当前输出契约的 input/output 结构；移除运行标识，跳过不兼容或超过 2400 字符的单条参考，不截断 JSON。当前 actions 优先于参考。分段模式另有 `max_concurrency`（默认 4，最大 8）和 `segment_timeout_seconds`（默认 5 秒，最大 60 秒；0 表示不限制单段请求），完整 Core 汇合仍受 30 秒上限约束。详细 WIRING 过程日志使用 DEBUG，分段生成摘要和最终投递保留 INFO，异常保留 WARN/ERROR。
+`history_turns` 控制附带的最近纯文本对话轮数（默认 6，范围 0–20）。动作 Provider 不接收图片、截图上下文说明或工具消息；主回复模型的图片输入不受影响。每段动作输入当前 `speech`、`actions`、`tendency`，并复用本轮已取得、允许模型读取的记忆摘要（最多 6 条，每条 240 字符），不额外检索记忆。Prompt 保留合法轴/等级和资源约束。另保留最多 2 个相关示例和最近 3 个执行动作，全部投影为当前输出契约的 input/output 结构；移除运行标识，跳过不兼容或超过 2400 字符的单条参考，不截断 JSON。当前 actions 优先于参考。`max_concurrency` 默认 4、最大 8；`segment_timeout_seconds` 默认 5 秒、最大 60 秒，0 表示不限制非流式单段请求。完整 Core 汇合仍受 30 秒上限约束。详细 WIRING 过程日志使用 DEBUG，分段生成摘要和最终投递保留 INFO，异常保留 WARN/ERROR。
 
 ### NeuroBrain 状态上下文
 
-当同一 AstrBot 进程加载并启用 `astrbot_plugin_neurobrain` 时，按 Persona speech 分段的独立动作（包括 OLV 分段流式路径）直接通过无参数 `get_state()` 读取当前完整快照。读取不等待本轮情绪输入处理完成，不触发推理；模型在独立线程中持续演化。动作 prompt 中仅包含经过范围校验的 `emotion`、`behavior`、`last_tendency` 和 `step`。模型未就绪时省略状态。整条回复独立动作链路不读取 NeuroBrain。AG99live 不直接连接 NeuroBrain WebSocket，也不提交刺激。
+当同一 AstrBot 进程加载并启用 `astrbot_plugin_neurobrain` 时，独立动作路径直接通过无参数 `get_state()` 读取当前完整快照。读取不等待本轮情绪输入处理完成，不触发推理；模型在独立线程中持续演化。动作 prompt 中仅包含经过范围校验的 `emotion`、`behavior`、`last_tendency` 和 `step`。模型未就绪时省略状态。AG99live 不直接连接 NeuroBrain WebSocket，也不提交刺激。
 
 NeuroBrain 状态只是动作选择的辅助信号，不是动作命令；动作结果仍必须通过现有校验、`engine.motion_intent.v4` 和 `output.segment.v6` 发送链路。该接入不增加协议字段、不改变段身份、不改变播放时钟。
 

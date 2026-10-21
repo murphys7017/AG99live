@@ -50,7 +50,9 @@ def test_prune_retired_plugin_fields_keeps_active_and_unowned_config() -> None:
 
     assert set(removed) == {
         "image_cooldown_seconds",
+        "independent_motion.per_speech_segment",
         "independent_motion.segment_stream_enabled",
+        "independent_motion",
         "desktop_observation.provider_id",
         "desktop_observation.timeout_seconds",
         "remote_operator.default_computer",
@@ -66,7 +68,6 @@ def test_prune_retired_plugin_fields_keeps_active_and_unowned_config() -> None:
         "remote_operator_profiles",
     }
     assert config == {
-        "independent_motion": {"per_speech_segment": True},
         "desktop_observation": {"enabled": True},
         "performance_curve": {"enabled": True, "provider_id": "active-provider"},
         "memory": {"enabled": True},

@@ -9,7 +9,7 @@ flowchart TD
     subgraph PROMPT[1. 动作输入来源与上下文]
         SYS[System Mount<br/>控制 Live2D 角色的任务与选择原则]:::prompt
         CAP[Capability Mount<br/>当前模型轴定义 / -4..4 等级语义<br/>typed resources / 参考样本]:::prompt
-        CTX[Context Mount<br/>本轮对话 / 回复用途<br/>上一动作关键轴等级]:::prompt
+        CTX[Context Mount<br/>当前 speech 段 / 动作倾向<br/>上一动作关键轴等级]:::prompt
         SCHEMA[Persona Effect Schema<br/>仅独立动作关闭时注册]:::contract
         ROUTE{independent_motion.enabled?}:::contract
         SYS --> REQUEST[Persona 主模型输出回复/分段]:::prompt
@@ -17,7 +17,7 @@ flowchart TD
         CTX --> REQUEST
         REQUEST --> ROUTE
         ROUTE -->|关闭| SCHEMA
-        ROUTE -->|开启| PROVIDER[独立动作 Provider<br/>JSON 动作意图]:::prompt
+        ROUTE -->|开启| PROVIDER[独立动作 Provider<br/>每个非空 speech 段单独请求]:::prompt
     end
 
     subgraph OUTPUT[2. 模型结构化输出]
@@ -59,7 +59,7 @@ flowchart TD
     end
 
     subgraph TRANSPORT[4. 原子消息与前端入站]
-        SEG[output.segment (schema v5).motion + speech<br/>与 canonical text/audio 同段]:::contract
+        SEG[output.segment (schema v6).motion + speech<br/>与 canonical text/audio 同段]:::contract
         PARSE[Frontend motion parser<br/>schema/profile/finite fields]:::runtime
         FVALID{前端 DTO 合法？}:::runtime
         REJECTSEG[拒绝整个原子 segment<br/>零队列副作用]:::failure

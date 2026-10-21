@@ -68,8 +68,6 @@ from .incremental_output import IncrementalOutputSession, SendPayload
 
 
 MAX_REMEMBERED_TERMINAL_TURNS = 256
-_INDEPENDENT_MOTION_TASK_EXTRA_KEY = "_ag99live_independent_motion_task"
-_INDEPENDENT_MOTION_RESULT_EXTRA_KEY = "_ag99live_independent_motion_result"
 _INDEPENDENT_MOTION_TASKS_BY_TURN_ATTRIBUTE = (
     "independent_motion_generation_tasks_by_turn"
 )
@@ -384,9 +382,6 @@ class TurnCoordinator:
             self._active_vad_turn_by_capture_turn.clear()
             self._active_speech_capture_turns.clear()
             self.motion_observations.reset()
-            cache = getattr(self.runtime_state, "independent_motion_result_cache", None)
-            if isinstance(cache, dict):
-                cache.clear()
             tasks_by_turn = getattr(
                 self.runtime_state,
                 _INDEPENDENT_MOTION_TASKS_BY_TURN_ATTRIBUTE,
@@ -893,25 +888,11 @@ class TurnCoordinator:
             )
         self._clear_active_vad_turn(resolved_turn_id)
         self._turn_timings.pop(resolved_turn_id, None)
-        discard_motion_result = getattr(
-            self,
-            "_discard_independent_motion_result",
-            None,
-        )
         motion_work_turn_id = _resolve_motion_work_turn_id(
             event,
             resolved_turn_id,
         )
-        if callable(discard_motion_result):
-            discard_motion_result(motion_work_turn_id)
-        else:
-            cache = getattr(
-                getattr(self, "runtime_state", None),
-                "independent_motion_result_cache",
-                None,
-            )
-            if isinstance(cache, dict):
-                cache.pop(motion_work_turn_id, None)
+        self._discard_persona_motion_work(motion_work_turn_id)
 
     def _cancel_turn_owned_motion_task(
         self,
@@ -922,29 +903,14 @@ class TurnCoordinator:
     ) -> None:
         """Cancel motion work owned by a turn before its event is discarded.
 
-        Independent motion generation is started from an AstrBot hook, while turn
-        termination is coordinated here. Whole-turn work can expose its task on
-        the event; Persona-hook work is tracked in RuntimeState because AstrBot
+        Persona-hook motion work is tracked in RuntimeState because AstrBot
         isolates hook-local event extras from later output contributors.
         """
-        get_extra = getattr(event, "get_extra", None)
-        set_extra = getattr(event, "set_extra", None)
         motion_work_turn_id = _resolve_motion_work_turn_id(event, turn_id)
         registry = getattr(self.runtime_state, "persona_stream_motion", None)
         if registry is not None:
             registry.clear(motion_work_turn_id)
         tasks: set[asyncio.Task] = set()
-        if callable(get_extra):
-            try:
-                event_task = get_extra(_INDEPENDENT_MOTION_TASK_EXTRA_KEY)
-                if isinstance(event_task, asyncio.Task):
-                    tasks.add(event_task)
-            except Exception:  # noqa: BLE001 - cleanup must continue.
-                logger.exception(
-                    "Failed to inspect independent motion task during turn cleanup: "
-                    "turn_id=%s",
-                    turn_id,
-                )
 
         tasks_by_turn = getattr(
             getattr(self, "runtime_state", None),
@@ -969,22 +935,10 @@ class TurnCoordinator:
                 reason,
                 task.get_name(),
             )
-        if callable(set_extra):
-            try:
-                set_extra(_INDEPENDENT_MOTION_TASK_EXTRA_KEY, None)
-                set_extra(_INDEPENDENT_MOTION_RESULT_EXTRA_KEY, None)
-            except Exception:  # noqa: BLE001 - cleanup must continue.
-                logger.exception(
-                    "Failed to clear independent motion event state: turn_id=%s",
-                    turn_id,
-                )
-        self._discard_independent_motion_result(motion_work_turn_id)
+        self._discard_persona_motion_work(motion_work_turn_id)
 
-    def _discard_independent_motion_result(self, turn_id: str) -> None:
+    def _discard_persona_motion_work(self, turn_id: str) -> None:
         normalized_turn_id = str(turn_id or "").strip()
-        cache = getattr(self.runtime_state, "independent_motion_result_cache", None)
-        if isinstance(cache, dict):
-            cache.pop(normalized_turn_id, None)
         persona_work = getattr(
             self.runtime_state,
             _PERSONA_MOTION_WORK_BY_TURN_ATTRIBUTE,

@@ -27,5 +27,5 @@ sequenceDiagram
     Finalizer-->>Core: 结果物料化完成
     Core->>Segments: 交付文本、TTS 与对应动作
     Segments->>Segments: 按 turn_id/message_id 聚合，按 sequence 排序
-    Segments-->>Frontend: output.segment (schema v5)
+    Segments-->>Frontend: output.segment (schema v6)
     Frontend->>Frontend: 播放音频、字幕、动作和口型
