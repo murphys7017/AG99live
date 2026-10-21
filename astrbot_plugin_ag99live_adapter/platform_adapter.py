@@ -287,6 +287,10 @@ class OLVPetPlatformAdapter(Platform):
     async def run(self):
         self._event_loop = asyncio.get_running_loop()
         await self.passive_behavior_runtime.start()
+        asr_prewarm_task = asyncio.create_task(
+            self.turn_coordinator.speech_ingress.prewarm_streaming_asr(),
+            name=f"streaming-asr-prewarm:{self.platform_id}",
+        )
         try:
             await self.transport.start()
         except asyncio.CancelledError:
@@ -296,6 +300,7 @@ class OLVPetPlatformAdapter(Platform):
             logger.exception("AG99live adapter failed during run()")
             raise
         finally:
+            await asyncio.gather(asr_prewarm_task, return_exceptions=True)
             self.desktop_observation.disconnect()
             self.desktop_presence.disconnect()
             await self.passive_behavior_runtime.stop()
