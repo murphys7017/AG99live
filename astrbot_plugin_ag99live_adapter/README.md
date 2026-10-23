@@ -56,7 +56,7 @@ AG99 Persona
 
 `parallel` 控制非流式 Persona 结果中的逐段动作请求是并发还是串行；并发数由 `max_concurrency` 限制。独立动作 Provider 使用 `text_chat_stream()`。OLV Persona 段流开启且 Core 能力检查通过时，每个 `segment_start` 会启动对应动作请求，与后续 speech 生成及 Core 管理的 TTS 合成重叠；每段使用同一绝对时限约束上下文准备和 Provider 请求。Provider 不支持聊天流、请求超时或失败时，该段跳过动作并保留失败原因，核心文本/TTS 继续。TTS 身份到达后 Adapter 按 `turn_id`、`persona_result_id` 和分段索引绑定动作；支持段级物料化时，Core 最多并发准备 2 段语音，每段只等待对应动作 Future，按序提交并 flush 原子 `output.segment`，首段不等待其余段的动作。Persona 段流未启用或能力检查未通过时，不请求增量动作，继续使用 Core 的普通 Persona 输出流程。段索引决定对应关系，Provider 的返回先后不决定播放顺序。
 
-`history_turns` 控制附带的最近纯文本对话轮数（默认 6，范围 0–20）。动作 Provider 不接收图片、截图上下文说明或工具消息；主回复模型的图片输入不受影响。每段动作输入当前 `speech`、`actions`、`tendency`，并复用本轮已取得、允许模型读取的记忆摘要（最多 6 条，每条 240 字符），不额外检索记忆。Prompt 保留合法轴/等级和资源约束。另保留最多 2 个相关示例和最近 3 个执行动作，全部投影为当前输出契约的 input/output 结构；移除运行标识，跳过不兼容或超过 2400 字符的单条参考，不截断 JSON。当前 actions 优先于参考。`max_concurrency` 默认 4、最大 8；`segment_timeout_seconds` 默认 5 秒、最大 60 秒，0 表示不限制非流式单段请求。完整 Core 汇合仍受 30 秒上限约束。详细 WIRING 过程日志使用 DEBUG，分段生成摘要和最终投递保留 INFO，异常保留 WARN/ERROR。
+`history_turns` 控制附带的最近纯文本对话轮数（默认 6，范围 0–20）。动作 Provider 不接收图片、截图上下文说明、工具消息或 memory slot；主回复模型的图片输入不受影响。每段动作输入只包含当前用户文本和当前 `speech`、`actions`、`tendency`；历史仅通过上述有界的纯文本对话轮次提供，不额外检索或注入记忆。Prompt 保留合法轴/等级和资源约束。另保留最多 2 个相关示例和最近 3 个执行动作，全部投影为当前输出契约的 input/output 结构；移除运行标识，跳过不兼容或超过 2400 字符的单条参考，不截断 JSON。当前 actions 优先于参考。`max_concurrency` 默认 4、最大 8；`segment_timeout_seconds` 默认 5 秒、最大 60 秒，0 表示不限制非流式单段请求。完整 Core 汇合仍受 30 秒上限约束。详细 WIRING 过程日志使用 DEBUG，分段生成摘要和最终投递保留 INFO，异常保留 WARN/ERROR。
 
 ### NeuroBrain 状态上下文
 

@@ -17,7 +17,70 @@ class AG99liveMotionPromptContributor:
     priority = 40
 
     async def collect(self, event, plugin_context, config=None, *, provider_request=None):
+        return await self._collect(
+            event,
+            plugin_context,
+            config,
+            provider_request=provider_request,
+            allowed_mounts=None,
+            allowed_targets=None,
+        )
+
+    async def collect_for_prompt_mounts(
+        self,
+        event,
+        plugin_context,
+        config=None,
+        *,
+        provider_request=None,
+        allowed_mounts: frozenset[str],
+    ):
+        return await self._collect(
+            event,
+            plugin_context,
+            config,
+            provider_request=provider_request,
+            allowed_mounts=allowed_mounts,
+            allowed_targets=None,
+        )
+
+    async def collect_for_prompt_context(
+        self,
+        event,
+        plugin_context,
+        config=None,
+        *,
+        provider_request=None,
+        allowed_mounts: frozenset[str] | None = None,
+        allowed_targets: frozenset[str] | None = None,
+    ):
+        return await self._collect(
+            event,
+            plugin_context,
+            config,
+            provider_request=provider_request,
+            allowed_mounts=allowed_mounts,
+            allowed_targets=allowed_targets,
+        )
+
+    async def _collect(
+        self,
+        event,
+        plugin_context,
+        config=None,
+        *,
+        provider_request=None,
+        allowed_mounts: frozenset[str] | None,
+        allowed_targets: frozenset[str] | None,
+    ):
         del plugin_context, config, provider_request
+
+        if allowed_targets is not None and "persona" not in allowed_targets:
+            return []
+        if allowed_mounts is not None and not allowed_mounts.intersection(
+            {"system", "context"}
+        ):
+            return []
 
         capabilities = get_interaction_capabilities()
         if capabilities is None:
@@ -32,20 +95,6 @@ class AG99liveMotionPromptContributor:
         static_capability_payload = _build_motion_static_capability_payload(
             bundle.runtime_state
         )
-        runtime_payload, reference_diagnostics = _build_motion_runtime_payload(
-            event,
-            bundle.turn_coordinator,
-            bundle.runtime_state,
-            capability_payload=static_capability_payload,
-        )
-        _record_motion_prompt_reference_observation(
-            bundle=bundle,
-            event=event,
-            capability_payload=static_capability_payload,
-            runtime_payload=runtime_payload,
-            reference_diagnostics=reference_diagnostics,
-        )
-
         extensions = [
             capabilities.prompt_extension(
                 plugin_id=self.plugin_id,
@@ -76,6 +125,21 @@ class AG99liveMotionPromptContributor:
                 },
             ),
         ]
+        runtime_payload = {}
+        if allowed_mounts is None or "context" in allowed_mounts:
+            runtime_payload, reference_diagnostics = _build_motion_runtime_payload(
+                event,
+                bundle.turn_coordinator,
+                bundle.runtime_state,
+                capability_payload=static_capability_payload,
+            )
+            _record_motion_prompt_reference_observation(
+                bundle=bundle,
+                event=event,
+                capability_payload=static_capability_payload,
+                runtime_payload=runtime_payload,
+                reference_diagnostics=reference_diagnostics,
+            )
         if runtime_payload:
             extensions.append(
                 capabilities.prompt_extension(

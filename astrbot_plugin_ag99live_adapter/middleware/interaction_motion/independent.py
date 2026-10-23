@@ -213,7 +213,6 @@ class IndependentMotionContext:
     """Read-only motion inputs shared by all speech segments in one turn."""
 
     current_user_text: str
-    memories: tuple[str, ...]
     contexts: tuple[dict[str, str], ...]
     capability_payload: dict[str, Any]
     runtime_payload: dict[str, Any]
@@ -525,7 +524,6 @@ async def _prepare_independent_motion_context(
     runtime_payload["recent_executed_motions"] = _resolve_prompt_motion_history(bundle.turn_coordinator)[-3:]
     return IndependentMotionContext(
         current_user_text=current_user_text,
-        memories=_motion_memory_summaries(event),
         contexts=contexts,
         capability_payload=capability_payload,
         runtime_payload=runtime_payload,
@@ -1075,7 +1073,6 @@ async def generate_independent_motion(
         prompt = _build_current_turn_prompt(
             current_user_text=current_user_text,
             assistant_text=assistant_text,
-            memories=prepared_context.memories if prepared_context is not None else _motion_memory_summaries(event),
             segment_intent=segment_intent,
             neurobrain_state=neurobrain_state,
         )
@@ -1355,47 +1352,16 @@ def _dialogue_text(value: str) -> str:
     return sanitize_assistant_output_text(value).strip()
 
 
-def _motion_memory_summaries(event: Any) -> tuple[str, ...]:
-    """Reuse exposed memory from this turn, without another retrieval."""
-    state = getattr(event, "_interaction_turn_state", None)
-    material = getattr(state, "context_material", None)
-    pack = getattr(material, "prompt_context_pack", None)
-    summaries: list[str] = []
-    text_keys = {"current_topic", "topic_summary", "short_summary", "active_focus", "summary", "detail_summary"}
-
-    def collect(value: Any, depth: int = 0) -> None:
-        if depth > 6 or len(summaries) >= 6:
-            return
-        if isinstance(value, Mapping):
-            for key, child in value.items():
-                if key in text_keys and isinstance(child, str):
-                    text = _dialogue_text(child)[:240]
-                    if text and text not in summaries and len(summaries) < 6:
-                        summaries.append(text)
-                elif isinstance(child, (Mapping, list, tuple)):
-                    collect(child, depth + 1)
-        elif isinstance(value, (list, tuple)):
-            for child in value:
-                collect(child, depth + 1)
-
-    for slot in getattr(pack, "slots", {}).values():
-        if slot.name.startswith("memory.") and slot.llm_exposure == "allowed":
-            collect(slot.value)
-    return tuple(summaries)
-
-
 def _build_current_turn_prompt(
     *,
     current_user_text: str,
     assistant_text: str,
-    memories: tuple[str, ...] = (),
     segment_intent: Mapping[str, Any] | None = None,
     neurobrain_state: Mapping[str, Any] | None = None,
 ) -> str:
     intent = segment_intent or {}
     payload: dict[str, Any] = {
         "user": current_user_text,
-        "memory": memories,
         "segment": {
             "speech": assistant_text,
             "actions": intent.get("actions", []),
@@ -1451,17 +1417,14 @@ def _build_independent_system_prompt(
             contract["axis_levels"] = {str(first_axis["id"]): level}
     return (
         "你负责为 AG99live 的 Live2D 角色生成动作参数。"
-        "根据纯文本对话、简短记忆和当前 segment 的 speech、actions、tendency，"
+        "根据当前用户输入、提供的近期纯文本对话，以及当前 segment 的 speech、actions、tendency，"
         "你的输出不是动作建议或文字描述，而是会直接交给 Live2D ModelEngine 执行的工作参数。"
         "优先落实 actions，以 tendency 调整情绪强度，只描述角色本段应该呈现的动作。"
-        "这是桌面宠物式的陪伴互动，同时具有轻度舞台表演性质；动作要自然亲近，但也要有明确的表演感。"
-        "不要按现实中难以察觉的微小动作来估计；为了让用户在窗口中看清并感受到回应，"
-        "默认使用比现实动作明显更大、更有戏剧性的幅度，"
-        "在能力数据允许时优先选择中高或高等级，并让头部、身体、视线或表情形成清晰变化。"
-        "普通的点头、摇头、看向一侧等语义，应转换为用户能看清的陪伴互动动作；"
-        "只有确实需要保持中性或避免干扰时才使用低等级或不改变轴。"
-        "动作要服务于当前语义，避免无意义地同时拉满所有轴；夸张应体现在语义相关的轴和动作步骤上，"
-        "不要为了显眼而制造与语义冲突的动作。"
+        "这是长期陪伴中的身体表达，不是独立的舞台表演；动作要自然亲近，并服务于同一人格的语气和关系。"
+        "动作幅度跟随当前语气和 tendency：普通确认、轻声安慰或停顿思考保持克制；"
+        "只有明确的动作意图、强烈情绪或用户明确要求时才提高幅度或使用动作序列。"
+        "若当前内容没有清晰动作信号，可以保持中性或不控制无关轴；不要把每条回复都演成明显动作。"
+        "每个动作都要服务于当前语义，不要为了显眼而制造与语义冲突的动作。"
         "如果当前输入包含 neurobrain_state，它只是连续状态的参考，不能当作动作命令；"
         "不要输出或复述这个字段，也不要因此改变既有 JSON 输出契约。"
         "参考示例的 output 就是输出格式；最近执行动作只用于衔接和避免机械重复，勿照搬。"
