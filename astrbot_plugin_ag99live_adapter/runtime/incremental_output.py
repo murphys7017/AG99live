@@ -64,6 +64,7 @@ class IncrementalOutputSession:
         require_current: Callable[[], None],
         on_text_complete: Callable[[str], None],
         on_audio_sent: Callable[[], None] | None = None,
+        on_motion_started: Callable[[int, str], None] | None = None,
         turn_audio_credit: AudioCredit | None = None,
         segment_offset: int = 0,
     ) -> None:
@@ -76,6 +77,7 @@ class IncrementalOutputSession:
         self._require_current = require_current
         self._on_text_complete = on_text_complete
         self._on_audio_sent = on_audio_sent
+        self._on_motion_started = on_motion_started
         self._segments: dict[int, _Segment] = {}
         self._text_units = 0
         self.has_output = False
@@ -236,6 +238,8 @@ class IncrementalOutputSession:
             stream.seq = 1
             segment.streams[resource] = stream
             self._segments[segment_index] = segment
+            if resource == "motion" and self._on_motion_started is not None:
+                self._on_motion_started(segment_index, segment.message_id)
 
     async def append_text(self, segment_index: int, text: str) -> None:
         async with self._lock:

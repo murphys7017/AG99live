@@ -184,6 +184,15 @@ class OutputSegmentCoordinator:
                 require_current()
                 self._require_output_queue_open(turn_id, incremental=True)
 
+            def mark_motion_started(index: int, message_id: str) -> None:
+                result_state = self.runtime_state.persona_sessions.get_result(
+                    turn_id,
+                    persona_result_id,
+                )
+                if result_state is None:
+                    raise RuntimeError("persona_incremental_result_state_missing")
+                result_state.segment(index).mark_wire_started(message_id)
+
             writer = IncrementalOutputSession(
                 turn_id=turn_id, core_turn_id=core_turn_id,
                 persona_result_id=persona_result_id, lock=self._get_turn_lock(turn_id),
@@ -196,6 +205,7 @@ class OutputSegmentCoordinator:
                     turn_id,
                     "audio_payload_sent_at",
                 ),
+                on_motion_started=mark_motion_started,
             )
             writers[persona_result_id] = writer
             return writer
@@ -428,9 +438,13 @@ class OutputSegmentCoordinator:
             writers = self._incremental_outputs.get(normalized_turn_id, {})
             incremental = next(reversed(writers.values()), None)
             for result_writer in writers.values():
-                # All resources must explicitly close; text/audio EOF alone
-                # cannot settle a still-pending optional motion producer.
-                result_writer.require_complete()
+                # A writer opened from a Persona header may have no segment if
+                # generation failed before its first segment_start. Let the
+                # no-output branch below fail that Turn with a control error.
+                if result_writer.segment_count:
+                    # All resources must explicitly close; text/audio EOF alone
+                    # cannot settle a still-pending optional motion producer.
+                    result_writer.require_complete()
                 if result_writer.has_output:
                     self._emitted_turn_ids.add(normalized_turn_id)
                 if result_writer.failure_reason and getattr(
@@ -459,7 +473,9 @@ class OutputSegmentCoordinator:
                     )
                     return
                 if normalized_turn_id not in self._emitted_turn_ids:
-                    reason = f"output_segment_missing:{normalized_turn_id}"
+                    reason = self._output_failures.get(normalized_turn_id) or (
+                        f"output_segment_missing:{normalized_turn_id}"
+                    )
                     error_sent = await self._send_json(
                         build_control_error(turn_id=normalized_turn_id, message=reason)
                     )

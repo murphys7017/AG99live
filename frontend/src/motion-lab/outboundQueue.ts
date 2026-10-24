@@ -176,20 +176,32 @@ export function createIndexedDbMotionLabPendingEventStore(): MotionLabPendingEve
 
 const MOTION_LAB_DATABASE = "ag99live-motion-lab-outbound-v1";
 const MOTION_LAB_OBJECT_STORE = "pending-events";
+const MOTION_LAB_DATABASE_VERSION = 2;
 
 function openMotionLabDatabase(): Promise<IDBDatabase> {
   if (!window.indexedDB) {
     return Promise.reject(new Error("IndexedDB is required for MotionLab delivery."));
   }
   return new Promise((resolve, reject) => {
-    const request = window.indexedDB.open(MOTION_LAB_DATABASE, 1);
-    request.onupgradeneeded = () => {
+    const request = window.indexedDB.open(
+      MOTION_LAB_DATABASE,
+      MOTION_LAB_DATABASE_VERSION,
+    );
+    request.onupgradeneeded = (event) => {
       const db = request.result;
       if (!db.objectStoreNames.contains(MOTION_LAB_OBJECT_STORE)) {
         db.createObjectStore(MOTION_LAB_OBJECT_STORE, { keyPath: "eventId" });
+      } else if (event.oldVersion < MOTION_LAB_DATABASE_VERSION) {
+        request.transaction
+          ?.objectStore(MOTION_LAB_OBJECT_STORE)
+          .clear();
       }
     };
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => {
+      const db = request.result;
+      db.onversionchange = () => db.close();
+      resolve(db);
+    };
     request.onerror = () => reject(request.error ?? new Error("MotionLab IndexedDB open failed."));
   });
 }

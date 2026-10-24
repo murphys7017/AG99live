@@ -130,7 +130,16 @@ def _build_event(module, *, images: list[dict] | None):
         "desktop-client",
         AdapterStub(),
     )
+    from astrbot_plugin_ag99live_adapter.runtime.persona_lifecycle import (
+        PersonaTurnSessionRegistry,
+    )
+
+    event.adapter.runtime_state = types.SimpleNamespace(
+        persona_sessions=PersonaTurnSessionRegistry(),
+    )
+    event.adapter.turn_coordinator.runtime_state = event.adapter.runtime_state
     event.set_extra("output_correlation_id", "turn-1")
+    event.set_extra("_turn_id", "turn-1")
     return event
 
 
@@ -228,20 +237,13 @@ def test_streaming_output_joins_motion_future_by_segment_identity(
                 reason="independent_provider",
             )
         )
-        from astrbot_plugin_ag99live_adapter.runtime.persona_stream_motion import (
-            PersonaStreamMotionRegistry,
+        result_state = event.adapter.runtime_state.persona_sessions.session(
+            "backend-turn-1"
+        ).result(
+            "persona-result-1",
+            parent_message_id="stream-parent",
         )
-        registry = PersonaStreamMotionRegistry()
-        event.adapter.runtime_state = types.SimpleNamespace(persona_stream_motion=registry)
-        registry.register(
-            "backend-turn-1",
-            {
-                "turn_id": "backend-turn-1",
-                "persona_result_id": "persona-result-1",
-                "parent_message_id": "stream-parent",
-                "segment_result_futures": {0: future},
-            },
-        )
+        result_state.segment(0).result_future = future
         await event.send_message_with_extras(
             [Plain(speech)],
             platform_extras={
@@ -269,9 +271,6 @@ def test_streaming_output_joins_motion_future_by_segment_identity(
         }
     ]
     assert extras["metadata"]["ag99live_motion_schedule"]["persona_segmented"] is True
-    assert event.get_extra(
-        "_interaction_persona_stream_motion_downlink_indexes"
-    ) == {0}
     assert isinstance(
         event.get_extra("_interaction_personal_stream_first_output_monotonic"),
         float,
@@ -306,9 +305,6 @@ def test_streaming_empty_motion_placeholder_is_not_marked_as_downlinked(
     extras = event.adapter.emit_calls[0]["platform_extras"]
     assert extras["client_objects"] == []
     assert event.get_extra(
-        "_interaction_persona_stream_motion_downlink_indexes", set()
-    ) == set()
-    assert event.get_extra(
         "_interaction_personal_stream_first_output_monotonic"
     ) is None
     assert "persona_segment_count" not in extras
@@ -323,14 +319,22 @@ def test_incremental_motion_update_records_first_output_time(
     updates = []
 
     class WriterStub:
-        async def update_motion(self, segment_index, payload):
-            updates.append((segment_index, payload))
+        core_turn_id = "core-turn-1"
+        persona_result_id = "result-1"
+
+        async def update_motion(self, segment_index, payload, **kwargs):
+            updates.append((segment_index, payload, kwargs))
 
         async def end_stream(self, resource, segment_index):
             updates.append((resource, segment_index))
 
-    event.set_extra("_interaction_incremental_output_writer", WriterStub())
-    event.set_extra("_interaction_incremental_motion_started", {0: True})
+    writer = WriterStub()
+    event.adapter.runtime_state.persona_sessions.register_writer(
+        "turn-1", "result-1", writer
+    )
+    event.adapter.runtime_state.persona_sessions.get_result(
+        "turn-1", "result-1"
+    ).segment(0).mark_wire_started("segment-0")
 
     accepted = asyncio.run(
         event.publish_interaction_incremental_motion(
@@ -341,7 +345,7 @@ def test_incremental_motion_update_records_first_output_time(
 
     assert accepted is True
     assert updates == [
-        (0, {"actions": ["nod"]}),
+        (0, {"actions": ["nod"]}, {"revision": 1, "anchor": "segment_start"}),
         ("motion", 0),
     ]
     assert isinstance(
@@ -750,15 +754,24 @@ def test_failed_persona_tts_segment_uses_bound_segment_identity(
     _install_platform_event_astrbot_stubs(install_fake_astrbot, monkeypatch)
     module = _load_platform_event_module()
     event = _build_event(module, images=[])
-    event.set_extra(
-        "_ag99live_persona_tts_segment_map",
-        {
-            "tts-segment-1": {
-                "parent_message_id": "parent",
-                "persona_segment_index": 1,
-                "persona_segment_count": 2,
-            }
-        },
+    from astrbot_plugin_ag99live_adapter.runtime.persona_lifecycle import (
+        PersonaTtsBinding,
+    )
+
+    result_state = event.adapter.runtime_state.persona_sessions.session(
+        "turn-1"
+    ).result("result-1", parent_message_id="parent")
+    result_state.expected_segment_count = 2
+    result_state.segment(0).bind_content(speech="first", actions=(), tendency={})
+    result_state.segment(1).bind_content(speech="second", actions=(), tendency={})
+    result_state.segment(1).tts_binding = PersonaTtsBinding(
+        turn_id="turn-1",
+        parent_message_id="parent",
+        persona_result_id="result-1",
+        segment_index=1,
+        segment_count=2,
+        message_id="tts-segment-1",
+        tts_request_id="tts-request-1",
     )
 
     asyncio.run(
@@ -793,15 +806,24 @@ def test_dual_output_auxiliary_text_uses_bound_persona_parent(
     _install_platform_event_astrbot_stubs(install_fake_astrbot, monkeypatch)
     module = _load_platform_event_module()
     event = _build_event(module, images=[])
-    event.set_extra(
-        "_ag99live_persona_tts_segment_map",
-        {
-            "parent": {
-                "parent_message_id": "parent",
-                "persona_segment_index": 0,
-                "persona_segment_count": 2,
-            }
-        },
+    from astrbot_plugin_ag99live_adapter.runtime.persona_lifecycle import (
+        PersonaTtsBinding,
+    )
+
+    result_state = event.adapter.runtime_state.persona_sessions.session(
+        "turn-1"
+    ).result("result-1", parent_message_id="parent")
+    result_state.expected_segment_count = 2
+    result_state.segment(0).bind_content(speech="first", actions=(), tendency={})
+    result_state.segment(1).bind_content(speech="second", actions=(), tendency={})
+    result_state.segment(0).tts_binding = PersonaTtsBinding(
+        turn_id="turn-1",
+        parent_message_id="parent",
+        persona_result_id="result-1",
+        segment_index=0,
+        segment_count=2,
+        message_id="parent",
+        tts_request_id="tts-parent",
     )
 
     asyncio.run(

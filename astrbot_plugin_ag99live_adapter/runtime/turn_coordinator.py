@@ -68,12 +68,6 @@ from .incremental_output import IncrementalOutputSession, SendPayload
 
 
 MAX_REMEMBERED_TERMINAL_TURNS = 256
-_INDEPENDENT_MOTION_TASKS_BY_TURN_ATTRIBUTE = (
-    "independent_motion_generation_tasks_by_turn"
-)
-_PERSONA_MOTION_WORK_BY_TURN_ATTRIBUTE = "persona_motion_work_by_turn"
-
-
 def _resolve_motion_work_turn_id(event: Any, fallback_turn_id: str) -> str:
     get_extra = getattr(event, "get_extra", None)
     if callable(get_extra):
@@ -366,9 +360,6 @@ class TurnCoordinator:
             )
         finally:
             self._turn_timings.clear()
-            registry = getattr(self.runtime_state, "persona_stream_motion", None)
-            if registry is not None:
-                registry.reset()
             self.output_segments.reset()
             self._turn_terminal_results.clear()
             for waiters in self._turn_terminal_waiters.values():
@@ -382,25 +373,7 @@ class TurnCoordinator:
             self._active_vad_turn_by_capture_turn.clear()
             self._active_speech_capture_turns.clear()
             self.motion_observations.reset()
-            tasks_by_turn = getattr(
-                self.runtime_state,
-                _INDEPENDENT_MOTION_TASKS_BY_TURN_ATTRIBUTE,
-                None,
-            )
-            if isinstance(tasks_by_turn, dict):
-                for tasks in tasks_by_turn.values():
-                    if isinstance(tasks, (set, list, tuple)):
-                        for task in tasks:
-                            if isinstance(task, asyncio.Task) and not task.done():
-                                task.cancel()
-                tasks_by_turn.clear()
-            persona_work = getattr(
-                self.runtime_state,
-                _PERSONA_MOTION_WORK_BY_TURN_ATTRIBUTE,
-                None,
-            )
-            if isinstance(persona_work, dict):
-                persona_work.clear()
+            self.runtime_state.persona_sessions.reset()
 
         if cleanup_failures:
             raise RuntimeError(
@@ -892,7 +865,7 @@ class TurnCoordinator:
             event,
             resolved_turn_id,
         )
-        self._discard_persona_motion_work(motion_work_turn_id)
+        self.runtime_state.persona_sessions.clear_turn(motion_work_turn_id)
 
     def _cancel_turn_owned_motion_task(
         self,
@@ -907,27 +880,14 @@ class TurnCoordinator:
         isolates hook-local event extras from later output contributors.
         """
         motion_work_turn_id = _resolve_motion_work_turn_id(event, turn_id)
-        registry = getattr(self.runtime_state, "persona_stream_motion", None)
-        if registry is not None:
-            registry.clear(motion_work_turn_id)
-        tasks: set[asyncio.Task] = set()
-
-        tasks_by_turn = getattr(
-            getattr(self, "runtime_state", None),
-            _INDEPENDENT_MOTION_TASKS_BY_TURN_ATTRIBUTE,
-            None,
+        session = self.runtime_state.persona_sessions.get_session(
+            motion_work_turn_id
         )
-        if isinstance(tasks_by_turn, dict):
-            turn_tasks = tasks_by_turn.pop(motion_work_turn_id, None)
-            if isinstance(turn_tasks, (set, list, tuple)):
-                tasks.update(
-                    task for task in turn_tasks if isinstance(task, asyncio.Task)
-                )
-
+        tasks = tuple(session.tasks) if session is not None else ()
+        self.runtime_state.persona_sessions.clear_turn(motion_work_turn_id)
         for task in tasks:
             if task.done():
                 continue
-            task.cancel()
             logger.info(
                 "WIRING independent_motion.task_cancelled turn_id=%s "
                 "reason=%s task_name=%s",
@@ -935,17 +895,6 @@ class TurnCoordinator:
                 reason,
                 task.get_name(),
             )
-        self._discard_persona_motion_work(motion_work_turn_id)
-
-    def _discard_persona_motion_work(self, turn_id: str) -> None:
-        normalized_turn_id = str(turn_id or "").strip()
-        persona_work = getattr(
-            self.runtime_state,
-            _PERSONA_MOTION_WORK_BY_TURN_ATTRIBUTE,
-            None,
-        )
-        if isinstance(persona_work, dict):
-            persona_work.pop(normalized_turn_id, None)
 
     def _prune_turn_terminal_results(self) -> None:
         completed_count = sum(

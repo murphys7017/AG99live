@@ -1,3 +1,39 @@
+persona_motion_training_sample_capture_20261024:
+  class: feature
+  risk: high
+  status: local_source_updated_pending_v3_migration_plugin_reload_and_runtime_acceptance
+  scope: >-
+    Replace Motion Lab raw-event observations with per-Persona-segment
+    motion.persona_sample.v1 snapshots for M0 nonstreaming, M1 Persona segment
+    streaming, and M2 OLV incremental delivery. Capture user input, available
+    history, Persona speech/actions/tendency, motion route, Provider prompts and
+    outputs, and target Persona Effect arguments. Keep the actual M2 intent-ready
+    request separate from the later complete segment snapshot. Upgrade SQLite
+    raw-event schema to v3 and clear old desktop pending events. Preserve tuning
+    samples, VTube Studio recordings, AstrBot chat history, and the C++ validation
+    project.
+  validation: >-
+    Deployed Motion Lab raw-event database was inspected read-only: 0 rows remain
+    and schema metadata is v2, so the first load of the updated Adapter will run
+    the v3 reset. The local AstrBot Core hook implementation confirms intent-ready
+    dispatch at segment_start and complete segment dispatch at segment_end with
+    the same segment message identity. Review correction records M2 Provider
+    previews as provider candidates with a local index, not as delivered motion
+    updates; the contract states that wire seq/revision/anchor and stream terminal
+    status are not captured. M0/M1 successful independent results now receive a
+    post-binding segment identity snapshot, and Provider result statuses no
+    longer imply delivery. Thirty-four focused tests passed after the
+    correction; Ruff, frontend typecheck, plugin structure check, state YAML
+    parse, and git diff whitespace check passed. A separate existing
+    independent-motion prompt test still fails because it expects a "memory"
+    field that the current prompt builder does not emit; this task did not change
+    prompt construction.
+  limitations: >-
+    Updated plugin source has not been synchronized to Downloads/AstrBot and the
+    plugin has not been restarted. IndexedDB v1 pending events clear when the new
+    renderer opens the upgraded database. Live M0/M1/M2, Provider, TTS, and
+    Live2D behavior remains unverified.
+
 desktop_return_presence_20261019:
   class: feature
   risk: high
@@ -1437,3 +1473,22 @@ independent_motion_segment_only_20261020:
     to sync Adapter files to the AstrBot deployment copy; a successful sync does
     not prove a running Core or desktop loaded the code. Preserve unrelated dirty
     AstrBot main-repo files.
+persona_lifecycle_unification_20261024:
+  class: refactor
+  risk: high
+  status: source_reviewed_and_locally_validated_pending_baseline_metric_and_live_acceptance
+  scope: >-
+    Unify Adapter Persona turn, result, segment, TTS binding, M0/M1/M2 delivery,
+    cancellation, and Motion Lab lifecycle ownership. Remove the obsolete
+    whole-reply work/task registry, persona_stream_motion module, and duplicate
+    platform delivery dictionaries while preserving existing user changes.
+  validation: >-
+    Stage 0 ownership, M0/M1/M2 call-chain, and parallel state-transition
+    baseline documents exist. Python compileall and Ruff pass. Focused Persona,
+    plugin-hook, and Turn interruption tests pass (31 tests). The old production
+    registry/module/delivery dictionary references have no remaining callers.
+  evidence_gap: >-
+    The workspace already contained unrelated uncommitted changes before Stage 0,
+    so production net line deletion cannot be proven from current HEAD diff.
+    A Stage 0 file snapshot is required for that metric. Real Core, Provider,
+    TTS, Electron, and Live2D joint acceptance remains pending.

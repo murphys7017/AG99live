@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 class MotionLabRawEventStore:
@@ -152,6 +152,30 @@ class MotionLabRawEventStore:
                 )
                 """
             )
+            version_row = conn.execute(
+                "SELECT value FROM motion_lab_meta WHERE key = 'schema_version'"
+            ).fetchone()
+            table_row = conn.execute(
+                "SELECT 1 FROM sqlite_master "
+                "WHERE type = 'table' AND name = 'motion_lab_raw_events'"
+            ).fetchone()
+            stored_version = str(version_row[0]) if version_row is not None else None
+            if stored_version is not None:
+                try:
+                    numeric_stored_version = int(stored_version)
+                except ValueError:
+                    raise RuntimeError("motion_lab_schema_version_invalid") from None
+                if numeric_stored_version > SCHEMA_VERSION:
+                    raise RuntimeError(
+                        "motion_lab_schema_version_newer_than_adapter:"
+                        f"{numeric_stored_version}:{SCHEMA_VERSION}"
+                    )
+            has_legacy_table = table_row is not None
+            if has_legacy_table and stored_version != str(SCHEMA_VERSION):
+                # The old observations do not meet the new Persona sample
+                # contract. Reset only this table; curated Motion Tuning
+                # samples and AstrBot conversation history live elsewhere.
+                conn.execute("DROP TABLE motion_lab_raw_events")
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS motion_lab_raw_events (
@@ -181,7 +205,12 @@ class MotionLabRawEventStore:
                 )
                 """
             )
-            _require_schema_version(conn)
+            if stored_version != str(SCHEMA_VERSION):
+                conn.execute(
+                    "INSERT INTO motion_lab_meta (key, value) VALUES ('schema_version', ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    (str(SCHEMA_VERSION),),
+                )
             _require_current_event_columns(conn)
             conn.execute(
                 """
@@ -227,22 +256,6 @@ class MotionLabRawEventStore:
 
 def _json_dumps(value: Any) -> str:
     return json.dumps(value if value is not None else {}, ensure_ascii=False, default=str)
-
-
-def _require_schema_version(conn: sqlite3.Connection) -> None:
-    row = conn.execute(
-        "SELECT value FROM motion_lab_meta WHERE key = 'schema_version'"
-    ).fetchone()
-    if row is None:
-        conn.execute(
-            "INSERT INTO motion_lab_meta (key, value) VALUES ('schema_version', ?)",
-            (str(SCHEMA_VERSION),),
-        )
-        return
-    if str(row[0]) != str(SCHEMA_VERSION):
-        raise RuntimeError(
-            f"motion_lab_schema_version_mismatch:{row[0]}:{SCHEMA_VERSION}"
-        )
 
 
 def _require_current_event_columns(conn: sqlite3.Connection) -> None:

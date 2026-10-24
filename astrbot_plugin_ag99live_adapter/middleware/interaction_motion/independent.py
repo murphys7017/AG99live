@@ -12,6 +12,12 @@ from uuid import uuid4
 
 from astrbot.api import logger
 
+from ...runtime.persona_lifecycle import PersonaSegmentState
+from ...motion.observation import (
+    record_persona_motion_sample,
+    resolve_persona_core_turn_id,
+    resolve_persona_delivery_mode,
+)
 from ...motion.output_sanitizer import sanitize_assistant_output_text
 from ...motion.payload_validation import (
     normalize_motion_arguments_payload,
@@ -37,10 +43,6 @@ from .shared import (
     _sanitize_reason_fragment,
 )
 
-INDEPENDENT_MOTION_TASKS_BY_TURN_ATTRIBUTE = (
-    "independent_motion_generation_tasks_by_turn"
-)
-PERSONA_MOTION_WORK_BY_TURN_ATTRIBUTE = "persona_motion_work_by_turn"
 PERSONA_EXPRESSION_INTENT_METADATA_KEY = "interaction.persona_expression_intent"
 PERSONA_RESULT_ID_METADATA_KEY = "interaction.persona_result_id"
 _DEFAULT_SEGMENT_MAX_CONCURRENCY = 4
@@ -335,140 +337,6 @@ def persona_expression_intent(request: Any) -> Mapping[str, Any] | None:
     return intent if isinstance(intent, Mapping) else None
 
 
-def store_persona_motion_work(
-    runtime_state: Any,
-    *,
-    turn_id: str,
-    persona_result_id: str,
-    work: dict[str, Any],
-) -> bool:
-    normalized_turn_id = str(turn_id or "").strip()
-    normalized_result_id = str(persona_result_id or "").strip()
-    if not normalized_turn_id or not normalized_result_id:
-        logger.warning(
-            "WIRING independent_motion.persona_work_not_stored "
-            "reason=identity_missing turn_id=%s persona_result_id=%s",
-            normalized_turn_id or "<missing>",
-            normalized_result_id or "<missing>",
-        )
-        return False
-
-    works_by_turn = getattr(runtime_state, PERSONA_MOTION_WORK_BY_TURN_ATTRIBUTE, None)
-    if not isinstance(works_by_turn, dict):
-        works_by_turn = {}
-        setattr(runtime_state, PERSONA_MOTION_WORK_BY_TURN_ATTRIBUTE, works_by_turn)
-    works_by_result = works_by_turn.get(normalized_turn_id)
-    if not isinstance(works_by_result, dict):
-        works_by_result = {}
-        works_by_turn[normalized_turn_id] = works_by_result
-    if normalized_result_id in works_by_result:
-        return False
-    work["turn_id"] = normalized_turn_id
-    work["persona_result_id"] = normalized_result_id
-    works_by_result[normalized_result_id] = work
-    logger.debug(
-        "WIRING independent_motion.persona_work_stored turn_id=%s "
-        "persona_result_id=%s segment_count=%s",
-        normalized_turn_id,
-        normalized_result_id,
-        len(work.get("speech_segments") or ()),
-    )
-    return True
-
-
-def get_persona_motion_work(
-    runtime_state: Any,
-    *,
-    turn_id: str,
-    persona_result_id: str,
-) -> dict[str, Any] | None:
-    normalized_turn_id = str(turn_id or "").strip()
-    normalized_result_id = str(persona_result_id or "").strip()
-    if not normalized_turn_id or not normalized_result_id:
-        return None
-    works_by_turn = getattr(runtime_state, PERSONA_MOTION_WORK_BY_TURN_ATTRIBUTE, None)
-    if not isinstance(works_by_turn, dict):
-        return None
-    works_by_result = works_by_turn.get(normalized_turn_id)
-    if not isinstance(works_by_result, dict):
-        return None
-    work = works_by_result.get(normalized_result_id)
-    return work if isinstance(work, dict) else None
-
-
-def remove_persona_motion_work(
-    runtime_state: Any,
-    *,
-    turn_id: str,
-    persona_result_id: str,
-) -> dict[str, Any] | None:
-    normalized_turn_id = str(turn_id or "").strip()
-    normalized_result_id = str(persona_result_id or "").strip()
-    works_by_turn = getattr(runtime_state, PERSONA_MOTION_WORK_BY_TURN_ATTRIBUTE, None)
-    if not normalized_turn_id or not normalized_result_id or not isinstance(
-        works_by_turn, dict
-    ):
-        return None
-    works_by_result = works_by_turn.get(normalized_turn_id)
-    if not isinstance(works_by_result, dict):
-        return None
-    work = works_by_result.pop(normalized_result_id, None)
-    if not works_by_result:
-        works_by_turn.pop(normalized_turn_id, None)
-    return work if isinstance(work, dict) else None
-
-
-def track_motion_generation_task(
-    runtime_state: Any,
-    *,
-    turn_id: str,
-    task: asyncio.Task,
-) -> bool:
-    normalized_turn_id = str(turn_id or "").strip()
-    if not normalized_turn_id or not isinstance(task, asyncio.Task):
-        return False
-    tasks_by_turn = getattr(
-        runtime_state,
-        INDEPENDENT_MOTION_TASKS_BY_TURN_ATTRIBUTE,
-        None,
-    )
-    if not isinstance(tasks_by_turn, dict):
-        tasks_by_turn = {}
-        setattr(
-            runtime_state,
-            INDEPENDENT_MOTION_TASKS_BY_TURN_ATTRIBUTE,
-            tasks_by_turn,
-        )
-    tasks = tasks_by_turn.setdefault(normalized_turn_id, set())
-    if not isinstance(tasks, set):
-        tasks = set()
-        tasks_by_turn[normalized_turn_id] = tasks
-    tasks.add(task)
-    return True
-
-
-def untrack_motion_generation_task(
-    runtime_state: Any,
-    *,
-    turn_id: str,
-    task: asyncio.Task,
-) -> None:
-    normalized_turn_id = str(turn_id or "").strip()
-    tasks_by_turn = getattr(
-        runtime_state,
-        INDEPENDENT_MOTION_TASKS_BY_TURN_ATTRIBUTE,
-        None,
-    )
-    if not normalized_turn_id or not isinstance(tasks_by_turn, dict):
-        return
-    tasks = tasks_by_turn.get(normalized_turn_id)
-    if not isinstance(tasks, set):
-        return
-    tasks.discard(task)
-    if not tasks:
-        tasks_by_turn.pop(normalized_turn_id, None)
-
-
 async def _prepare_independent_motion_context(
     event: Any,
     bundle: _MotionRuntimeBundle,
@@ -540,7 +408,7 @@ async def generate_independent_motion_for_segments(
     tasks: set[asyncio.Task],
     persona_result_id: str | None = None,
     segment_intents: tuple[dict[str, Any], ...] = (),
-    segment_result_futures: dict[int, asyncio.Future] | None = None,
+    segments_by_index: dict[int, PersonaSegmentState] | None = None,
     prepared_context: IndependentMotionContext | None = None,
 ) -> dict[int, IndependentMotionResult]:
     """Generate one Provider result for each speech or explicit intent segment."""
@@ -790,8 +658,13 @@ async def generate_independent_motion_for_segments(
 
         tasks.add(task)
         task.add_done_callback(tasks.discard)
-        if segment_result_futures is not None and index in segment_result_futures:
-            future = segment_result_futures[index]
+        segment_state = (
+            segments_by_index.get(index)
+            if segments_by_index is not None
+            else None
+        )
+        future = segment_state.result_future if segment_state is not None else None
+        if future is not None:
 
             def publish(completed):
                 if future.done():
@@ -801,7 +674,9 @@ async def generate_independent_motion_for_segments(
                 elif completed.exception() is not None:
                     future.set_exception(completed.exception())
                 else:
-                    future.set_result(completed.result())
+                    result = completed.result()
+                    segment_state.provider_result = result
+                    future.set_result(result)
 
             task.add_done_callback(publish)
         return task
@@ -856,6 +731,7 @@ async def generate_independent_motion(
     segment_intent: Mapping[str, Any] | None = None,
     persona_result_id: str | None = None,
     segment_index: int | None = None,
+    segment_message_id: str | None = None,
 ) -> IndependentMotionResult:
     images: list[str] = []
     motion_request_id = uuid4().hex
@@ -867,12 +743,77 @@ async def generate_independent_motion(
         if bool(getattr(bundle.runtime_state, "independent_motion_parallel", False))
         else "serial"
     )
+    sample_input_context: dict[str, Any] = {
+        "user_text": _dialogue_text(str(getattr(event, "message_str", "") or "")),
+        "recent_context": [],
+        "motion_request": {"provider_id": provider_id, "state": "not_prepared"},
+    }
+    sample_raw_output: Any = None
+    provider_update_index = 0
     get_extra = getattr(event, "get_extra", None)
     stream_active = bool(
         get_extra("_interaction_persona_segment_stream_active", False)
         if callable(get_extra)
         else False
     )
+
+    def record_sample(
+        *,
+        stage: str,
+        record_key: str,
+        motion_payload: dict[str, Any] | None,
+        status: str,
+        reason: str,
+        raw_output: Any,
+        provider_final: bool,
+        provider_update_index: int | None = None,
+    ) -> None:
+        if not persona_result_id or type(segment_index) is not int:
+            return
+        segment_snapshot: dict[str, Any] = {
+            "speech": assistant_text,
+            "speech_state": (
+                "not_yet_ready"
+                if stream_active and not assistant_text
+                else "ready"
+            ),
+        }
+        if isinstance(segment_intent, Mapping):
+            actions = segment_intent.get("actions")
+            tendency = segment_intent.get("tendency")
+            segment_snapshot["actions"] = (
+                list(actions) if isinstance(actions, (list, tuple)) else []
+            )
+            segment_snapshot["tendency"] = (
+                dict(tendency) if isinstance(tendency, Mapping) else {}
+            )
+        motion_output = {
+            "raw_output": raw_output,
+            "accepted_payload": motion_payload,
+            "status": status,
+            "reason": reason,
+            "motion_request_id": motion_request_id,
+            "provider_id": provider_id,
+            "provider_final": provider_final,
+        }
+        if provider_update_index is not None:
+            motion_output["provider_update_index"] = provider_update_index
+        record_persona_motion_sample(
+            getattr(bundle.runtime_state, "motion_lab_recorder", None),
+            turn_id=str(turn_id),
+            core_turn_id=resolve_persona_core_turn_id(event),
+            persona_result_id=persona_result_id,
+            segment_index=segment_index,
+            segment_count=None,
+            segment_message_id=segment_message_id,
+            source_route="independent_motion",
+            delivery_mode=resolve_persona_delivery_mode(event),
+            record_stage=stage,
+            record_key=record_key,
+            input_context=sample_input_context,
+            persona_segment=segment_snapshot,
+            motion=motion_output,
+        )
 
     def finish(
         *,
@@ -885,6 +826,19 @@ async def generate_independent_motion(
             motion_payload=motion_payload,
             reason=reason,
             image_count=image_count,
+        )
+        record_sample(
+            stage="motion_result",
+            record_key=f"result:{motion_request_id}",
+            motion_payload=motion_payload,
+            status=(
+                "provider_normalized"
+                if motion_payload is not None
+                else "provider_failed"
+            ),
+            reason=reason,
+            raw_output=sample_raw_output,
+            provider_final=True,
         )
         logger.info(
             "DIAG latency.motion_result_ready turn_id=%s motion_request_id=%s "
@@ -915,6 +869,8 @@ async def generate_independent_motion(
 
     async def publish_completed_motion_record(raw_arguments: dict[str, Any]) -> None:
         """Validate and publish a closed JSON action before Provider EOF."""
+
+        nonlocal provider_update_index
 
         if not stream_active or type(segment_index) is not int:
             return
@@ -961,6 +917,19 @@ async def generate_independent_motion(
                     reason,
                 )
                 return
+            provider_update_index += 1
+            record_sample(
+                stage="motion_candidate",
+                record_key=(
+                    f"provider-preview:{motion_request_id}:{provider_update_index}"
+                ),
+                motion_payload=motion_payload,
+                status="provider_preview",
+                reason=reason,
+                raw_output=dict(raw_arguments),
+                provider_final=False,
+                provider_update_index=provider_update_index,
+            )
             accepted = await publish_motion(
                 persona_result_id=persona_result_id,
                 segment_index=segment_index,
@@ -1083,6 +1052,21 @@ async def generate_independent_motion(
         expected_transport = (
             "stream" if supports_text_chat_stream(provider) else "unsupported"
         )
+        sample_input_context = {
+            "user_text": current_user_text,
+            "recent_context": contexts,
+            "motion_request": {
+                "motion_request_id": motion_request_id,
+                "provider_id": provider_id,
+                "prompt": prompt,
+                "system_prompt": system_prompt,
+                "neurobrain_state": neurobrain_state,
+                "runtime_references": runtime_payload,
+                "transport": expected_transport,
+                "image_count": len(images),
+                "image_payloads_persisted": False,
+            },
+        }
         logger.info(
             "DIAG latency.motion_provider_request_started turn_id=%s "
             "motion_request_id=%s persona_result_id=%s segment_index=%s "
@@ -1099,6 +1083,15 @@ async def generate_independent_motion(
             len(system_prompt),
             time_ns() // 1_000_000,
         )
+        record_sample(
+            stage="motion_request",
+            record_key=f"request:{motion_request_id}",
+            motion_payload=None,
+            status="requested",
+            reason="provider_request_started",
+            raw_output=None,
+            provider_final=False,
+        )
         response_text, transport = await _request_motion_provider_text(
             provider,
             prompt=prompt,
@@ -1110,6 +1103,7 @@ async def generate_independent_motion(
             segment_index=segment_index,
             on_complete_json=publish_completed_motion_record,
         )
+        sample_raw_output = response_text
         logger.debug(
             "WIRING independent_motion.provider_response_received turn_id=%s "
             "response_len=%s transport=%s",
@@ -1132,6 +1126,10 @@ async def generate_independent_motion(
             )
             if raw_arguments is None:
                 raise ValueError("independent_motion_json_unrecoverable")
+            sample_raw_output = {
+                "provider_text": response_text,
+                "parsed_arguments": raw_arguments,
+            }
         except (TypeError, ValueError, json.JSONDecodeError) as exc:
             logger.warning(
                 "WIRING independent_motion.json_parse_failed turn_id=%s "
@@ -1541,16 +1539,10 @@ def _motion_output_shape_summary(value: Mapping[str, Any]) -> dict[str, Any]:
 
 __all__ = [
     "IndependentMotionResult",
-    "PERSONA_MOTION_WORK_BY_TURN_ATTRIBUTE",
     "await_with_hard_deadline",
-    "get_persona_motion_work",
     "generate_independent_motion_for_segments",
     "generate_independent_motion",
     "is_persona_expression_request",
     "persona_expression_intent",
-    "remove_persona_motion_work",
-    "store_persona_motion_work",
-    "track_motion_generation_task",
-    "untrack_motion_generation_task",
     "resolve_stream_motion_budget_seconds",
 ]

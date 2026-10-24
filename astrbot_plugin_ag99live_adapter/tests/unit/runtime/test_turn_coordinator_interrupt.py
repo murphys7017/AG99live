@@ -26,6 +26,14 @@ def _pre_action_stub():
     )
 
 
+def _persona_sessions():
+    from astrbot_plugin_ag99live_adapter.runtime.persona_lifecycle import (
+        PersonaTurnSessionRegistry,
+    )
+
+    return PersonaTurnSessionRegistry()
+
+
 def test_backend_abort_is_idempotent_while_terminal_publication_is_pending(
     install_fake_astrbot,
     monkeypatch,
@@ -53,7 +61,7 @@ def test_backend_abort_is_idempotent_while_terminal_publication_is_pending(
         _terminating_turn_ids=set(),
         _events_by_turn_id={},
         _turn_timings={},
-        runtime_state=types.SimpleNamespace(persona_motion_work_by_turn={}),
+        runtime_state=types.SimpleNamespace(persona_sessions=_persona_sessions()),
         turn_identity_map=types.SimpleNamespace(clear_frontend_turn=lambda _turn_id: None),
         session_state=types.SimpleNamespace(current_turn_id=None, reset_to_idle=lambda: None),
         output_segments=types.SimpleNamespace(clear_turn=lambda _turn_id: None),
@@ -65,9 +73,6 @@ def test_backend_abort_is_idempotent_while_terminal_publication_is_pending(
     runtime._require_turn_id_value = TurnCoordinator._require_turn_id_value
     runtime._prune_turn_terminal_results = lambda: None
     runtime._clear_active_vad_turn = lambda _turn_id: None
-    runtime._discard_persona_motion_work = types.MethodType(
-        TurnCoordinator._discard_persona_motion_work, runtime
-    )
     runtime._finish_turn = types.MethodType(TurnCoordinator._finish_turn, runtime)
 
     async def run_case() -> None:
@@ -127,7 +132,7 @@ def test_wait_for_turn_finished_observes_playback_completion_result(
         _turn_terminal_waiters={},
         _events_by_turn_id={},
         _turn_timings={},
-        runtime_state=types.SimpleNamespace(persona_motion_work_by_turn={}),
+        runtime_state=types.SimpleNamespace(persona_sessions=_persona_sessions()),
         output_segments=types.SimpleNamespace(
             require_playback_queue_closed=lambda _turn_id: _completed(),
             output_failure_reason=lambda _turn_id: None,
@@ -145,9 +150,6 @@ def test_wait_for_turn_finished_observes_playback_completion_result(
     runtime._clear_active_vad_turn = lambda _turn_id: None
     runtime._mark_turn_timing = lambda *_args: None
     runtime._elapsed_ms = lambda *_args: 0.0
-    runtime._discard_persona_motion_work = types.MethodType(
-        TurnCoordinator._discard_persona_motion_work, runtime
-    )
     runtime._finish_turn = types.MethodType(TurnCoordinator._finish_turn, runtime)
 
     async def run_case() -> None:
@@ -206,13 +208,10 @@ def test_backend_abort_cancels_turn_owned_motion_task_and_clears_segment_work(
             get_extra=lambda key, default=None: extras.get(key, default),
             stop_event=lambda: None,
         )
+        sessions = _persona_sessions()
+        sessions.register_task("astrbot-turn", task)
         runtime = types.SimpleNamespace(
-            runtime_state=types.SimpleNamespace(
-                independent_motion_generation_tasks_by_turn={"astrbot-turn": {task}},
-                persona_motion_work_by_turn={
-                    "astrbot-turn": {"persona-result": {"task": task}}
-                },
-            ),
+            runtime_state=types.SimpleNamespace(persona_sessions=sessions),
             _turn_terminal_results={},
             _turn_terminal_waiters={},
             _terminating_turn_ids=set(),
@@ -235,10 +234,6 @@ def test_backend_abort_cancels_turn_owned_motion_task_and_clears_segment_work(
         runtime._require_turn_id_value = TurnCoordinator._require_turn_id_value
         runtime._prune_turn_terminal_results = lambda: None
         runtime._clear_active_vad_turn = lambda _turn_id: None
-        runtime._discard_persona_motion_work = types.MethodType(
-            TurnCoordinator._discard_persona_motion_work,
-            runtime,
-        )
         runtime._cancel_turn_owned_motion_task = types.MethodType(
             TurnCoordinator._cancel_turn_owned_motion_task,
             runtime,
@@ -253,8 +248,7 @@ def test_backend_abort_cancels_turn_owned_motion_task_and_clears_segment_work(
         await asyncio.gather(task, return_exceptions=True)
 
         assert task.cancelled()
-        assert runtime.runtime_state.independent_motion_generation_tasks_by_turn == {}
-        assert runtime.runtime_state.persona_motion_work_by_turn == {}
+        assert runtime.runtime_state.persona_sessions.get_session("astrbot-turn") is None
 
     asyncio.run(run_case())
 
@@ -270,15 +264,10 @@ def test_disconnect_reset_cancels_orphaned_motion_work(install_fake_astrbot) -> 
             await asyncio.Future()
 
         task = asyncio.create_task(wait_forever())
+        sessions = _persona_sessions()
+        sessions.register_task("astrbot-turn", task)
         runtime = types.SimpleNamespace(
-            runtime_state=types.SimpleNamespace(
-                independent_motion_generation_tasks_by_turn={
-                    "astrbot-turn": {task}
-                },
-                persona_motion_work_by_turn={
-                    "astrbot-turn": {"persona-result": {"task": task}}
-                },
-            ),
+            runtime_state=types.SimpleNamespace(persona_sessions=sessions),
             _turn_timings={},
             _events_by_turn_id={},
             _turn_terminal_results={},
@@ -301,8 +290,7 @@ def test_disconnect_reset_cancels_orphaned_motion_work(install_fake_astrbot) -> 
         await asyncio.gather(task, return_exceptions=True)
 
         assert task.cancelled()
-        assert runtime.runtime_state.independent_motion_generation_tasks_by_turn == {}
-        assert runtime.runtime_state.persona_motion_work_by_turn == {}
+        assert runtime.runtime_state.persona_sessions.get_session("astrbot-turn") is None
 
     asyncio.run(run_case())
 

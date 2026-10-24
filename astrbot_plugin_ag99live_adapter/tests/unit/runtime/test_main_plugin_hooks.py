@@ -367,6 +367,7 @@ def test_persona_segment_ready_starts_motion_future_for_that_index(
         "interaction.persona_result_id"
     )
     independent_module.IndependentMotionResult = IndependentMotionResult
+    independent_module._dialogue_text = lambda text: text.strip()
     independent_module._prepare_independent_motion_context = prepare_context
     independent_module.await_with_hard_deadline = lambda awaitable, *_args, **_kwargs: awaitable
     independent_module.generate_independent_motion_for_segments = generate_for_segments
@@ -376,8 +377,6 @@ def test_persona_segment_ready_starts_motion_future_for_that_index(
         "kind": "reply",
     }
     independent_module.resolve_stream_motion_budget_seconds = lambda _state: 0.75
-    independent_module.track_motion_generation_task = lambda *_args, **_kwargs: True
-    independent_module.untrack_motion_generation_task = lambda *_args, **_kwargs: None
     monkeypatch.setitem(
         sys.modules,
         "astrbot_plugin_ag99live_adapter.middleware.interaction_motion.independent",
@@ -415,10 +414,20 @@ def test_persona_segment_ready_starts_motion_future_for_that_index(
         independent_motion_max_concurrency=2,
         independent_motion_segment_timeout_seconds=5,
     )
-    from astrbot_plugin_ag99live_adapter.runtime.persona_stream_motion import (
-        PersonaStreamMotionRegistry,
+    recorded_samples: list[dict] = []
+
+    class MotionLabRecorder:
+        def enqueue(self, sample: dict, *, on_persisted=None) -> bool:
+            recorded_samples.append(sample)
+            if on_persisted is not None:
+                on_persisted()
+            return True
+
+    runtime_state.motion_lab_recorder = MotionLabRecorder()
+    from astrbot_plugin_ag99live_adapter.runtime.persona_lifecycle import (
+        PersonaTurnSessionRegistry,
     )
-    runtime_state.persona_stream_motion = PersonaStreamMotionRegistry()
+    runtime_state.persona_sessions = PersonaTurnSessionRegistry()
     bundle = types.SimpleNamespace(runtime_state=runtime_state)
     extras = {
         "_turn_id": "turn-1",
@@ -426,7 +435,19 @@ def test_persona_segment_ready_starts_motion_future_for_that_index(
         "provider_request": object(),
     }
 
+    runtime_state.persona_sessions.register_writer(
+        "turn-1",
+        "result-1",
+        types.SimpleNamespace(
+            core_turn_id="core-turn-1",
+            persona_result_id="result-1",
+        ),
+    )
+
     class EventStub:
+        message_str = "current user"
+        adapter = types.SimpleNamespace(runtime_state=runtime_state)
+
         def get_platform_name(self) -> str:
             return "olv_pet_adapter"
 
@@ -455,9 +476,9 @@ def test_persona_segment_ready_starts_motion_future_for_that_index(
             },
         )
         await asyncio.wait_for(generation_started.wait(), timeout=1)
-        work = runtime_state.persona_stream_motion.get("turn-1")
-        motion = await work["segment_result_futures"][0]
-        await asyncio.gather(*tuple(work["tasks"]))
+        work = runtime_state.persona_sessions.get_result("turn-1", "result-1")
+        motion = await work.segments[0].result_future
+        await asyncio.gather(*tuple(work.tasks))
         assert motion is result
         await plugin.handle_persona_expression_segment_ready(
             event,
@@ -484,3 +505,11 @@ def test_persona_segment_ready_starts_motion_future_for_that_index(
     assert generation_calls[0]["prepared_context"] is prepared_context
     assert len(generation_calls) == 1
     assert not extras.get("stopped", False)
+    assert len(recorded_samples) == 1
+    sample = recorded_samples[0]["raw"]
+    assert sample["record_stage"] == "persona_segment_ready"
+    assert sample["identity"]["core_turn_id"] == "core-turn-1"
+    assert sample["identity"]["segment_message_id"] == "stream-parent"
+    assert sample["input"]["user_text"] == "current user"
+    assert sample["persona_segment"]["speech"] == " hello "
+    assert sample["persona_segment"]["speech_state"] == "ready"

@@ -45,7 +45,7 @@ from .client_profile import (
 )
 from .motion_lab import MotionLabRawEventStore, MotionLabRecorder
 from .motion_state import MotionTuningStore
-from .persona_stream_motion import PersonaStreamMotionRegistry
+from .persona_lifecycle import PersonaTurnSessionRegistry
 from .plugin_runtime import PluginConfigSnapshot, get_config_value
 
 LIVE2D_SCAN_CACHE_VERSION = "live2d_scan_cache.v3"
@@ -118,9 +118,7 @@ class RuntimeState:
         self.independent_motion_parallel = False
         self.independent_motion_max_concurrency = 4
         self.independent_motion_segment_timeout_seconds = 5.0
-        self.independent_motion_generation_tasks_by_turn: dict[str, set[Any]] = {}
-        self.persona_motion_work_by_turn: dict[str, dict[str, Any]] = {}
-        self.persona_stream_motion = PersonaStreamMotionRegistry()
+        self.persona_sessions = PersonaTurnSessionRegistry()
         self.passive_behavior_enabled = False
         self.passive_behavior_provider_id = ""
         self.passive_behavior_request_interval_ms = 500
