@@ -55,7 +55,6 @@ function buildOutputSegment() {
 function testMapsAtomicOutputSegment(): void {
   const event = mapInboundEnvelopeToEvent(
     makeEnvelope("output.segment", buildOutputSegment(), "turn-1"),
-    { currentTurnId: null },
   );
 
   assert.equal(event.kind, "output_segment");
@@ -75,7 +74,6 @@ function testMapsAtomicOutputSegment(): void {
 function testRejectsOutputSegmentWithoutTurnIdentity(): void {
   const event = mapInboundEnvelopeToEvent(
     makeEnvelope("output.segment", buildOutputSegment(), null),
-    { currentTurnId: "must-not-be-inherited" },
   );
 
   assert.equal(event.kind, "protocol_error");
@@ -84,7 +82,6 @@ function testRejectsOutputSegmentWithoutTurnIdentity(): void {
 function testMapsModelSync(): void {
   const event = mapInboundEnvelopeToEvent(
     makeEnvelope("system.model_sync", makeValidModelSyncPayload(), null),
-    { currentTurnId: null },
   );
 
   assert.equal(event.kind, "model_sync");

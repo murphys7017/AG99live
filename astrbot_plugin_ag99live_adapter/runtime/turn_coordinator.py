@@ -600,20 +600,18 @@ class TurnCoordinator:
                 next_turn_id=normalized_turn_id,
             )
             backend_turn_id = self._resolve_backend_turn_id(message_obj, frontend_turn_id=normalized_turn_id)
-            turn_identity_map = getattr(self, "turn_identity_map", None)
-            if turn_identity_map is not None:
-                turn_identity_map.register_bound_turn(
-                    frontend_turn_id=normalized_turn_id,
-                    backend_turn_id=backend_turn_id,
-                )
+            turn_identity_map = self.turn_identity_map
+            turn_identity_map.register_bound_turn(
+                frontend_turn_id=normalized_turn_id,
+                backend_turn_id=backend_turn_id,
+            )
             sent = await self._send_json(
                 build_control_turn_started(
                     turn_id=normalized_turn_id,
                 )
             )
             if not sent:
-                if turn_identity_map is not None:
-                    turn_identity_map.clear_frontend_turn(normalized_turn_id)
+                turn_identity_map.clear_frontend_turn(normalized_turn_id)
                 raise RuntimeError(f"turn_started_send_failed:{normalized_turn_id}")
 
             current_turn_id = normalized_turn_id
@@ -845,9 +843,7 @@ class TurnCoordinator:
             if not waiter.done():
                 waiter.set_result(terminal_result)
         self._prune_turn_terminal_results()
-        turn_identity_map = getattr(self, "turn_identity_map", None)
-        if turn_identity_map is not None:
-            turn_identity_map.clear_frontend_turn(resolved_turn_id)
+        self.turn_identity_map.clear_frontend_turn(resolved_turn_id)
         self._events_by_turn_id.pop(resolved_turn_id, None)
         if self.session_state.current_turn_id == resolved_turn_id:
             self.session_state.reset_to_idle()

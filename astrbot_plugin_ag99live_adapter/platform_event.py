@@ -430,11 +430,7 @@ class OLVPetPlatformEvent(AstrMessageEvent):
                         record_send_operation=False,
                     )
                 if record_send_operation:
-                    record_send = getattr(self, "_record_send_operation", None)
-                    if callable(record_send):
-                        await record_send()
-                    else:
-                        await super().send(message)
+                    await super().send(message)
                 return
             if split_failure:
                 auxiliary_parent_id = (
@@ -553,11 +549,7 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         if not record_send_operation:
             self._has_send_oper = previous_has_send_oper
         else:
-            record_send = getattr(self, "_record_send_operation", None)
-            if callable(record_send):
-                await record_send()
-            else:
-                await super().send(message)
+            await super().send(message)
 
     async def complete_visible_turn(self) -> None:
         if self._is_stop_requested():

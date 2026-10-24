@@ -12,7 +12,6 @@ import type { PcmTimelineStream } from "../../playback-timeline/pcmTimelinePlayb
 import {
   mapInboundEnvelopeToEvent,
   type InboundAdapterEvent,
-  type InboundEventMappingContext,
 } from "./inboundEvents.js";
 import {
   dispatchInboundEvent as dispatchInboundEventToDeps,
@@ -96,7 +95,7 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
     // in wire order so their turn_started cannot be overtaken by an interrupt.
     const parsed = parseInboundEnvelope(rawData);
     if (!parsed.ok || parsed.envelope.type !== "control.interrupt") return false;
-    const event = mapInboundEnvelopeToEvent(parsed.envelope, buildInboundEventContext());
+    const event = mapInboundEnvelopeToEvent(parsed.envelope);
     if (event.kind !== "interrupt" || event.turnId !== deps.state.currentTurnId) return false;
     dispatchInboundRuntimeEvent(buildDispatchDeps(), event);
     return true;
@@ -159,14 +158,8 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
       incremental.handleEvent(streamEvent);
       return;
     }
-    const event = mapInboundEnvelopeToEvent(envelope, buildInboundEventContext());
+    const event = mapInboundEnvelopeToEvent(envelope);
     await dispatchInboundEvent(event);
-  }
-
-  function buildInboundEventContext(): InboundEventMappingContext {
-    return {
-      currentTurnId: deps.state.currentTurnId,
-    };
   }
 
   async function dispatchInboundEvent(
@@ -236,7 +229,6 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
         deps.notifyTurnLifecycle(event);
       },
       reportedProtocolWarnings,
-      buildInboundEventContext: () => buildInboundEventContext(),
     };
   }
 
@@ -261,7 +253,6 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
     resetIncremental: incremental.reset,
     tryHandlePriorityInterrupt,
     handleSocketMessage,
-    buildInboundEventContext,
     dispatchInboundEvent,
     buildDispatchDeps,
   };

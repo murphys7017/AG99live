@@ -26,7 +26,7 @@ import type {
   SystemDesktopObservationRequestPayload,
   SystemServerInfoPayload,
 } from "../../types/protocol.js";
-import type { InboundAdapterEvent, InboundEventMappingContext } from "./inboundEvents.js";
+import type { InboundAdapterEvent } from "./inboundEvents.js";
 import type { NormalizedMotionPayload } from "../../types/motion.js";
 import type {
   OutputSegmentCommitResult,
@@ -115,8 +115,6 @@ export interface InboundDispatchDeps {
   notifyTurnLifecycle: (event: { phase: "started" | "terminal"; turnId: string }) => void;
   // protocol warnings
   reportedProtocolWarnings: Set<string>;
-  // build context
-  buildInboundEventContext: () => InboundEventMappingContext;
 }
 
 // ── Main dispatch ──────────────────────────────────────────────────

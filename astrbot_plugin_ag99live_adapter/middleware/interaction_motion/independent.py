@@ -191,17 +191,6 @@ async def await_with_hard_deadline(
     raise asyncio.TimeoutError
 
 
-def _consume_background_motion_exception(task: asyncio.Task) -> None:
-    if task.cancelled():
-        return
-    error = task.exception()
-    if error is not None:
-        logger.warning(
-            "WIRING independent_motion.background_task_failed error=%s",
-            error,
-        )
-
-
 @dataclass(slots=True)
 class IndependentMotionResult:
     assistant_text: str

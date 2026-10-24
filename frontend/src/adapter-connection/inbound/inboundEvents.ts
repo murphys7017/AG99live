@@ -54,14 +54,6 @@ import {
   parseSystemServerInfoPayload,
 } from "./inboundPayloads.js";
 
-/**
- * 映射上下文：折叠时提供当前运行现场；不为 segment/control 事件补缺失身份。
- * 由 createAdapterInboundRuntime 在每次折叠前现场快照构造，不由本文件持有状态。
- */
-export interface InboundEventMappingContext {
-  currentTurnId: string | null;
-}
-
 function normalizeTurnId(value: unknown): string | null {
   if (typeof value !== "string") {
     return null;
@@ -191,7 +183,6 @@ export type InboundAdapterEvent =
  */
 export function mapInboundEnvelopeToEvent(
   envelope: ProtocolEnvelope<unknown>,
-  _ctx: InboundEventMappingContext,
 ): InboundAdapterEvent {
   switch (envelope.type) {
     case INBOUND_MESSAGE_TYPES.SYSTEM_SERVER_INFO: {

@@ -11,7 +11,7 @@ async function run(): Promise<void> {
     timestamp: new Date().toISOString(), turn_id: "turn", source: "adapter",
     payload: { success: false, reason: "provider_stream_failed" },
   };
-  const mapped = mapInboundEnvelopeToEvent(envelope, { currentTurnId: "turn" });
+  const mapped = mapInboundEnvelopeToEvent(envelope);
   assert.equal(mapped.kind, "synth_finished");
   if (mapped.kind !== "synth_finished") throw new Error("terminal not parsed");
 
@@ -47,7 +47,7 @@ async function run(): Promise<void> {
     assert.deepEqual(acknowledgements, [{ success: false, reason: "provider_stream_failed" }]);
 
     const rejected = mapInboundEnvelopeToEvent(
-      { ...envelope, payload: { success: false } }, { currentTurnId: "turn" },
+      { ...envelope, payload: { success: false } },
     );
     assert.equal(rejected.kind, "protocol_error");
 
