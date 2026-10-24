@@ -186,7 +186,7 @@ class OutputSegmentCoordinator:
 
             def mark_motion_started(index: int, message_id: str) -> None:
                 result_state = self.runtime_state.persona_sessions.get_result(
-                    turn_id,
+                    core_turn_id,
                     persona_result_id,
                 )
                 if result_state is None:
