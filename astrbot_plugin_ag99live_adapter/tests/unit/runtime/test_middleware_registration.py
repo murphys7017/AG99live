@@ -1106,10 +1106,15 @@ def test_independent_motion_request_uses_text_memory_and_segment_without_images(
     assert request_input["user"] == "本轮输入"
     assert request_input["segment"] == {"speech": "回复文本", "actions": ["nod"], "tendency": {"Joy": 4}}
     assert "private-id" not in calls[0]["prompt"]
-    assert '"examples":[{"input":"自然点头"' in calls[0]["system_prompt"]
-    assert '"recent_executed":[{"input":"最近执行动作"' in calls[0]["system_prompt"]
+    assert '"examples":[{"input":"自然点头"' in calls[0]["prompt"]
+    assert '"recent_executed":[{"input":"最近执行动作"' in calls[0]["prompt"]
+    assert "motion_guidance" not in calls[0]["system_prompt"]
+    assert "自然点头" not in calls[0]["system_prompt"]
+    assert calls[0]["system_prompt"] == calls[1]["system_prompt"]
     assert "private-runtime-id" not in calls[0]["system_prompt"]
     assert "runtime-only" not in calls[0]["system_prompt"]
+    assert "private-runtime-id" not in calls[0]["prompt"]
+    assert "runtime-only" not in calls[0]["prompt"]
     expected_history = [
         {"role": "user", "content": "上一轮问题"},
         {"role": "assistant", "content": "上一轮回答"},

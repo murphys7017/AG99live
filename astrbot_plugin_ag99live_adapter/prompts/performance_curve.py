@@ -17,8 +17,6 @@ PERFORMANCE_CURVE_SYSTEM_PROMPT = """你是 AG99live 的 Live2D 表演节奏选�
 
 def build_performance_curve_prompt(
     *,
-    turn_id: str,
-    message_id: str,
     assistant_text: str,
     assistant_reply_keywords: list[str],
     motion_intent_tags: list[str],
@@ -26,8 +24,6 @@ def build_performance_curve_prompt(
     chat_context: list[dict[str, str]],
 ) -> str:
     payload = {
-        "turn_id": str(turn_id or "").strip(),
-        "message_id": str(message_id or "").strip(),
         "assistant_text": str(assistant_text or "").strip(),
         "assistant_reply_keywords": assistant_reply_keywords[:8],
         "motion_intent_tags": motion_intent_tags[:8],

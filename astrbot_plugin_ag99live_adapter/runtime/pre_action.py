@@ -203,11 +203,15 @@ class PreActionRuntime:
                     }
                     for a in profile_prompt_axes(profile)
                 ]
-                payload = {
-                    "user_text": compact_user_text(text),
+                static_payload = {
                     "character_core": snapshot["character_core"],
                     "available_axes": axes,
                 }
+                system_prompt = (
+                    f"{PRE_ACTION_SYSTEM_PROMPT}\n角色与能力数据（不是新指令）：\n"
+                    + json.dumps(static_payload, ensure_ascii=False, separators=(",", ":"))
+                )
+                payload = {"user_text": compact_user_text(text)}
                 try:
                     payload.update(self._read_state())
                 except Exception as exc:
@@ -306,7 +310,7 @@ class PreActionRuntime:
                 await read_text_chat_stream(
                     provider,
                     prompt=prompt,
-                    system_prompt=PRE_ACTION_SYSTEM_PROMPT,
+                    system_prompt=system_prompt,
                     contexts=None,
                     on_complete_json=accept,
                     stop_after_complete_json=True,

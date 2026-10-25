@@ -94,11 +94,13 @@ def test_pre_action_emits_before_provider_eof_without_prompt_history():
         class Provider:
             async def text_chat_stream(self, **request):
                 payload = json.loads(request["prompt"])
+                static_payload = json.loads(request["system_prompt"].split("\n")[-1])
                 assert len(payload["user_text"]) == 100
-                assert "关系" not in payload["character_core"]
-                assert "理性" in payload["character_core"]
+                assert "关系" not in static_payload["character_core"]
+                assert "理性" in static_payload["character_core"]
                 assert "contexts" in request and request["contexts"] is None
-                assert set(payload) == {"user_text", "character_core", "available_axes"}
+                assert set(payload) == {"user_text"}
+                assert set(static_payload) == {"character_core", "available_axes"}
                 assert request["max_tokens"] == 128
                 try:
                     yield SimpleNamespace(

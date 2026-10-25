@@ -36,6 +36,27 @@ def test_summarize_motion_for_curve_includes_sequence_axes(
     assert malformed["motion_step_count"] == 1
 
 
+def test_performance_curve_prompt_omits_runtime_identifiers(
+    install_fake_astrbot,
+) -> None:
+    install_fake_astrbot()
+    from astrbot_plugin_ag99live_adapter.prompts.performance_curve import (
+        build_performance_curve_prompt,
+    )
+
+    prompt = build_performance_curve_prompt(
+        assistant_text="你好。",
+        assistant_reply_keywords=["你好"],
+        motion_intent_tags=["greeting"],
+        motion_effect_summary={},
+        chat_context=[],
+    )
+
+    assert "turn_id" not in prompt
+    assert "message_id" not in prompt
+    assert "你好。" in prompt
+
+
 def test_normalize_performance_curve_hint_rejects_unknown_enums(
     install_fake_astrbot,
 ) -> None:

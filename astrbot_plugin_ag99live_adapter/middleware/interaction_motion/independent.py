@@ -1028,15 +1028,14 @@ async def generate_independent_motion(
             _read_neurobrain_state(bundle) if segment_intent is not None else None
         )
 
+        capability = _build_motion_capability_prompt_payload(capability_payload)
+        system_prompt = _build_independent_system_prompt(capability=capability)
         prompt = _build_current_turn_prompt(
             current_user_text=current_user_text,
             assistant_text=assistant_text,
             segment_intent=segment_intent,
             neurobrain_state=neurobrain_state,
-        )
-        system_prompt = _build_independent_system_prompt(
-            capability_payload=capability_payload,
-            runtime_payload=runtime_payload,
+            motion_guidance=_motion_guidance_for_prompt(capability, runtime_payload),
         )
         expected_transport = (
             "stream" if supports_text_chat_stream(provider) else "unsupported"
@@ -1345,6 +1344,7 @@ def _build_current_turn_prompt(
     assistant_text: str,
     segment_intent: Mapping[str, Any] | None = None,
     neurobrain_state: Mapping[str, Any] | None = None,
+    motion_guidance: Mapping[str, Any] | None = None,
 ) -> str:
     intent = segment_intent or {}
     payload: dict[str, Any] = {
@@ -1357,22 +1357,22 @@ def _build_current_turn_prompt(
     }
     if isinstance(neurobrain_state, Mapping):
         payload["neurobrain_state"] = dict(neurobrain_state)
+    if motion_guidance is not None:
+        payload["motion_guidance"] = dict(motion_guidance)
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
 def _build_independent_system_prompt(
     *,
-    capability_payload: dict[str, Any],
-    runtime_payload: dict[str, Any],
+    capability: dict[str, Any],
 ) -> str:
-    capability = _build_motion_capability_prompt_payload(capability_payload)
+    capability = dict(capability)
     capability.pop("pose_references", None)
     axis_keys = {"id", "label", "negative_semantics", "positive_semantics", "available_levels", "usage_notes"}
     capability["axes"] = [
         {key: value for key, value in axis.items() if key in axis_keys}
         for axis in capability.get("axes", [])
     ]
-    guidance = _motion_guidance_for_prompt(capability, runtime_payload)
     motion_resource = next(
         (
             str(resource.get("resource_id") or "").strip()
@@ -1428,8 +1428,6 @@ def _build_independent_system_prompt(
         f"JSON 形状示例：{json.dumps(contract, ensure_ascii=False, separators=(',', ':'))}\n\n"
         "Live2D 能力：\n"
         f"{json.dumps(capability, ensure_ascii=False, separators=(',', ':'))}\n\n"
-        "精简参考（所有 output 使用同一输出契约）：\n"
-        f"{json.dumps(guidance, ensure_ascii=False, separators=(',', ':'))}"
     )
 
 

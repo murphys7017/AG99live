@@ -203,8 +203,6 @@ class PerformanceCurveRuntime:
             return
 
         prompt = build_performance_curve_prompt(
-            turn_id=request.turn_id,
-            message_id=request.message_id,
             assistant_text=request.assistant_text,
             assistant_reply_keywords=request.assistant_reply_keywords,
             motion_intent_tags=request.motion_intent_tags,
