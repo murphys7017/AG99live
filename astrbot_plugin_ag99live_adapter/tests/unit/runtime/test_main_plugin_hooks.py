@@ -405,7 +405,7 @@ def test_persona_segment_ready_starts_motion_future_for_that_index(
     sys.modules.pop("astrbot_plugin_ag99live_adapter.main", None)
     module = importlib.import_module("astrbot_plugin_ag99live_adapter.main")
     plugin = module.MyPlugin.__new__(module.MyPlugin)
-    plugin._official_core_compatibility = False
+    plugin._enhanced_interaction_unavailable = False
     plugin._independent_motion_tasks = set()
 
     runtime_state = types.SimpleNamespace(

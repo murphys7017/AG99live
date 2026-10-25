@@ -131,19 +131,19 @@ class MyPlugin(Star):
             context,
             persona_effect_enabled=not independent_motion_enabled,
         )
-        self._official_core_compatibility = not contributors_registered
+        self._enhanced_interaction_unavailable = not contributors_registered
         logger.debug(
             "WIRING interaction.plugin_initialized contributors_registered=%s "
-            "official_core_compatibility=%s "
+            "enhanced_interaction_unavailable=%s "
             "context_type=%s",
             contributors_registered,
-            self._official_core_compatibility,
+            self._enhanced_interaction_unavailable,
             type(context).__name__,
         )
         from .web_control import register_web_control_page
 
         self._web_control_page_registered = register_web_control_page(context, self)
-        if self._official_core_compatibility:
+        if self._enhanced_interaction_unavailable:
             logger.info(
                 "AG99live enhanced interaction is unavailable; "
                 "motion generation and performance curves are disabled."
@@ -200,7 +200,7 @@ class MyPlugin(Star):
         event: AstrMessageEvent,
         state: Any,
     ) -> None:
-        if self._official_core_compatibility:
+        if self._enhanced_interaction_unavailable:
             return
         if str(event.get_platform_name() or "").strip() != "olv_pet_adapter":
             return
@@ -255,7 +255,7 @@ class MyPlugin(Star):
     ) -> None:
         del turn_action, execution_surface
         if (
-            self._official_core_compatibility
+            self._enhanced_interaction_unavailable
             or str(event.get_platform_name() or "").strip() != "olv_pet_adapter"
             or not event.get_extra("_interaction_persona_segment_stream_active", False)
             or event.get_extra("agent_stop_requested", False)
@@ -532,7 +532,7 @@ class MyPlugin(Star):
     ) -> None:
         del turn_action, execution_surface
         if (
-            self._official_core_compatibility
+            self._enhanced_interaction_unavailable
             or str(event.get_platform_name() or "").strip() != "olv_pet_adapter"
             or not event.get_extra(
                 "_interaction_persona_segment_stream_active",
@@ -996,7 +996,7 @@ class MyPlugin(Star):
         event: AstrMessageEvent,
         result: Any,
     ) -> None:
-        if self._official_core_compatibility:
+        if self._enhanced_interaction_unavailable:
             return
         if str(event.get_platform_name() or "").strip() != "olv_pet_adapter":
             return
