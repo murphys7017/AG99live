@@ -20,7 +20,6 @@ from ..motion.text_stream import read_text_chat_stream
 from ..prompts.pre_action import (
     PRE_ACTION_SYSTEM_PROMPT,
     compact_user_text,
-    extract_character_core,
 )
 from ..prompts.semantic_axis_prompt import (
     profile_prompt_axes,
@@ -94,6 +93,7 @@ class PreActionRuntime:
 
     async def _prepare(self) -> dict[str, Any]:
         from astrbot.core.persona_resolution import resolve_event_persona
+        from astrbot.core.prompt.persona_segments import build_persona_motion_prompt
 
         context = self.state.plugin_context
         event = self.build_event()
@@ -117,7 +117,7 @@ class PreActionRuntime:
         settings = self.state.plugin_config.get("pre_action", {})
         core = str(settings.get("character_core", "") or "").strip()
         if not core:
-            core = extract_character_core(str(persona.get("prompt", "") or ""))
+            core = build_persona_motion_prompt(str(persona.get("prompt", "") or ""))
         if not core:
             raise ValueError("pre_action_character_core_unavailable")
         return {

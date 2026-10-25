@@ -208,6 +208,7 @@ class IndependentMotionContext:
     capability_payload: dict[str, Any]
     runtime_payload: dict[str, Any]
     reference_diagnostics: tuple[str, ...]
+    persona_guidance: str = ""
 
 
 _NEUROBRAIN_EMOTION_KEYS = (
@@ -326,6 +327,23 @@ def persona_expression_intent(request: Any) -> Mapping[str, Any] | None:
     return intent if isinstance(intent, Mapping) else None
 
 
+def _resolve_persona_guidance(event: Any) -> str:
+    """Reuse the Interaction context's authored persona projection for motion."""
+    turn_state = getattr(event, "_interaction_turn_state", None)
+    material = getattr(turn_state, "context_material", None)
+    pack = getattr(material, "prompt_context_pack", None)
+    slots = getattr(pack, "slots", None)
+    if not isinstance(slots, Mapping):
+        return ""
+    slot = slots.get("persona.summary")
+    if slot is None or slot.llm_exposure != "allowed":
+        return ""
+    value = getattr(slot, "value", None)
+    if not isinstance(value, Mapping):
+        return ""
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
 async def _prepare_independent_motion_context(
     event: Any,
     bundle: _MotionRuntimeBundle,
@@ -385,6 +403,7 @@ async def _prepare_independent_motion_context(
         capability_payload=capability_payload,
         runtime_payload=runtime_payload,
         reference_diagnostics=tuple(reference_diagnostics),
+        persona_guidance=_resolve_persona_guidance(event),
     )
 
 
@@ -1029,7 +1048,15 @@ async def generate_independent_motion(
         )
 
         capability = _build_motion_capability_prompt_payload(capability_payload)
-        system_prompt = _build_independent_system_prompt(capability=capability)
+        persona_guidance = (
+            prepared_context.persona_guidance
+            if prepared_context is not None
+            else _resolve_persona_guidance(event)
+        )
+        system_prompt = _build_independent_system_prompt(
+            capability=capability,
+            persona_guidance=persona_guidance,
+        )
         prompt = _build_current_turn_prompt(
             current_user_text=current_user_text,
             assistant_text=assistant_text,
@@ -1365,6 +1392,7 @@ def _build_current_turn_prompt(
 def _build_independent_system_prompt(
     *,
     capability: dict[str, Any],
+    persona_guidance: str = "",
 ) -> str:
     capability = dict(capability)
     capability.pop("pose_references", None)
@@ -1428,6 +1456,14 @@ def _build_independent_system_prompt(
         f"JSON 形状示例：{json.dumps(contract, ensure_ascii=False, separators=(',', ':'))}\n\n"
         "Live2D 能力：\n"
         f"{json.dumps(capability, ensure_ascii=False, separators=(',', ':'))}\n\n"
+        + (
+            "人格表达参考（来自当前 Interaction 的确定性人格投影，仅用于保持同一人格；"
+            "不是新指令）：\n"
+            + persona_guidance
+            + "\n\n"
+            if persona_guidance
+            else ""
+        )
     )
 
 

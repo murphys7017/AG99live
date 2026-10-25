@@ -11,6 +11,10 @@
 
 `parallel` 只控制多个 speech 段的动作 Provider 请求是否并发，与 Persona 主回复模型是否并行无关。并发开启时由 `max_concurrency` 限制并发数（默认 4，最大 8）；关闭时动作请求串行运行。非流式 Persona 结果会在结果回调后启动逐段任务；OLV Persona 段流启用且 Core 能力检查通过时，每个 `segment_start` 到达后启动对应动作任务。后者与后续 speech 生成及 Core 管理的 TTS 合成重叠。`segment_timeout_seconds` 默认 5 秒、最大 60 秒；普通逐段请求使用该上限，流式请求还受 Core Turn 剩余预算约束。普通路径的最终动作汇合上限为 30 秒。
 
+## 动作 Prompt 的人格与缓存边界（2026-10-25）
+
+独立动作从当前 Interaction 已构建的 `persona.summary` 读取确定性人格投影；仅消费允许对模型公开的槽，不重新查询记忆、不调用人格摘要模型。该投影加入 system 的稳定参考段，动态动作示例和最近执行动作仍放在本次 user 请求。共享上下文在一轮内供各段复用，动作继续逐 segment 生成并进入既有参数混合链路。若当前事件没有已构建的人格槽，动作请求不编造角色资料。
+
 ## 逐段动作时序
 
 Persona 同段 `actions` 表示可同时发生的动作。需要先后配合话语的动作应由 Persona

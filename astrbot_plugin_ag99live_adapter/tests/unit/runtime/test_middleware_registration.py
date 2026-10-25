@@ -1052,6 +1052,9 @@ def test_independent_motion_request_uses_text_memory_and_segment_without_images(
                 prompt_context_pack=SimpleNamespace(slots={"memory.short_term": SimpleNamespace(
                     name="memory.short_term", llm_exposure="allowed",
                     value={"short_summary": "喜欢自然点头", "umo": "private-id"},
+                ), "persona.summary": SimpleNamespace(
+                    llm_exposure="allowed",
+                    value={"core_persona": ["谨慎，遇事先观察。"]},
                 )}),
             )),
         )
@@ -1109,6 +1112,7 @@ def test_independent_motion_request_uses_text_memory_and_segment_without_images(
     assert '"examples":[{"input":"自然点头"' in calls[0]["prompt"]
     assert '"recent_executed":[{"input":"最近执行动作"' in calls[0]["prompt"]
     assert "motion_guidance" not in calls[0]["system_prompt"]
+    assert "谨慎，遇事先观察。" in calls[0]["system_prompt"]
     assert "自然点头" not in calls[0]["system_prompt"]
     assert calls[0]["system_prompt"] == calls[1]["system_prompt"]
     assert "private-runtime-id" not in calls[0]["system_prompt"]

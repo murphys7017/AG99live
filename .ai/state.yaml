@@ -1492,3 +1492,27 @@ persona_lifecycle_unification_20261024:
     so production net line deletion cannot be proven from current HEAD diff.
     A Stage 0 file snapshot is required for that metric. Real Core, Provider,
     TTS, Electron, and Live2D joint acceptance remains pending.
+
+prompt_persona_projection_repairs_20261025:
+  class: bugfix
+  risk: high
+  status: source_validated_pending_paired_core_restart_and_live_acceptance
+  scope: >-
+    Replace the Adapter's pre-action heading heuristic with the paired Core's
+    shared persona parser. Preserve plain paragraphs, formatted headings and
+    free-form author text; retain the explicit character_core override. Add the
+    current Interaction's allowed persona.summary to independent motion's stable
+    system reference, shared across segments. Keep motion semantics, per-segment
+    scheduling, parameter mixing, NeuroBrain and Passive unchanged.
+  validation: >-
+    The public pre-action request/emission boundary and the independent-motion
+    request payload boundary passed. Shared-parser formatted/free-form cases
+    passed in the paired Core. Scoped Ruff and Python compilation passed.
+    Plugin structure validation reported no errors or warnings. Documentation
+    now distinguishes static system data from dynamic user data.
+  evidence_gap: >-
+    No live Provider, warm-cache, voice or Live2D acceptance and no service
+    restart. This source depends on the paired Core persona parser changes;
+    fully restart AstrBot to load both after deployment. The post-commit hook
+    deploys managed Adapter files through deploy_adapter.ps1. Preserve the
+    unrelated untracked continuous-presence design document.
