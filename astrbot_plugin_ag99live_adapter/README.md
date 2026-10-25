@@ -60,7 +60,7 @@ AG99 Persona
 
 ### NeuroBrain 状态上下文
 
-当同一 AstrBot 进程加载并启用 `astrbot_plugin_neurobrain` 时，独立动作路径直接通过无参数 `get_state()` 读取当前完整快照。读取不等待本轮情绪输入处理完成，不触发推理；模型在独立线程中持续演化。动作 prompt 中仅包含经过范围校验的 `emotion`、`behavior`、`last_tendency` 和 `step`。模型未就绪时省略状态。AG99live 不直接连接 NeuroBrain WebSocket，也不提交刺激。
+当同一 AstrBot 进程加载并启用 `astrbot_plugin_neurobrain` 时，独立动作路径直接通过无参数 `get_state()` 读取当前完整快照。读取不等待本轮情绪输入处理完成，不触发推理；模型在独立线程中持续演化。动作 prompt 中仅包含经过范围校验的当前 `emotion` 和 `behavior`。最近一次输入刺激 `last_tendency` 与内部步数 `step` 只保留在 NeuroBrain 快照和诊断侧，不作为动作模型的决策输入。模型未就绪时省略状态。AG99live 不直接连接 NeuroBrain WebSocket，也不提交刺激。
 
 NeuroBrain 状态只是动作选择的辅助信号，不是动作命令；动作结果仍必须通过现有校验、`engine.motion_intent.v4` 和 `output.segment.v6` 发送链路。该接入不增加协议字段、不改变段身份、不改变播放时钟。
 

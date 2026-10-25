@@ -46,18 +46,6 @@ _BEHAVIOR_KEYS = (
     "initiative",
     "activation",
 )
-_TENDENCY_KEYS = (
-    "Joy",
-    "Trust",
-    "Fear",
-    "Surprise",
-    "Sadness",
-    "Disgust",
-    "Anger",
-    "Anticipation",
-)
-
-
 class PassiveBehaviorRuntime:
     """Run the OLV-only NeuroBrain action stream independently of chat Turns."""
 
@@ -430,29 +418,13 @@ def _project_neurobrain_state(snapshot: Any) -> dict[str, Any] | None:
                 result[key] = max(0.0, min(1.0, number))
         return result
 
-    def tendency_values(value: Any) -> dict[str, int]:
-        if not isinstance(value, Mapping):
-            return {}
-        result: dict[str, int] = {}
-        for key in _TENDENCY_KEYS:
-            raw = value.get(key)
-            if isinstance(raw, bool) or not isinstance(raw, int):
-                continue
-            result[key] = max(0, min(10, raw))
-        return result
-
     emotion = unit_values(snapshot.get("emotion"), _EMOTION_KEYS)
     behavior = unit_values(snapshot.get("behavior"), _BEHAVIOR_KEYS)
-    tendency = tendency_values(snapshot.get("last_tendency"))
-    if not emotion and not behavior and not tendency:
+    if not emotion and not behavior:
         return None
-    raw_step = snapshot.get("step")
-    step = raw_step if isinstance(raw_step, int) and not isinstance(raw_step, bool) else 0
     return {
-        "step": max(0, step),
         "emotion": emotion,
         "behavior": behavior,
-        "last_tendency": tendency,
     }
 
 

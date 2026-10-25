@@ -229,18 +229,6 @@ _NEUROBRAIN_BEHAVIOR_KEYS = (
     "initiative",
     "activation",
 )
-_NEUROBRAIN_TENDENCY_KEYS = (
-    "Joy",
-    "Trust",
-    "Fear",
-    "Surprise",
-    "Sadness",
-    "Disgust",
-    "Anger",
-    "Anticipation",
-)
-
-
 def _project_neurobrain_state(snapshot: Any) -> dict[str, Any] | None:
     """Keep only bounded numeric state needed by the action generator."""
 
@@ -260,30 +248,13 @@ def _project_neurobrain_state(snapshot: Any) -> dict[str, Any] | None:
                 result[key] = max(0.0, min(1.0, number))
         return result
 
-    def _tendency_mapping(value: Any) -> dict[str, int]:
-        if not isinstance(value, Mapping):
-            return {}
-        result: dict[str, int] = {}
-        for key in _NEUROBRAIN_TENDENCY_KEYS:
-            raw = value.get(key)
-            if isinstance(raw, bool) or not isinstance(raw, int):
-                continue
-            result[key] = max(0, min(10, raw))
-        return result
-
     emotion = _unit_mapping(snapshot.get("emotion"), _NEUROBRAIN_EMOTION_KEYS)
     behavior = _unit_mapping(snapshot.get("behavior"), _NEUROBRAIN_BEHAVIOR_KEYS)
-    tendency = _tendency_mapping(snapshot.get("last_tendency"))
-    if not emotion and not behavior and not tendency:
+    if not emotion and not behavior:
         return None
-
-    raw_step = snapshot.get("step")
-    step = raw_step if isinstance(raw_step, int) and not isinstance(raw_step, bool) else 0
     return {
-        "step": max(0, step),
         "emotion": emotion,
         "behavior": behavior,
-        "last_tendency": tendency,
     }
 
 
