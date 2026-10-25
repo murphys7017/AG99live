@@ -364,7 +364,7 @@ WebSocket.onmessage
 - `core_compatibility.py:96-108` 在 `astrbot.core.prompt` 缺失时返回硬编码默认 key `"prompt_input_item_annotations"` / `"input.text"`,**不产生任何日志**。若上游常量改名而模块仍可导入,`platform_event.py:174,205` 会把注解写进错误的 extra key,prompt 注解静默丢失。
 - `main.py:53-56` 反向布尔:
   ```python
-  self._official_core_compatibility = not register_ag99live_interaction_contributors(context)
+  self._enhanced_interaction_unavailable = not register_ag99live_interaction_contributors(context)
   ```
   `True` 表示"增强路径**不可用**"。`turn_coordinator.py:566-574` 进一步用 `getattr(runtime_state, "ag99live_motion_persona_effect_available", True) is False` —— 若 `runtime_state` 被替换或裁剪,默认 `True` 会让 `<@anim>` 兼容路径**静默关闭**。
 - `adapter-connection/outbound/outboundClient.ts:35-49`:`send` 任何异常只 `console.warn` 并 `return false`;上游 `useAdapterConnection.ts:765-805` 的 history / motion-tuning CRUD 全部返回裸 `false`,调用方无法区分"socket 未开"与"序列化抛错"。
@@ -515,7 +515,7 @@ Adapter 侧所有影响用户可见状态的失败都发 `control.error`;兼容�
 | 根 `package.json` | 与 `frontend/package.json` 同名同版本同 deps,无 `scripts` | **Medium** | 确认无工具链依赖仓库根 |
 | `bilibili-live/` 的文档缺口 | 已接线(`usePetDesktopRuntime.ts:507-513`),但**无任何文档提及** | 不删除 | 补文档 |
 | `runtime-core/build/`、`render-core/build/` | 本地存在,已 gitignore,未入库 | 不删除 | 保持忽略 |
-| `main.py:53` `_official_core_compatibility` | 非死代码,但反向布尔致 3 处下游误读 | 不删除 | 重命名 |
+| `main.py:53` `_enhanced_interaction_unavailable` | contributors 注册失败时控制增强交互降级 | 不删除 | 已完成重命名；继续保留能力探测与降级日志 |
 
 **不构成死代码的(已逐一确认有调用者)**:`bilibili-live/`(`usePetDesktopRuntime.ts:47,507-513`)、`esp32-display/`(`App.vue:10,23` + 完整 IPC 链)、`motion-lab/outboundQueue.ts`(`usePetDesktopRuntime.ts:101,116,395-406`)、`action-lab/parameterExcludeKeywords.ts`(`BaseActionPreviewPanel.vue:96`、`SemanticAxisProfileEditor.vue:81`)、`runtime-core/tests/protocol_smoke.cpp`、Adapter 全部 21 个测试文件。
 

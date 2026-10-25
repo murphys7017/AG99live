@@ -161,7 +161,7 @@ Persona Effect 仍只在独立动作关闭时注册；动作段失败仍保留�
 
 ### P2 · Core 兼容分支 + 一个专门钉住旧 API 的测试
 
-当前保留的能力探测为交互结果事件过滤与 Persona 段流钩子；整回复动作路径已删除，因此不再探测或要求 LLM request/response hooks。`_official_core_compatibility` 只代表交互 contributors 是否注册成功，不再承担独立整回复 Provider 的准入判断。
+当前保留的能力探测为交互结果事件过滤与 Persona 段流钩子；整回复动作路径已删除，因此不再探测或要求 LLM request/response hooks。`_enhanced_interaction_unavailable` 只代表交互 contributors 是否注册成功，不再承担独立整回复 Provider 的准入判断。
 
 `interaction_motion/__init__.py:29-35` 在支持 `event_filter` 与不支持时注册**两种形态**的同一个 contributor。
 
