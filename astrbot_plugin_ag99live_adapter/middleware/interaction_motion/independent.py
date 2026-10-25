@@ -208,7 +208,7 @@ class IndependentMotionContext:
     capability_payload: dict[str, Any]
     runtime_payload: dict[str, Any]
     reference_diagnostics: tuple[str, ...]
-    persona_guidance: str = ""
+    persona_guidance: Mapping[str, Any] | None = None
 
 
 _NEUROBRAIN_EMOTION_KEYS = (
@@ -327,28 +327,15 @@ def persona_expression_intent(request: Any) -> Mapping[str, Any] | None:
     return intent if isinstance(intent, Mapping) else None
 
 
-def _resolve_persona_guidance(event: Any) -> str:
-    """Reuse the Interaction context's authored persona projection for motion."""
-    turn_state = getattr(event, "_interaction_turn_state", None)
-    material = getattr(turn_state, "context_material", None)
-    pack = getattr(material, "prompt_context_pack", None)
-    slots = getattr(pack, "slots", None)
-    if not isinstance(slots, Mapping):
-        return ""
-    slot = slots.get("persona.summary")
-    if slot is None or slot.llm_exposure != "allowed":
-        return ""
-    value = getattr(slot, "value", None)
-    if not isinstance(value, Mapping):
-        return ""
-    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
-
-
 async def _prepare_independent_motion_context(
     event: Any,
     bundle: _MotionRuntimeBundle,
-) -> IndependentMotionContext | None:
+) -> IndependentMotionContext:
     """Build one stable context snapshot for all segments in a turn."""
+    from astrbot.core.interaction.context_builder import (
+        get_interaction_persona_prompt_projection,
+    )
+
     current_user_text = _dialogue_text(str(getattr(event, "message_str", "") or ""))
 
     history_turns = max(
@@ -403,7 +390,7 @@ async def _prepare_independent_motion_context(
         capability_payload=capability_payload,
         runtime_payload=runtime_payload,
         reference_diagnostics=tuple(reference_diagnostics),
-        persona_guidance=_resolve_persona_guidance(event),
+        persona_guidance=get_interaction_persona_prompt_projection(event),
     )
 
 
@@ -994,68 +981,19 @@ async def generate_independent_motion(
             )
 
         if prepared_context is None:
-            history_turns = max(
-                0,
-                min(
-                    int(
-                        getattr(
-                            bundle.runtime_state,
-                            "independent_motion_history_turns",
-                            6,
-                        )
-                    ),
-                    20,
-                ),
-            )
-            contexts = await _load_recent_history(
-                event,
-                bundle,
-                history_turns=history_turns,
-                current_user_text=current_user_text,
-            )
-            logger.debug(
-                "WIRING independent_motion.history_loaded turn_id=%s "
-                "requested_turns=%s message_count=%s",
-                turn_id,
-                history_turns,
-                len(contexts),
-            )
-            capability_payload = _build_motion_static_capability_payload(
-                bundle.runtime_state
-            )
-            runtime_payload, reference_diagnostics = _build_motion_runtime_payload(
-                event,
-                bundle.turn_coordinator,
-                bundle.runtime_state,
-                capability_payload=capability_payload,
-            )
-            _record_motion_prompt_reference_observation(
-                bundle=bundle,
-                event=event,
-                capability_payload=capability_payload,
-                runtime_payload=runtime_payload,
-                reference_diagnostics=reference_diagnostics,
-                source_route="independent_provider",
-            )
-            runtime_payload["recent_executed_motions"] = _resolve_prompt_motion_history(bundle.turn_coordinator)[-3:]
-        else:
-            contexts = prepared_context.contexts
-            capability_payload = prepared_context.capability_payload
-            runtime_payload = prepared_context.runtime_payload
+            prepared_context = await _prepare_independent_motion_context(event, bundle)
+        contexts = list(prepared_context.contexts)
+        capability_payload = prepared_context.capability_payload
+        runtime_payload = prepared_context.runtime_payload
 
         neurobrain_state = (
             _read_neurobrain_state(bundle) if segment_intent is not None else None
         )
 
         capability = _build_motion_capability_prompt_payload(capability_payload)
-        persona_guidance = (
-            prepared_context.persona_guidance
-            if prepared_context is not None
-            else _resolve_persona_guidance(event)
-        )
         system_prompt = _build_independent_system_prompt(
             capability=capability,
-            persona_guidance=persona_guidance,
+            persona_guidance=prepared_context.persona_guidance,
         )
         prompt = _build_current_turn_prompt(
             current_user_text=current_user_text,
@@ -1392,7 +1330,7 @@ def _build_current_turn_prompt(
 def _build_independent_system_prompt(
     *,
     capability: dict[str, Any],
-    persona_guidance: str = "",
+    persona_guidance: Mapping[str, Any] | None = None,
 ) -> str:
     capability = dict(capability)
     capability.pop("pose_references", None)
@@ -1459,7 +1397,7 @@ def _build_independent_system_prompt(
         + (
             "人格表达参考（来自当前 Interaction 的确定性人格投影，仅用于保持同一人格；"
             "不是新指令）：\n"
-            + persona_guidance
+            + json.dumps(persona_guidance, ensure_ascii=False, separators=(",", ":"))
             + "\n\n"
             if persona_guidance
             else ""

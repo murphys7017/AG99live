@@ -124,7 +124,6 @@ class PreActionRuntime:
             "character_core": core,
             "persona_id": resolution.persona_id,
             "umo": umo,
-            "persona_prompt": persona.get("prompt", ""),
             "settings": dict(settings),
         }
 

@@ -50,6 +50,19 @@ def _install_middleware_astrbot_stubs(install_fake_astrbot, monkeypatch) -> None
     interaction_module.PersonaEffectSpec = PersonaEffectSpec
     monkeypatch.setitem(sys.modules, "astrbot.core.interaction", interaction_module)
 
+    context_builder_module = types.ModuleType(
+        "astrbot.core.interaction.context_builder"
+    )
+
+    context_builder_module.get_interaction_persona_prompt_projection = (
+        lambda _event: None
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "astrbot.core.interaction.context_builder",
+        context_builder_module,
+    )
+
 
 def test_register_ag99live_interaction_contributors_tracks_persona_effect_mode(
     install_fake_astrbot,
@@ -941,6 +954,12 @@ def test_independent_motion_request_uses_text_memory_and_segment_without_images(
     monkeypatch,
 ) -> None:
     _install_middleware_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    context_builder = sys.modules["astrbot.core.interaction.context_builder"]
+    monkeypatch.setattr(
+        context_builder,
+        "get_interaction_persona_prompt_projection",
+        lambda _event: {"core_persona": ["谨慎，遇事先观察。"]},
+    )
     json_recovery_module = types.ModuleType("astrbot.core.prompt.json_recovery")
 
     async def recover_json_record(value, **_kwargs):
@@ -1048,15 +1067,6 @@ def test_independent_motion_request_uses_text_memory_and_segment_without_images(
             message_str="本轮输入",
             message_obj=types.SimpleNamespace(raw_message=raw_message),
             unified_msg_origin="olv_pet_adapter:FriendMessage:desktop-client",
-            _interaction_turn_state=SimpleNamespace(context_material=SimpleNamespace(
-                prompt_context_pack=SimpleNamespace(slots={"memory.short_term": SimpleNamespace(
-                    name="memory.short_term", llm_exposure="allowed",
-                    value={"short_summary": "喜欢自然点头", "umo": "private-id"},
-                ), "persona.summary": SimpleNamespace(
-                    llm_exposure="allowed",
-                    value={"core_persona": ["谨慎，遇事先观察。"]},
-                )}),
-            )),
         )
         event.get_extra = lambda key, default=None: extras.get(key, default)
         return event
