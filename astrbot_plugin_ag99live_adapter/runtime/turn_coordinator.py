@@ -420,6 +420,15 @@ class TurnCoordinator:
             require_turn_active=require_turn_active,
         )
 
+    async def discard_incremental_output(
+        self, *, turn_id: str, persona_result_id: str
+    ) -> bool:
+        """Release an admitted writer that has not produced a segment."""
+        return await self.output_segments.discard_incremental_output(
+            turn_id=turn_id,
+            persona_result_id=persona_result_id,
+        )
+
     async def emit_message_chain(
         self,
         message_chain,

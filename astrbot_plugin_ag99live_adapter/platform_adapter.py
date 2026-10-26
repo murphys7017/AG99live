@@ -457,6 +457,12 @@ class OLVPetPlatformAdapter(Platform):
             send_payload=self.transport.bind_current_client_sender(),
         )
 
+    async def discard_incremental_output(self, *, event, persona_result_id: str) -> bool:
+        return await self.turn_coordinator.discard_incremental_output(
+            turn_id=str(event.get_extra("output_correlation_id", "") or "").strip(),
+            persona_result_id=persona_result_id,
+        )
+
     async def _handle_frontend_system(self, message: Any) -> None:
         # TurnCoordinator hands over a parsed ProtocolMessage, not the raw dict.
         if message.type == "system.desktop_presence_result":

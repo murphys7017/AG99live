@@ -40,6 +40,10 @@ class PlatformEventAdapterPort(Protocol):
 
     async def open_incremental_output(self, *, event: Any, persona_result_id: str) -> Any: ...
 
+    async def discard_incremental_output(
+        self, *, event: Any, persona_result_id: str
+    ) -> bool: ...
+
 
 class OLVPetPlatformEvent(AstrMessageEvent):
     """Message event that sends AstrBot replies back to the desktop frontend."""
@@ -163,6 +167,35 @@ class OLVPetPlatformEvent(AstrMessageEvent):
             writer,
         )
         return writer
+
+    async def discard_interaction_incremental_output(
+        self, *, persona_result_id: str
+    ) -> bool:
+        """Drop a payloadless incremental writer so Core can fall back."""
+        discarded = await self.adapter.discard_incremental_output(
+            event=self,
+            persona_result_id=persona_result_id,
+        )
+        if not discarded:
+            return False
+        result = self._persona_result_state(persona_result_id)
+        if result is not None:
+            result.writer = None
+            result.delivery_mode = None
+        session = self._persona_session()
+        normalized_result_id = str(persona_result_id or "").strip()
+        if session is not None and session.active_result_id == normalized_result_id:
+            session.active_result_id = next(
+                (
+                    candidate.persona_result_id
+                    for candidate in session.results.values()
+                    if candidate.writer is not None
+                    and candidate.persona_result_id != normalized_result_id
+                ),
+                None,
+            )
+        self.set_extra("_interaction_incremental_output_writer", None)
+        return True
 
     def _persona_result_state(self, persona_result_id: str | None = None):
         sessions = self.adapter.runtime_state.persona_sessions

@@ -210,6 +210,37 @@ class OutputSegmentCoordinator:
             writers[persona_result_id] = writer
             return writer
 
+    async def discard_incremental_output(
+        self, *, turn_id: str, persona_result_id: str
+    ) -> bool:
+        """Release an admitted writer that has produced no payload."""
+        normalized_turn_id = _require_turn_id_value(turn_id)
+        normalized_result_id = str(persona_result_id or "").strip()
+        if not normalized_result_id:
+            raise ValueError("persona_result_identity_invalid")
+        async with self._get_turn_lock(normalized_turn_id):
+            writers = self._incremental_outputs.get(normalized_turn_id)
+            if not writers:
+                return False
+            writer = writers.get(normalized_result_id)
+            if writer is None:
+                return False
+            if writer.has_output:
+                return False
+            if writer.segment_count:
+                try:
+                    writer.require_complete()
+                except (RuntimeError, ValueError):
+                    return False
+            writers.pop(normalized_result_id, None)
+            if not writers:
+                self._incremental_outputs.pop(normalized_turn_id, None)
+                credit = self._turn_audio_credit.pop(normalized_turn_id, None)
+                if credit is not None:
+                    credit.close()
+            writer.invalidate()
+            return True
+
     async def emit_message_chain(
         self,
         message_chain: Any,
