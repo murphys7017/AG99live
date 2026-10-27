@@ -40,6 +40,8 @@ Core、Adapter 和桌面已接通增量文本/PCM/动作 update，并实现双�
 
 `OLVPetPlatformEvent.open_interaction_incremental_output(persona_result_id=...)` 已由 Core producer 在 OLV 流头调用，并由现有桌面 OLV 流式设置设置内部准入标记。入口沿用现有外部 Turn 与 Core Turn 绑定，由 TurnCoordinator 校验，OutputSegmentCoordinator 保存唯一 writer。writer 共用该 Turn 的锁，发送始终绑定创建时的 WebSocket；不能改用最新连接或另建 Turn。
 
+`discard_interaction_incremental_output(persona_result_id=...)` 只允许在 Turn 输出队列仍开放、且该 writer 从未尝试发送 wire 事件时成功；否则返回 `false`，Core 必须继续或终止当前增量交付，不能再回退发送 v6。发送取消或失败也视为已有 wire activity，因为事件可能已到达桌面。任一资源的 start 事件到达后，桌面已建立 incremental 段，当前客户端没有撤销该段的协议。
+
 start、append、end 均等待实际发送，成功后推进序号与采样位置。发送取消或异常可能已部分到达客户端，因此封闭 writer，禁止按同一序号重试。PCM 输入块最多 1 MiB，按最多 64 KiB 的协议帧切分；后段 PCM 必须等待前段音频明确生产 EOF。音频容量受上文独立 credit 约束，不能仅依赖 socket 写入等待；等待信用不持有三资源共用发送锁。
 
 三条资源必须分别明确 end，才能由现有输出协调器发布 synth_finished。动作 failed/cancelled 不使成功文本和音频失败，文本/音频失败则记入本轮合成失败。结束文本将已接受前缀加入既有聊天缓冲，不重发全文。播放完成回执必须在输出关闭之后处理；检查等待同一把 Turn 锁，避免快速客户端在 synth_finished 发送返回前回执而被误拒绝。已有 Turn 清理同时撤销 writer，后续调用拒绝；发送中途断开仍须由既有失败/打断路径终止该 Turn，不能尝试在另一连接重放。

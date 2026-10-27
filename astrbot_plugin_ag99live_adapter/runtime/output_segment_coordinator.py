@@ -213,7 +213,7 @@ class OutputSegmentCoordinator:
     async def discard_incremental_output(
         self, *, turn_id: str, persona_result_id: str
     ) -> bool:
-        """Release an admitted writer that has produced no payload."""
+        """Release a current writer before it attempts any wire sends."""
         normalized_turn_id = _require_turn_id_value(turn_id)
         normalized_result_id = str(persona_result_id or "").strip()
         if not normalized_result_id:
@@ -225,13 +225,12 @@ class OutputSegmentCoordinator:
             writer = writers.get(normalized_result_id)
             if writer is None:
                 return False
-            if writer.has_output:
+            try:
+                self._require_output_queue_open(normalized_turn_id, incremental=True)
+            except RuntimeError:
                 return False
-            if writer.segment_count:
-                try:
-                    writer.require_complete()
-                except (RuntimeError, ValueError):
-                    return False
+            if writer.has_output or writer.has_wire_activity or writer.segment_count:
+                return False
             writers.pop(normalized_result_id, None)
             if not writers:
                 self._incremental_outputs.pop(normalized_turn_id, None)

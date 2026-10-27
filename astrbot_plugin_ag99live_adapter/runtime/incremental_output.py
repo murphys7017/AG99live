@@ -87,6 +87,7 @@ class IncrementalOutputSession:
         # owning conversational Turn.
         self.failure_fatal = True
         self._broken = False
+        self._wire_activity = False
         self._audio_lock = asyncio.Lock()
         self._audio_credit = AudioCredit(turn_audio_credit)
         self._segment_offset = segment_offset
@@ -118,6 +119,10 @@ class IncrementalOutputSession:
     def segment_count(self) -> int:
         return len(self._segments)
 
+    @property
+    def has_wire_activity(self) -> bool:
+        return self._wire_activity
+
     def invalidate(self) -> None:
         self._audio_credit.close()
 
@@ -141,6 +146,7 @@ class IncrementalOutputSession:
     ) -> None:
         try:
             self._require_open()
+            self._wire_activity = True
             if not await self._send_payload(payload):
                 raise RuntimeError("incremental_output_send_failed")
             self._require_open()

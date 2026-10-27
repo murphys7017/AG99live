@@ -1516,3 +1516,24 @@ prompt_persona_projection_repairs_20261025:
     fully restart AstrBot to load both after deployment. The post-commit hook
     deploys managed Adapter files through deploy_adapter.ps1. Preserve the
     unrelated untracked continuous-presence design document.
+
+incremental_writer_discard_guard_20261028:
+  class: bugfix
+  risk: medium
+  status: source_checks_passed_pending_paired_core_runtime_acceptance
+  scope: >-
+    Allow discarding an incremental output writer only while its Turn output
+    queue is open and before any wire send has been attempted. Preserve possibly
+    delivered OLV segment state on the desktop and prevent v6 fallback after
+    incremental start events or interrupted writes. Keep the OLV wire schema
+    unchanged.
+  validation: >-
+    Source review confirmed stream start creates client segment state and v6
+    commit rejects mixed incremental delivery. Writer records attempted wire
+    sends before awaiting transport; discard checks queue state and requires no
+    wire activity or segments. Python compilation, YAML parsing, and git diff
+    whitespace checks passed; no tests were run.
+  evidence_gap: >-
+    This repository has no production callsite for the new discard event hook.
+    Paired Core must invoke it before any segment start and honor false by
+    continuing or terminating OLV. No paired runtime or desktop acceptance.
