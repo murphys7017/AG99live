@@ -275,6 +275,27 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         if result_state is None or result_state.writer is None:
             return False  # A late result cannot mutate the next expression's motion.
         normalized_result_id = result_state.persona_result_id
+
+        def settle_core_future(accepted: bool) -> None:
+            if not final:
+                return
+            motion_states = self.get_extra(
+                "_interaction_incremental_motion_states", {}
+            )
+            motion_state = (
+                motion_states.get(normalized_result_id)
+                if isinstance(motion_states, dict)
+                else None
+            )
+            futures = (
+                motion_state.get("futures")
+                if isinstance(motion_state, dict)
+                else None
+            )
+            future = futures.get(segment_index) if isinstance(futures, dict) else None
+            if isinstance(future, asyncio.Future) and not future.done():
+                future.set_result(accepted)
+
         segment_state = result_state.segment(segment_index)
         writer = result_state.writer
         if not segment_state.wire_started:
@@ -332,27 +353,15 @@ class OLVPetPlatformEvent(AstrMessageEvent):
                 segment_state.wire_motion_closed = True
                 segment_state.wire_status = "failed"
         except (RuntimeError, ValueError):
+            settle_core_future(False)
             return False
+        except BaseException:
+            settle_core_future(False)
+            raise
         future = segment_state.wire_future
         if final and isinstance(future, asyncio.Future) and not future.done():
             future.set_result(True)
-        if final:
-            motion_states = self.get_extra(
-                "_interaction_incremental_motion_states", {}
-            )
-            motion_state = (
-                motion_states.get(normalized_result_id)
-                if isinstance(motion_states, dict)
-                else None
-            )
-            futures = (
-                motion_state.get("futures")
-                if isinstance(motion_state, dict)
-                else None
-            )
-            core_future = futures.get(segment_index) if isinstance(futures, dict) else None
-            if isinstance(core_future, asyncio.Future) and not core_future.done():
-                core_future.set_result(True)
+        settle_core_future(True)
         return True
 
     def get_interaction_incremental_motion_deadline(

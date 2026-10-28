@@ -865,9 +865,11 @@ def test_abort_visible_turn_routes_to_frontend_turn_coordinator(
     ]
 
 
+@pytest.mark.parametrize("writer_raises", [False, True])
 def test_final_incremental_motion_resolves_core_segment_future(
     install_fake_astrbot,
     monkeypatch,
+    writer_raises,
 ) -> None:
     _install_platform_event_astrbot_stubs(install_fake_astrbot, monkeypatch)
     module = _load_platform_event_module()
@@ -891,6 +893,8 @@ def test_final_incremental_motion_resolves_core_segment_future(
 
         class WriterStub:
             async def publish_motion_result(self, segment_index, payload, **kwargs):
+                if writer_raises:
+                    raise OSError("motion transport failed")
                 return True
 
             async def update_motion(self, segment_index, payload, **kwargs):
@@ -914,14 +918,23 @@ def test_final_incremental_motion_resolves_core_segment_future(
             {"result-1": {"futures": {0: core_motion_future}}},
         )
 
-        accepted = await event.publish_interaction_incremental_motion(
-            persona_result_id="result-1",
-            segment_index=0,
-            motion_payload={"actions": ["nod"]},
-        )
-
-        assert accepted is True
+        if writer_raises:
+            with pytest.raises(OSError, match="motion transport failed"):
+                await event.publish_interaction_incremental_motion(
+                    persona_result_id="result-1",
+                    segment_index=0,
+                    motion_payload={"actions": ["nod"]},
+                )
+            expected = False
+        else:
+            accepted = await event.publish_interaction_incremental_motion(
+                persona_result_id="result-1",
+                segment_index=0,
+                motion_payload={"actions": ["nod"]},
+            )
+            assert accepted is True
+            expected = True
         assert core_motion_future.done()
-        assert core_motion_future.result() is True
+        assert core_motion_future.result() is expected
 
     asyncio.run(run())
