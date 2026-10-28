@@ -641,7 +641,6 @@ async def generate_independent_motion_for_segments(
                     future.set_exception(completed.exception())
                 else:
                     result = completed.result()
-                    segment_state.provider_result = result
                     future.set_result(result)
 
             task.add_done_callback(publish)

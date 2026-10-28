@@ -9,7 +9,10 @@ interface CursorTarget {
   horizontalRatio: number;
 }
 
-export function useCursorGaze(selectedModel: Ref<ModelSummary | null>): void {
+export function useCursorGaze(
+  selectedModel: Ref<ModelSummary | null>,
+  onAttentionChanged?: (active: boolean) => void,
+): void {
   const settings = useCursorGazeSettings();
   let timer: number | null = null;
   let candidate: CursorTarget | null = null;
@@ -18,6 +21,14 @@ export function useCursorGaze(selectedModel: Ref<ModelSummary | null>): void {
   let mounted = false;
   let pollInFlight = false;
   let pollRevision = 0;
+
+  function reportAttentionChanged(nextActive: boolean): void {
+    try {
+      onAttentionChanged?.(nextActive);
+    } catch {
+      console.warn("[CursorGaze] attention observer failed.");
+    }
+  }
 
   function canPoll(): boolean {
     return mounted
@@ -38,6 +49,7 @@ export function useCursorGaze(selectedModel: Ref<ModelSummary | null>): void {
     if (active) {
       window.getLAppAdapter?.().stopInteractionGaze?.();
       active = false;
+      reportAttentionChanged(false);
     }
   }
 
@@ -85,8 +97,12 @@ export function useCursorGaze(selectedModel: Ref<ModelSummary | null>): void {
         if (!input) {
           return;
         }
-        active = window.getLAppAdapter?.().startInteractionGaze?.(input) === true;
-        if (active) {
+        const started = window.getLAppAdapter?.().startInteractionGaze?.(input) === true;
+        if (started !== active) {
+          active = started;
+          reportAttentionChanged(active);
+        }
+        if (started) {
           console.info("[CursorGaze] dwell gaze started.", {
             axisId: input.axisId,
             targetRatio: input.targetRatio,

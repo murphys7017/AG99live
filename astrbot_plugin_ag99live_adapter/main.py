@@ -15,6 +15,8 @@ from .motion.output_sanitizer import (
     sanitize_assistant_output_segment_text,
     sanitize_assistant_output_text,
 )
+from .motion.observation import resolve_persona_motion_source_route
+from .runtime.persona_lifecycle import PersonaSegmentIdentity, PersonaTurnIdentity
 
 def _optional_tts_state_hook():
     hook = getattr(filter, "on_tts_state_changed", None)
@@ -206,6 +208,7 @@ class MyPlugin(Star):
             return
         if state.stage != "interaction.outbound_tts":
             return
+        self._record_persona_tts_identity(event, state)
         if state.status == "succeeded":
             logger.info(
                 "DIAG latency.tts_material_ready turn_id=%s persona_result_id=%s "
@@ -237,6 +240,106 @@ class MyPlugin(Star):
             persona_result_id=getattr(state, "persona_result_id", None),
             persona_segment_index=getattr(state, "persona_segment_index", None),
             persona_segment_count=getattr(state, "persona_segment_count", None),
+        )
+
+    @staticmethod
+    def _record_persona_tts_identity(
+        event: AstrMessageEvent,
+        state: Any,
+    ) -> None:
+        from .middleware.interaction_motion.shared import _resolve_motion_runtime_bundle
+        from .motion.observation import (
+            record_persona_motion_sample,
+            resolve_persona_core_turn_id,
+            resolve_persona_delivery_mode,
+            resolve_persona_motion_source_route,
+        )
+
+        bundle = _resolve_motion_runtime_bundle(event)
+        if bundle is None:
+            return
+        delivery_mode = resolve_persona_delivery_mode(event)
+        if delivery_mode == "M2_olv_incremental":
+            return
+
+        turn_id = str(getattr(state, "turn_id", "") or "").strip()
+        persona_result_id = str(
+            getattr(state, "persona_result_id", "") or ""
+        ).strip()
+        message_id = str(getattr(state, "message_id", "") or "").strip()
+        tts_request_id = str(
+            getattr(state, "tts_request_id", "") or ""
+        ).strip()
+        segment_index = getattr(state, "persona_segment_index", None)
+        segment_count = getattr(state, "persona_segment_count", None)
+        if (
+            not turn_id
+            or not persona_result_id
+            or not message_id
+            or not tts_request_id
+            or type(segment_index) is not int
+            or segment_index < 0
+            or type(segment_count) is not int
+            or segment_count <= segment_index
+        ):
+            return
+
+        runtime_state = bundle.runtime_state
+        source_route = resolve_persona_motion_source_route(
+            event,
+            runtime_state,
+        )
+        if source_route is None:
+            return
+        result_state = runtime_state.persona_sessions.get_result(
+            PersonaTurnIdentity(turn_id),
+            persona_result_id,
+        )
+        segment_state = (
+            result_state.segments.get(segment_index)
+            if result_state is not None
+            else None
+        )
+        persona_segment: dict[str, Any] = {"speech_state": "identity_only"}
+        if segment_state is not None:
+            if isinstance(segment_state.speech, str):
+                persona_segment["speech"] = segment_state.speech
+                persona_segment["speech_state"] = (
+                    "ready" if segment_state.speech_ready else "not_yet_ready"
+                )
+            if segment_state.intent_ready:
+                persona_segment["actions"] = list(segment_state.actions)
+                persona_segment["tendency"] = dict(segment_state.tendency)
+
+        get_extra = getattr(event, "get_extra", None)
+        user_text = (
+            get_extra("ag99live_original_message_str", "")
+            if callable(get_extra)
+            else ""
+        ) or getattr(event, "message_str", "") or ""
+        record_persona_motion_sample(
+            getattr(runtime_state, "motion_lab_recorder", None),
+            turn_id=turn_id,
+            core_turn_id=resolve_persona_core_turn_id(event),
+            persona_result_id=persona_result_id,
+            segment_index=segment_index,
+            segment_count=segment_count,
+            segment_message_id=message_id,
+            source_route=source_route,
+            delivery_mode=delivery_mode,
+            record_stage="segment_identity",
+            record_key=f"segment-identity:{message_id}",
+            input_context={
+                "user_text": str(user_text),
+                "capture_kind": "core_tts_identity_snapshot",
+                "provider_prompt_available": False,
+            },
+            persona_segment=persona_segment,
+            motion={
+                "status": "tts_identity_observed",
+                "tts_request_id": tts_request_id,
+                "tts_state": str(getattr(state, "status", "") or "unknown"),
+            },
         )
 
     @_optional_persona_segment_intent_ready_hook()
@@ -285,7 +388,12 @@ class MyPlugin(Star):
         bundle = _resolve_motion_runtime_bundle(event)
         if (
             bundle is None
-            or not bool(getattr(bundle.runtime_state, "independent_motion_enabled", False))
+            or resolve_persona_motion_source_route(
+                event,
+                bundle.runtime_state,
+                capture_if_missing=True,
+            )
+            != "independent_motion"
         ):
             return
         request = event.get_extra("provider_request")
@@ -330,7 +438,9 @@ class MyPlugin(Star):
             )
         except (TypeError, ValueError):
             max_concurrency = 4
-        result_state = registry.session(normalized_turn_id).result(
+        result_state = registry.session(
+            PersonaTurnIdentity(normalized_turn_id)
+        ).result(
             normalized_result_id,
             phase=str(intent.get("phase") or "").strip(),
             parent_message_id=normalized_parent_id,
@@ -340,9 +450,28 @@ class MyPlugin(Star):
         if segment_index != len(result_state.segments):
             return
         loop = asyncio.get_running_loop()
-        segment_state = result_state.segment(segment_index)
-        segment_state.bind_intent(actions=actions, tendency=tendency)
-        segment_state.result_future = loop.create_future()
+        try:
+            segment_state = result_state.bind_intent(
+                PersonaSegmentIdentity(
+                    turn=result_state.turn,
+                    persona_result_id=normalized_result_id,
+                    segment_index=segment_index,
+                ),
+                actions=actions,
+                tendency=tendency,
+            )
+        except (ValueError, RuntimeError) as exc:
+            logger.warning(
+                "WIRING independent_motion.intent_rejected reason=%s turn_id=%s "
+                "persona_result_id=%s segment_index=%s",
+                exc,
+                normalized_turn_id,
+                normalized_result_id,
+                segment_index,
+            )
+            return
+        if segment_state.result_future is None:
+            segment_state.result_future = loop.create_future()
         segment_state.deadline = loop.time() + motion_budget_seconds()
 
         if not isinstance(result_state.context_task, asyncio.Task):
@@ -385,7 +514,7 @@ class MyPlugin(Star):
             context_task.add_done_callback(result_state.tasks.discard)
             context_task.add_done_callback(self._independent_motion_tasks.discard)
             registry.register_result_task(
-                normalized_turn_id,
+                PersonaTurnIdentity(normalized_turn_id),
                 normalized_result_id,
                 context_task,
             )
@@ -476,7 +605,6 @@ class MyPlugin(Star):
                     and segment_state.result_future is not None
                     and not segment_state.result_future.done()
                 ):
-                    segment_state.provider_result = result
                     segment_state.result_future.set_result(result)
                 publish_motion = getattr(
                     event,
@@ -512,7 +640,7 @@ class MyPlugin(Star):
         preview_task.add_done_callback(result_state.tasks.discard)
         preview_task.add_done_callback(self._independent_motion_tasks.discard)
         registry.register_result_task(
-            normalized_turn_id,
+            PersonaTurnIdentity(normalized_turn_id),
             normalized_result_id,
             preview_task,
         )
@@ -555,6 +683,7 @@ class MyPlugin(Star):
         from .middleware.interaction_motion.shared import (
             _resolve_motion_runtime_bundle,
         )
+        from .motion.observation import resolve_persona_motion_source_route
 
         def motion_budget_seconds() -> float:
             try:
@@ -569,9 +698,12 @@ class MyPlugin(Star):
         bundle = _resolve_motion_runtime_bundle(event)
         if (
             bundle is None
-            or not bool(
-                getattr(bundle.runtime_state, "independent_motion_enabled", False)
+            or resolve_persona_motion_source_route(
+                event,
+                bundle.runtime_state,
+                capture_if_missing=True,
             )
+            != "independent_motion"
         ):
             return
         normalized_turn_id = str(turn_id or "").strip()
@@ -637,7 +769,9 @@ class MyPlugin(Star):
             )
         except (TypeError, ValueError):
             max_concurrency = 4
-        result_state = registry.session(normalized_turn_id).result(
+        result_state = registry.session(
+            PersonaTurnIdentity(normalized_turn_id)
+        ).result(
             normalized_result_id,
             phase=phase,
             parent_message_id=normalized_parent_id,
@@ -669,14 +803,18 @@ class MyPlugin(Star):
             )
             return
         result_state.next_segment_index += 1
-        segment_state = result_state.segment(segment_index)
         try:
-            segment_state.bind_content(
+            result_state.bind_content(
+                PersonaSegmentIdentity(
+                    turn=result_state.turn,
+                    persona_result_id=normalized_result_id,
+                    segment_index=segment_index,
+                ),
                 speech=speech,
                 actions=actions,
                 tendency=tendency,
             )
-        except ValueError as exc:
+        except (ValueError, RuntimeError) as exc:
             logger.warning(
                 "WIRING independent_motion.stream_segment_rejected "
                 "reason=%s turn_id=%s persona_result_id=%s segment_index=%s",
@@ -878,7 +1016,6 @@ class MyPlugin(Star):
                 )
             finally:
                 if result is not None and not result_future.done():
-                    segment_state.provider_result = result
                     result_future.set_result(result)
                 publish_motion = getattr(
                     event,
@@ -912,7 +1049,7 @@ class MyPlugin(Star):
             ),
         )
         if not registry.register_result_task(
-            normalized_turn_id,
+            PersonaTurnIdentity(normalized_turn_id),
             normalized_result_id,
             generation_task,
         ):
@@ -966,13 +1103,6 @@ class MyPlugin(Star):
                 status=status,
                 failure_reason=failure_reason,
             )
-            result_state = event.adapter.runtime_state.persona_sessions.get_result(
-                str(turn_id or "").strip(),
-                str(persona_result_id or "").strip(),
-            )
-            if result_state is not None:
-                result_state.expected_segment_count = segment_count
-                result_state.finish_stream(status, failure_reason)
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "WIRING persona_stream_terminal_rejected turn_id=%s "
@@ -1036,10 +1166,18 @@ class MyPlugin(Star):
         from .middleware.interaction_motion.shared import (
             _resolve_motion_runtime_bundle,
         )
+        from .motion.observation import resolve_persona_motion_source_route
 
         bundle = _resolve_motion_runtime_bundle(event)
         if bundle is not None:
-            if bool(getattr(bundle.runtime_state, "independent_motion_enabled", False)):
+            if (
+                resolve_persona_motion_source_route(
+                    event,
+                    bundle.runtime_state,
+                    capture_if_missing=True,
+                )
+                == "independent_motion"
+            ):
                 turn_id = str(event.get_extra("_turn_id") or "").strip()
                 if not turn_id:
                     logger.warning(
@@ -1100,18 +1238,33 @@ class MyPlugin(Star):
                         ),
                     ),
                 )
-                result_state.expected_segment_count = len(speech_segments)
+                result_state.set_expected_segment_count(len(speech_segments))
                 for index, speech in enumerate(speech_segments):
                     raw_segment = raw_segments[index]
                     actions = getattr(raw_segment, "actions", ())
                     tendency = getattr(raw_segment, "tendency", {})
-                    segment_state = result_state.segment(index)
-                    segment_state.bind_content(
-                        speech=speech,
-                        actions=actions,
-                        tendency=tendency,
-                    )
-                    if speech.strip():
+                    try:
+                        segment_state = result_state.bind_content(
+                            PersonaSegmentIdentity(
+                                turn=result_state.turn,
+                                persona_result_id=persona_result_id,
+                                segment_index=index,
+                            ),
+                            speech=speech,
+                            actions=actions,
+                            tendency=tendency,
+                        )
+                    except (ValueError, RuntimeError) as exc:
+                        logger.warning(
+                            "WIRING independent_motion.result_segment_rejected "
+                            "reason=%s turn_id=%s persona_result_id=%s segment_index=%s",
+                            exc,
+                            turn_id,
+                            persona_result_id,
+                            index,
+                        )
+                        return
+                    if speech.strip() and segment_state.result_future is None:
                         segment_state.result_future = (
                             asyncio.get_running_loop().create_future()
                         )
@@ -1141,7 +1294,6 @@ class MyPlugin(Star):
                         for index, segment_state in result_state.segments.items():
                             future = segment_state.result_future
                             if future is not None and not future.done():
-                                segment_state.provider_result = result_map.get(index)
                                 future.set_result(result_map.get(index))
                         if event.get_extra("agent_stop_requested", False):
                             logger.debug(
@@ -1181,7 +1333,7 @@ class MyPlugin(Star):
                 )
                 result_state.generation_task = generation_task
                 if not sessions.register_result_task(
-                    turn_id,
+                    PersonaTurnIdentity(turn_id),
                     persona_result_id,
                     generation_task,
                 ):

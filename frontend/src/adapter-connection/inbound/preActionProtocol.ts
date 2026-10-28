@@ -4,7 +4,7 @@ import { PRE_ACTION_SCHEMA_VERSION } from "../../types/protocolSchema.generated.
 
 export type PreActionEvent =
   | { action: "input"; turnId: string }
-  | { action: "cancel"; turnId: string | null }
+  | { action: "cancel"; turnId: string | null; requestId?: string }
   | { action: "ready"; turnId: string; requestId: string; motion: NormalizedMotionPayload; expiresAt: number };
 
 export function parsePreAction(
@@ -16,8 +16,9 @@ export function parsePreAction(
     || Object.keys(p).sort().join() !== ["schema_version", "request_id", "action", "motion", "expires_at_epoch_ms"].sort().join()) {
     throw new Error("pre_action_identity_invalid");
   }
+  const requestId = p.request_id.trim();
   if (p.action === "cancel" && p.motion === null && p.expires_at_epoch_ms === null) {
-    return { action: "cancel", turnId: envelope.turn_id };
+    return { action: "cancel", turnId: envelope.turn_id, requestId };
   }
   if (p.action !== "ready" || typeof p.expires_at_epoch_ms !== "number"
     || !Number.isFinite(p.expires_at_epoch_ms)) throw new Error("pre_action_payload_invalid");
@@ -32,6 +33,6 @@ export function parsePreAction(
     || intent.motion_steps || intent.motion_resource_id || intent.expression_resource_id) {
     throw new Error("pre_action_execution_shape_invalid");
   }
-  return { action: "ready", turnId: envelope.turn_id, requestId: p.request_id,
+  return { action: "ready", turnId: envelope.turn_id, requestId,
     motion: motion.payload, expiresAt: p.expires_at_epoch_ms };
 }

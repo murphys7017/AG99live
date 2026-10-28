@@ -63,7 +63,7 @@ python scripts/check_protocol_schema_manifest.py
 
 `output.pre_action` 是独立的可选动作消息，不创建正式 Turn、播放段、语音或回执。manifest 增加 `pre_action: olv.pre_action.v1`，需双端配套加载。信封 `turn_id` 是本次输入 ID（或 VAD 子输入 ID），payload 固定包含：
 
-- `schema_version: "olv.pre_action.v1"` 与唯一 `request_id`；
+- `schema_version: "olv.pre_action.v1"` 与本次预动作的 `request_id`；`cancel` 必须复用对应 `ready` 请求的 ID；
 - `action: "ready"` 时，`motion` 为当前合法的 `engine.motion_intent.v4` 单姿态，`expires_at_epoch_ms` 为到期时刻；
 - `action: "cancel"` 时，`motion` 与 `expires_at_epoch_ms` 均为 null。
 

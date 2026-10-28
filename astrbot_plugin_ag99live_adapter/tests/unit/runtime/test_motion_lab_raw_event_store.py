@@ -16,7 +16,6 @@ def test_motion_lab_raw_event_store_creates_sqlite_and_inserts_events(
     from astrbot_plugin_ag99live_adapter.runtime.motion_lab.raw_event_store import (
         MotionLabRawEventStore,
     )
-
     db_path = tmp_path / "motion_lab.sqlite3"
     store = MotionLabRawEventStore(db_path)
 
@@ -415,6 +414,7 @@ def test_persona_delivery_mode_uses_incremental_writer_presence(
         resolve_persona_delivery_mode,
     )
     from astrbot_plugin_ag99live_adapter.runtime.persona_lifecycle import (
+        PersonaTurnIdentity,
         PersonaTurnSessionRegistry,
     )
     from types import SimpleNamespace
@@ -437,7 +437,7 @@ def test_persona_delivery_mode_uses_incremental_writer_presence(
         runtime_state=SimpleNamespace(persona_sessions=sessions)
     )
     sessions.register_writer(
-        "turn-1",
+        PersonaTurnIdentity("turn-1"),
         "result-1",
         SimpleNamespace(core_turn_id="core-turn-1", persona_result_id="result-1"),
     )

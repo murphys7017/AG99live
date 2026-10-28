@@ -33,6 +33,8 @@ class _Stream:
     seq: int = 0
     status: str = "open"
     samples: int = 0
+    motion_payload: dict[str, Any] | None = None
+    motion_revision: int = 0
 
 
 @dataclass(slots=True)
@@ -41,7 +43,14 @@ class _Segment:
     streams: dict[str, _Stream] = field(default_factory=dict)
     text: str = ""
     text_units: int = 0
-    motion_delivered: bool = False
+
+
+@dataclass(slots=True)
+class _PendingMotion:
+    payload: dict[str, Any] | None
+    reason: str
+    final: bool
+    anchor: str
 
 
 class IncrementalOutputSession:
@@ -91,6 +100,7 @@ class IncrementalOutputSession:
         self._audio_lock = asyncio.Lock()
         self._audio_credit = AudioCredit(turn_audio_credit)
         self._segment_offset = segment_offset
+        self._pending_motion: dict[int, _PendingMotion] = {}
         self._created_at = perf_counter()
         self._observed_resources: set[str] = set()
 
@@ -112,7 +122,8 @@ class IncrementalOutputSession:
         """Segments whose motion update was accepted by the bound sender."""
         return frozenset(
             index for index, segment in self._segments.items()
-            if segment.motion_delivered
+            if segment.streams.get("motion") is not None
+            and segment.streams["motion"].motion_payload is not None
         )
 
     @property
@@ -125,6 +136,7 @@ class IncrementalOutputSession:
 
     def invalidate(self) -> None:
         self._audio_credit.close()
+        self._pending_motion.clear()
 
     def release_audio_credit(self, *, core_turn_id: str, persona_result_id: str,
                              released_bytes: int, released_frames: int) -> None:
@@ -246,6 +258,10 @@ class IncrementalOutputSession:
             self._segments[segment_index] = segment
             if resource == "motion" and self._on_motion_started is not None:
                 self._on_motion_started(segment_index, segment.message_id)
+            if resource == "motion":
+                pending = self._pending_motion.pop(segment_index, None)
+                if pending is not None:
+                    await self._submit_motion_locked(segment_index, stream, pending)
 
     async def append_text(self, segment_index: int, text: str) -> None:
         async with self._lock:
@@ -301,31 +317,86 @@ class IncrementalOutputSession:
                     stream.samples += len(block) // 2
                     stream.seq += 1
 
-    async def update_motion(
+    async def publish_motion_result(
         self,
         segment_index: int,
-        motion_payload: dict[str, Any],
+        motion_payload: dict[str, Any] | None,
         *,
-        revision: int = 1,
+        reason: str = "",
+        final: bool = True,
         anchor: str = "segment_start",
-    ) -> None:
+    ) -> bool:
         async with self._lock:
             self._require_open()
-            segment, stream = self._stream("motion", segment_index)
-            if not isinstance(motion_payload, dict) or not motion_payload:
-                raise ValueError("incremental_output_motion_payload_invalid")
-            if type(revision) is not int or not 1 <= revision <= 2**31 - 1:
-                raise ValueError("incremental_output_motion_revision_invalid")
+            if type(segment_index) is not int or not 0 <= segment_index < 256 - self._segment_offset:
+                raise ValueError("incremental_output_segment_order_invalid")
+            if type(final) is not bool:
+                raise ValueError("incremental_output_motion_final_invalid")
             if not isinstance(anchor, str) or not anchor.strip() or len(anchor) > 64:
                 raise ValueError("incremental_output_motion_anchor_invalid")
-            payload = self._payload(segment_index, segment, stream)
-            payload["motion_payload"] = dict(motion_payload)
-            payload["motion_revision"] = revision
-            payload["motion_anchor"] = anchor.strip()
-            await self._send_event("motion", "update", payload)
-            segment.motion_delivered = True
-            self._observe_first("motion", segment_index, segment.message_id)
-            stream.seq += 1
+            if not isinstance(reason, str) or len(reason.encode("utf-16-le")) // 2 > 4096:
+                raise ValueError("incremental_output_motion_reason_invalid")
+            normalized_payload = (
+                dict(motion_payload)
+                if isinstance(motion_payload, dict) and motion_payload
+                else None
+            )
+            segment = self._segments.get(segment_index)
+            stream = segment.streams.get("motion") if segment is not None else None
+            fact = _PendingMotion(
+                payload=normalized_payload,
+                reason=reason,
+                final=final,
+                anchor=anchor.strip(),
+            )
+            if stream is None:
+                self._pending_motion[segment_index] = fact
+                return True
+            return await self._submit_motion_locked(segment_index, stream, fact)
+
+    async def _submit_motion_locked(
+        self,
+        segment_index: int,
+        stream: _Stream,
+        fact: _PendingMotion,
+    ) -> bool:
+        segment = self._segments[segment_index]
+        payload = fact.payload
+        if payload is None:
+            if not fact.final:
+                return True
+            if stream.status != "open":
+                return False
+            await self._end_stream_locked(
+                "motion",
+                segment_index,
+                status="failed",
+                reason=fact.reason.strip() or "motion_payload_missing",
+            )
+            return True
+
+        if stream.motion_payload == payload:
+            if fact.final and stream.status == "open":
+                await self._end_stream_locked("motion", segment_index)
+            return True
+        if stream.status != "open":
+            return False
+
+        revision = stream.motion_revision + 1
+        if not 1 <= revision <= 2**31 - 1:
+            raise ValueError("incremental_output_motion_revision_invalid")
+        event = self._payload(segment_index, segment, stream)
+        event["motion_payload"] = dict(payload)
+        event["motion_revision"] = revision
+        event["motion_anchor"] = fact.anchor
+        await self._send_event("motion", "update", event)
+        stream.motion_payload = dict(payload)
+        stream.motion_revision = revision
+        self._observe_first("motion", segment_index, segment.message_id)
+        stream.seq += 1
+        if fact.final:
+            await self._end_stream_locked("motion", segment_index)
+        return True
 
     async def end_stream(
         self,
@@ -336,25 +407,37 @@ class IncrementalOutputSession:
         reason: str = "",
     ) -> None:
         async with self._lock:
-            self._require_open()
-            segment, stream = self._stream(resource, segment_index)
-            if (
-                status not in {"completed", "failed", "cancelled"}
-                or not isinstance(reason, str)
-                or len(reason.encode("utf-16-le")) // 2 > 4096
-                or (status != "completed" and not reason.strip())
-            ):
-                raise ValueError("incremental_output_end_status_invalid")
-            payload = self._payload(segment_index, segment, stream)
-            payload.update(status=status, reason=reason)
-            if resource == "text":
-                payload["text_length"] = len(segment.text)
-            elif resource == "audio":
-                payload["total_samples"] = stream.samples
-            await self._send_event(resource, "end", payload)
-            stream.status = status
-            stream.seq += 1
-            if status != "completed" and resource != "motion":
-                self.failure_reason = self.failure_reason or reason
-            if resource == "text" and segment.text:
-                self._on_text_complete(segment.text)
+            await self._end_stream_locked(
+                resource, segment_index, status=status, reason=reason
+            )
+
+    async def _end_stream_locked(
+        self,
+        resource: Resource,
+        segment_index: int,
+        *,
+        status: Status = "completed",
+        reason: str = "",
+    ) -> None:
+        self._require_open()
+        segment, stream = self._stream(resource, segment_index)
+        if (
+            status not in {"completed", "failed", "cancelled"}
+            or not isinstance(reason, str)
+            or len(reason.encode("utf-16-le")) // 2 > 4096
+            or (status != "completed" and not reason.strip())
+        ):
+            raise ValueError("incremental_output_end_status_invalid")
+        payload = self._payload(segment_index, segment, stream)
+        payload.update(status=status, reason=reason)
+        if resource == "text":
+            payload["text_length"] = len(segment.text)
+        elif resource == "audio":
+            payload["total_samples"] = stream.samples
+        await self._send_event(resource, "end", payload)
+        stream.status = status
+        stream.seq += 1
+        if status != "completed" and resource != "motion":
+            self.failure_reason = self.failure_reason or reason
+        if resource == "text" and segment.text:
+            self._on_text_complete(segment.text)

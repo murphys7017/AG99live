@@ -63,6 +63,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
   });
   let activePlaybackRun: ModelEngineActivePlaybackRun | null = null;
   const preActionBlockedTurns = new Set<string>();
+  const preActionBlockedRequests = new Set<string>();
   let activePreActionPlan: MotionPlanPayload | null = null;
   let thinkingSwayTurnId: string | null = null;
   const preparedSemanticMotions = new Map<string, {
@@ -337,7 +338,11 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
   }
 
   function startPreAction(payload: NormalizedMotionPayload, turnId: string, requestId: string): boolean {
-    if (preActionBlockedTurns.has(turnId) || activePlaybackRun?.origin === "manual_preview") return false;
+    if (
+      preActionBlockedTurns.has(turnId)
+      || preActionBlockedRequests.has(buildPreActionRequestKey(turnId, requestId))
+      || activePlaybackRun?.origin === "manual_preview"
+    ) return false;
     return startNormalizedMotionPayload(payload, {
       turnId, messageId: requestId, playbackTurnId: null, playbackOrigin: "pre_action",
       assistantText: "", speechCues: [], startReason: "input_pre_action", queuedDelayMs: 0,
@@ -345,10 +350,15 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     }, motionStartDependencies, runtimeStateController, null);
   }
 
-  function cancelPreAction(turnId: string | null = null): void {
-    blockPreAction(turnId);
+  function cancelPreAction(turnId: string | null = null, requestId?: string): void {
+    if (turnId && requestId !== undefined) {
+      blockPreActionRequest(turnId, requestId);
+    } else {
+      blockPreAction(turnId);
+    }
     if (activePlaybackRun?.origin === "pre_action"
-      && (!turnId || activePlaybackRun.turnId === turnId)) {
+      && (!turnId || activePlaybackRun.turnId === turnId)
+      && (requestId === undefined || activePlaybackRun.messageId === requestId)) {
       stopActivePlayback("pre_action_cancelled", "预动作已结束。");
     }
   }
@@ -357,6 +367,17 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     if (!turnId) return;
     preActionBlockedTurns.add(turnId);
     if (preActionBlockedTurns.size > 256) preActionBlockedTurns.delete(preActionBlockedTurns.values().next().value!);
+  }
+
+  function blockPreActionRequest(turnId: string, requestId: string): void {
+    preActionBlockedRequests.add(buildPreActionRequestKey(turnId, requestId));
+    if (preActionBlockedRequests.size > 256) {
+      preActionBlockedRequests.delete(preActionBlockedRequests.values().next().value!);
+    }
+  }
+
+  function buildPreActionRequestKey(turnId: string, requestId: string): string {
+    return `${turnId.length}:${turnId}:${requestId.length}:${requestId}`;
   }
 
   function handlePlaybackTimelineStarted(

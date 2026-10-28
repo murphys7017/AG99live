@@ -434,6 +434,8 @@ def test_incremental_motion_finalizer_only_waits_for_requested_segment(
         "astrbot_plugin_ag99live_adapter.middleware.interaction_motion.independent"
     )
     from astrbot_plugin_ag99live_adapter.runtime.persona_lifecycle import (
+        PersonaSegmentIdentity,
+        PersonaTurnIdentity,
         PersonaTtsBinding,
         PersonaTurnSessionRegistry,
     )
@@ -470,7 +472,9 @@ def test_incremental_motion_finalizer_only_waits_for_requested_segment(
             return {0: first, 1: await futures[1]}
 
         task = asyncio.create_task(all_results())
-        work = state.persona_sessions.session("core-turn").result(
+        work = state.persona_sessions.session(
+            PersonaTurnIdentity("core-turn")
+        ).result(
             "persona",
             phase="immediate",
             parent_message_id="parent",
@@ -478,17 +482,25 @@ def test_incremental_motion_finalizer_only_waits_for_requested_segment(
         work.expected_segment_count = 2
         work.generation_task = task
         for index, speech in enumerate(("first", "second")):
-            segment_state = work.segment(index)
+            segment_state = work.segment(
+                PersonaSegmentIdentity(
+                    turn=work.turn,
+                    persona_result_id="persona",
+                    segment_index=index,
+                )
+            )
             segment_state.bind_content(speech=speech, actions=(), tendency={})
             segment_state.result_future = futures[index]
         if first_binding_present:
             work.segments[0].tts_binding = PersonaTtsBinding(
-                turn_id="core-turn",
+                identity=PersonaSegmentIdentity(
+                    PersonaTurnIdentity("core-turn"),
+                    "persona",
+                    0,
+                    segment_count=2,
+                    segment_message_id="message-0",
+                ),
                 parent_message_id="parent",
-                persona_result_id="persona",
-                segment_index=0,
-                segment_count=2,
-                message_id="message-0",
                 tts_request_id="tts-0",
             )
         contributor = module.AG99liveMotionResultContributor()
@@ -515,7 +527,9 @@ def test_incremental_motion_finalizer_only_waits_for_requested_segment(
                 "persona_motion_failure_reasons"
             ] == {"0": "tts_binding_missing"}
         assert not task.done()
-        assert state.persona_sessions.get_result("core-turn", "persona") is work
+        assert state.persona_sessions.get_result(
+            PersonaTurnIdentity("core-turn"), "persona"
+        ) is work
         futures[1].set_result(second)
         second_output = await contributor.finalize_output(
             event,
@@ -533,7 +547,9 @@ def test_incremental_motion_finalizer_only_waits_for_requested_segment(
         assert second_output.metadata["ag99live_motion_schedule"][
             "persona_motion_failure_reasons"
         ] == {"1": "motion_timeout"}
-        assert state.persona_sessions.get_result("core-turn", "persona") is None
+        assert state.persona_sessions.get_result(
+            PersonaTurnIdentity("core-turn"), "persona"
+        ) is None
         await task
 
     asyncio.run(run())
@@ -709,6 +725,7 @@ def test_persona_hook_cancellation_reaches_segment_provider_requests(
     provider_started = asyncio.Event()
     provider_cancelled = asyncio.Event()
     from astrbot_plugin_ag99live_adapter.runtime.persona_lifecycle import (
+        PersonaTurnIdentity,
         PersonaTurnSessionRegistry,
     )
 
@@ -733,7 +750,9 @@ def test_persona_hook_cancellation_reaches_segment_provider_requests(
         async def persona_result_hook() -> None:
             task = asyncio.current_task()
             assert task is not None
-            runtime_state.persona_sessions.register_task("turn-1", task)
+            runtime_state.persona_sessions.register_task(
+                PersonaTurnIdentity("turn-1"), task
+            )
             await module.generate_independent_motion_for_segments(
                 object(),
                 bundle,
@@ -744,13 +763,15 @@ def test_persona_hook_cancellation_reaches_segment_provider_requests(
 
         hook_task = asyncio.create_task(persona_result_hook())
         await provider_started.wait()
-        runtime_state.persona_sessions.clear_turn("turn-1")
+        runtime_state.persona_sessions.clear_turn(PersonaTurnIdentity("turn-1"))
         await asyncio.gather(hook_task, return_exceptions=True)
 
     asyncio.run(run_case())
 
     assert provider_cancelled.is_set()
-    assert runtime_state.persona_sessions.get_session("turn-1") is None
+    assert runtime_state.persona_sessions.get_session(
+        PersonaTurnIdentity("turn-1")
+    ) is None
 
 
 def test_independent_motion_segment_generation_respects_concurrency_limit(
@@ -854,24 +875,28 @@ def test_persona_motion_work_is_scoped_by_turn_and_result_id(
     )
     module = importlib.reload(module)
     from astrbot_plugin_ag99live_adapter.runtime.persona_lifecycle import (
+        PersonaSegmentIdentity,
+        PersonaTurnIdentity,
         PersonaTurnSessionRegistry,
     )
 
     registry = PersonaTurnSessionRegistry()
-    first = registry.session("turn-1").result("result-1")
+    turn = PersonaTurnIdentity("turn-1")
+    first = registry.session(turn).result("result-1")
     first.expected_segment_count = 3
-    first.segment(0).bind_content(speech="first", actions=(), tendency={})
-    first.segment(1).bind_content(speech="", actions=(), tendency={})
-    first.segment(2).bind_content(speech="third", actions=(), tendency={})
-    second = registry.session("turn-1").result("result-2")
+    for index, speech in enumerate(("first", "", "third")):
+        first.segment(
+            PersonaSegmentIdentity(turn, "result-1", index)
+        ).bind_content(speech=speech, actions=(), tendency={})
+    second = registry.session(turn).result("result-2")
 
-    assert registry.get_result("turn-1", "result-1") is first
-    assert registry.get_result("turn-1", "result-2") is second
-    assert registry.get_result("other-turn", "result-1") is None
+    assert registry.get_result(turn, "result-1") is first
+    assert registry.get_result(turn, "result-2") is second
+    assert registry.get_result(PersonaTurnIdentity("other-turn"), "result-1") is None
 
-    registry.clear_result("turn-1", "result-1")
-    assert registry.get_result("turn-1", "result-1") is None
-    assert registry.get_result("turn-1", "result-2") is second
+    registry.clear_result(turn, "result-1")
+    assert registry.get_result(turn, "result-1") is None
+    assert registry.get_result(turn, "result-2") is second
 
 
 def test_persona_tts_requests_bind_by_segment_index_and_validate_identity(
@@ -889,18 +914,24 @@ def test_persona_tts_requests_bind_by_segment_index_and_validate_identity(
     scheduling = importlib.reload(scheduling)
 
     from astrbot_plugin_ag99live_adapter.runtime.persona_lifecycle import (
+        PersonaSegmentIdentity,
+        PersonaTurnIdentity,
         PersonaTurnSessionRegistry,
     )
 
     runtime_state = SimpleNamespace(persona_sessions=PersonaTurnSessionRegistry())
-    work = runtime_state.persona_sessions.session("turn-1").result(
+    work = runtime_state.persona_sessions.session(
+        PersonaTurnIdentity("turn-1")
+    ).result(
         "result-1",
         phase="final",
         parent_message_id="parent-1",
     )
     work.expected_segment_count = 3
     for index, speech in enumerate(("first", "", "third")):
-        work.segment(index).bind_content(speech=speech, actions=(), tendency={})
+        work.segment(
+            PersonaSegmentIdentity(work.turn, "result-1", index)
+        ).bind_content(speech=speech, actions=(), tendency={})
     turn_coordinator = SimpleNamespace(
         runtime_state=runtime_state,
         performance_curves=SimpleNamespace(start_request=lambda **_kwargs: None),
@@ -935,11 +966,11 @@ def test_persona_tts_requests_bind_by_segment_index_and_validate_identity(
     assert track(2, "message-2", "tts-2") is None
     assert track(0, "message-0", "tts-0") is None
     assert {index for index, segment in work.segments.items() if segment.tts_binding} == {0, 2}
-    assert work.segments[2].tts_binding.message_id == "message-2"
+    assert work.segments[2].tts_binding.identity.segment_message_id == "message-2"
     assert work.segments[2].tts_binding.tts_request_id == "tts-2"
-    assert work.segments[0].tts_binding.message_id == "message-0"
+    assert work.segments[0].tts_binding.identity.segment_message_id == "message-0"
     assert {
-        index: segment.tts_binding.segment_index
+        index: segment.tts_binding.identity.segment_index
         for index, segment in work.segments.items()
         if segment.tts_binding is not None
     } == {0: 0, 2: 2}

@@ -1517,6 +1517,101 @@ prompt_persona_projection_repairs_20261025:
     deploys managed Adapter files through deploy_adapter.ps1. Preserve the
     unrelated untracked continuous-presence design document.
 
+persona_motion_dataset_pipeline_20261027:
+  class: feature
+  risk: medium
+  status: source_checks_passed_pending_live_collection
+  scope: >-
+    Capture the per-event motion source route when the OLV event is created and
+    reuse it for M1 segment routing, result scheduling, and M0/M1 TTS segment
+    identity with the bound message ID; remove the success-only duplicate
+    scheduler snapshot, and add a read-only v3
+    Motion Lab reducer, review JSONL and manually approved training JSONL export.
+    Require explicit source_route and delivery_mode, exclude NeuroBrain samples,
+    preserve Provider candidates separately from final normalized results, and
+    associate frontend playback evidence. No database migration, deployment,
+    continuous-presence behavior or training-job submission.
+  validation: >-
+    Targeted Python compilation, CLI help entry points, YAML parse and git diff
+    whitespace checks passed after route latching. The Stage 5 reducer follow-up
+    preserves raw-event schema v3 and training schema v1, validates review schema
+    v2, and reports malformed event details and collection status counts. No tests
+    or live database were run.
+  evidence_gap: >-
+    Target AstrBot has not been synchronized or restarted, and its runtime database
+    was not inspected. Live M0/M1/M2 collection, Provider/TTS/playback correlation
+    and final queue flush remain unverified. Recorder queue capacity is 500 and
+    write failure can reject observations; export after graceful shutdown for a
+    stable collection window.
+
+persona_lifecycle_identity_boundary_20261028:
+  class: refactor
+  risk: high
+  status: stage3_source_implementation_complete_pending_stage6_live_acceptance
+  scope: >-
+    Freeze the Persona lifecycle ownership and transition contract. Require
+    PersonaTurnIdentity for Registry Turn APIs and PersonaSegmentIdentity for
+    segment admission. Store the TTS binding identity as a PersonaSegmentIdentity.
+    Replace the dynamic delivery assembly dictionary with typed state; keep
+    stream terminal status on PersonaResultState, Provider result only in its
+    Future handoff, and M2 motion pending/revision/dedup/terminal state in the
+    OLV writer. Reject late admission after Result/Turn retirement. Keep Core,
+    WebSocket/OLV, and Motion Lab raw-event schemas unchanged.
+  validation: >-
+    Stage 2 previously passed eleven focused tests, Ruff, Python compilation,
+    YAML parsing, and diff whitespace checks. Stage 3 source review confirmed the
+    PersonaResultState.delivery_state and PersonaSegmentState.provider_result
+    fields/assignments are gone, as are platform-side M2 wire mirrors. Provider
+    result reads now come from the Future handoff. Python compileall and git diff
+    --check passed. Ruff was unavailable; no tests were run during Stage 3.
+  evidence_gap: >-
+    No live Core/Provider/TTS/OLV/desktop/Live2D acceptance. M0/M1/M2 behavior,
+    Core OLV motion-stream closure after Provider Future cancellation, and delayed
+    TTS binding still require target environment acceptance; Stage 6 final
+    verification remains.
+
+persona_lifecycle_delivery_convergence_20261028:
+  class: refactor
+  risk: high
+  status: stage4_source_review_complete_pending_live_acceptance
+  scope: >-
+    Review M0 complete-result v6 delivery, M1 Persona-segment v6 finalization,
+    and M2 OLV resource streams against the shared Persona result/segment identity
+    and ownership matrix. Preserve protocol-specific wire state; add no shared
+    delivery interface unless it removes real duplicate control flow.
+  validation: >-
+    Source review traced M0 result-task assembly, M1 segment Future/TTS binding
+    into the v6 finalizer, and M2 IncrementalOutputSession ownership of text,
+    audio, and motion wire state. The routes share identity and Provider result
+    semantics but have distinct timing and failure handling; no common delivery
+    interface was justified. No protocol or output schema changed.
+  evidence_gap: >-
+    No target Core, Provider, TTS, v6, OLV, desktop, or Live2D joint acceptance.
+
+persona_lifecycle_motion_lab_stage5_20261028:
+  class: feature
+  risk: medium
+  status: source_checks_passed_pending_live_collection
+  scope: >-
+    Complete the read-only Motion Lab reducer. Separate collection_status from
+    quality.status; preserve malformed event identity/reason and field-conflict
+    values/source IDs, including contradictory playback terminal facts; validate
+    review schema v2; reject approved open/incomplete samples at export. Keep
+    raw-event schema v3, training schema v1, and public
+    Core/WebSocket/OLV contracts unchanged.
+  validation: >-
+    Python compileall, CLI help, state YAML parsing, and git diff --check passed.
+    Summary and manifest expose malformed event details and collection status
+    counts. Review validation checks database schema, filters, row counts,
+    diagnostics, collection/quality/review fields and immutable sample digests.
+    No tests or live Motion Lab database were used.
+  evidence_gap: >-
+    Target collection and export have not been exercised against a real database.
+    A missing terminal fact remains open because the recorder cannot distinguish
+    an active request from a cancellation that produced no terminal snapshot.
+    M2 OLV wire completion and desktop playback remain separate unrecorded or
+    independently observed facts; Phase 6 runtime acceptance is pending.
+
 incremental_writer_discard_guard_20261028:
   class: bugfix
   risk: medium
@@ -1537,3 +1632,56 @@ incremental_writer_discard_guard_20261028:
     This repository has no production callsite for the new discard event hook.
     Paired Core must invoke it before any segment start and honor false by
     continuing or terminating OLV. No paired runtime or desktop acceptance.
+
+continuous_presence_stage0_baseline_20261028:
+  class: review
+  risk: medium
+  status: phase0_partial_baseline_data_and_live_render_observed
+  scope: >-
+    Read-only baseline for the continuous-presence plan: inspect deployed Motion
+    Lab schema/data and the active Mk6 Live2D model's ambient motion, eye blink,
+    breathing parameters, and parameter-mixer path. No C++ work, NeuroBrain
+    integration, code behavior changes, setting changes, or process restart.
+  validation: >-
+    Target state/motion_lab.sqlite3 is schema v3 with 1,993 raw events, including
+    858 motion.persona_sample.v1 events through 2026-10-28 03:00 Asia/Shanghai.
+    Stored events cover M0 and M2 modes; no M1 mode was found. A targeted
+    read-only capture of the AG99live Live2D window showed different rendered
+    frames about eight seconds apart. Mk6 declares no EyeBlink parameter IDs,
+    while its 平和 idle motion includes eye-open and ParamBreath curves. Required
+    Cubism breath parameter IDs are present. No tests were run.
+  evidence_gap: >-
+    Stage 0 remains incomplete: renderer mode and the actual ambient-motion
+    setting were not readable; the screenshot does not attribute animation to
+    idle or Cubism auto-blink; breath contribution was not isolated; model
+    switching was not tested. The deployed main.py differs from the workspace,
+    so current uncommitted collection changes are not confirmed loaded. The
+    separate cache database remains schema v2 and was not modified.
+
+continuous_presence_stage1_local_wiring_20261028:
+  class: feature
+  risk: medium
+  status: renderer_typecheck_passed_pending_live_runtime_acceptance
+  scope: >-
+    Add renderer-owned PresenceStateStore diagnostics for existing Adapter
+    connection and microphone state, playback audio, active Turn Playback phase,
+    accepted pre-action, cursor gaze activation, selected model, and Live2D
+    renderer lifecycle. Correlate pre-action cancellation by Turn/request ID and
+    monotonic generation. Keep diagnostics high-level and exclude conversation
+    text, model URLs, cursor coordinates, and action payloads. Do not add AG99
+    semantic requests.
+  validation: >-
+    Source tracing confirmed the existing owners and event points for each local
+    state. Renderer status is reported from useLive2dRenderer through
+    DesktopPetCanvas and PetDesktopView. Pre-action cancellation now retains its
+    request ID, and stale reducer revisions are ignored; ModelEngine blocks and
+    stops only the matching canceled request while Turn terminal events remain
+    Turn-scoped. Natural pre-action terminals clear only their matching
+    preparation, and model/Profile changes clear the current preparation after
+    cancellation. The renderer TypeScript check, state YAML parse, and git diff
+    --check passed. No tests or live runtime check were run.
+  evidence_gap: >-
+    AG99 RuntimeObservationSensorHandle is not registered in this workspace, and
+    no paired AG99 runtime is available to verify semantic bridging, model
+    switching, delayed events, disconnect recovery, or end-to-end presence
+    snapshots. Stage 1 remains incomplete.

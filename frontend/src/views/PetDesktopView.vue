@@ -7,6 +7,7 @@ const {
   live2dPresentationSettings,
   stageMessage,
   showContextMenu,
+  reportRendererStatus,
 } = providePetDesktopRuntime();
 </script>
 
@@ -19,6 +20,7 @@ const {
       :selected-model="selectedModel"
       :live2d-presentation-settings="live2dPresentationSettings"
       :stage-message="stageMessage"
+      @renderer-status-change="reportRendererStatus"
     />
   </main>
 </template>

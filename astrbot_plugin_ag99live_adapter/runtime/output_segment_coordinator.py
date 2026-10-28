@@ -37,6 +37,7 @@ from .motion_observation_recorder import MotionObservationRecorder
 from .output_segment import (
     PendingOutputSegment,
 )
+from .persona_lifecycle import PersonaSegmentIdentity, PersonaTurnIdentity
 from .performance_curve_coordinator import PerformanceCurveCoordinator
 
 
@@ -186,12 +187,19 @@ class OutputSegmentCoordinator:
 
             def mark_motion_started(index: int, message_id: str) -> None:
                 result_state = self.runtime_state.persona_sessions.get_result(
-                    core_turn_id,
+                    PersonaTurnIdentity(core_turn_id),
                     persona_result_id,
                 )
                 if result_state is None:
                     raise RuntimeError("persona_incremental_result_state_missing")
-                result_state.segment(index).mark_wire_started(message_id)
+                result_state.segment(
+                    PersonaSegmentIdentity(
+                        turn=result_state.turn,
+                        persona_result_id=persona_result_id,
+                        segment_index=index,
+                        segment_message_id=message_id,
+                    )
+                )
 
             writer = IncrementalOutputSession(
                 turn_id=turn_id, core_turn_id=core_turn_id,

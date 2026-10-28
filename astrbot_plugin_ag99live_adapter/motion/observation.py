@@ -6,6 +6,8 @@ from typing import Any, Callable, Protocol
 
 from astrbot.api import logger
 
+from ..runtime.persona_lifecycle import PersonaTurnIdentity
+
 
 class MotionObservationPort(Protocol):
     def enqueue(
@@ -17,6 +19,34 @@ class MotionObservationPort(Protocol):
 
 
 PERSONA_MOTION_SAMPLE_SCHEMA = "ag99live.persona_motion_sample.v1"
+PERSONA_MOTION_SOURCE_ROUTE_EXTRA_KEY = "_ag99live_persona_motion_source_route"
+
+
+def resolve_persona_motion_source_route(
+    event: Any,
+    runtime_state: Any,
+    *,
+    capture_if_missing: bool = False,
+) -> str | None:
+    """Return the route latched for this event, optionally capturing it once."""
+    get_extra = getattr(event, "get_extra", None)
+    if not callable(get_extra):
+        return None
+    existing = str(get_extra(PERSONA_MOTION_SOURCE_ROUTE_EXTRA_KEY, "") or "").strip()
+    if existing in {"persona_effect", "independent_motion"}:
+        return existing
+    if not capture_if_missing:
+        return None
+
+    source_route = (
+        "independent_motion"
+        if bool(getattr(runtime_state, "independent_motion_enabled", False))
+        else "persona_effect"
+    )
+    set_extra = getattr(event, "set_extra", None)
+    if callable(set_extra):
+        set_extra(PERSONA_MOTION_SOURCE_ROUTE_EXTRA_KEY, source_route)
+    return source_route
 
 
 def resolve_persona_delivery_mode(event: Any) -> str:
@@ -30,7 +60,11 @@ def resolve_persona_delivery_mode(event: Any) -> str:
     runtime_state = getattr(adapter, "runtime_state", None)
     sessions = getattr(runtime_state, "persona_sessions", None)
     turn_id = str(get_extra("_turn_id", "") or "").strip()
-    if sessions is not None and sessions.get_active_result(turn_id) is not None:
+    if (
+        sessions is not None
+        and turn_id
+        and sessions.get_active_result(PersonaTurnIdentity(turn_id)) is not None
+    ):
         return "M2_olv_incremental"
     return "M1_persona_segment_stream"
 
@@ -40,7 +74,11 @@ def resolve_persona_core_turn_id(event: Any) -> str | None:
     adapter = getattr(event, "adapter", None)
     sessions = getattr(getattr(adapter, "runtime_state", None), "persona_sessions", None)
     turn_id = str(get_extra("_turn_id", "") or "").strip() if callable(get_extra) else ""
-    result = sessions.get_active_result(turn_id) if sessions is not None else None
+    result = (
+        sessions.get_active_result(PersonaTurnIdentity(turn_id))
+        if sessions is not None and turn_id
+        else None
+    )
     writer = result.writer if result is not None else None
     core_turn_id = str(getattr(writer, "core_turn_id", "") or "").strip()
     return core_turn_id or None

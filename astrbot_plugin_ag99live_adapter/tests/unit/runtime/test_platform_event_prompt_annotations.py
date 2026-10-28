@@ -7,6 +7,11 @@ import types
 
 import pytest
 
+from astrbot_plugin_ag99live_adapter.runtime.persona_lifecycle import (
+    PersonaSegmentIdentity,
+    PersonaTurnIdentity,
+)
+
 
 def _install_platform_event_astrbot_stubs(install_fake_astrbot, monkeypatch) -> None:
     install_fake_astrbot()
@@ -238,12 +243,14 @@ def test_streaming_output_joins_motion_future_by_segment_identity(
             )
         )
         result_state = event.adapter.runtime_state.persona_sessions.session(
-            "backend-turn-1"
+            PersonaTurnIdentity("backend-turn-1")
         ).result(
             "persona-result-1",
             parent_message_id="stream-parent",
         )
-        result_state.segment(0).result_future = future
+        result_state.segment(
+            PersonaSegmentIdentity(result_state.turn, "persona-result-1", 0)
+        ).result_future = future
         await event.send_message_with_extras(
             [Plain(speech)],
             platform_extras={
@@ -271,10 +278,6 @@ def test_streaming_output_joins_motion_future_by_segment_identity(
         }
     ]
     assert extras["metadata"]["ag99live_motion_schedule"]["persona_segmented"] is True
-    assert isinstance(
-        event.get_extra("_interaction_personal_stream_first_output_monotonic"),
-        float,
-    )
 
 
 def test_streaming_empty_motion_placeholder_is_not_marked_as_downlinked(
@@ -304,37 +307,37 @@ def test_streaming_empty_motion_placeholder_is_not_marked_as_downlinked(
     asyncio.run(run())
     extras = event.adapter.emit_calls[0]["platform_extras"]
     assert extras["client_objects"] == []
-    assert event.get_extra(
-        "_interaction_personal_stream_first_output_monotonic"
-    ) is None
     assert "persona_segment_count" not in extras
 
 
-def test_incremental_motion_update_records_first_output_time(
+def test_incremental_motion_result_is_submitted_to_writer(
     install_fake_astrbot,
     monkeypatch,
 ) -> None:
     _install_platform_event_astrbot_stubs(install_fake_astrbot, monkeypatch)
     event = _build_event(_load_platform_event_module(), images=[])
+    event.set_extra("_turn_id", "core-turn-1")
     updates = []
 
     class WriterStub:
         core_turn_id = "core-turn-1"
         persona_result_id = "result-1"
 
-        async def update_motion(self, segment_index, payload, **kwargs):
+        async def publish_motion_result(self, segment_index, payload, **kwargs):
             updates.append((segment_index, payload, kwargs))
-
-        async def end_stream(self, resource, segment_index):
-            updates.append((resource, segment_index))
+            return True
 
     writer = WriterStub()
     event.adapter.runtime_state.persona_sessions.register_writer(
-        "turn-1", "result-1", writer
+        PersonaTurnIdentity("core-turn-1"), "result-1", writer
     )
     event.adapter.runtime_state.persona_sessions.get_result(
-        "turn-1", "result-1"
-    ).segment(0).mark_wire_started("segment-0")
+        PersonaTurnIdentity("core-turn-1"), "result-1"
+    ).segment(
+        PersonaSegmentIdentity(
+            PersonaTurnIdentity("core-turn-1"), "result-1", 0
+        )
+    )
 
     accepted = asyncio.run(
         event.publish_interaction_incremental_motion(
@@ -345,13 +348,12 @@ def test_incremental_motion_update_records_first_output_time(
 
     assert accepted is True
     assert updates == [
-        (0, {"actions": ["nod"]}, {"revision": 1, "anchor": "segment_start"}),
-        ("motion", 0),
+        (
+            0,
+            {"actions": ["nod"]},
+            {"reason": "", "final": True, "anchor": "segment_start"},
+        ),
     ]
-    assert isinstance(
-        event.get_extra("_interaction_personal_stream_first_output_monotonic"),
-        float,
-    )
 
 
 def test_streaming_terminal_rejects_missing_completed_segment(
@@ -759,18 +761,26 @@ def test_failed_persona_tts_segment_uses_bound_segment_identity(
     )
 
     result_state = event.adapter.runtime_state.persona_sessions.session(
-        "turn-1"
+        PersonaTurnIdentity("turn-1")
     ).result("result-1", parent_message_id="parent")
     result_state.expected_segment_count = 2
-    result_state.segment(0).bind_content(speech="first", actions=(), tendency={})
-    result_state.segment(1).bind_content(speech="second", actions=(), tendency={})
-    result_state.segment(1).tts_binding = PersonaTtsBinding(
-        turn_id="turn-1",
+    result_state.segment(
+        PersonaSegmentIdentity(result_state.turn, "result-1", 0)
+    ).bind_content(speech="first", actions=(), tendency={})
+    result_state.segment(
+        PersonaSegmentIdentity(result_state.turn, "result-1", 1)
+    ).bind_content(speech="second", actions=(), tendency={})
+    result_state.segment(
+        PersonaSegmentIdentity(result_state.turn, "result-1", 1)
+    ).tts_binding = PersonaTtsBinding(
+        identity=PersonaSegmentIdentity(
+            result_state.turn,
+            "result-1",
+            1,
+            segment_count=2,
+            segment_message_id="tts-segment-1",
+        ),
         parent_message_id="parent",
-        persona_result_id="result-1",
-        segment_index=1,
-        segment_count=2,
-        message_id="tts-segment-1",
         tts_request_id="tts-request-1",
     )
 
@@ -811,18 +821,26 @@ def test_dual_output_auxiliary_text_uses_bound_persona_parent(
     )
 
     result_state = event.adapter.runtime_state.persona_sessions.session(
-        "turn-1"
+        PersonaTurnIdentity("turn-1")
     ).result("result-1", parent_message_id="parent")
     result_state.expected_segment_count = 2
-    result_state.segment(0).bind_content(speech="first", actions=(), tendency={})
-    result_state.segment(1).bind_content(speech="second", actions=(), tendency={})
-    result_state.segment(0).tts_binding = PersonaTtsBinding(
-        turn_id="turn-1",
+    result_state.segment(
+        PersonaSegmentIdentity(result_state.turn, "result-1", 0)
+    ).bind_content(speech="first", actions=(), tendency={})
+    result_state.segment(
+        PersonaSegmentIdentity(result_state.turn, "result-1", 1)
+    ).bind_content(speech="second", actions=(), tendency={})
+    result_state.segment(
+        PersonaSegmentIdentity(result_state.turn, "result-1", 0)
+    ).tts_binding = PersonaTtsBinding(
+        identity=PersonaSegmentIdentity(
+            result_state.turn,
+            "result-1",
+            0,
+            segment_count=2,
+            segment_message_id="parent",
+        ),
         parent_message_id="parent",
-        persona_result_id="result-1",
-        segment_index=0,
-        segment_count=2,
-        message_id="parent",
         tts_request_id="tts-parent",
     )
 

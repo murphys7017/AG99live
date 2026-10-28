@@ -1,6 +1,6 @@
 # Persona 动作意图样本归一化契约
 
-状态：字段映射与首版采集边界。Adapter 已将 Persona 段语义和动作结果写入 Motion Lab raw-event store，事件类型为 `motion.persona_sample.v1`；相同 `sample_id` 下可有模型请求、Persona 段完成、流式预览和最终结果多个快照。M2 中模型请求与 Persona 段完成是不同时间点：请求快照保留模型实际看到的输入，完成快照保留最终 `speech/actions/tendency`。数据库查询界面、训练导出、人工评价和训练集筛选尚未实现。
+状态：首版采集、样本归约、审核清单与训练导出已实现。Adapter 将 Persona 段语义和动作结果写入 Motion Lab raw-event store，事件类型为 `motion.persona_sample.v1`；同一 `sample_id` 下可有模型请求、Persona 段完成、流式候选、最终结果及段身份等快照。M2 中模型请求与 Persona 段完成是不同时间点：请求快照保留模型实际看到的输入，完成快照保留最终 `speech/actions/tendency`。独立 CLI 只读归并这些快照、关联桌面播放事实、生成待审核 JSONL，并只导出人工批准且通过结构检查的样本。尚无图形审核界面，也没有真实运行库的新采集结果可以证明端到端数据已到达。
 
 范围只包含输入、Persona 段语义、动作生成结果和交付模式，不记录 Live2D 逐帧参数。VTube Studio 录制器仍是独立的参数观测工具。
 
@@ -123,7 +123,9 @@ M2 的 text/audio/motion 是独立资源流。text delta 的到达顺序不能�
 
 ## 样本封闭与训练筛选
 
-- v6 的 motion 为 `pending` 时，样本保持未封闭；收到 `output.segment_motion` 的 present/failed 终态后再封闭动作结果。
+- Review 样本把 `collection_status` 与 `quality.status` 分开。`open` 表示尚无可识别的 motion 终态；`closed` 表示来源记录了成功的 Provider 规范化结果或 Persona Effect 结果；`incomplete` 表示记录了失败、超时、明确取消或相互冲突的终态。没有终态记录时不能区分“仍在进行”和“取消未落盘”，因此保留为 `open`，不推断取消。
+- `quality.status` 只表示归并事实是否满足审核字段和一致性要求：`reviewable` 表示可进入人工审核，`blocked` 表示字段缺失、失败结果或事实冲突。它不替代采集状态；即使质量为 `reviewable`，`open` 或 `incomplete` 样本也不能导出。
+- v6 的 motion 为 `pending` 时，样本尚无可识别的 motion 终态并保持 `open`；收到 Adapter 记录的 present/failed 结果后，按该来源结果封闭或标记不完整。当前 Motion Lab 不记录 M2 OLV motion wire 终态，因此 `closed` 不代表动作已发送或桌面已执行。
 - M2 的 `provider_previews` 是模型候选，不等于已发送的 motion update；多个候选按 `provider_update_index` 保留，但段启动前的待发送槽可能只交付最后一个。`provider_final` 只表示 Provider 生成终态。当前 wire `seq`、revision、anchor 和 OLV 资源终态尚未写入 Motion Lab，导出时不得把候选直接当作已交付动作。
 - 保存失败、拒绝、取消和无动作样本用于诊断；训练导出另行筛选，不将这些状态伪装成中性动作。
 - M0/M1/M2 和 `persona_effect`/`independent_motion` 是不同维度：前者是交付模式，后者是动作来源。
@@ -135,12 +137,42 @@ M2 的 text/audio/motion 是独立资源流。text delta 的到达顺序不能�
 当前已能取得并写入样本事件的事实包括：
 
 - Persona Effect 路径记录每段 `speech/actions/tendency`、匹配的 Effect arguments、规范化 payload、当前用户输入及 delivery mode。完整 Core Persona Prompt 不暴露给 Adapter，因此明确标注其输入上下文不完整。
-- 独立动作 Provider 路径在调用前记录 `motion_request` 快照，因此 Provider 失败或取消时仍保留实际当前用户文本、历史上下文、segment 字段、NeuroBrain 状态、system/user prompt；结果快照再记录 raw Provider 输出和规范化 payload。M0/M1 会在 TTS/播放段绑定完成后追加 `segment_identity` 快照，补上真实 `segment_message_id`。M2 的 intent-ready 请求与 segment-ready Persona 快照分开记录。候选快照使用 `record_stage=motion_candidate` 和 `status=provider_preview`；请求、候选和最终结果的 `provider_final` 均表示 Provider 状态，不表示是否通过 OLV writer 实际发送。`motion_result.status` 使用 `provider_normalized` 或 `provider_failed`。
+- 独立动作 Provider 路径在调用前记录 `motion_request` 快照，因此 Provider 失败或取消时仍保留实际当前用户文本、历史上下文、segment 字段、NeuroBrain 状态、system/user prompt；结果快照再记录 raw Provider 输出和规范化 payload。Motion 路由在 OLV 事件创建时固定，M1 分段处理、结果调度和 M0/M1 TTS 身份记录读取同一来源，不受本轮中途的全局设置变化影响。TTS 状态回调按真实 `message_id` 追加 `segment_identity`，不依赖 Provider 成功。M2 的 intent-ready 请求与 segment-ready Persona 快照分开记录。候选快照使用 `record_stage=motion_candidate` 和 `status=provider_preview`；请求、候选和最终结果的 `provider_final` 均表示 Provider 状态，不表示是否通过 OLV writer 实际发送。`motion_result.status` 使用 `provider_normalized` 或 `provider_failed`。
 - v6 普通段的 text/audio/motion slots、message ID 和播放 sequence。
 - M2 的 Core/Persona/segment/message 身份和 Provider 候选/结果；各资源 wire `seq` 与 OLV motion 终态当前未写入 Motion Lab。
 - 独立 Provider 当前会收到当前用户文本、近期历史、当前段 speech/actions/tendency；条件满足时还会收到 NeuroBrain 状态和最近执行动作等参考。它们作为 `motion_request` 上下文记录，不误写成 Core Persona 字段。
 
 当前样本仍不是可直接训练的数据集：M0/M1 v6 不携带 Persona 段身份，采集器依赖 Adapter 内部关联；M2 原始协议没有把 Core 的 `actions/tendency` 发给桌面，采集器在 Adapter 内部保留它们；Persona Effect 与独立 Provider 的输入范围不同，导出时应按 `source_route` 分组或显式投影，不要当成同分布样本。
+
+## 样本审核与导出
+
+工具位于 `tools/persona_motion_dataset.py`，仅使用 Python 标准库。数据库连接通过 SQLite `mode=ro` 和 `query_only` 打开；schema 不是 v3、列不完整或数据库不可读时会拒绝运行，不会创建表、迁移或清空数据。读取样本和播放事件时使用同一只读事务快照。先从 Adapter 的 `STATE_DIR` 找到 `motion_lab.sqlite3`，再执行：
+
+```powershell
+$stateDir = '替换为 Adapter 的 STATE_DIR 路径'
+$db = Join-Path $stateDir 'motion_lab.sqlite3'
+python tools/persona_motion_dataset.py summary --db $db
+python tools/persona_motion_dataset.py manifest --db $db --source-route independent_motion --delivery-mode M1_persona_segment_stream --output persona-motion-review.jsonl
+```
+
+`manifest` 使用 `ag99live.persona_motion_review.v2`：首行记录来源/模式筛选、数据库 schema、采集状态统计及 malformed 事件诊断；后续每行是一条归并样本。诊断保留事件 ID、类型和原因；字段冲突保留冲突值及来源 event ID。只编辑 `review.status`、`review.reviewer`、`review.notes`；把 `status` 设为 `approved` 并填写审核人，其他字段保持原样。`collection_status` 是采集闭合状态，`quality.status` 是质量门槛，两者不可互相替代。默认不会把含非空 `neurobrain_state` 的样本写入审核清单；manifest 首行会显示排除数量。缺失终态的样本可能仍处于活动中，也可能因取消未写终态；归约器不推测是哪一种。
+
+```powershell
+python tools/persona_motion_dataset.py export --manifest persona-motion-review.jsonl --source-route independent_motion --delivery-mode M1_persona_segment_stream --output persona-motion-training.jsonl
+```
+
+导出时必须再次显式指定同一 `source_route` 与 `delivery_mode`。工具校验 review schema v2、数据库 schema、筛选器、样本计数、采集/质量/审核字段和样本内容摘要；仅输出人工批准、`collection_status == closed` 且无质量阻断项的行。已批准的 `open` 或 `incomplete` 样本会使导出拒绝。默认拒绝覆盖已有输出；确认替换时才加 `--overwrite`。训练目标只取 `motion_result` 的最终 `accepted_payload`；`motion_candidate` 只保留为审核证据，不会冒充最终动作。M2 的最终 Provider 结果也不等同于已发出的 OLV motion update，review playback 状态保留为 `unobserved/started/completed/failed/conflict`。当前代码没有独立的人类正向反馈事件，因此人工审核是导出门槛，不是反馈标签；训练 schema v1 不变，该字段在导出中标为 `not_recorded`。
+
+录制器在 Adapter 进程中异步写入，队列上限为 500；队列满会拒收事件，连续数据库写入失败会停止 recorder 并记录错误。因此它提供可追踪的原始观察，不承诺断电或数据库故障下零丢失。要做某一阶段的最终导出，应先让 Adapter 正常停止以等待队列落盘，再运行 CLI。当前工作区代码尚未证明已同步并加载到目标 AstrBot 实例；开始日常采集后，应先用 `summary` 确认新事件和样本数量增长。
+
+## 自动质量门槛
+
+- 归并时以 `sample_id` 汇合快照，检查 Turn、Persona result、段索引、消息 ID、来源路由、交付模式、Persona 意图、动作终态和 payload 冲突；质量诊断保留冲突字段值及来源 event ID，冲突会阻断导出。
+- Persona 段必须有非空 speech、`actions` 列表和完整八维 `tendency`（值为 `0..10` 整数），并且存在非空用户输入和最终动作 payload。
+- 失败结果、只有 Provider 候选而没有最终结果、缺失段身份及含 NeuroBrain 状态的样本不可导出。
+- 桌面 playback started/completed/failed 事件按 `turn_id + message_id` 关联，只作为交付证据，不会替换 Provider/Effect 的训练目标。互相矛盾的 completed/failed 终态会进入冲突诊断并阻断导出。没有播放事件不自动证明动作未执行；审核人可在其他字段完整时作判断。
+- malformed 的 sample 事件不伪造身份、不归并为训练样本；`summary` 和 manifest 首行列出 event ID、event type、reason 与总数。
+- 审核清单通过 SHA-256 摘要保护样本事实字段，修改审核状态之外的字段会导致导出拒绝。要修正采集事实，应修复源代码并重新生成清单，而不是手工改造训练标签。
 
 Motion Lab raw-event store 升至 schema v3 时会清除旧 `motion_lab_raw_events` 表并重建；独立的 `motion_tuning_samples.json`、VTube Studio 录制库和 AstrBot 会话历史不受影响。桌面 IndexedDB Motion Lab v1 待发送队列在数据库升级时清空，避免旧格式离线事件在重连后重新写回。
 

@@ -425,6 +425,7 @@ def test_persona_segment_ready_starts_motion_future_for_that_index(
 
     runtime_state.motion_lab_recorder = MotionLabRecorder()
     from astrbot_plugin_ag99live_adapter.runtime.persona_lifecycle import (
+        PersonaTurnIdentity,
         PersonaTurnSessionRegistry,
     )
     runtime_state.persona_sessions = PersonaTurnSessionRegistry()
@@ -436,7 +437,7 @@ def test_persona_segment_ready_starts_motion_future_for_that_index(
     }
 
     runtime_state.persona_sessions.register_writer(
-        "turn-1",
+        PersonaTurnIdentity("turn-1"),
         "result-1",
         types.SimpleNamespace(
             core_turn_id="core-turn-1",
@@ -476,7 +477,9 @@ def test_persona_segment_ready_starts_motion_future_for_that_index(
             },
         )
         await asyncio.wait_for(generation_started.wait(), timeout=1)
-        work = runtime_state.persona_sessions.get_result("turn-1", "result-1")
+        work = runtime_state.persona_sessions.get_result(
+            PersonaTurnIdentity("turn-1"), "result-1"
+        )
         motion = await work.segments[0].result_future
         await asyncio.gather(*tuple(work.tasks))
         assert motion is result

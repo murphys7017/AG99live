@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import inspect
 import math
-import time
 from copy import copy
 from typing import Any, Protocol
 
@@ -13,10 +12,16 @@ from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 
 from .core_compatibility import get_prompt_annotation_capabilities
+from .motion.observation import resolve_persona_motion_source_route
 from .motion.output_sanitizer import (
     sanitize_assistant_output_segment_text,
 )
 from .runtime.message_utils import resolve_platform_segment_message_id
+from .runtime.persona_lifecycle import (
+    PersonaResultState,
+    PersonaSegmentIdentity,
+    PersonaTurnIdentity,
+)
 
 ACTION_ONLY_MOTION_ACK_TIMEOUT_SECONDS = 30.0
 
@@ -59,6 +64,12 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         super().__init__(message_str, message_obj, platform_meta, session_id)
         self.adapter = adapter
         runtime_state = getattr(adapter, "runtime_state", None)
+        source_route = resolve_persona_motion_source_route(
+            self,
+            runtime_state,
+            capture_if_missing=True,
+        )
+        independent_motion_enabled = source_route == "independent_motion"
         if bool(getattr(runtime_state, "fast_asr_enabled", False)):
             raw_message = getattr(message_obj, "raw_message", None)
             raw_payload = (
@@ -88,7 +99,7 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         persona_segment_stream_enabled = (
             getattr(adapter, "desktop_persona_segment_stream_enabled", False) is True
         )
-        if bool(getattr(runtime_state, "independent_motion_enabled", False)):
+        if independent_motion_enabled:
             self.set_extra(
                 "_interaction_plugin_runtime_target_overrides",
                 {"astrbot_plugin_ag99live_adapter": "personal_expression"},
@@ -103,7 +114,7 @@ class OLVPetPlatformEvent(AstrMessageEvent):
             )
         if persona_segment_stream_enabled:
             gate_failure = None
-            if not bool(getattr(runtime_state, "independent_motion_enabled", False)):
+            if not independent_motion_enabled:
                 gate_failure = "independent_motion_disabled"
             elif not bool(
                 getattr(runtime_state, "interaction_result_event_filter_available", False)
@@ -162,7 +173,7 @@ class OLVPetPlatformEvent(AstrMessageEvent):
             event=self, persona_result_id=persona_result_id,
         )
         self.adapter.runtime_state.persona_sessions.register_writer(
-            str(self.get_extra("_turn_id") or "").strip(),
+            PersonaTurnIdentity(str(self.get_extra("_turn_id") or "").strip()),
             persona_result_id,
             writer,
         )
@@ -194,17 +205,20 @@ class OLVPetPlatformEvent(AstrMessageEvent):
                 ),
                 None,
             )
-        self.set_extra("_interaction_incremental_output_writer", None)
         return True
 
     def _persona_result_state(self, persona_result_id: str | None = None):
         sessions = self.adapter.runtime_state.persona_sessions
         turn_id = str(self.get_extra("_turn_id") or "").strip()
+        if not turn_id:
+            return None
         normalized_result_id = str(persona_result_id or "").strip()
         return (
-            sessions.get_result(turn_id, normalized_result_id)
+            sessions.get_result(
+                PersonaTurnIdentity(turn_id), normalized_result_id
+            )
             if normalized_result_id
-            else sessions.get_active_result(turn_id)
+            else sessions.get_active_result(PersonaTurnIdentity(turn_id))
         )
 
     def _persona_session(self):
@@ -217,40 +231,60 @@ class OLVPetPlatformEvent(AstrMessageEvent):
             or self.get_extra("output_correlation_id")
             or ""
         ).strip()
-        return sessions.session(turn_id)
+        if not turn_id:
+            return None
+        return sessions.session(PersonaTurnIdentity(turn_id))
 
-    def _persona_delivery_state(self, *, turn_id: str, parent_message_id: str) -> dict[str, Any] | None:
+    def _persona_delivery_result(
+        self,
+        *,
+        parent_message_id: str,
+        persona_result_id: str | None = None,
+        create: bool = False,
+    ) -> PersonaResultState | None:
         runtime_state = getattr(self.adapter, "runtime_state", None)
         sessions = getattr(runtime_state, "persona_sessions", None)
         if sessions is None:
             return None
-        session = sessions.get_session(turn_id)
+        core_turn_id = str(self.get_extra("_turn_id", "") or "").strip()
+        if not core_turn_id:
+            return None
+        identity = PersonaTurnIdentity(core_turn_id)
+        session = (
+            sessions.session(identity)
+            if create
+            else sessions.get_session(identity)
+        )
         if session is None:
             return None
-        for result in session.results.values():
-            if result.parent_message_id == parent_message_id:
-                return result.delivery_state
-        return None
-
-    def _ensure_persona_delivery_state(
-        self, *, turn_id: str, parent_message_id: str, persona_result_id: str | None = None
-    ) -> dict[str, Any]:
-        session = self.adapter.runtime_state.persona_sessions.session(turn_id)
-        result = (
-            session.result(persona_result_id)
-            if persona_result_id
-            else next((r for r in session.results.values() if r.parent_message_id == parent_message_id), None)
+        normalized_result_id = str(persona_result_id or "").strip()
+        result = session.results.get(normalized_result_id) if normalized_result_id else next(
+            (candidate for candidate in session.results.values()
+             if candidate.parent_message_id == parent_message_id),
+            None,
         )
+        if result is None and create:
+            prior_parent_result = next(
+                (candidate for candidate in session.results.values()
+                 if candidate.parent_message_id == parent_message_id),
+                None,
+            )
+            if (
+                prior_parent_result is not None
+                and normalized_result_id
+                and prior_parent_result.persona_result_id != normalized_result_id
+            ):
+                raise RuntimeError("persona_result_id_conflict")
+            result = session.result(
+                normalized_result_id or f"delivery:{parent_message_id}"
+            )
         if result is None:
-            result = session.result(persona_result_id or f"delivery:{parent_message_id}")
-        result.set_parent_message_id(parent_message_id)
-        state = result.delivery_state
-        state.setdefault("segment_count", None)
-        state.setdefault("indexes", set())
-        state.setdefault("template", None)
-        state.setdefault("persona_result_id", result.persona_result_id)
-        state.setdefault("streaming", False)
-        return state
+            return None
+        if create:
+            result.set_parent_message_id(parent_message_id)
+        elif result.parent_message_id != parent_message_id:
+            return None
+        return result
 
     async def publish_interaction_incremental_motion(
         self,
@@ -274,6 +308,8 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         result_state = self._persona_result_state(normalized_result_id or None)
         if result_state is None or result_state.writer is None:
             return False  # A late result cannot mutate the next expression's motion.
+        if result_state.stream_status is not None:
+            return False
         normalized_result_id = result_state.persona_result_id
 
         def settle_core_future(accepted: bool) -> None:
@@ -296,73 +332,37 @@ class OLVPetPlatformEvent(AstrMessageEvent):
             if isinstance(future, asyncio.Future) and not future.done():
                 future.set_result(accepted)
 
-        segment_state = result_state.segment(segment_index)
+        result_state.segment(
+            PersonaSegmentIdentity(
+                turn=result_state.turn,
+                persona_result_id=result_state.persona_result_id,
+                segment_index=segment_index,
+            )
+        )
         writer = result_state.writer
-        if not segment_state.wire_started:
-            segment_state.pending_motion = (motion_payload, reason, final)
-            return True
         try:
-            if isinstance(motion_payload, dict) and motion_payload:
-                if segment_state.wire_motion_payload == motion_payload:
-                    if final and not segment_state.wire_motion_closed:
-                        await writer.end_stream("motion", segment_index)
-                        segment_state.wire_motion_closed = True
-                        segment_state.wire_status = "ended"
-                elif segment_state.wire_motion_closed:
-                    # The first accepted action is immutable after the stream
-                    # closes; do not replay a late revision into a new stream.
-                    logger.warning(
-                        "Discarded late incremental motion revision: turn_id=%s "
-                        "segment_index=%s",
-                        self.get_extra("_turn_id", "<missing>"),
-                        segment_index,
-                    )
-                    return False
-                else:
-                    revision = segment_state.wire_motion_revision + 1
-                    await writer.update_motion(
-                        segment_index,
-                        motion_payload,
-                        revision=revision,
-                        anchor=anchor,
-                    )
-                    segment_state.wire_motion_payload = dict(motion_payload)
-                    segment_state.wire_motion_revision = revision
-                    segment_state.wire_status = "open"
-                    if final:
-                        await writer.end_stream("motion", segment_index)
-                        segment_state.wire_motion_closed = True
-                        segment_state.wire_status = "ended"
-                first_output_at = self.get_extra(
-                    "_interaction_personal_stream_first_output_monotonic"
-                )
-                if not isinstance(first_output_at, (int, float)):
-                    self.set_extra(
-                        "_interaction_personal_stream_first_output_monotonic",
-                        time.monotonic(),
-                    )
-            else:
-                if not final:
-                    return True
-                await writer.end_stream(
-                    "motion",
+            accepted = await writer.publish_motion_result(
+                segment_index,
+                motion_payload,
+                reason=reason,
+                final=final,
+                anchor=anchor,
+            )
+            if not accepted:
+                logger.warning(
+                    "Discarded late incremental motion result: core_turn_id=%s "
+                    "persona_result_id=%s segment_index=%s",
+                    result_state.turn.turn_id,
+                    normalized_result_id,
                     segment_index,
-                    status="failed",
-                    reason=str(reason or "motion_payload_missing"),
                 )
-                segment_state.wire_motion_closed = True
-                segment_state.wire_status = "failed"
         except (RuntimeError, ValueError):
-            settle_core_future(False)
-            return False
+            accepted = False
         except BaseException:
             settle_core_future(False)
             raise
-        future = segment_state.wire_future
-        if final and isinstance(future, asyncio.Future) and not future.done():
-            future.set_result(True)
-        settle_core_future(True)
-        return True
+        settle_core_future(accepted)
+        return accepted
 
     def get_interaction_incremental_motion_deadline(
         self, *, segment_index: int, persona_result_id: str | None = None
@@ -374,25 +374,6 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         segment_state = result_state.segments.get(segment_index)
         deadline = segment_state.deadline if segment_state is not None else None
         return float(deadline) if isinstance(deadline, (int, float)) and math.isfinite(deadline) else None
-
-    async def flush_interaction_incremental_motion(
-        self, *, segment_index: int, persona_result_id: str | None = None
-    ) -> None:
-        result_state = self._persona_result_state(persona_result_id)
-        if result_state is None:
-            return
-        segment_state = result_state.segments.get(segment_index)
-        if segment_state is None or segment_state.pending_motion is None:
-            return
-        motion_payload, reason, final = segment_state.pending_motion
-        segment_state.pending_motion = None
-        await self.publish_interaction_incremental_motion(
-            persona_result_id=result_state.persona_result_id,
-            segment_index=segment_index,
-            motion_payload=motion_payload,
-            reason=reason,
-            final=final,
-        )
 
     async def send_message_with_extras(
         self,
@@ -545,7 +526,6 @@ class OLVPetPlatformEvent(AstrMessageEvent):
             self._register_message_child(parent_message_id, message_id)
         if persona_segment is not None:
             self._remember_persona_segment(
-                turn_id=turn_id,
                 parent_message_id=parent_message_id,
                 persona_result_id=str(
                     resolved_platform_extras.get("persona_result_id") or ""
@@ -571,19 +551,6 @@ class OLVPetPlatformEvent(AstrMessageEvent):
             turn_id=turn_id,
             parent_message_id=explicit_parent_id or parent_message_id,
         )
-        motion_segment_index = resolved_platform_extras.get("persona_segment_index")
-        motion_downlink_accepted = (
-            resolved_platform_extras.get("persona_streaming") is True
-            and type(motion_segment_index) is int
-            and any(
-                isinstance(item, dict)
-                and item.get("type") == "ag99live.motion_payload"
-                and item.get("persona_segment_index") == motion_segment_index
-                and isinstance(item.get("motion_payload"), dict)
-                and bool(item["motion_payload"])
-                for item in resolved_platform_extras.get("client_objects", [])
-            )
-        )
         await self.adapter.emit_message_chain(
             message_chain=message,
             turn_id=turn_id,
@@ -596,15 +563,6 @@ class OLVPetPlatformEvent(AstrMessageEvent):
             or None,
             platform_extras=resolved_platform_extras,
         )
-        if motion_downlink_accepted:
-            first_output_at = self.get_extra(
-                "_interaction_personal_stream_first_output_monotonic"
-            )
-            if not isinstance(first_output_at, (int, float)):
-                self.set_extra(
-                    "_interaction_personal_stream_first_output_monotonic",
-                    time.monotonic(),
-                )
         if not record_send_operation:
             self._has_send_oper = previous_has_send_oper
         else:
@@ -680,14 +638,6 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         normalized_message_id = str(message_id or "").strip()
         if not normalized_message_id:
             raise RuntimeError("output_event_segment_message_id_missing")
-        state = self._persona_delivery_state(turn_id=turn_id, parent_message_id=normalized_message_id)
-        is_streaming = isinstance(state, dict) and state.get("streaming") is True
-        terminal_received = self._validate_persona_stream_completion(
-            turn_id=turn_id,
-            parent_message_id=normalized_message_id,
-        )
-        if is_streaming and not terminal_received:
-            state["delivery_completed"] = True
         await self._emit_remaining_persona_tts_segments(
             turn_id=turn_id,
             parent_message_id=normalized_message_id,
@@ -704,13 +654,16 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         session = self._persona_session()
         if session is not None:
             session.active_delivery_parent = None
-        if not is_streaming or terminal_received:
-            if state is not None:
-                state.clear()
+        result_state = self._persona_delivery_result(
+            parent_message_id=normalized_message_id
+        )
+        if result_state is not None:
+            result_state.mark_delivery_completed()
 
     def record_persona_stream_failure(self, reason: str) -> None:
-        if self._persona_session().output_failure_reason is None:
-            self._persona_session().output_failure_reason = reason
+        session = self._persona_session()
+        if session is not None and session.output_failure_reason is None:
+            session.output_failure_reason = reason
 
     def mark_persona_stream_finished(
         self,
@@ -722,10 +675,6 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         status: str,
         failure_reason: str | None = None,
     ) -> None:
-        if status != "completed":
-            self.record_persona_stream_failure(
-                str(failure_reason or "").strip() or f"persona_segment_stream_{status}"
-            )
         event_turn_id = str(self.get_extra("_turn_id", "") or "").strip()
         delivery_turn_id = str(
             self.get_extra("output_correlation_id", "") or ""
@@ -745,54 +694,30 @@ class OLVPetPlatformEvent(AstrMessageEvent):
             or normalized_status not in {"completed", "incomplete", "failed", "cancelled"}
         ):
             raise RuntimeError("persona_stream_terminal_identity_invalid")
-        state = self._ensure_persona_delivery_state(
-            turn_id=delivery_turn_id,
+        turn_identity_map = getattr(
+            getattr(self.adapter, "turn_coordinator", None),
+            "turn_identity_map",
+            None,
+        )
+        resolve_core_turn = getattr(turn_identity_map, "resolve_astrbot_turn", None)
+        if callable(resolve_core_turn) and resolve_core_turn(delivery_turn_id) != event_turn_id:
+            raise RuntimeError("persona_stream_terminal_turn_binding_invalid")
+        result_state = self._persona_delivery_result(
             parent_message_id=normalized_parent_id,
             persona_result_id=normalized_result_id,
+            create=True,
         )
-        if (
-            state.get("persona_result_id") not in {None, normalized_result_id}
-            or state.get("segment_count") not in {None, segment_count}
-        ):
-            raise RuntimeError("persona_stream_terminal_identity_conflict")
-        state["segment_count"] = segment_count
-        state["persona_result_id"] = normalized_result_id
-        state["streaming"] = True
-        state["terminal_status"] = normalized_status
-        if state.get("delivery_completed"):
-            try:
-                self._validate_persona_stream_completion(
-                    turn_id=delivery_turn_id,
-                    parent_message_id=normalized_parent_id,
-                )
-            finally:
-                (self._persona_delivery_state(turn_id=delivery_turn_id, parent_message_id=normalized_parent_id) or {}).clear()
-
-    def _validate_persona_stream_completion(
-        self,
-        *,
-        turn_id: str,
-        parent_message_id: str,
-    ) -> bool:
-        state = self._persona_delivery_state(
-            turn_id=turn_id, parent_message_id=parent_message_id
-        )
-        if not isinstance(state, dict) or state.get("streaming") is not True:
-            return True
-        segment_count = state.get("segment_count")
-        status = state.get("terminal_status")
-        indexes = state.get("indexes")
-        if type(segment_count) is not int or not isinstance(status, str):
-            return False
-        if not isinstance(indexes, set):
-            raise RuntimeError("persona_stream_segment_state_invalid")
-        if any(type(index) is not int or index < 0 or index >= segment_count for index in indexes):
-            raise RuntimeError("persona_stream_segment_index_out_of_range")
-        if status == "completed" and indexes != set(range(segment_count)):
-            raise RuntimeError("persona_stream_segment_coverage_incomplete")
-        if status != "completed" and indexes != set(range(len(indexes))):
-            raise RuntimeError("persona_stream_segment_prefix_invalid")
-        return True
+        if result_state is None:
+            raise RuntimeError("persona_stream_terminal_result_missing")
+        result_state.set_parent_message_id(normalized_parent_id)
+        result_state.set_expected_segment_count(segment_count)
+        result_state.delivery_assembly_state(streaming=True)
+        result_state.finish_stream(normalized_status, failure_reason)
+        if normalized_status != "completed":
+            self.record_persona_stream_failure(
+                str(failure_reason or "").strip()
+                or f"persona_segment_stream_{normalized_status}"
+            )
 
     async def _close_frontend_turn_output_queue(self) -> None:
         turn_id = str(self.get_extra("output_correlation_id", "") or "").strip()
@@ -1068,8 +993,11 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         if not isinstance(tts, dict) or str(tts.get("status") or "").strip() != "failed":
             return None
         message_id = str(tts.get("message_id") or "").strip()
+        turn_id = str(self.get_extra("_turn_id") or "").strip()
+        if not turn_id:
+            return None
         found = self.adapter.runtime_state.persona_sessions.find_segment_by_message_id(
-            str(self.get_extra("_turn_id") or "").strip(),
+            PersonaTurnIdentity(turn_id),
             message_id,
         )
         if found is None:
@@ -1109,8 +1037,11 @@ class OLVPetPlatformEvent(AstrMessageEvent):
             message_id = resolve_platform_segment_message_id(platform_extras)
         except ValueError:
             return ""
+        turn_id = str(self.get_extra("_turn_id") or "").strip()
+        if not turn_id:
+            return ""
         found = self.adapter.runtime_state.persona_sessions.find_segment_by_message_id(
-            str(self.get_extra("_turn_id") or "").strip(),
+            PersonaTurnIdentity(turn_id),
             message_id,
         )
         if found is None:
@@ -1179,7 +1110,6 @@ class OLVPetPlatformEvent(AstrMessageEvent):
     def _remember_persona_segment(
         self,
         *,
-        turn_id: str,
         parent_message_id: str,
         persona_result_id: str | None,
         segment_index: int,
@@ -1187,39 +1117,17 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         streaming: bool,
         template_extras: dict[str, Any] | None,
     ) -> None:
-        state = self._ensure_persona_delivery_state(
-            turn_id=turn_id,
+        normalized_result_id = str(persona_result_id or "").strip()
+        if streaming and not normalized_result_id:
+            raise RuntimeError("persona_stream_result_identity_missing")
+        result_state = self._persona_delivery_result(
             parent_message_id=parent_message_id,
-            persona_result_id=persona_result_id,
+            persona_result_id=normalized_result_id or None,
+            create=True,
         )
-        if state.get("segment_count") is None:
-            state["segment_count"] = segment_count
-        state["streaming"] = bool(state.get("streaming") or streaming)
-        existing_count = state.get("segment_count")
-        if (
-            existing_count is not None
-            and segment_count is not None
-            and existing_count != segment_count
-        ):
-            raise RuntimeError("persona_segment_count_conflict")
-        existing_result_id = state.get("persona_result_id")
-        if (
-            existing_result_id
-            and persona_result_id
-            and existing_result_id != persona_result_id
-        ):
-            raise RuntimeError("persona_result_id_conflict")
-        indexes = state["indexes"]
-        if streaming and segment_index in indexes:
-            raise RuntimeError("persona_stream_segment_index_duplicate")
-        if streaming and segment_index != len(indexes):
-            raise RuntimeError("persona_stream_segment_index_nonsequential")
-        if segment_count is not None and segment_index >= segment_count:
-            raise RuntimeError("persona_segment_index_out_of_range")
-        state["segment_count"] = segment_count if segment_count is not None else existing_count
-        state["persona_result_id"] = persona_result_id or existing_result_id
-        state["streaming"] = bool(state.get("streaming") or streaming)
-        indexes.add(segment_index)
+        if result_state is None:
+            raise RuntimeError("persona_delivery_result_state_missing")
+        template = None
         if template_extras is not None:
             template = dict(template_extras)
             for field in (
@@ -1237,7 +1145,12 @@ class OLVPetPlatformEvent(AstrMessageEvent):
                 "semantic_text",
             ):
                 template.pop(field, None)
-            state["template"] = template
+        result_state.remember_delivery_segment(
+            segment_index=segment_index,
+            segment_count=segment_count,
+            streaming=streaming,
+            template_extras=template,
+        )
 
     async def _emit_missing_persona_tts_segments_before(
         self,
@@ -1248,14 +1161,18 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         segment_count: int,
         template_extras: dict[str, Any],
     ) -> None:
-        state = self._persona_delivery_state(
-            turn_id=turn_id, parent_message_id=parent_message_id
+        result_state = self._persona_delivery_result(
+            parent_message_id=parent_message_id
         )
-        if isinstance(state, dict) and state.get("streaming") is True:
+        assembly = result_state.delivery_assembly if result_state is not None else None
+        if assembly is not None and assembly.streaming:
             return
-        if state is not None and state["segment_count"] != segment_count:
+        if (
+            result_state is not None
+            and result_state.expected_segment_count not in {None, segment_count}
+        ):
             raise RuntimeError("persona_segment_count_conflict")
-        seen = state["indexes"] if state is not None else set()
+        seen = assembly.segment_indexes if assembly is not None else set()
         for segment_index in range(before_segment_index):
             if segment_index in seen:
                 continue
@@ -1273,26 +1190,30 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         turn_id: str,
         parent_message_id: str,
     ) -> None:
-        state = self._persona_delivery_state(
-            turn_id=turn_id, parent_message_id=parent_message_id
+        result_state = self._persona_delivery_result(
+            parent_message_id=parent_message_id
         )
-        if not isinstance(state, dict) or not isinstance(state.get("template"), dict):
+        assembly = result_state.delivery_assembly if result_state is not None else None
+        if (
+            result_state is None
+            or assembly is None
+            or not isinstance(assembly.template_extras, dict)
+        ):
             return
-        if state.get("streaming") is True:
+        if assembly.streaming:
             return
-        segment_count = state.get("segment_count")
-        seen = state.get("indexes")
-        if not isinstance(segment_count, int) or not isinstance(seen, set):
+        segment_count = result_state.expected_segment_count
+        if type(segment_count) is not int:
             return
         for segment_index in range(segment_count):
-            if segment_index in seen:
+            if segment_index in assembly.segment_indexes:
                 continue
             await self._emit_persona_motion_only_segment(
                 turn_id=turn_id,
                 parent_message_id=parent_message_id,
                 segment_index=segment_index,
                 segment_count=segment_count,
-                template_extras=state["template"],
+                template_extras=assembly.template_extras,
             )
 
     async def _emit_persona_motion_only_segment(

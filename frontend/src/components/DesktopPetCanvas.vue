@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { toRef } from "vue";
+import { toRef, watch } from "vue";
 import type { ModelSummary } from "../types/protocol";
+import type { PresenceRendererStatus } from "../presence/presenceStateStore";
 import type { Live2dPresentationSettings } from "../live2d-renderer/settings";
 import { useLive2dRenderer } from "../live2d-renderer/useLive2dRenderer";
 import { usePetWindowDrag } from "../app/usePetWindowDrag";
@@ -12,11 +13,15 @@ const props = defineProps<{
   live2dPresentationSettings: Live2dPresentationSettings;
   stageMessage: string;
 }>();
+const emit = defineEmits<{
+  "renderer-status-change": [status: PresenceRendererStatus];
+}>();
 
 const selectedModelRef = toRef(props, "selectedModel");
 const live2dPresentationSettingsRef = toRef(props, "live2dPresentationSettings");
-const { containerRef, canvasRef, renderError } =
+const { containerRef, canvasRef, renderError, renderStatus } =
   useLive2dRenderer(selectedModelRef, live2dPresentationSettingsRef);
+watch(renderStatus, (status) => emit("renderer-status-change", status), { immediate: true });
 const { config: spoutConfig } = useSpoutSettings();
 useSpoutFramePublisher(canvasRef, toRef(spoutConfig, "enabled"));
 const {

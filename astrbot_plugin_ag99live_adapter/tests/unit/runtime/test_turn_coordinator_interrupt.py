@@ -4,6 +4,10 @@ import asyncio
 import sys
 import types
 
+from astrbot_plugin_ag99live_adapter.runtime.persona_lifecycle import (
+    PersonaTurnIdentity,
+)
+
 
 async def _noop_async(*_args, **_kwargs) -> None:
     return None
@@ -209,7 +213,7 @@ def test_backend_abort_cancels_turn_owned_motion_task_and_clears_segment_work(
             stop_event=lambda: None,
         )
         sessions = _persona_sessions()
-        sessions.register_task("astrbot-turn", task)
+        sessions.register_task(PersonaTurnIdentity("astrbot-turn"), task)
         runtime = types.SimpleNamespace(
             runtime_state=types.SimpleNamespace(persona_sessions=sessions),
             _turn_terminal_results={},
@@ -248,7 +252,9 @@ def test_backend_abort_cancels_turn_owned_motion_task_and_clears_segment_work(
         await asyncio.gather(task, return_exceptions=True)
 
         assert task.cancelled()
-        assert runtime.runtime_state.persona_sessions.get_session("astrbot-turn") is None
+        assert runtime.runtime_state.persona_sessions.get_session(
+            PersonaTurnIdentity("astrbot-turn")
+        ) is None
 
     asyncio.run(run_case())
 
@@ -265,7 +271,7 @@ def test_disconnect_reset_cancels_orphaned_motion_work(install_fake_astrbot) -> 
 
         task = asyncio.create_task(wait_forever())
         sessions = _persona_sessions()
-        sessions.register_task("astrbot-turn", task)
+        sessions.register_task(PersonaTurnIdentity("astrbot-turn"), task)
         runtime = types.SimpleNamespace(
             runtime_state=types.SimpleNamespace(persona_sessions=sessions),
             _turn_timings={},
@@ -290,7 +296,9 @@ def test_disconnect_reset_cancels_orphaned_motion_work(install_fake_astrbot) -> 
         await asyncio.gather(task, return_exceptions=True)
 
         assert task.cancelled()
-        assert runtime.runtime_state.persona_sessions.get_session("astrbot-turn") is None
+        assert runtime.runtime_state.persona_sessions.get_session(
+            PersonaTurnIdentity("astrbot-turn")
+        ) is None
 
     asyncio.run(run_case())
 

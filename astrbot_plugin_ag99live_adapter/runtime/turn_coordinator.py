@@ -57,6 +57,7 @@ from ..protocol.constants import (
 from ..protocol.parser import parse_inbound_message
 from ..services.speech_service import SpeechIngressService
 from .pre_action import PreActionRuntime
+from .persona_lifecycle import PersonaTurnIdentity
 from .conversation_observation_window import ConversationObservationWindow
 from .image_diagnostics import (
     emit_image_input_diagnostics,
@@ -870,7 +871,9 @@ class TurnCoordinator:
             event,
             resolved_turn_id,
         )
-        self.runtime_state.persona_sessions.clear_turn(motion_work_turn_id)
+        self.runtime_state.persona_sessions.clear_turn(
+            PersonaTurnIdentity(motion_work_turn_id)
+        )
 
     def _cancel_turn_owned_motion_task(
         self,
@@ -886,10 +889,12 @@ class TurnCoordinator:
         """
         motion_work_turn_id = _resolve_motion_work_turn_id(event, turn_id)
         session = self.runtime_state.persona_sessions.get_session(
-            motion_work_turn_id
+            PersonaTurnIdentity(motion_work_turn_id)
         )
         tasks = tuple(session.tasks) if session is not None else ()
-        self.runtime_state.persona_sessions.clear_turn(motion_work_turn_id)
+        self.runtime_state.persona_sessions.clear_turn(
+            PersonaTurnIdentity(motion_work_turn_id)
+        )
         for task in tasks:
             if task.done():
                 continue

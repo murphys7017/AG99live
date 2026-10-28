@@ -56,6 +56,11 @@ import {
 } from "../motion-lab/outboundQueue";
 import { createConversationPlaybackRuntime } from "./createConversationPlaybackRuntime";
 import { useCursorGaze } from "./useCursorGaze";
+import {
+  createPresenceStateStore,
+  type PresenceConversationPhase,
+  type PresenceRendererStatus,
+} from "../presence/presenceStateStore";
 
 export interface PetDesktopRuntime {
   sessionStore: ReturnType<typeof useTurnPlaybackSessionStore>;
@@ -64,16 +69,71 @@ export interface PetDesktopRuntime {
   live2dPresentationSettings: Live2dPresentationSettings;
   stageMessage: ComputedRef<string>;
   showContextMenu: ReturnType<typeof useDesktopContextMenu>["showContextMenu"];
+  reportRendererStatus: (status: PresenceRendererStatus) => void;
 }
 
 export const petDesktopRuntimeKey: InjectionKey<PetDesktopRuntime> =
   Symbol("AG99livePetDesktopRuntime");
 
+function isSameConversationTurn(left: string, right: string): boolean {
+  return left === right
+    || left.startsWith(`${right}:vad:`)
+    || right.startsWith(`${left}:vad:`);
+}
+
 export function providePetDesktopRuntime(): PetDesktopRuntime {
   const sessionStore = useTurnPlaybackSessionStore({ normalizeMotionPayload });
   const modelSync = createModelSync();
   const { state, selectedModel, selectedSemanticAxisProfile } = modelSync;
-  useCursorGaze(selectedModel);
+  const presenceStateStore = createPresenceStateStore({
+    onSnapshot: (snapshot) => {
+      console.info("[PresenceState] transition.", {
+        revision: snapshot.revision,
+        source: snapshot.lastTransition?.source,
+        type: snapshot.lastTransition?.type,
+        connection: snapshot.connectionStatus,
+        phase: snapshot.conversationPhase,
+        playback: snapshot.playback,
+        microphone: snapshot.microphone.status,
+        attention: snapshot.attentionTarget,
+        model: snapshot.model.selection,
+        renderer: snapshot.model.rendererStatus,
+        mode: snapshot.mode,
+      });
+    },
+  });
+  let presencePreparationRevision = 0;
+  let activePresencePreparation: {
+    turnId: string;
+    requestId: string;
+    revision: number;
+  } | null = null;
+  function clearPresencePreparation(turnId?: string | null, requestId?: string): void {
+    const active = activePresencePreparation;
+    if (!active) {
+      return;
+    }
+    if (typeof turnId === "string" && !isSameConversationTurn(active.turnId, turnId)) {
+      return;
+    }
+    if (requestId !== undefined && active.requestId !== requestId) {
+      return;
+    }
+    presenceStateStore.dispatch({
+      source: "pre_action",
+      type: "conversation.preparation.changed",
+      pending: false,
+      revision: active.revision,
+    });
+    activePresencePreparation = null;
+  }
+  useCursorGaze(selectedModel, (active) => {
+    presenceStateStore.dispatch({
+      source: "cursor_gaze",
+      type: "attention.changed",
+      active,
+    });
+  });
   const bridge = useDesktopBridge();
   const motionEngineSettings = reactive(
     cloneModelEngineSettings(bridge.state.snapshot.motionEngineSettings),
@@ -120,6 +180,101 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     desktopRuntimeSettings,
   });
   const { adapter, playbackTimeline } = conversationPlayback;
+  watch(
+    () => adapter.state.status,
+    (status) => {
+      presenceStateStore.dispatch({
+        source: "adapter_connection",
+        type: "connection.changed",
+        status,
+      });
+    },
+    { immediate: true },
+  );
+  watch(
+    () => [adapter.state.micCapturing, adapter.state.microphoneStandby] as const,
+    ([capturing, standby]) => {
+      presenceStateStore.dispatch({
+        source: "adapter_microphone",
+        type: "microphone.changed",
+        capturing,
+        standby,
+      });
+    },
+    { immediate: true },
+  );
+  watch(
+    () => adapter.state.isPlayingAudio,
+    (playing) => {
+      presenceStateStore.dispatch({
+        source: "playback_audio",
+        type: "playback.changed",
+        playing,
+      });
+    },
+    { immediate: true },
+  );
+  let modelSelectionRevision = 0;
+  watch(
+    () => selectedModel.value?.model_url ?? null,
+    (modelKey, previousModelKey) => {
+      if (modelKey === previousModelKey || (previousModelKey === undefined && modelKey === null)) {
+        return;
+      }
+      modelSelectionRevision += 1;
+      presenceStateStore.dispatch({
+        source: "model_sync",
+        type: "model.selection.changed",
+        selected: modelKey !== null,
+        selectionRevision: modelSelectionRevision,
+      });
+    },
+    { immediate: true },
+  );
+  watch(
+    [
+      () => sessionStore.getActiveSession()?.id ?? null,
+      () => sessionStore.getActiveSession()?.phase ?? null,
+      () => sessionStore.getActiveSession()?.interrupted ?? false,
+    ],
+    () => {
+      const session = sessionStore.getActiveSession();
+      let phase: Exclude<PresenceConversationPhase, "preparing" | "speaking"> = "idle";
+      if (session?.interrupted) {
+        phase = "interrupted";
+      } else if (session) {
+        switch (session.phase) {
+          case "collecting":
+          case "ready":
+          case "playing":
+            phase = "thinking";
+            break;
+          case "settling":
+            phase = "settling";
+            break;
+          case "completed":
+            phase = "completed";
+            break;
+          case "failed":
+            phase = "failed";
+            break;
+        }
+      }
+      presenceStateStore.dispatch({
+        source: "playback_session",
+        type: "conversation.phase.changed",
+        phase,
+      });
+    },
+    { immediate: true },
+  );
+  function reportRendererStatus(status: PresenceRendererStatus): void {
+    presenceStateStore.dispatch({
+      source: "live2d_renderer",
+      type: "model.renderer_status.changed",
+      status,
+    });
+  }
   const motionPlayer = usePreviewMotionPlayer();
   const manualPreviewText = ref("");
   let manualPreviewRequestId = "";
@@ -277,6 +432,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       const completedRun = modelEngine.handlePlaybackTerminal(event);
       if (completedRun?.origin === "pre_action") {
         reportLatencyStage("pre_action_ended", completedRun.turnId, null, completedRun.messageId);
+        clearPresencePreparation(completedRun.turnId, completedRun.messageId);
       }
       if (completedRun?.origin !== "manual_preview") {
         return;
@@ -541,10 +697,17 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
   );
   adapter.setTurnLifecycleObserver((event) => {
     if (event.phase === "started") {
+      presenceStateStore.dispatch({
+        source: "playback_session",
+        type: "conversation.phase.changed",
+        phase: "thinking",
+      });
+      clearPresencePreparation(event.turnId);
       modelEngine.cancelIdleMotion();
       modelEngine.startThinkingSway(event.turnId);
       return;
     }
+    clearPresencePreparation(event.turnId);
     modelEngine.releaseThinkingSway(event.turnId);
     modelEngine.cancelPreAction(event.turnId);
   });
@@ -552,9 +715,27 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     modelEngine.cancelIdleMotion();
     if (event.action === "ready") {
       const started = modelEngine.startPreAction(event.motion, event.turnId, event.requestId);
+      if (started) {
+        const revision = ++presencePreparationRevision;
+        activePresencePreparation = {
+          turnId: event.turnId,
+          requestId: event.requestId,
+          revision,
+        };
+        presenceStateStore.dispatch({
+          source: "pre_action",
+          type: "conversation.preparation.changed",
+          pending: true,
+          revision,
+        });
+      }
       console.info("[PreAction] execution admission.", { turnId: event.turnId, requestId: event.requestId, started });
+    } else if (event.action === "input") {
+      clearPresencePreparation();
+      modelEngine.cancelPreAction();
     } else {
-      modelEngine.cancelPreAction(event.action === "input" ? null : event.turnId);
+      clearPresencePreparation(event.turnId, event.requestId);
+      modelEngine.cancelPreAction(event.turnId, event.requestId);
     }
   });
   const idleMotionAllowed = computed(() => {
@@ -582,6 +763,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
   }, () => {
     modelEngine.cancelIdleMotion();
     modelEngine.cancelPreAction();
+    clearPresencePreparation();
   });
   const pushToTalk = usePushToTalkController(adapter);
   let snapshotPublisher: ReturnType<typeof createPetRuntimeSnapshotPublisher> | null = null;
@@ -655,6 +837,8 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
         adapter.setTurnLifecycleObserver(null);
         modelEngine.releaseThinkingSway();
       }],
+      ["pre-action observer detach", () => adapter.setPreActionObserver(null)],
+      ["presence state store dispose", () => presenceStateStore.dispose()],
       ["MotionLab reconnect watch stop", stopMotionLabReconnectWatch],
       ["MotionLab recorded handler detach", () => {
         adapter.setMotionLabRawEventRecordedHandler(null);
@@ -703,6 +887,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     live2dPresentationSettings,
     stageMessage,
     showContextMenu,
+    reportRendererStatus,
   };
 
   provide(petDesktopRuntimeKey, runtime);
