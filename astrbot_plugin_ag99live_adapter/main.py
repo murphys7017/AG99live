@@ -804,7 +804,7 @@ class MyPlugin(Star):
             return
         result_state.next_segment_index += 1
         try:
-            result_state.bind_content(
+            segment_state = result_state.bind_content(
                 PersonaSegmentIdentity(
                     turn=result_state.turn,
                     persona_result_id=normalized_result_id,
