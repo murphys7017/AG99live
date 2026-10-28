@@ -863,3 +863,65 @@ def test_abort_visible_turn_routes_to_frontend_turn_coordinator(
     assert event.adapter.aborted_turns == [
         ("turn-1", "superseded_by_new_user_input")
     ]
+
+
+def test_final_incremental_motion_resolves_core_segment_future(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    _install_platform_event_astrbot_stubs(install_fake_astrbot, monkeypatch)
+    module = _load_platform_event_module()
+    event = _build_event(module, images=[])
+    event.set_extra("_turn_id", "core-turn-1")
+
+    async def run() -> None:
+        from astrbot_plugin_ag99live_adapter.runtime.persona_lifecycle import (
+            PersonaTurnIdentity,
+        )
+
+        segment_state = types.SimpleNamespace(
+            wire_started=True,
+            wire_motion_payload=None,
+            wire_motion_revision=0,
+            wire_motion_closed=False,
+            wire_status="not_started",
+            wire_future=None,
+            pending_motion=None,
+        )
+
+        class WriterStub:
+            async def publish_motion_result(self, segment_index, payload, **kwargs):
+                return True
+
+            async def update_motion(self, segment_index, payload, **kwargs):
+                pass
+
+            async def end_stream(self, resource, segment_index, **kwargs):
+                pass
+
+        result_state = types.SimpleNamespace(
+            persona_result_id="result-1",
+            writer=WriterStub(),
+            stream_status=None,
+            turn=PersonaTurnIdentity("core-turn-1"),
+            segment=lambda *_args: segment_state,
+        )
+        event._persona_result_state = lambda _result_id=None: result_state
+
+        core_motion_future = asyncio.get_running_loop().create_future()
+        event.set_extra(
+            "_interaction_incremental_motion_states",
+            {"result-1": {"futures": {0: core_motion_future}}},
+        )
+
+        accepted = await event.publish_interaction_incremental_motion(
+            persona_result_id="result-1",
+            segment_index=0,
+            motion_payload={"actions": ["nod"]},
+        )
+
+        assert accepted is True
+        assert core_motion_future.done()
+        assert core_motion_future.result() is True
+
+    asyncio.run(run())

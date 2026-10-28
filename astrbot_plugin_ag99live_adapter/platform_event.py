@@ -336,6 +336,23 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         future = segment_state.wire_future
         if final and isinstance(future, asyncio.Future) and not future.done():
             future.set_result(True)
+        if final:
+            motion_states = self.get_extra(
+                "_interaction_incremental_motion_states", {}
+            )
+            motion_state = (
+                motion_states.get(normalized_result_id)
+                if isinstance(motion_states, dict)
+                else None
+            )
+            futures = (
+                motion_state.get("futures")
+                if isinstance(motion_state, dict)
+                else None
+            )
+            core_future = futures.get(segment_index) if isinstance(futures, dict) else None
+            if isinstance(core_future, asyncio.Future) and not core_future.done():
+                core_future.set_result(True)
         return True
 
     def get_interaction_incremental_motion_deadline(
