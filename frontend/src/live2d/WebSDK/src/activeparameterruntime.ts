@@ -13,6 +13,7 @@ import {
   type ExternalAudioSignalSourceOptions,
   type ExternalAudioSignalValues,
 } from "./speechsignalruntime";
+import type { ResolvedParameterFrameEntry } from "./parametermixer";
 
 export type { ExternalAudioSignalSourceOptions, ExternalAudioSignalValues };
 
@@ -24,6 +25,7 @@ export interface ActiveParameterFrameFailure {
 export interface ActiveParameterFrameResult {
   failure: ActiveParameterFrameFailure | null;
   directPlanReleased: boolean;
+  parameters: readonly ResolvedParameterFrameEntry[];
 }
 
 /**
@@ -152,6 +154,7 @@ export class ActiveParameterRuntime {
           reason: execution.reason,
         },
         directPlanReleased: false,
+        parameters: [],
       };
     }
     if (execution.idlePlan.released) this.idlePlan = null;
@@ -199,6 +202,7 @@ export class ActiveParameterRuntime {
     return {
       failure: null,
       directPlanReleased: execution.directPlan.released && planState !== null,
+      parameters: execution.parameters,
     };
   }
 

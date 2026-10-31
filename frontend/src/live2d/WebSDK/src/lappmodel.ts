@@ -64,6 +64,7 @@ import {
   type ExternalAudioSignalValues,
 } from "./activeparameterruntime";
 import { TextureInfo } from "./lapptexturemanager";
+import { VtsParameterSink } from "./vtsParameterSink";
 import { CubismMoc } from "@framework/model/cubismmoc";
 import {
   cancelLive2DModelLoad,
@@ -205,6 +206,7 @@ export class LAppModel extends CubismUserModel {
       this.stopDirectParameterPlan("direct_parameter_plan_model_released", "failed"));
     releaseStep("motion resource stop", () => this.stopMotion("motion_model_released"));
     releaseStep("active parameter runtime reset", () => this._activeParameterRuntime.reset());
+    releaseStep("VTS parameter sink stop", () => this._vtsParameterSink.stop());
     releaseStep("Cubism model release", () => super.release());
     if (releaseErrors.length > 0) {
       throw releaseErrors[0];
@@ -530,6 +532,7 @@ export class LAppModel extends CubismUserModel {
         this._initialized = true;
 
         this.createRenderer();
+        this.configureModelMasking();
         this.setupTextures();
         this.getRenderer().startUp(gl);
         return;
@@ -615,7 +618,25 @@ export class LAppModel extends CubismUserModel {
   public reloadRenderer(): void {
     this.deleteRenderer();
     this.createRenderer();
+    this.configureModelMasking();
     this.setupTextures();
+  }
+
+  /**
+   * Apply renderer settings required by models with dense facial clipping.
+   * The model asset owns this compatibility hint; the wire and motion layers
+   * remain unchanged.
+   */
+  private configureModelMasking(): void {
+    const modelHomeDir = String(this._modelHomeDir || "")
+      .replace(/\\/g, "/")
+      .toLowerCase();
+    if (!modelHomeDir.includes("/deepseek/")) {
+      return;
+    }
+    const renderer = this.getRenderer();
+    renderer.useHighPrecisionMask(true);
+    renderer.setClippingMaskBufferSize(1024);
   }
 
   /**
@@ -743,6 +764,10 @@ export class LAppModel extends CubismUserModel {
         lipSyncParameterIds: this._lipSyncIds,
       });
       parameterMixerFailure = frameResult.failure;
+      this._vtsParameterSink.publish(frameResult.parameters.map((parameter) => ({
+        id: parameter.parameterIdRaw,
+        value: parameter.value,
+      })));
       if (frameResult.directPlanReleased) {
         console.info("[LAppModel] Direct parameter plan released after parameter mixing.");
         this.stopDirectParameterPlan("", "completed");
@@ -1462,6 +1487,7 @@ export class LAppModel extends CubismUserModel {
     this._initialized = true;
 
     this.createRenderer();
+    this.configureModelMasking();
     this.setupTextures();
     this.getRenderer().startUp(gl);
   }
@@ -2321,6 +2347,8 @@ export class LAppModel extends CubismUserModel {
   public constructor() {
     super();
 
+    this._vtsParameterSink = new VtsParameterSink();
+
     this._modelSetting = null;
     this._modelHomeDir = null;
     this._userTimeSeconds = 0.0;
@@ -2420,6 +2448,7 @@ export class LAppModel extends CubismUserModel {
   _directParameterPlanError: string;
   _motionStartError: string;
   private _activeParameterRuntime: ActiveParameterRuntime;
+  private _vtsParameterSink: VtsParameterSink;
   private _physicsResponseScale: number;
   private _physicsResponseProtectedParameterIds: Set<string>;
   private _physicsInputParameterIds: Set<string>;
