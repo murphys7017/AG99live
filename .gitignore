@@ -18,6 +18,7 @@ __pycache__/
 *.tsbuildinfo
 *.obj
 astrbot_plugin_ag99live_adapter/debug_exports/
+astrbot_plugin_ag99live_adapter/live2ds/DeepSeek/
 *.ipynb
 analysis/
 analysis/*.ipynb

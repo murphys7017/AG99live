@@ -176,6 +176,58 @@ function booleanSettingHandler(
   };
 }
 
+function localStorageTextSettingHandler(
+  key: string,
+  defaultValue: string,
+  normalize: (value: string) => string = (value) => value.trim(),
+): DesktopSettingHandler {
+  const read = () => {
+    try {
+      return normalize(window.localStorage.getItem(key) ?? defaultValue);
+    } catch {
+      return defaultValue;
+    }
+  };
+  return {
+    list: async () => ({ value: read(), options: [] }),
+    set: async (value) => {
+      const normalized = normalize(value);
+      if (!normalized) throw new Error("desktop_setting_value_required");
+      window.localStorage.setItem(key, normalized);
+      return { value: normalized, options: [] };
+    },
+  };
+}
+
+function localStorageBooleanSettingHandler(key: string): DesktopSettingHandler {
+  return booleanSettingHandler(
+    () => {
+      try { return window.localStorage.getItem(key) === "true"; } catch { return false; }
+    },
+    (enabled) => window.localStorage.setItem(key, String(enabled)),
+  );
+}
+
+function localStorageNumberSettingHandler(
+  key: string,
+  defaultValue: number,
+  minimum: number,
+  maximum: number,
+): DesktopSettingHandler {
+  return boundedNumberSettingHandler(
+    () => {
+      try {
+        const value = Number(window.localStorage.getItem(key));
+        return Number.isFinite(value) ? value : defaultValue;
+      } catch { return defaultValue; }
+    },
+    (value) => window.localStorage.setItem(key, String(value)),
+    minimum,
+    maximum,
+    1,
+  );
+}
+
 function boundedNumberSettingHandler(
   current: () => number,
   apply: (value: number) => void,
@@ -509,6 +561,18 @@ const DESKTOP_SETTING_HANDLERS: Record<
   string,
   (access: DesktopSettingAccess) => DesktopSettingHandler
 > = {
+  vts_output_enabled: () => localStorageBooleanSettingHandler("ag99live.vts.enabled"),
+  vts_endpoint: () => localStorageTextSettingHandler(
+    "ag99live.vts.endpoint",
+    "ws://localhost:8001",
+    (value) => value.trim() || "ws://localhost:8001",
+  ),
+  vts_send_hz: () => localStorageNumberSettingHandler("ag99live.vts.send_hz", 3, 1, 30),
+  vts_parameter_mapping: () => localStorageTextSettingHandler(
+    "ag99live.vts.parameter_mapping",
+    "{}",
+    (value) => value.trim() || "{}",
+  ),
   astrbot_webui_url: webControlUrlHandler,
   cursor_gaze_enabled: () => booleanSettingHandler(
     () => loadCursorGazeSettings().enabled,

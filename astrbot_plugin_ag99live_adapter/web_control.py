@@ -612,6 +612,37 @@ class DesktopSetting:
 
 DESKTOP_SETTINGS_SPEC: tuple[DesktopSetting, ...] = (
     DesktopSetting(
+        key="vts_output_enabled",
+        group="appearance",
+        label="VTube Studio 参数输出",
+        description="将当前动作混合后的参数发送到 VTube Studio。",
+        kind="toggle",
+    ),
+    DesktopSetting(
+        key="vts_endpoint",
+        group="appearance",
+        label="VTube Studio API 地址",
+        description="默认 ws://localhost:8001。",
+        kind="text",
+    ),
+    DesktopSetting(
+        key="vts_send_hz",
+        group="appearance",
+        label="VTube Studio 发送频率",
+        description="每秒发送参数帧数；低频模式适合先验证链路。",
+        kind="range",
+        minimum=1,
+        maximum=30,
+        step=1,
+    ),
+    DesktopSetting(
+        key="vts_parameter_mapping",
+        group="appearance",
+        label="VTube Studio 参数映射",
+        description="JSON 对象，例如 {\"ParamAngleX\":\"FaceAngleX\"}。",
+        kind="text",
+    ),
+    DesktopSetting(
         key="astrbot_webui_url",
         group="connection",
         label="AstrBot WebUI 地址",
