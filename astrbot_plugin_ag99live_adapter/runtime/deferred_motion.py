@@ -39,16 +39,24 @@ class DeferredMotionDelivery:
         self, turn_id: str, message_id: str,
         resolve: Callable[[], Awaitable[dict[str, Any]]],
         timeout_seconds: float = 30,
-    ) -> None:
+    ) -> bool:
         key = (turn_id, message_id)
         if key in self._entries or self._is_terminal(turn_id):
             raise ValueError("deferred_motion_registration_invalid")
         if len(self._entries) >= _DEFERRED_MOTION_MAX_ENTRIES:
-            raise ValueError("deferred_motion_capacity_exceeded")
+            logger.warning(
+                "Deferred motion registration degraded: capacity exceeded "
+                "turn_id=%s message_id=%s capacity=%s",
+                turn_id,
+                message_id,
+                _DEFERRED_MOTION_MAX_ENTRIES,
+            )
+            return False
         entry = _Delivery(sent=asyncio.Event(), ready=asyncio.Event())
         self._entries[key] = entry
         entry.task = asyncio.create_task(self._deliver(key, entry, resolve, timeout_seconds))
         entry.task.add_done_callback(lambda task: None if task.cancelled() else task.exception())
+        return True
 
     async def _deliver(self, key, entry, resolve, timeout_seconds) -> None:
         turn_id, message_id = key

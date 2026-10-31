@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from datetime import datetime, timezone
 from math import isfinite
 from typing import Any, Callable
@@ -9,6 +10,8 @@ from uuid import uuid4
 from astrbot.api import logger
 
 from .raw_event_store import MotionLabRawEventStore
+
+_QUEUE_FULL_LOG_INTERVAL_SECONDS = 1.0
 
 
 class MotionLabRecorder:
@@ -32,6 +35,21 @@ class MotionLabRecorder:
         self._closed = False
         self._healthy = True
         self._failure_reason = ""
+        self._queue_full_count = 0
+        self._last_queue_full_log_at = 0.0
+
+    @property
+    def queue_full_count(self) -> int:
+        """Return the number of observation events rejected by a full queue."""
+        return self._queue_full_count
+
+    def queue_stats(self) -> dict[str, int]:
+        """Expose bounded queue health without exposing the queue internals."""
+        return {
+            "queued": self._queue.qsize(),
+            "capacity": self._queue.maxsize,
+            "queue_full_count": self._queue_full_count,
+        }
 
     def enqueue(
         self,
@@ -52,10 +70,21 @@ class MotionLabRecorder:
         try:
             self._queue.put_nowait((snapshot, on_persisted))
         except asyncio.QueueFull:
-            logger.error(
-                "MotionLab raw event rejected: recorder queue is full (%s events).",
-                self._queue.maxsize,
-            )
+            self._queue_full_count += 1
+            now = time.monotonic()
+            if (
+                self._queue_full_count == 1
+                or now - self._last_queue_full_log_at
+                >= _QUEUE_FULL_LOG_INTERVAL_SECONDS
+            ):
+                self._last_queue_full_log_at = now
+                logger.warning(
+                    "MotionLab raw event dropped: recorder queue is full "
+                    "(%s events), dropped=%s event_type=%s.",
+                    self._queue.maxsize,
+                    self._queue_full_count,
+                    snapshot.get("event_type") or "motion.unknown",
+                )
             return False
         return True
 

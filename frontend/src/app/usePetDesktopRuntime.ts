@@ -610,6 +610,14 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       adapter.pushHistory("error", message);
     });
   });
+  adapter.setMotionLabRawEventRejectedHandler((eventId, reason) => {
+    void motionLabOutboundQueue.rejectPersisted(eventId, reason).catch((error) => {
+      const details = error instanceof Error ? error.message : String(error);
+      const message = `MotionLab rejected-event cleanup failed: ${details}`;
+      console.error("[MotionLab]", message, error);
+      adapter.pushHistory("error", message);
+    });
+  });
   adapter.setMotionLabRawEventReporter((payload, turnId) => {
     sendMotionLabEvent(payload, turnId);
   });
@@ -845,6 +853,9 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       }],
       ["MotionLab reporter detach", () => {
         adapter.setMotionLabRawEventReporter(null);
+      }],
+      ["MotionLab rejected-event handler detach", () => {
+        adapter.setMotionLabRawEventRejectedHandler(null);
       }],
       ["MotionLab outbound queue dispose", () => motionLabOutboundQueue.dispose()],
       ["push-to-talk dispose", () => pushToTalk.dispose()],

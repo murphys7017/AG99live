@@ -487,7 +487,7 @@ class AG99liveMotionResultContributor:
                             return slot
                     return {"state": "failed", "reason": "deferred_motion_payload_unavailable"}
 
-                bundle.turn_coordinator.output_segments.deferred_motion.register(
+                registered = bundle.turn_coordinator.output_segments.deferred_motion.register(
                     identity.event_frontend_turn_id,
                     binding.identity.segment_message_id or "",
                     resolve_late_motion,
@@ -500,6 +500,16 @@ class AG99liveMotionResultContributor:
                     ),
                 )
                 capabilities = get_interaction_capabilities()
+                if not registered:
+                    segment_count = work.expected_segment_count or len(work.segments)
+                    return capabilities.interaction_result_contribution(
+                        plugin_id=self.plugin_id, priority=self.priority,
+                        metadata={"ag99live_motion_schedule": _build_persona_segment_motion_schedule(
+                            segment_count=segment_count,
+                            motion_resolution_reason="deferred_motion_capacity_exceeded",
+                            failure_reasons={str(segment_index): "deferred_motion_capacity_exceeded"},
+                        )},
+                    ) if capabilities else None
                 return capabilities.interaction_result_contribution(
                     plugin_id=self.plugin_id, priority=self.priority,
                     metadata={"ag99live_motion_schedule": _build_persona_segment_motion_schedule(

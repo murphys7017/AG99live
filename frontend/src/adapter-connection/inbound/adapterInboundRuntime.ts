@@ -41,6 +41,7 @@ export interface AdapterInboundRuntimeDeps {
   getMotionTuningAdapter: () => ReturnType<typeof useAdapterMotionTuning> | null;
   getModelSyncAdapter: () => ModelSyncInstance | null;
   pushHistory: (role: string, text: string) => void;
+  rejectMotionLabRawEvent: (eventId: string, reason: string) => void;
   stopAudioAndSettleTurn: (turnId: string | null, reason: string) => void;
   findActiveAudioSegment: () => { turnId: string | null; messageId: string } | null;
   acknowledgeMotionLabRawEventPersisted: (eventId: string) => void;
@@ -190,6 +191,8 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
       state: deps.state,
       sessionStore,
       pushHistory: deps.pushHistory,
+      rejectMotionLabRawEvent: (eventId, reason) =>
+        deps.rejectMotionLabRawEvent(eventId, reason),
       modelSyncAdapter: modelSyncAdapter
         ? {
             applyModelSyncMessage: (env) => modelSyncAdapter.applyModelSyncMessage(env),

@@ -1,3 +1,22 @@
+motion_lab_rejection_ack_bounded_outbox_20261031:
+  class: bugfix
+  risk: high
+  status: source_reviewed_pending_runtime_acceptance
+  scope: >-
+    Release MotionLab outbound in-flight entries when the existing backend
+    control_error reports enqueue failure, and bound the IndexedDB-backed
+    outbound event set to 512 entries with oldest-first local eviction. Keep
+    the existing protocol messages, Prompt text, Live2D protocol and C++
+    unchanged.
+  validation: >-
+    Renderer vue-tsc typecheck and git diff whitespace inspection pass. No
+    automated tests or runtime integration checks are run per user scope.
+  limitations: >-
+    Queue-capacity eviction and backend enqueue rejection discard optional
+    MotionLab observations locally after emitting diagnostics; they preserve
+    dialogue and playback availability rather than guaranteeing telemetry
+    completeness.
+
 pending_motion_ttl_capacity_prepared_cache_20261031:
   class: bugfix
   risk: high

@@ -80,6 +80,7 @@ export interface InboundDispatchDeps {
     ) => OutputSegmentCommitResult;
   };
   pushHistory: (role: string, text: string) => void;
+  rejectMotionLabRawEvent: (eventId: string, reason: string) => void;
   modelSyncAdapter: {
     applyModelSyncMessage: (envelope: ProtocolEnvelope<SystemModelSyncPayload>) => void;
   } | null;

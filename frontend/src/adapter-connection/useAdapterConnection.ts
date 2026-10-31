@@ -130,6 +130,9 @@ export interface AdapterConnectionInstance {
   setMotionLabRawEventRecordedHandler: (
     handler: ((eventId: string) => void) | null,
   ) => void;
+  setMotionLabRawEventRejectedHandler: (
+    handler: ((eventId: string, reason: string) => void) | null,
+  ) => void;
   setMotionLabRawEventReporter: (
     handler: ((payload: MotionLabRawEventInput, turnId: string | null) => void) | null,
   ) => void;
@@ -202,6 +205,7 @@ export function createAdapterConnection(
   let historyAdapter: AdapterHistory | null = null;
   let motionTuningAdapter: AdapterMotionTuning | null = null;
   let motionLabRawEventRecordedHandler: ((eventId: string) => void) | null = null;
+  let motionLabRawEventRejectedHandler: ((eventId: string, reason: string) => void) | null = null;
   let motionLabRawEventReporter: ((
     payload: MotionLabRawEventInput,
     turnId: string | null,
@@ -463,6 +467,8 @@ export function createAdapterConnection(
     getMotionTuningAdapter: () => motionTuningAdapter,
     getModelSyncAdapter: () => modelSync,
     pushHistory: pushHistory as (role: string, text: string) => void,
+    rejectMotionLabRawEvent: (eventId, reason) =>
+      motionLabRawEventRejectedHandler?.(eventId, reason),
     stopAudioAndSettleTurn: (turnId, reason) =>
       stopAudioAndSettleTurn(turnId, reason),
     findActiveAudioSegment: () => findActiveAudioSegment(),
@@ -1056,6 +1062,12 @@ export function createAdapterConnection(
     motionLabRawEventRecordedHandler = handler;
   }
 
+  function setMotionLabRawEventRejectedHandler(
+    handler: ((eventId: string, reason: string) => void) | null,
+  ): void {
+    motionLabRawEventRejectedHandler = handler;
+  }
+
   function setMotionLabRawEventReporter(
     handler: ((payload: MotionLabRawEventInput, turnId: string | null) => void) | null,
   ): void {
@@ -1138,6 +1150,7 @@ export function createAdapterConnection(
     deleteMotionTuningSample,
     sendMotionLabRawEvent,
     setMotionLabRawEventRecordedHandler,
+    setMotionLabRawEventRejectedHandler,
     setMotionLabRawEventReporter,
     sendPlaybackFinishedForCurrentGroup: sendPlaybackFinished,
     clearPlaybackGroupContext,

@@ -206,7 +206,15 @@ def record_motion_observation(
     if event_id:
         event["id"] = event_id
     try:
-        return recorder.enqueue(event, on_persisted=on_persisted)
+        accepted = recorder.enqueue(event, on_persisted=on_persisted)
+        if not accepted:
+            logger.debug(
+                "Motion observation was not queued: event_type=%s turn_id=%s phase=%s",
+                event_type,
+                turn_id or "<none>",
+                phase or "<none>",
+            )
+        return accepted
     except Exception as exc:  # noqa: BLE001
         logger.exception("Motion observation port rejected event: %s", exc)
         return False

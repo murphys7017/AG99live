@@ -36,6 +36,7 @@ export interface InboundRuntimeDispatchDeps {
     assertOutputSegmentsResolved: (turnId: string | null) => void;
   };
   pushHistory: (role: string, text: string) => void;
+  rejectMotionLabRawEvent: (eventId: string, reason: string) => void;
   stopAudioAndSettleTurn: (turnId: string | null, reason: string) => void;
   findActiveAudioSegment: () => { turnId: string | null; messageId: string } | null;
   startMicrophoneCapture: (origin?: "manual" | "ptt" | "auto") => Promise<boolean>;
@@ -218,7 +219,20 @@ function applyControlError(
   envelope: ProtocolEnvelope<ControlErrorPayload>,
 ): void {
   const s = deps.state;
+  const motionLabEventId = parseMotionLabEnqueueFailure(envelope.payload.message);
+  if (motionLabEventId) {
+    deps.rejectMotionLabRawEvent(motionLabEventId, envelope.payload.message);
+  }
   s.lastError = envelope.payload.message;
   s.statusMessage = envelope.payload.message;
   deps.pushHistory("error", envelope.payload.message);
+}
+
+function parseMotionLabEnqueueFailure(message: string): string | null {
+  const prefix = "motion_lab_event_enqueue_failed:";
+  if (!message.startsWith(prefix)) {
+    return null;
+  }
+  const eventId = message.slice(prefix.length).trim();
+  return eventId || null;
 }
