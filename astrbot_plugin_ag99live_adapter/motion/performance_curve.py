@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import re
 import time
 from dataclasses import dataclass
@@ -36,6 +37,7 @@ EMPHASES = {"none", "early", "middle", "late", "punctuated"}
 ENERGIES = {"low", "medium", "high", "teasing", "calm"}
 
 _MAX_RETAINED_RESULTS = 64
+_DEFAULT_REQUEST_TIMEOUT_SECONDS = 8.0
 
 
 async def _request_curve_text(
@@ -88,12 +90,27 @@ class PerformanceCurveRuntimeContext(Protocol):
 class PerformanceCurveRuntime:
     """Best-effort small-model runtime for symbolic performance curve hints."""
 
-    def __init__(self, *, runtime_state: PerformanceCurveRuntimeContext) -> None:
+    def __init__(
+        self,
+        *,
+        runtime_state: PerformanceCurveRuntimeContext,
+        request_timeout_seconds: float | None = None,
+    ) -> None:
         self.runtime_state = runtime_state
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._results: dict[str, dict[str, Any]] = {}
         self._requests: dict[str, PerformanceCurveInput] = {}
         self._requested_keys: set[str] = set()
+        self._attached_keys: set[str] = set()
+        self._request_timeout_seconds = _normalize_request_timeout_seconds(
+            request_timeout_seconds
+            if request_timeout_seconds is not None
+            else getattr(
+                runtime_state,
+                "performance_curve_request_timeout_seconds",
+                _DEFAULT_REQUEST_TIMEOUT_SECONDS,
+            )
+        )
 
     def start(self, request: PerformanceCurveInput) -> bool:
         if not self._is_enabled():
@@ -133,6 +150,18 @@ class PerformanceCurveRuntime:
             return None
         return dict(result)
 
+    def mark_ready_attached(
+        self,
+        *,
+        turn_id: str | None,
+        request_id: str | None,
+    ) -> None:
+        """Record that a ready result was copied into the outgoing motion payload."""
+
+        key = _build_curve_key(turn_id, request_id)
+        if key and key in self._results:
+            self._attached_keys.add(key)
+
     def owns_request(self, *, turn_id: str | None, request_id: str | None) -> bool:
         key = _build_curve_key(turn_id, request_id)
         return bool(key and key in self._requested_keys)
@@ -148,6 +177,7 @@ class PerformanceCurveRuntime:
         self._results.pop(key, None)
         self._requests.pop(key, None)
         self._requested_keys.discard(key)
+        self._attached_keys.discard(key)
 
     def discard_if_not_ready(
         self,
@@ -159,8 +189,11 @@ class PerformanceCurveRuntime:
         if not key:
             return False
         task = self._tasks.get(key)
-        if key in self._results:
+        if key in self._attached_keys:
             return False
+        if key in self._results:
+            self._drop_cached_key(key)
+            return True
         request = self._requests.get(key)
         if request is None:
             return False
@@ -191,6 +224,7 @@ class PerformanceCurveRuntime:
             self._tasks.pop(key, None)
             self._results.pop(key, None)
             self._requests.pop(key, None)
+            self._attached_keys.discard(key)
         self._requested_keys = {
             key for key in self._requested_keys if not key.startswith(prefix)
         }
@@ -218,11 +252,14 @@ class PerformanceCurveRuntime:
                 "stream" if supports_text_chat_stream(provider) else "unsupported",
                 time.time_ns() // 1_000_000,
             )
-            completion_text, transport = await _request_curve_text(
-                provider,
-                prompt=prompt,
-                system_prompt=PERFORMANCE_CURVE_SYSTEM_PROMPT,
-                turn_id=request.turn_id,
+            completion_text, transport = await asyncio.wait_for(
+                _request_curve_text(
+                    provider,
+                    prompt=prompt,
+                    system_prompt=PERFORMANCE_CURVE_SYSTEM_PROMPT,
+                    turn_id=request.turn_id,
+                ),
+                timeout=self._request_timeout_seconds,
             )
             latency_ms = int((time.perf_counter() - started_at) * 1000)
             hint = normalize_performance_curve_hint(_extract_json_object(completion_text))
@@ -250,6 +287,20 @@ class PerformanceCurveRuntime:
                 request.turn_id,
                 request.request_id,
                 exc,
+            )
+        except asyncio.TimeoutError:
+            latency_ms = int((time.perf_counter() - started_at) * 1000)
+            self._record_failed(
+                request,
+                "request_timeout",
+                latency_ms=latency_ms,
+            )
+            self._drop_cached_key(key)
+            logger.warning(
+                "Performance curve timed out: turn_id=%s request_id=%s timeout_seconds=%.2f",
+                request.turn_id,
+                request.request_id,
+                self._request_timeout_seconds,
             )
         except asyncio.CancelledError:
             self._drop_current_task(key)
@@ -318,6 +369,7 @@ class PerformanceCurveRuntime:
         self._results.pop(key, None)
         self._requests.pop(key, None)
         self._requested_keys.discard(key)
+        self._attached_keys.discard(key)
 
     def _prune_retained_results(self) -> None:
         while len(self._results) > _MAX_RETAINED_RESULTS:
@@ -325,6 +377,7 @@ class PerformanceCurveRuntime:
             self._results.pop(key, None)
             self._requests.pop(key, None)
             self._requested_keys.discard(key)
+            self._attached_keys.discard(key)
 
 
 def normalize_performance_curve_hint(value: Any) -> dict[str, Any]:
@@ -356,6 +409,16 @@ def attach_performance_curve_hint(
     next_payload = dict(payload)
     next_payload["performance_curve_hint"] = normalized_hint
     return next_payload, normalized_hint
+
+
+def _normalize_request_timeout_seconds(value: Any) -> float:
+    try:
+        timeout = float(value)
+    except (TypeError, ValueError):
+        return _DEFAULT_REQUEST_TIMEOUT_SECONDS
+    if not math.isfinite(timeout):
+        return _DEFAULT_REQUEST_TIMEOUT_SECONDS
+    return min(60.0, max(0.5, timeout))
 
 
 def extract_assistant_reply_keywords(text: str, *, limit: int = 8) -> list[str]:

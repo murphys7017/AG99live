@@ -1,3 +1,21 @@
+performance_curve_request_lifecycle_20261031:
+  class: refactor
+  risk: high
+  status: source_reviewed_pending_runtime_acceptance
+  scope: >-
+    Add a bounded request-level timeout to PerformanceCurveRuntime, record timeout
+    failures, and track whether a ready hint was actually attached before output
+    egress. A result that becomes ready after the egress snapshot is now treated as
+    missed and cleaned up deterministically. Prompt text, Live2D protocol and C++
+    remain unchanged.
+  validation: >-
+    Changed Python modules pass py_compile and git diff whitespace inspection.
+    No automated tests or runtime integration checks are run per user scope.
+  limitations: >-
+    The default curve request budget is 8 seconds and can be overridden through the
+    internal runtime state attribute performance_curve_request_timeout_seconds.
+    Attachment remains best-effort and does not delay output segment egress.
+
 multi_segment_motion_continuity_run_index_20261031:
   class: refactor
   risk: high

@@ -32,6 +32,13 @@ class PerformanceCurveRuntimePort(Protocol):
         request_id: str | None,
     ) -> dict[str, Any] | None: ...
 
+    def mark_ready_attached(
+        self,
+        *,
+        turn_id: str | None,
+        request_id: str | None,
+    ) -> None: ...
+
     def discard_if_not_ready(
         self,
         *,
@@ -221,6 +228,12 @@ class PerformanceCurveCoordinator:
             )
             if attached_hint is None:
                 raise ValueError("performance_curve_runtime_hint_invalid")
+            mark_ready_attached = getattr(self._runtime, "mark_ready_attached", None)
+            if callable(mark_ready_attached):
+                mark_ready_attached(
+                    turn_id=turn_id,
+                    request_id=normalized_request_id,
+                )
             return next_payload
         except Exception as exc:  # noqa: BLE001 - optional curve cannot block output.
             logger.exception(
