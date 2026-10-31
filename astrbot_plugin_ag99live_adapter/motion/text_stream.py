@@ -11,6 +11,13 @@ class TextChatStreamUnavailable(RuntimeError):
     """The selected optional Provider cannot produce a chat text stream."""
 
 
+class TextChatStreamOutputTooLarge(RuntimeError):
+    """The optional Provider produced more text than the motion path accepts."""
+
+
+MAX_TEXT_CHAT_STREAM_CHARS = 16_000
+
+
 def supports_text_chat_stream(provider: Any) -> bool:
     stream = getattr(provider, "text_chat_stream", None)
     if not callable(stream):
@@ -110,6 +117,10 @@ async def read_text_chat_stream(
                 raise RuntimeError(chunk_text or "text_chat_stream_error")
             if bool(getattr(response, "is_chunk", False)):
                 if chunk_text:
+                    if len(streamed_text) + len(chunk_text) > MAX_TEXT_CHAT_STREAM_CHARS:
+                        raise TextChatStreamOutputTooLarge(
+                            f"text_chat_stream_output_too_large:{MAX_TEXT_CHAT_STREAM_CHARS}"
+                        )
                     saw_chunk = True
                     if not first_chunk_reported:
                         first_chunk_reported = True
@@ -126,6 +137,10 @@ async def read_text_chat_stream(
         if not saw_chunk:
             raise TextChatStreamUnavailable("text_chat_stream_final_only")
         if final_text:
+            if len(final_text) > MAX_TEXT_CHAT_STREAM_CHARS:
+                raise TextChatStreamOutputTooLarge(
+                    f"text_chat_stream_output_too_large:{MAX_TEXT_CHAT_STREAM_CHARS}"
+                )
             if final_text.startswith(streamed_text):
                 streamed_text = final_text
             elif not streamed_text.startswith(final_text):
@@ -155,7 +170,9 @@ def _first_complete_json_object(value: str) -> dict[str, Any] | None:
 
 
 __all__ = [
+    "MAX_TEXT_CHAT_STREAM_CHARS",
     "TextChatStreamUnavailable",
+    "TextChatStreamOutputTooLarge",
     "read_text_chat_stream",
     "supports_text_chat_stream",
 ]

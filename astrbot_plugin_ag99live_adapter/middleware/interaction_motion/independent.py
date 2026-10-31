@@ -24,6 +24,7 @@ from ...motion.payload_validation import (
     normalize_motion_arguments_payload,
 )
 from ...motion.text_stream import (
+    TextChatStreamOutputTooLarge,
     TextChatStreamUnavailable,
     read_text_chat_stream,
     supports_text_chat_stream,
@@ -1345,6 +1346,18 @@ async def generate_independent_motion(
         return finish(
             motion_payload=None,
             reason="provider_stream_unsupported",
+            image_count=len(images),
+        )
+    except TextChatStreamOutputTooLarge as exc:
+        logger.warning(
+            "WIRING independent_motion.skipped turn_id=%s provider=%s reason=%s",
+            turn_id,
+            provider_id,
+            exc,
+        )
+        return finish(
+            motion_payload=None,
+            reason="provider_output_too_large",
             image_count=len(images),
         )
     except asyncio.CancelledError:

@@ -56,6 +56,8 @@ AG99 Persona
 
 `independent_motion.enabled` 默认关闭。关闭时由 Persona Effect 为 Persona 回复段生成动作。开启后停用 Persona Effect，改由单独选择的聊天 Provider 为每个非空 `segments[].speech` 分别生成动作，并绑定到同索引的 TTS/输出段。独立动作没有整回复生成模式；旧配置中的 `per_speech_segment` 会在启动时清除，不再决定动作粒度。
 
+动作 Provider 的通用流式响应最多收集 16,000 个字符。超限会关闭 Provider 流并跳过该段动作，保留核心文本和 TTS；Motion Lab 会记录 `provider_output_too_large` 或 `output_too_large` 失败原因。
+
 `parallel` 控制非流式 Persona 结果中的逐段动作请求是并发还是串行；并发数由 `max_concurrency` 限制。独立动作 Provider 使用 `text_chat_stream()`。OLV Persona 段流开启且 Core 能力检查通过时，默认等当前 `speech` 段完成后再启动对应动作请求，确保模型看到真实段文本；`stream_preview_enabled` 可显式开启旧的提前预览模式，以降低首帧等待但允许在 speech 为空时先生成。每段使用同一绝对时限约束上下文准备和 Provider 请求。Provider 不支持聊天流、请求超时或失败时，该段跳过动作并保留失败原因，核心文本/TTS 继续。TTS 身份到达后 Adapter 按 `turn_id`、`persona_result_id` 和分段索引绑定动作；支持段级物料化时，Core 最多并发准备 2 段语音，每段只等待对应动作 Future，按序提交并 flush 原子 `output.segment`，首段不等待其余段的动作。Persona 段流未启用或能力检查未通过时，不请求增量动作，继续使用 Core 的普通 Persona 输出流程。段索引决定对应关系，Provider 的返回先后不决定播放顺序。
 
 `shadow_enabled` 默认关闭。开启后，Adapter 使用 `shadow_provider_id` 与主动作 Provider 并行生成，发送完全相同的 system prompt、user prompt 和文本上下文；影子结果只经过相同的 JSON 恢复和动作契约校验并写入 Motion Lab，不参与 Live2D 播放，也不等待影子请求完成后再继续主链路。`shadow_timeout_seconds` 默认 5 秒，超时记录失败候选。训练/评估时以主动作 Provider 的已接受结果作为目标，影子候选保留 Provider ID、归一化动作、原始输出和耗时供对比。

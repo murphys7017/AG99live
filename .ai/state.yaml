@@ -1,3 +1,19 @@
+motion_provider_stream_output_bound_20261101:
+  class: bugfix
+  risk: medium
+  status: source_reviewed_pending_runtime_acceptance
+  scope: >-
+    Bound the shared action Provider text stream collector to 16,000 characters,
+    close oversized iterators, and degrade independent motion and performance
+    curve work with explicit failure reasons while core text and TTS continue.
+    Prompt text, Live2D protocol and C++ remain unchanged.
+  validation: >-
+    Changed Python modules pass py_compile and git diff whitespace inspection.
+    No automated tests or runtime integration checks are run per user scope.
+  limitations: >-
+    The bound is an adapter policy and needs real Provider responses to tune;
+    it applies to the shared collector used by action, curve and pre-action paths.
+
 continuity_handoff_envelope_20261101:
   class: bugfix
   risk: high

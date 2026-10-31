@@ -18,6 +18,7 @@ from ..prompts.performance_curve import (
 )
 from .observation import record_motion_observation
 from .text_stream import (
+    TextChatStreamOutputTooLarge,
     TextChatStreamUnavailable,
     read_text_chat_stream,
     supports_text_chat_stream,
@@ -284,6 +285,16 @@ class PerformanceCurveRuntime:
             self._record_failed(request, "provider_stream_unsupported", latency_ms=0)
             logger.warning(
                 "Performance curve skipped: turn_id=%s request_id=%s reason=%s",
+                request.turn_id,
+                request.request_id,
+                exc,
+            )
+        except TextChatStreamOutputTooLarge as exc:
+            self._drop_cached_key(key)
+            self._record_failed(request, "output_too_large", latency_ms=0)
+            logger.warning(
+                "Performance curve skipped oversized provider output: "
+                "turn_id=%s request_id=%s error=%s",
                 request.turn_id,
                 request.request_id,
                 exc,
