@@ -1,3 +1,44 @@
+platform_event_adapter_state_20261031:
+  class: refactor
+  risk: high
+  status: source_reviewed_pending_runtime_acceptance
+  scope: >-
+    Move platform_event's adapter-owned negotiation flags, motion acknowledgement
+    state, turn identities, stop state and sanitized raw reply text into a
+    structured private event state. Keep AstrBot get_extra/set_extra as the
+    compatibility boundary and retain output platform_extras required by the
+    existing delivery coordinator. Prompt, Live2D protocol and C++ remain
+    unchanged.
+  validation: >-
+    platform_event.py, persona_lifecycle.py and main.py pass py_compile and
+    git diff whitespace inspection. No automated tests or runtime integration
+    checks were run, per user scope.
+  limitations: >-
+    Core still receives the established compatibility extras through
+    set_extra, while output-segment metadata remains a cross-module delivery
+    contract. A later slice can move the remaining platform_event orchestration
+    helpers if that boundary is intentionally redesigned.
+
+persona_expression_frame_adapter_20261031:
+  class: refactor
+  risk: high
+  status: source_reviewed_pending_runtime_acceptance
+  scope: >-
+    Establish PersonaExpressionFrame as the immutable Adapter ingress fact for
+    one AG99 Persona segment. Reuse PersonaTurnSessionRegistry and
+    PersonaResultState as the mutable owners of tasks, deadlines, delivery and
+    cancellation. Route intent-ready, segment-ready and complete Persona
+    result hooks through the frame without changing Prompt text, desktop
+    protocol, Live2D execution or C++ sources.
+  validation: >-
+    Changed Python modules pass py_compile and git diff whitespace inspection.
+    No automated tests or runtime integration checks were run, per user scope.
+  limitations: >-
+    platform_event compatibility extras remain at the AstrBot boundary and
+    independent motion still uses its existing provider prompt. A later batch
+    must decide how to migrate those inputs without introducing a second
+    mutable Persona state owner.
+
 persona_motion_training_sample_capture_20261024:
   class: feature
   risk: high

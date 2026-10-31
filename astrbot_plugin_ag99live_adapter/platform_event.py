@@ -6,6 +6,7 @@ import asyncio
 import inspect
 import math
 from copy import copy
+from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from astrbot.api import logger
@@ -24,6 +25,45 @@ from .runtime.persona_lifecycle import (
 )
 
 ACTION_ONLY_MOTION_ACK_TIMEOUT_SECONDS = 30.0
+
+
+@dataclass(slots=True)
+class _AdapterEventInternalState:
+    """Adapter-owned state mirrored to AstrBot extras only at the boundary."""
+
+    plugin_runtime_target_overrides: dict[str, str] = field(default_factory=dict)
+    persona_segment_stream_requested: bool = False
+    incremental_output_requested: bool = False
+    wait_for_motion_execution_ack: bool = False
+    incremental_motion_states: dict[str, Any] = field(default_factory=dict)
+    core_turn_id: str = ""
+    delivery_turn_id: str = ""
+    agent_stop_requested: bool = False
+    raw_reply_text: str = ""
+
+    def observe_extra(self, key: str, value: Any) -> None:
+        if key == "_interaction_plugin_runtime_target_overrides":
+            self.plugin_runtime_target_overrides = (
+                dict(value) if isinstance(value, dict) else {}
+            )
+        elif key == "_interaction_persona_segment_stream_requested":
+            self.persona_segment_stream_requested = value is True
+        elif key == "_interaction_incremental_output_requested":
+            self.incremental_output_requested = value is True
+        elif key == "_interaction_wait_for_motion_execution_ack":
+            self.wait_for_motion_execution_ack = value is True
+        elif key == "_interaction_incremental_motion_states":
+            self.incremental_motion_states = (
+                dict(value) if isinstance(value, dict) else {}
+            )
+        elif key == "_turn_id":
+            self.core_turn_id = str(value or "").strip()
+        elif key == "output_correlation_id":
+            self.delivery_turn_id = str(value or "").strip()
+        elif key == "agent_stop_requested":
+            self.agent_stop_requested = value is True
+        elif key == "ag99live_raw_reply_text":
+            self.raw_reply_text = str(value or "")
 
 
 class OutputSegmentDeliveryPort(Protocol):
@@ -61,6 +101,7 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         session_id,
         adapter: PlatformEventAdapterPort,
     ):
+        self._adapter_internal_state = _AdapterEventInternalState()
         super().__init__(message_str, message_obj, platform_meta, session_id)
         self.adapter = adapter
         runtime_state = getattr(adapter, "runtime_state", None)
@@ -154,6 +195,10 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         self._next_logical_segment_index = 0
         self._attach_prompt_annotations(message_obj=message_obj)
 
+    def set_extra(self, key: str, value: Any) -> None:
+        super().set_extra(key, value)
+        self._adapter_internal_state.observe_extra(key, value)
+
     async def send(self, message):
         self._direct_output_sequence += 1
         message_id = f"direct_output:{self._direct_output_sequence:04d}"
@@ -165,7 +210,7 @@ class OLVPetPlatformEvent(AstrMessageEvent):
 
     async def open_interaction_incremental_output(self, *, persona_result_id: str):
         """Core producer entry; opt-in remains unavailable until full negotiation."""
-        if self.get_extra("_interaction_incremental_output_requested") is not True:
+        if not self._adapter_internal_state.incremental_output_requested:
             raise RuntimeError("incremental_output_not_negotiated")
         if self._is_stop_requested():
             raise asyncio.CancelledError
@@ -173,7 +218,7 @@ class OLVPetPlatformEvent(AstrMessageEvent):
             event=self, persona_result_id=persona_result_id,
         )
         self.adapter.runtime_state.persona_sessions.register_writer(
-            PersonaTurnIdentity(str(self.get_extra("_turn_id") or "").strip()),
+            PersonaTurnIdentity(self._adapter_internal_state.core_turn_id),
             persona_result_id,
             writer,
         )
@@ -209,7 +254,7 @@ class OLVPetPlatformEvent(AstrMessageEvent):
 
     def _persona_result_state(self, persona_result_id: str | None = None):
         sessions = self.adapter.runtime_state.persona_sessions
-        turn_id = str(self.get_extra("_turn_id") or "").strip()
+        turn_id = self._adapter_internal_state.core_turn_id
         if not turn_id:
             return None
         normalized_result_id = str(persona_result_id or "").strip()
@@ -227,8 +272,8 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         if sessions is None:
             return None
         turn_id = str(
-            self.get_extra("_turn_id")
-            or self.get_extra("output_correlation_id")
+            self._adapter_internal_state.core_turn_id
+            or self._adapter_internal_state.delivery_turn_id
             or ""
         ).strip()
         if not turn_id:
@@ -246,7 +291,7 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         sessions = getattr(runtime_state, "persona_sessions", None)
         if sessions is None:
             return None
-        core_turn_id = str(self.get_extra("_turn_id", "") or "").strip()
+        core_turn_id = self._adapter_internal_state.core_turn_id
         if not core_turn_id:
             return None
         identity = PersonaTurnIdentity(core_turn_id)
@@ -315,9 +360,7 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         def settle_core_future(accepted: bool) -> None:
             if not final:
                 return
-            motion_states = self.get_extra(
-                "_interaction_incremental_motion_states", {}
-            )
+            motion_states = self._adapter_internal_state.incremental_motion_states
             motion_state = (
                 motion_states.get(normalized_result_id)
                 if isinstance(motion_states, dict)
@@ -382,7 +425,7 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         platform_extras: dict[str, Any] | None = None,
         record_send_operation: bool = True,
     ) -> None:
-        turn_id = str(self.get_extra("output_correlation_id", "") or "").strip()
+        turn_id = self._adapter_internal_state.delivery_turn_id
         if not turn_id:
             raise RuntimeError("output_event_turn_id_missing")
         if self._is_stop_requested():
@@ -558,7 +601,7 @@ class OLVPetPlatformEvent(AstrMessageEvent):
             raw_reply_text_override=(
                 split_raw_text
                 if has_split_raw_text_override
-                else str(self.get_extra("ag99live_raw_reply_text", "") or "").strip()
+                else self._adapter_internal_state.raw_reply_text.strip()
             )
             or None,
             platform_extras=resolved_platform_extras,
@@ -577,10 +620,10 @@ class OLVPetPlatformEvent(AstrMessageEvent):
             if inspect.isawaitable(result):
                 await result
         await self._close_frontend_turn_output_queue()
-        if self.get_extra("_interaction_wait_for_motion_execution_ack") is not True:
+        if not self._adapter_internal_state.wait_for_motion_execution_ack:
             return
 
-        turn_id = str(self.get_extra("output_correlation_id", "") or "").strip()
+        turn_id = self._adapter_internal_state.delivery_turn_id
         coordinator = getattr(self.adapter, "turn_coordinator", None)
         wait_for_turn_finished = getattr(
             coordinator,
@@ -609,7 +652,7 @@ class OLVPetPlatformEvent(AstrMessageEvent):
 
     async def abort_visible_turn(self, *, reason: str) -> None:
         """Close this frontend turn before a superseding Core turn begins."""
-        turn_id = str(self.get_extra("output_correlation_id", "") or "").strip()
+        turn_id = self._adapter_internal_state.delivery_turn_id
         if not turn_id:
             return
         await self.adapter.turn_coordinator.abort_turn_from_backend(
@@ -621,7 +664,7 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         """Emit one ready segment without completing its parent or Turn."""
         if self._is_stop_requested():
             raise asyncio.CancelledError
-        turn_id = str(self.get_extra("output_correlation_id", "") or "").strip()
+        turn_id = self._adapter_internal_state.delivery_turn_id
         if not turn_id or not str(message_id or "").strip():
             raise RuntimeError("output_event_segment_identity_missing")
         await self.adapter.turn_coordinator.finalize_output_segment(
@@ -632,7 +675,7 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         """Finalize a Core-delivered logical message without closing its Turn."""
         if self._is_stop_requested():
             return
-        turn_id = str(self.get_extra("output_correlation_id", "") or "").strip()
+        turn_id = self._adapter_internal_state.delivery_turn_id
         if not turn_id:
             raise RuntimeError("output_event_turn_id_missing")
         normalized_message_id = str(message_id or "").strip()
@@ -675,10 +718,8 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         status: str,
         failure_reason: str | None = None,
     ) -> None:
-        event_turn_id = str(self.get_extra("_turn_id", "") or "").strip()
-        delivery_turn_id = str(
-            self.get_extra("output_correlation_id", "") or ""
-        ).strip()
+        event_turn_id = self._adapter_internal_state.core_turn_id
+        delivery_turn_id = self._adapter_internal_state.delivery_turn_id
         normalized_turn_id = str(turn_id or "").strip()
         normalized_result_id = str(persona_result_id or "").strip()
         normalized_parent_id = str(message_id or "").strip()
@@ -720,7 +761,7 @@ class OLVPetPlatformEvent(AstrMessageEvent):
             )
 
     async def _close_frontend_turn_output_queue(self) -> None:
-        turn_id = str(self.get_extra("output_correlation_id", "") or "").strip()
+        turn_id = self._adapter_internal_state.delivery_turn_id
         if not turn_id:
             raise RuntimeError("output_event_turn_id_missing")
         await self.adapter.turn_coordinator.close_turn_output_queue(
@@ -728,7 +769,7 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         )
 
     def _is_stop_requested(self) -> bool:
-        return bool(self.get_extra("agent_stop_requested", False))
+        return self._adapter_internal_state.agent_stop_requested
 
     async def _attach_persona_stream_motion(
         self,
@@ -756,7 +797,7 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         if (
             result_state is not None
             and result_state.turn.turn_id
-            == str(self.get_extra("_turn_id") or "").strip()
+            == self._adapter_internal_state.core_turn_id
             and result_state.persona_result_id == persona_result_id
             and result_state.parent_message_id == parent_message_id
         ):
@@ -804,7 +845,7 @@ class OLVPetPlatformEvent(AstrMessageEvent):
                         "WIRING independent_motion.future_failed turn_id=%s "
                         "persona_result_id=%s segment_index=%s error=%s "
                         "action=continue_core_dialogue",
-                        self.get_extra("_turn_id", "<missing>"),
+                        self._adapter_internal_state.core_turn_id or "<missing>",
                         persona_result_id,
                         segment_index,
                         exc,
@@ -993,7 +1034,7 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         if not isinstance(tts, dict) or str(tts.get("status") or "").strip() != "failed":
             return None
         message_id = str(tts.get("message_id") or "").strip()
-        turn_id = str(self.get_extra("_turn_id") or "").strip()
+        turn_id = self._adapter_internal_state.core_turn_id
         if not turn_id:
             return None
         found = self.adapter.runtime_state.persona_sessions.find_segment_by_message_id(
@@ -1037,7 +1078,7 @@ class OLVPetPlatformEvent(AstrMessageEvent):
             message_id = resolve_platform_segment_message_id(platform_extras)
         except ValueError:
             return ""
-        turn_id = str(self.get_extra("_turn_id") or "").strip()
+        turn_id = self._adapter_internal_state.core_turn_id
         if not turn_id:
             return ""
         found = self.adapter.runtime_state.persona_sessions.find_segment_by_message_id(

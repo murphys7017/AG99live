@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Any
 
 _MAX_RETIRED_TURN_IDS = 256
@@ -54,6 +55,79 @@ class PersonaSegmentIdentity:
             type(self.sequence) is not int or self.sequence < 0
         ):
             raise ValueError("persona_output_sequence_invalid")
+
+
+@dataclass(frozen=True, slots=True)
+class PersonaExpressionFrame:
+    """Immutable expression facts admitted from the AG99 Persona boundary.
+
+    The frame is the adapter's hand-off object for one Persona segment. It
+    carries only the already-decided expression material and its identity;
+    mutable tasks, deadlines, delivery state and playback state remain owned by
+    the lifecycle/session objects below.
+    """
+
+    identity: PersonaSegmentIdentity
+    phase: str = ""
+    speech: str | None = None
+    intent_ready: bool = False
+    actions: tuple[Any, ...] = ()
+    tendency: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.identity, PersonaSegmentIdentity):
+            raise ValueError("persona_expression_identity_invalid")
+        if not isinstance(self.phase, str):
+            raise ValueError("persona_expression_phase_invalid")
+        if self.speech is not None and not isinstance(self.speech, str):
+            raise ValueError("persona_expression_speech_invalid")
+        if not isinstance(self.intent_ready, bool):
+            raise ValueError("persona_expression_intent_state_invalid")
+        normalized_actions = (
+            tuple(self.actions)
+            if isinstance(self.actions, (list, tuple))
+            else ()
+        )
+        normalized_tendency = (
+            dict(self.tendency) if isinstance(self.tendency, Mapping) else {}
+        )
+        object.__setattr__(self, "phase", self.phase.strip())
+        object.__setattr__(self, "actions", normalized_actions)
+        object.__setattr__(
+            self,
+            "tendency",
+            MappingProxyType(normalized_tendency),
+        )
+
+    @classmethod
+    def from_values(
+        cls,
+        *,
+        turn: PersonaTurnIdentity,
+        persona_result_id: str,
+        segment_index: int,
+        segment_count: int | None = None,
+        segment_message_id: str | None = None,
+        phase: str = "",
+        speech: str | None = None,
+        intent_ready: bool = False,
+        actions: Any = (),
+        tendency: Any = None,
+    ) -> "PersonaExpressionFrame":
+        return cls(
+            identity=PersonaSegmentIdentity(
+                turn=turn,
+                persona_result_id=persona_result_id,
+                segment_index=segment_index,
+                segment_count=segment_count,
+                segment_message_id=segment_message_id,
+            ),
+            phase=phase,
+            speech=speech,
+            intent_ready=intent_ready,
+            actions=actions if isinstance(actions, (list, tuple)) else (),
+            tendency=tendency if isinstance(tendency, Mapping) else {},
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,6 +220,32 @@ class PersonaSegmentState:
         self.actions = normalized_actions
         self.tendency = normalized_tendency
         self.intent_ready = True
+
+    def bind_expression(self, frame: PersonaExpressionFrame) -> None:
+        if not isinstance(frame, PersonaExpressionFrame):
+            raise ValueError("persona_expression_frame_invalid")
+        if frame.identity.segment_index != self.index:
+            raise ValueError("persona_expression_segment_index_conflict")
+        normalized_actions = tuple(frame.actions)
+        normalized_tendency = dict(frame.tendency)
+        if self.intent_ready and (
+            self.actions != normalized_actions
+            or self.tendency != normalized_tendency
+        ):
+            raise ValueError(
+                "persona_segment_intent_conflict"
+                if frame.intent_ready
+                else "persona_segment_content_conflict"
+            )
+        if frame.speech is not None:
+            if self.speech_ready and self.speech != frame.speech:
+                raise ValueError("persona_segment_content_conflict")
+            self.speech = frame.speech
+            self.speech_ready = True
+        self.actions = normalized_actions
+        self.tendency = normalized_tendency
+        if frame.intent_ready:
+            self.intent_ready = True
 
     def bind_content(
         self,
@@ -257,9 +357,14 @@ class PersonaResultState:
     ) -> PersonaSegmentState:
         if self.stream_status is not None:
             raise RuntimeError("persona_result_terminal")
-        segment = self.segment(identity)
-        segment.bind_intent(actions=actions, tendency=tendency)
-        return segment
+        frame = PersonaExpressionFrame(
+            identity=identity,
+            phase=self.phase,
+            intent_ready=True,
+            actions=actions if isinstance(actions, (list, tuple)) else (),
+            tendency=tendency if isinstance(tendency, Mapping) else {},
+        )
+        return self.bind_expression(frame)
 
     def bind_content(
         self,
@@ -271,8 +376,37 @@ class PersonaResultState:
     ) -> PersonaSegmentState:
         if self.stream_status is not None:
             raise RuntimeError("persona_result_terminal")
-        segment = self.segment(identity)
-        segment.bind_content(speech=speech, actions=actions, tendency=tendency)
+        frame = PersonaExpressionFrame(
+            identity=identity,
+            phase=self.phase,
+            speech=speech,
+            actions=actions if isinstance(actions, (list, tuple)) else (),
+            tendency=tendency if isinstance(tendency, Mapping) else {},
+        )
+        return self.bind_expression(frame)
+
+    def bind_expression(self, frame: PersonaExpressionFrame) -> PersonaSegmentState:
+        if not isinstance(frame, PersonaExpressionFrame):
+            raise ValueError("persona_expression_frame_invalid")
+        if self.stream_status is not None:
+            raise RuntimeError("persona_result_terminal")
+        frame_turn = frame.identity.turn
+        if (
+            frame_turn.turn_id != self.turn.turn_id
+            or (
+                frame_turn.core_turn_id is not None
+                and self.turn.core_turn_id is not None
+                and frame_turn.core_turn_id != self.turn.core_turn_id
+            )
+            or frame.identity.persona_result_id != self.persona_result_id
+        ):
+            raise ValueError("persona_expression_identity_conflict")
+        if frame.phase and self.phase and frame.phase != self.phase:
+            raise ValueError("persona_expression_phase_conflict")
+        segment = self.segment(frame.identity)
+        if frame.phase and not self.phase:
+            self.phase = frame.phase
+        segment.bind_expression(frame)
         return segment
 
     def bind_tts(self, binding: PersonaTtsBinding) -> PersonaSegmentState:

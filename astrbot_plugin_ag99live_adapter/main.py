@@ -16,7 +16,10 @@ from .motion.output_sanitizer import (
     sanitize_assistant_output_text,
 )
 from .motion.observation import resolve_persona_motion_source_route
-from .runtime.persona_lifecycle import PersonaSegmentIdentity, PersonaTurnIdentity
+from .runtime.persona_lifecycle import (
+    PersonaExpressionFrame,
+    PersonaTurnIdentity,
+)
 
 def _optional_tts_state_hook():
     hook = getattr(filter, "on_tts_state_changed", None)
@@ -418,6 +421,17 @@ class MyPlugin(Star):
         ):
             return
 
+        turn_identity = PersonaTurnIdentity(normalized_turn_id)
+        expression_frame = PersonaExpressionFrame.from_values(
+            turn=turn_identity,
+            persona_result_id=normalized_result_id,
+            segment_index=segment_index,
+            segment_message_id=normalized_parent_id,
+            phase=str(intent.get("phase") or "").strip(),
+            intent_ready=True,
+            actions=actions,
+            tendency=tendency,
+        )
         registry = bundle.runtime_state.persona_sessions
         parallel = bool(
             getattr(bundle.runtime_state, "independent_motion_parallel", False)
@@ -439,10 +453,10 @@ class MyPlugin(Star):
         except (TypeError, ValueError):
             max_concurrency = 4
         result_state = registry.session(
-            PersonaTurnIdentity(normalized_turn_id)
+            expression_frame.identity.turn
         ).result(
             normalized_result_id,
-            phase=str(intent.get("phase") or "").strip(),
+            phase=expression_frame.phase,
             parent_message_id=normalized_parent_id,
             parallel=parallel,
             max_concurrency=max_concurrency,
@@ -451,15 +465,7 @@ class MyPlugin(Star):
             return
         loop = asyncio.get_running_loop()
         try:
-            segment_state = result_state.bind_intent(
-                PersonaSegmentIdentity(
-                    turn=result_state.turn,
-                    persona_result_id=normalized_result_id,
-                    segment_index=segment_index,
-                ),
-                actions=actions,
-                tendency=tendency,
-            )
+            segment_state = result_state.bind_expression(expression_frame)
         except (ValueError, RuntimeError) as exc:
             logger.warning(
                 "WIRING independent_motion.intent_rejected reason=%s turn_id=%s "
@@ -770,6 +776,16 @@ class MyPlugin(Star):
         speech = sanitize_assistant_output_segment_text(speech)
         actions = list(raw_actions) if isinstance(raw_actions, (list, tuple)) else []
         tendency = dict(raw_tendency) if isinstance(raw_tendency, Mapping) else {}
+        expression_frame = PersonaExpressionFrame.from_values(
+            turn=PersonaTurnIdentity(normalized_turn_id),
+            persona_result_id=normalized_result_id,
+            segment_index=segment_index,
+            segment_message_id=normalized_parent_id,
+            phase=phase,
+            speech=speech,
+            actions=actions,
+            tendency=tendency,
+        )
 
         registry = bundle.runtime_state.persona_sessions
         parallel = bool(
@@ -791,11 +807,9 @@ class MyPlugin(Star):
             )
         except (TypeError, ValueError):
             max_concurrency = 4
-        result_state = registry.session(
-            PersonaTurnIdentity(normalized_turn_id)
-        ).result(
+        result_state = registry.session(expression_frame.identity.turn).result(
             normalized_result_id,
-            phase=phase,
+            phase=expression_frame.phase,
             parent_message_id=normalized_parent_id,
             parallel=parallel,
             max_concurrency=max_concurrency,
@@ -826,16 +840,7 @@ class MyPlugin(Star):
             return
         result_state.next_segment_index += 1
         try:
-            segment_state = result_state.bind_content(
-                PersonaSegmentIdentity(
-                    turn=result_state.turn,
-                    persona_result_id=normalized_result_id,
-                    segment_index=segment_index,
-                ),
-                speech=speech,
-                actions=actions,
-                tendency=tendency,
-            )
+            segment_state = result_state.bind_expression(expression_frame)
         except (ValueError, RuntimeError) as exc:
             logger.warning(
                 "WIRING independent_motion.stream_segment_rejected "
@@ -1262,21 +1267,24 @@ class MyPlugin(Star):
                     ),
                 )
                 result_state.set_expected_segment_count(len(speech_segments))
+                expression_frames: list[PersonaExpressionFrame] = []
                 for index, speech in enumerate(speech_segments):
                     raw_segment = raw_segments[index]
                     actions = getattr(raw_segment, "actions", ())
                     tendency = getattr(raw_segment, "tendency", {})
+                    expression_frame = PersonaExpressionFrame.from_values(
+                        turn=result_state.turn,
+                        persona_result_id=persona_result_id,
+                        segment_index=index,
+                        segment_count=len(speech_segments),
+                        phase=phase,
+                        speech=speech,
+                        actions=actions,
+                        tendency=tendency,
+                    )
+                    expression_frames.append(expression_frame)
                     try:
-                        segment_state = result_state.bind_content(
-                            PersonaSegmentIdentity(
-                                turn=result_state.turn,
-                                persona_result_id=persona_result_id,
-                                segment_index=index,
-                            ),
-                            speech=speech,
-                            actions=actions,
-                            tendency=tendency,
-                        )
+                        segment_state = result_state.bind_expression(expression_frame)
                     except (ValueError, RuntimeError) as exc:
                         logger.warning(
                             "WIRING independent_motion.result_segment_rejected "
@@ -1300,10 +1308,13 @@ class MyPlugin(Star):
                             bundle,
                             speech_segments=speech_segments,
                             persona_result_id=persona_result_id,
-                            segment_intents=tuple({
-                                "actions": list(getattr(segment, "actions", ()) or ()),
-                                "tendency": dict(getattr(segment, "tendency", {}) or {}),
-                            } for segment in raw_segments),
+                            segment_intents=tuple(
+                                {
+                                    "actions": list(frame.actions),
+                                    "tendency": dict(frame.tendency),
+                                }
+                                for frame in expression_frames
+                            ),
                             parallel=bool(
                                 getattr(
                                     bundle.runtime_state,
