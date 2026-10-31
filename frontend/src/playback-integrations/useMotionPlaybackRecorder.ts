@@ -8,6 +8,17 @@ import { cloneJson } from "../utils/cloneJson.js";
 
 const DEFAULT_MAX_MOTION_PLAYBACK_RECORDS = 5;
 const MOTION_RECORD_DEDUP_WINDOW_MS = 1200;
+const MAX_ACTIVE_MOTION_RUNS = 64;
+
+type ActiveMotionRun = {
+  runId: string;
+  turnId: string | null;
+  messageId: string;
+  playbackOrigin: ModelEnginePlanStartedEvent["playbackOrigin"];
+  profileId: string;
+  profileRevision?: number;
+  transformTrace: Record<string, unknown> | null;
+};
 
 export interface MotionPlaybackRecorderOptions {
   motionRecord: MotionPlaybackRecordPort;
@@ -45,15 +56,7 @@ export function useMotionPlaybackRecorder(options: MotionPlaybackRecorderOptions
   );
   const maxMotionPlaybackRecords =
     options.maxMotionPlaybackRecords ?? DEFAULT_MAX_MOTION_PLAYBACK_RECORDS;
-  let currentMotionRun: {
-    runId: string;
-    turnId: string | null;
-    messageId: string;
-    playbackOrigin: ModelEnginePlanStartedEvent["playbackOrigin"];
-    profileId: string;
-    profileRevision?: number;
-    transformTrace: Record<string, unknown> | null;
-  } | null = null;
+  const activeMotionRuns = new Map<string, ActiveMotionRun>();
 
   function recordMotionPlayback(event: ModelEnginePlanStartedEvent): void {
     console.info("[MotionLab] playback plan started.", {
@@ -74,7 +77,7 @@ export function useMotionPlaybackRecorder(options: MotionPlaybackRecorderOptions
       return;
     }
 
-    currentMotionRun = {
+    activeMotionRuns.set(event.runId, {
       runId: event.runId,
       turnId: event.turnId,
       messageId: event.messageId,
@@ -84,7 +87,8 @@ export function useMotionPlaybackRecorder(options: MotionPlaybackRecorderOptions
       transformTrace: event.diagnostics?.transformTrace
         ? cloneJson(event.diagnostics.transformTrace) as unknown as Record<string, unknown>
         : null,
-    };
+    });
+    pruneActiveMotionRuns();
 
     const now = new Date();
     const baseRecord = {
@@ -182,11 +186,11 @@ export function useMotionPlaybackRecorder(options: MotionPlaybackRecorderOptions
   }
 
   function completeMotionPlayback(event: DirectParameterPlanTerminalEvent): void {
-    if (!currentMotionRun || currentMotionRun.runId !== event.runId) {
+    const run = activeMotionRuns.get(event.runId);
+    if (!run) {
       return;
     }
-    const run = currentMotionRun;
-    currentMotionRun = null;
+    activeMotionRuns.delete(event.runId);
     const timeline = options.getPlaybackTimelineSnapshot?.(
       run.turnId,
       run.messageId,
@@ -231,7 +235,21 @@ export function useMotionPlaybackRecorder(options: MotionPlaybackRecorderOptions
   }
 
   function resetMotionPlaybackRecorder(): void {
-    currentMotionRun = null;
+    activeMotionRuns.clear();
+  }
+
+  function pruneActiveMotionRuns(): void {
+    while (activeMotionRuns.size > MAX_ACTIVE_MOTION_RUNS) {
+      const oldestRunId = activeMotionRuns.keys().next().value;
+      if (typeof oldestRunId !== "string") {
+        return;
+      }
+      activeMotionRuns.delete(oldestRunId);
+      console.warn("[MotionLab] pruned unterminated playback run.", {
+        runId: oldestRunId,
+        maxActiveRuns: MAX_ACTIVE_MOTION_RUNS,
+      });
+    }
   }
 
   return {

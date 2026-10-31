@@ -1,3 +1,24 @@
+multi_segment_motion_continuity_run_index_20261031:
+  class: refactor
+  risk: high
+  status: source_reviewed_pending_runtime_acceptance
+  scope: >-
+    Make multi-segment independent motion generation ordered when a shared motion
+    context is available, carrying each accepted segment payload through the
+    existing recent-executed reference channel for the next segment. Replace the
+    MotionLab recorder's single active run with a runId-indexed bounded active set.
+    Prompt text, motion payload/protocol shape, Live2D execution and C++ remain
+    unchanged.
+  validation: >-
+    Frontend renderer, WebSDK and Node TypeScript typechecks pass, Python static
+    compilation passes, and git diff whitespace inspection passes. No automated
+    tests or runtime integration checks are run per user scope.
+  limitations: >-
+    Continuity ordering falls back to the configured parallel path when the shared
+    motion context cannot be prepared. Runtime visual continuity still needs AG99,
+    TTS, Electron and Live2D acceptance. Unterminated MotionLab runs are bounded
+    at 64 entries and older entries are pruned with a diagnostic warning.
+
 playback_release_late_motion_continuity_20261031:
   class: refactor
   risk: high

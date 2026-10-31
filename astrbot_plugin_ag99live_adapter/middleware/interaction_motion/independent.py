@@ -212,6 +212,39 @@ class IndependentMotionContext:
     persona_guidance: Mapping[str, Any] | None = None
 
 
+def _append_planned_motion_context(
+    context: IndependentMotionContext,
+    motion_payload: Mapping[str, Any] | None,
+) -> IndependentMotionContext:
+    """Carry the prior segment's planned action into the next segment reference set.
+
+    The existing ``recent_executed_motions`` channel is already projected into the
+    provider guidance.  Keeping the continuity state there avoids changing the
+    prompt text or the motion payload contract while allowing an ordered segment
+    batch to plan from its predecessor.
+    """
+
+    if not isinstance(motion_payload, Mapping):
+        return context
+    runtime_payload = dict(context.runtime_payload)
+    recent = runtime_payload.get("recent_executed_motions")
+    recent_motions = [
+        dict(item)
+        for item in recent
+        if isinstance(item, Mapping)
+    ] if isinstance(recent, list) else []
+    recent_motions.append(dict(motion_payload))
+    runtime_payload["recent_executed_motions"] = recent_motions[-3:]
+    return IndependentMotionContext(
+        current_user_text=context.current_user_text,
+        contexts=context.contexts,
+        capability_payload=context.capability_payload,
+        runtime_payload=runtime_payload,
+        reference_diagnostics=context.reference_diagnostics,
+        persona_guidance=context.persona_guidance,
+    )
+
+
 _NEUROBRAIN_EMOTION_KEYS = (
     "joy",
     "trust",
@@ -519,6 +552,8 @@ async def generate_independent_motion_for_segments(
     async def _run_one(
         index: int,
         speech: str,
+        *,
+        context_override: IndependentMotionContext | None = None,
     ) -> IndependentMotionResult:
         async with concurrency_gate:
             try:
@@ -534,8 +569,9 @@ async def generate_independent_motion_for_segments(
                     if persona_result_id is not None or stream_active:
                         kwargs["persona_result_id"] = persona_result_id
                         kwargs["segment_index"] = index
-                    if shared_context is not None:
-                        kwargs["prepared_context"] = shared_context
+                    prepared_context_for_segment = context_override or shared_context
+                    if prepared_context_for_segment is not None:
+                        kwargs["prepared_context"] = prepared_context_for_segment
                     if shadow_tasks is not None:
                         kwargs["shadow_tasks"] = shadow_tasks
                     return await generate_independent_motion(
@@ -597,9 +633,11 @@ async def generate_independent_motion_for_segments(
     def _create_one(
         index: int,
         speech: str,
+        *,
+        context_override: IndependentMotionContext | None = None,
     ) -> asyncio.Task[IndependentMotionResult]:
         task = asyncio.create_task(
-            _run_one(index, speech),
+            _run_one(index, speech, context_override=context_override),
             name=f"ag99live-independent-motion-segment-{index}",
         )
 
@@ -628,6 +666,10 @@ async def generate_independent_motion_for_segments(
         return task
 
     results: dict[int, IndependentMotionResult] = {}
+    # A multi-segment batch must hand the prior planned posture to the next
+    # request. Preserve parallel generation for independent batches, but do not
+    # let a Persona segment race past its predecessor when shared context exists.
+    continuity_required = len(inputs) > 1 and shared_context is not None
     # A streamed Persona segment is submitted as a one-item batch with a
     # prepared context.  Running that item inline avoids an extra task hop
     # between the segment-ready hook and the Provider request.  That hop can
@@ -635,7 +677,7 @@ async def generate_independent_motion_for_segments(
     if len(inputs) == 1 and shared_context is not None:
         index, speech = inputs[0]
         results[index] = await _run_one(index, speech)
-    elif parallel:
+    elif parallel and not continuity_required:
         indexed_tasks = [
             (index, _create_one(index, speech))
             for index, speech in inputs
@@ -648,14 +690,25 @@ async def generate_independent_motion_for_segments(
             for (index, _), result in zip(indexed_tasks, generated)
         )
     else:
+        continuity_context = shared_context
         for index, speech in inputs:
-            result = await _create_one(index, speech)
+            result = await _create_one(
+                index,
+                speech,
+                context_override=continuity_context,
+            )
             results[index] = result
+            if continuity_context is not None and result.motion_payload is not None:
+                continuity_context = _append_planned_motion_context(
+                    continuity_context,
+                    result.motion_payload,
+                )
     logger.info(
         "WIRING independent_motion.segment_generation_completed mode=%s "
-        "input_count=%s result_count=%s payload_count=%s max_concurrency=%s "
+        "continuity=%s input_count=%s result_count=%s payload_count=%s max_concurrency=%s "
         "timeout_seconds=%.2f turn_id=%s duration_ms=%.2f",
-        "parallel" if parallel else "serial",
+        "serial_continuity" if continuity_required else "parallel" if parallel else "serial",
+        continuity_required,
         len(inputs),
         len(results),
         sum(result.motion_payload is not None for result in results.values()),
