@@ -6,7 +6,7 @@
  * descriptions, so a new setting only has to be declared once on the server.
  */
 
-export type ConfigFieldKind = "text" | "int" | "float" | "bool" | "model" | "provider" | "choice";
+export type ConfigFieldKind = "text" | "json" | "int" | "float" | "bool" | "model" | "provider" | "choice";
 
 export type ConfigField = {
   key: string;

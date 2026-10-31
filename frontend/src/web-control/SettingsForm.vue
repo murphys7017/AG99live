@@ -136,8 +136,17 @@ function onInput(field: ConfigField, sectionKey: string, event: Event): void {
         <label v-else class="web-control-field">
           <span class="web-control-field__label">{{ labelFor(field) }}</span>
 
+          <textarea
+            v-if="field.kind === 'json'"
+            :value="String(valueAt(field, section.key))"
+            :maxlength="field.maxLength"
+            :disabled="props.disabled"
+            rows="6"
+            @input="onInput(field, section.key, $event)"
+          />
+
           <input
-            v-if="field.kind === 'text'"
+            v-else-if="field.kind === 'text'"
             :value="String(valueAt(field, section.key))"
             type="text"
             :maxlength="field.maxLength"

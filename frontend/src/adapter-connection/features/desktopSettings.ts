@@ -570,7 +570,17 @@ const DESKTOP_SETTING_HANDLERS: Record<
   vts_send_hz: () => localStorageNumberSettingHandler("ag99live.vts.send_hz", 3, 1, 30),
   vts_parameter_mapping: () => localStorageTextSettingHandler(
     "ag99live.vts.parameter_mapping",
-    "{}",
+    JSON.stringify({
+      ParamAngleX: "FaceAngleX",
+      ParamAngleY: "FaceAngleY",
+      ParamAngleZ: "FaceAngleZ",
+      ParamEyeBallX: "EyeX",
+      ParamEyeBallY: "EyeY",
+      ParamEyeLOpen: "EyeOpenLeft",
+      ParamEyeROpen: "EyeOpenRight",
+      ParamMouthForm: "MouthSmile",
+      ParamMouthOpenY: "MouthOpen",
+    }, null, 2),
     (value) => value.trim() || "{}",
   ),
   astrbot_webui_url: webControlUrlHandler,

@@ -3,8 +3,22 @@ const VTS_TOKEN_KEY = "ag99live.vts.token";
 const VTS_ENABLED_KEY = "ag99live.vts.enabled";
 const VTS_SEND_HZ_KEY = "ag99live.vts.send_hz";
 const VTS_MAPPING_KEY = "ag99live.vts.parameter_mapping";
+const VTS_PARAMETER_CATALOG_KEY = "ag99live.vts.parameter_catalog";
 const VTS_DEFAULT_ENDPOINT = "ws://localhost:8001";
 const VTS_DEFAULT_SEND_HZ = 3;
+const VTS_OUTPUT_EXPERIMENTAL_ENABLED = false;
+const VTS_DEFAULT_MAPPING: Record<string, string> = {
+  ParamAngleX: "FaceAngleX",
+  ParamAngleY: "FaceAngleY",
+  ParamAngleZ: "FaceAngleZ",
+  ParamEyeBallX: "EyeX",
+  ParamEyeBallY: "EyeY",
+  ParamEyeLOpen: "EyeOpenLeft",
+  ParamEyeROpen: "EyeOpenRight",
+  ParamMouthForm: "MouthSmile",
+  ParamMouthOpenY: "MouthOpen",
+};
+const VTS_DEFAULT_PARAMETER_IDS = new Set(Object.values(VTS_DEFAULT_MAPPING));
 
 interface VtsParameterValue {
   id: string;
@@ -18,6 +32,8 @@ export class VtsParameterSink {
   private sendTimer: number | null = null;
   private requestCounter = 0;
   private lastSendAt = 0;
+  private targetParameterIds: Set<string> | null = null;
+  private reportedMissingIds = new Set<string>();
 
   public start(): void {
     if (!this.isEnabled() || this.socket) return;
@@ -47,9 +63,23 @@ export class VtsParameterSink {
   public publish(values: readonly VtsParameterValue[]): void {
     if (!this.isEnabled()) return;
     const mapping = this.readMapping();
-    this.pendingValues = values
+    const mappedValues = values
       .filter((entry) => entry.id.trim() && Number.isFinite(entry.value))
       .map((entry) => ({ id: mapping[entry.id.trim()] || entry.id.trim(), value: entry.value }));
+    this.pendingValues = mappedValues.filter((entry) => {
+      if (
+        !this.targetParameterIds
+        || this.targetParameterIds.has(entry.id)
+        || VTS_DEFAULT_PARAMETER_IDS.has(entry.id)
+      ) return true;
+      if (!this.reportedMissingIds.has(entry.id)) {
+        this.reportedMissingIds.add(entry.id);
+        console.warn("[VTS] mapped target parameter is not present in the current model.", {
+          parameterId: entry.id,
+        });
+      }
+      return false;
+    });
     this.start();
   }
 
@@ -105,6 +135,24 @@ export class VtsParameterSink {
         authenticated: this.authenticated,
         reason: message.data?.reason ?? null,
       });
+      if (this.authenticated) {
+        this.send({ messageType: "Live2DParameterListRequest", data: {} });
+      }
+      return;
+    }
+    if (message.messageType === "Live2DParameterListResponse") {
+      const parameters = Array.isArray(message.data?.parameters)
+        ? message.data.parameters
+        : [];
+      const ids = parameters
+        .map((parameter: any) => String(parameter?.name || parameter?.id || "").trim())
+        .filter(Boolean);
+      this.targetParameterIds = new Set(ids);
+      this.writeStorage(VTS_PARAMETER_CATALOG_KEY, JSON.stringify(ids));
+      console.info("[VTS] target parameter catalog received.", {
+        count: ids.length,
+        ids,
+      });
       return;
     }
     if (message.messageType === "APIErrorEvent") {
@@ -151,7 +199,8 @@ export class VtsParameterSink {
   }
 
   private isEnabled(): boolean {
-    return this.readStorage(VTS_ENABLED_KEY).toLowerCase() === "true";
+    return VTS_OUTPUT_EXPERIMENTAL_ENABLED
+      && this.readStorage(VTS_ENABLED_KEY).toLowerCase() === "true";
   }
 
   private endpoint(): string {
@@ -167,14 +216,17 @@ export class VtsParameterSink {
     try {
       const value = JSON.parse(this.readStorage(VTS_MAPPING_KEY) || "{}");
       if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-      return Object.fromEntries(
+      return {
+        ...VTS_DEFAULT_MAPPING,
+        ...Object.fromEntries(
         Object.entries(value).filter(([source, target]) =>
           source.trim() && typeof target === "string" && target.trim(),
         ).map(([source, target]) => [source.trim(), String(target).trim()]),
-      );
+        ),
+      };
     } catch {
-      console.warn("[VTS] parameter mapping JSON is invalid; using direct IDs.");
-      return {};
+      console.warn("[VTS] parameter mapping JSON is invalid; using default mapping.");
+      return { ...VTS_DEFAULT_MAPPING };
     }
   }
 
