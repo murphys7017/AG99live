@@ -889,12 +889,21 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     if (!completedRun) {
       return null;
     }
+    const isSpeechSegmentHandoff = event.status === "stopped"
+      && event.reason === "speech_segment_handoff";
     if (activePlaybackRun?.runId === event.runId) {
       activePlaybackRun = null;
-      activePlaybackPlan = null;
-      continuityEnvelope = null;
+      // A speech handoff ends the previous execution, but its parameter plan
+      // and continuity envelope are still the source state for the successor
+      // segment. Ordinary completion, failure and interruption must clear them.
+      if (!isSpeechSegmentHandoff) {
+        activePlaybackPlan = null;
+        continuityEnvelope = null;
+      }
     }
-    if (event.status === "failed" || event.status === "rejected") {
+    if (isSpeechSegmentHandoff) {
+      setState("idle", "动作已交接，等待下一段动作。", null);
+    } else if (event.status === "failed" || event.status === "rejected") {
       setState(
         "failed",
         event.reason || "动作执行失败。",

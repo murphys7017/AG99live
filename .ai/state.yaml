@@ -1,3 +1,21 @@
+continuity_handoff_envelope_20261101:
+  class: bugfix
+  risk: high
+  status: source_reviewed_pending_runtime_acceptance
+  scope: >-
+    Preserve the active parameter plan and ContinuityEnvelope when a speech
+    segment ends through the intentional handoff path, so the successor motion
+    can compile against the prior segment state. Ordinary completion, failure,
+    interruption and stop still clear continuity state. Prompt text, Live2D
+    protocol and C++ remain unchanged.
+  validation: >-
+    Renderer vue-tsc typecheck and git diff whitespace inspection pass. No
+    automated tests or runtime integration checks are run per user scope.
+  limitations: >-
+    The handoff state still needs real multi-segment AG99, TTS, Electron and
+    Live2D playback acceptance to confirm visual continuity and interruption
+    behavior.
+
 audio_stream_resource_bounds_20261031:
   class: bugfix
   risk: medium
