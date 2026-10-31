@@ -1,3 +1,39 @@
+pending_motion_ttl_capacity_prepared_cache_20261031:
+  class: bugfix
+  risk: high
+  status: source_reviewed_pending_runtime_acceptance
+  scope: >-
+    Bound renderer pending inbound motion payloads with a 30-second TTL and
+    64-entry capacity, evicting the oldest stale work through the existing
+    failure path. Give prepared semantic motion entries the same bounded TTL
+    and capacity with timer cleanup on consume, segment interruption, and stop.
+    Prompt text, Live2D protocol and C++ remain unchanged.
+  validation: >-
+    Renderer vue-tsc typecheck and git diff whitespace inspection pass. No
+    automated tests or runtime integration checks are run per user scope.
+  limitations: >-
+    Expiry and capacity eviction drop optional motion preparation and rely on
+    the existing fallback/rejection path. Runtime playback timing still needs
+    AG99, Electron, TTS and Live2D acceptance.
+
+deferred_motion_capacity_motion_lab_overflow_20261031:
+  class: bugfix
+  risk: high
+  status: source_reviewed_pending_runtime_acceptance
+  scope: >-
+    Degrade late-motion registration cleanly when the bounded delivery registry
+    is full, preserving the existing segment failure metadata path. Make MotionLab
+    queue-full observation drops bounded, rate-limited, and inspectable through
+    queue statistics and explicit rejection logs. Prompt text, Live2D protocol and
+    C++ remain unchanged.
+  validation: >-
+    Changed Python modules pass py_compile and git diff whitespace inspection.
+    No automated tests or runtime integration checks are run per user scope.
+  limitations: >-
+    Capacity overflow still drops the optional late motion and marks that segment
+    with a deterministic failure reason. MotionLab queue-full events remain
+    lossy, but the monotonic drop count and contextual logs make the loss visible.
+
 deferred_motion_bounded_send_retry_cleanup_20261031:
   class: bugfix
   risk: high

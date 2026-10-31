@@ -56,6 +56,17 @@ function buildSpeechCueKey(cues: readonly OutputSegmentSpeechCue[]): string {
     .join("|");
 }
 
+const MAX_PREPARED_SEMANTIC_MOTIONS = 64;
+const PREPARED_SEMANTIC_MOTION_TTL_MS = 30_000;
+
+interface PreparedSemanticMotionEntry {
+  durationMs: number;
+  assistantText: string;
+  speechCueKey: string;
+  prepared: PreparedSemanticMotionPayload;
+  expiresAtMs: number;
+}
+
 export function useModelEngine(dependencies: ModelEngineDependencies) {
   const state = reactive({
     status: "idle" as ModelEngineStatus,
@@ -72,12 +83,8 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
   let activePlaybackPlan: MotionPlanPayload | null = null;
   let continuityEnvelope: ContinuityEnvelope | null = null;
   let thinkingSwayTurnId: string | null = null;
-  const preparedSemanticMotions = new Map<string, {
-    durationMs: number;
-    assistantText: string;
-    speechCueKey: string;
-    prepared: PreparedSemanticMotionPayload;
-  }>();
+  const preparedSemanticMotions = new Map<string, PreparedSemanticMotionEntry>();
+  const preparedMotionExpiryTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   function buildSegmentKey(turnId: string | null, messageId: string): string {
     const normalizedTurnId = normalizeTurnId(turnId);
@@ -86,6 +93,99 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
       throw new Error("Prepared motion requires turnId and messageId.");
     }
     return `${normalizedTurnId.length}:${normalizedTurnId}:${normalizedMessageId}`;
+  }
+
+  function discardPreparedSemanticMotion(key: string): void {
+    const expiryTimer = preparedMotionExpiryTimers.get(key);
+    if (expiryTimer !== undefined) {
+      clearTimeout(expiryTimer);
+      preparedMotionExpiryTimers.delete(key);
+    }
+    preparedSemanticMotions.delete(key);
+  }
+
+  function prunePreparedSemanticMotions(): void {
+    const now = performance.now();
+    for (const [key, entry] of preparedSemanticMotions) {
+      if (entry.expiresAtMs <= now) {
+        discardPreparedSemanticMotion(key);
+      }
+    }
+  }
+
+  function schedulePreparedSemanticMotionExpiry(
+    key: string,
+    entry: PreparedSemanticMotionEntry,
+  ): void {
+    const previousTimer = preparedMotionExpiryTimers.get(key);
+    if (previousTimer !== undefined) {
+      clearTimeout(previousTimer);
+    }
+    const delayMs = Math.max(
+      0,
+      Math.ceil(entry.expiresAtMs - performance.now()),
+    );
+    const expiryTimer = setTimeout(() => {
+      if (preparedMotionExpiryTimers.get(key) !== expiryTimer) {
+        return;
+      }
+      preparedMotionExpiryTimers.delete(key);
+      const current = preparedSemanticMotions.get(key);
+      if (current !== entry) {
+        return;
+      }
+      if (performance.now() < entry.expiresAtMs) {
+        schedulePreparedSemanticMotionExpiry(key, entry);
+        return;
+      }
+      preparedSemanticMotions.delete(key);
+      console.debug("[ModelEngine] prepared motion cache entry expired.", { key });
+    }, delayMs);
+    preparedMotionExpiryTimers.set(key, expiryTimer);
+  }
+
+  function getPreparedSemanticMotion(key: string): PreparedSemanticMotionEntry | undefined {
+    const entry = preparedSemanticMotions.get(key);
+    if (!entry) {
+      return undefined;
+    }
+    if (entry.expiresAtMs <= performance.now()) {
+      discardPreparedSemanticMotion(key);
+      return undefined;
+    }
+    return entry;
+  }
+
+  function rememberPreparedSemanticMotion(
+    key: string,
+    entry: Omit<PreparedSemanticMotionEntry, "expiresAtMs">,
+  ): void {
+    discardPreparedSemanticMotion(key);
+    prunePreparedSemanticMotions();
+    while (preparedSemanticMotions.size >= MAX_PREPARED_SEMANTIC_MOTIONS) {
+      const oldestKey = preparedSemanticMotions.keys().next().value;
+      if (typeof oldestKey !== "string") {
+        break;
+      }
+      discardPreparedSemanticMotion(oldestKey);
+      console.debug("[ModelEngine] prepared motion cache entry evicted.", {
+        key: oldestKey,
+        capacity: MAX_PREPARED_SEMANTIC_MOTIONS,
+      });
+    }
+    const preparedEntry: PreparedSemanticMotionEntry = {
+      ...entry,
+      expiresAtMs: performance.now() + PREPARED_SEMANTIC_MOTION_TTL_MS,
+    };
+    preparedSemanticMotions.set(key, preparedEntry);
+    schedulePreparedSemanticMotionExpiry(key, preparedEntry);
+  }
+
+  function clearPreparedSemanticMotions(): void {
+    for (const key of preparedSemanticMotions.keys()) {
+      discardPreparedSemanticMotion(key);
+    }
+    preparedMotionExpiryTimers.clear();
   }
 
   function setState(
@@ -217,13 +317,13 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
         timeline: context.playbackClock,
       });
       const key = buildSegmentKey(context.turnId, context.messageId);
-      const cached = preparedSemanticMotions.get(key);
+      const cached = getPreparedSemanticMotion(key);
       let prepared = payload.kind === "semantic_intent"
         && cached?.assistantText === context.assistantText
         && cached.speechCueKey === buildSpeechCueKey(context.speechCues)
         ? cached.prepared
         : null;
-      preparedSemanticMotions.delete(key);
+      discardPreparedSemanticMotion(key);
       let startContext = context;
       if (!prepared && context.playbackClock?.source === "audio") {
         const clock = context.playbackClock;
@@ -437,12 +537,12 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     }
 
     const key = buildSegmentKey(playbackClock.turnId, normalizedMessageId);
-    const cached = preparedSemanticMotions.get(key);
+    const cached = getPreparedSemanticMotion(key);
     const prepared = cached?.assistantText === assistantText
       && cached.speechCueKey === buildSpeechCueKey(speechCues)
       ? cached.prepared
       : null;
-    preparedSemanticMotions.delete(key);
+    discardPreparedSemanticMotion(key);
     const started = startSpeechOnlyMotionRequest(
       speechOnlyRequest,
       {
@@ -555,7 +655,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     const selectedModel = dependencies.getSelectedModel();
     const selectedModelPath = selectedModel?.model_path.trim() ?? "";
     const selectedProfile = selectedModel?.semantic_axis_profile ?? null;
-    const cached = preparedSemanticMotions.get(key);
+    const cached = getPreparedSemanticMotion(key);
     const speechCueKey = buildSpeechCueKey(speechCues);
     if (
       cached
@@ -585,7 +685,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
           runtimeStateController,
         );
     if (!prepared) {
-      preparedSemanticMotions.delete(key);
+      discardPreparedSemanticMotion(key);
       const reason = state.lastCompileReason || "motion_preparation_failed";
       if (source === "queued_motion") {
         runtimeScheduler.failPendingPayloadForSegment(
@@ -610,7 +710,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
         source,
       };
     }
-    preparedSemanticMotions.set(key, {
+    rememberPreparedSemanticMotion(key, {
       durationMs,
       assistantText,
       speechCueKey,
@@ -838,7 +938,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
   function stop(reason = "stopped"): void {
     cancelIdleMotion();
     runtimeScheduler.clearAllPendingPayloads();
-    preparedSemanticMotions.clear();
+    clearPreparedSemanticMotions();
     releaseThinkingSway();
     stopActivePlayback(
       reason,
@@ -854,7 +954,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     reason: string,
   ): void {
     runtimeScheduler.cancelPendingPayloadForSegment(turnId, messageId);
-    preparedSemanticMotions.delete(buildSegmentKey(turnId, messageId));
+    discardPreparedSemanticMotion(buildSegmentKey(turnId, messageId));
     const normalizedTurnId = normalizeTurnId(turnId);
     const normalizedMessageId = messageId.trim();
     const activeRunMatches = activePlaybackRun?.turnId === normalizedTurnId

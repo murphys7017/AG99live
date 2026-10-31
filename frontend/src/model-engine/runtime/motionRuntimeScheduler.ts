@@ -7,6 +7,9 @@ import type { MotionPlaybackClockContext } from "./playbackClock.js";
 import { normalizeTurnId } from "../normalize.js";
 import type { ModelEnginePlaybackOrigin } from "./contracts.js";
 
+const MAX_PENDING_INBOUND_MOTION_PAYLOADS = 64;
+const PENDING_INBOUND_MOTION_TTL_MS = 30_000;
+
 export interface PendingInboundMotionPayload {
   payload: NormalizedMotionPayload;
   messageId: string;
@@ -16,6 +19,7 @@ export interface PendingInboundMotionPayload {
   motionSource?: InboundPayloadContext["motionSource"];
   playbackTurnId: string | null;
   receivedAtMs: number;
+  expiresAtMs: number;
   playbackClock: MotionPlaybackClockContext | null;
   playbackClockReader: MotionPlaybackClockReader | null;
   timelineMode: InboundPayloadContext["timelineMode"];
@@ -102,6 +106,7 @@ export function createMotionRuntimeScheduler(
   hooks: MotionRuntimeSchedulerHooks,
 ) {
   const pendingInboundMotionPayloads = new Map<string, PendingInboundMotionPayload>();
+  const pendingExpiryTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   function buildPendingMotionKey(
     turnId: string | null,
@@ -123,6 +128,61 @@ export function createMotionRuntimeScheduler(
       pendingInboundMotionPayloads.size,
       pendingInboundMotionPayloads.values().next().value?.messageId ?? "",
     );
+  }
+
+  function deletePendingPayload(key: string): void {
+    const expiryTimer = pendingExpiryTimers.get(key);
+    if (expiryTimer !== undefined) {
+      clearTimeout(expiryTimer);
+      pendingExpiryTimers.delete(key);
+    }
+    pendingInboundMotionPayloads.delete(key);
+  }
+
+  function schedulePendingExpiry(
+    key: string,
+    entry: PendingInboundMotionPayload,
+  ): void {
+    const previousTimer = pendingExpiryTimers.get(key);
+    if (previousTimer !== undefined) {
+      clearTimeout(previousTimer);
+    }
+    const delayMs = Math.max(
+      0,
+      Math.ceil(entry.expiresAtMs - performance.now()),
+    );
+    const expiryTimer = setTimeout(() => {
+      if (pendingExpiryTimers.get(key) !== expiryTimer) {
+        return;
+      }
+      pendingExpiryTimers.delete(key);
+      const current = pendingInboundMotionPayloads.get(key);
+      if (current !== entry) {
+        return;
+      }
+      if (performance.now() < entry.expiresAtMs) {
+        schedulePendingExpiry(key, entry);
+        return;
+      }
+      dropPendingPayload(entry, "motion_pending_ttl_expired");
+      syncPendingState();
+    }, delayMs);
+    pendingExpiryTimers.set(key, expiryTimer);
+  }
+
+  function pruneExpiredPendingPayloads(): void {
+    const now = performance.now();
+    let pruned = false;
+    for (const entry of pendingInboundMotionPayloads.values()) {
+      if (entry.expiresAtMs > now) {
+        continue;
+      }
+      dropPendingPayload(entry, "motion_pending_ttl_expired");
+      pruned = true;
+    }
+    if (pruned) {
+      syncPendingState();
+    }
   }
 
   function buildStartContext(
@@ -157,7 +217,7 @@ export function createMotionRuntimeScheduler(
       timelineMode: entry.timelineMode,
       playbackClock: summarizePlaybackClock(entry.playbackClock),
     });
-    pendingInboundMotionPayloads.delete(buildPendingMotionKey(entry.turnId, entry.messageId));
+    deletePendingPayload(buildPendingMotionKey(entry.turnId, entry.messageId));
     hooks.onStartFailed?.(buildStartContext(entry, startReason));
   }
 
@@ -177,7 +237,7 @@ export function createMotionRuntimeScheduler(
     if (!entry) {
       return false;
     }
-    pendingInboundMotionPayloads.delete(key);
+    deletePendingPayload(key);
     syncPendingState();
     return true;
   }
@@ -203,6 +263,7 @@ export function createMotionRuntimeScheduler(
     startReason: string,
     playbackClock: MotionPlaybackClockContext | null = null,
   ): boolean {
+    pruneExpiredPendingPayloads();
     const key = buildPendingMotionKey(turnId, messageId);
     const entry = pendingInboundMotionPayloads.get(key);
     if (!entry) {
@@ -236,7 +297,7 @@ export function createMotionRuntimeScheduler(
       startFailure = error;
     }
 
-    pendingInboundMotionPayloads.delete(key);
+    deletePendingPayload(key);
     syncPendingState();
 
     if (startFailure) {
@@ -308,6 +369,7 @@ export function createMotionRuntimeScheduler(
     const normalizedTurnId = normalizeTurnId(context.turnId);
     const normalizedPlaybackTurnId =
       normalizeTurnId(context.playbackTurnId ?? null) ?? normalizedTurnId;
+    pruneExpiredPendingPayloads();
     if (!normalizedTurnId) {
       hooks.onStartFailed?.({
         messageId: context.messageId,
@@ -344,6 +406,7 @@ export function createMotionRuntimeScheduler(
       motionSource: context.motionSource,
       playbackTurnId: normalizedPlaybackTurnId,
       receivedAtMs: context.receivedAtMs,
+      expiresAtMs: context.receivedAtMs + PENDING_INBOUND_MOTION_TTL_MS,
       playbackClock: context.playbackClock ?? null,
       playbackClockReader: context.playbackClockReader ?? null,
       timelineMode: context.timelineMode,
@@ -367,7 +430,16 @@ export function createMotionRuntimeScheduler(
       return false;
     }
 
+    while (pendingInboundMotionPayloads.size >= MAX_PENDING_INBOUND_MOTION_PAYLOADS) {
+      const oldest = pendingInboundMotionPayloads.values().next().value as
+        PendingInboundMotionPayload | undefined;
+      if (!oldest) {
+        break;
+      }
+      dropPendingPayload(oldest, "motion_pending_capacity_exceeded");
+    }
     pendingInboundMotionPayloads.set(pendingKey, entry);
+    schedulePendingExpiry(pendingKey, entry);
     syncPendingState();
     hooks.onPendingStatus("动作已排队，等待音频起播。");
     console.info("[ModelEngine] queued motion payload.", {
@@ -408,6 +480,7 @@ export function createMotionRuntimeScheduler(
   function handlePlaybackTimelineStarted(
     playbackClock: MotionPlaybackClockContext,
   ): boolean {
+    pruneExpiredPendingPayloads();
     console.info("[MotionRuntimeScheduler] playback timeline started callback received.", {
       playbackClock: summarizePlaybackClock(playbackClock),
       pendingCount: pendingInboundMotionPayloads.size,
@@ -457,6 +530,7 @@ export function createMotionRuntimeScheduler(
   function getPendingPayloadForTimeline(
     playbackClock: MotionPlaybackClockContext,
   ): PendingMotionPreparation | null {
+    pruneExpiredPendingPayloads();
     const entry = pendingInboundMotionPayloads.get(
       buildPendingMotionKey(playbackClock.turnId, playbackClock.messageId),
     );
