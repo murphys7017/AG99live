@@ -1,6 +1,6 @@
 # AG99live Frontend
 
-Electron + Vue 桌面客户端负责模型展示、用户交互、播放编排和 Live2D 执行。它连接本机 Adapter，接收完整的 `output.segment` 消息（Payload Schema 为 `output.segment.v5`），并把每段回复呈现为同步的音频、字幕、动作、口型和 Physics。
+Electron + Vue 桌面客户端负责模型展示、用户交互、播放编排和 Live2D 执行。它连接本机 Adapter，接收完整的 `output.segment` 消息（Payload Schema 为 `output.segment.v6`），并把每段回复呈现为同步的音频、字幕、动作、口型和 Physics。
 
 ## 边界
 
@@ -18,11 +18,12 @@ AdapterConnection
 - `turn-playback/` 保存段事实、顺序和播放投影。
 - `playback-timeline/` 负责时钟、sink 生命周期与终态。
 - `model-engine/` 把语义动作编译为参数计划或预检资源。
+- `model-engine/compiler/` 在编译边界执行动作预算、重复方向抑制和连续性释放衔接；它只处理内部语义和参数计划，不改变 Prompt 或 wire schema。
 - `live2d/`、`live2d-renderer/` 负责模型加载、参数融合、口型、Physics 和绘制。
 - `spout/` 与 `electron/main/spout-sender.ts` 发布透明 Live2D 画布给 `AG99live.Live2D` Sender。
 - `motion-lab/`、`action-lab/`、`views/` 和 `desktop-bridge/` 提供调校、窗口和桌面能力。
 
-SessionStore 不播放媒体，Timeline 不解释动作语义，ModelEngine 不创建第二个时钟，Live2D runtime 不读取 Turn 业务状态。
+SessionStore 不播放媒体，Timeline 不解释动作语义，ModelEngine 不创建第二个时钟，Live2D runtime 不读取 Turn 业务状态。迟到动作有独立的 1.8 秒尾部窗口；超过窗口的动作进入失败结算，不重播已经完成的音频。
 
 ## 开发
 

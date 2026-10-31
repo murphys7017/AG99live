@@ -86,6 +86,8 @@ Persona `segments[].speech` 是 TTS 文本分段，不是协议中的 speech cue
 
 麦克风采集由 `input.audio_stream_start`、二进制 PCM16LE chunk 和 `input.audio_stream_end` 组成。后端用 `stream_id` 汇总、严格检查顺序，并根据 PTT 或 VAD 建立正式 Turn。持续收音的 `capture_turn_id` 只标识采集根，每段 VAD 语音使用 `<capture_turn_id>:vad:<n>` 子 Turn。
 
+Adapter 对每条输入流设置 12 MiB PCM 总量上限和 120 秒生命周期上限。超限时立即清理 PTT/VAD/ASR 缓冲，通过既有 `control_error` 报告输入丢弃，并释放对应的采集上下文；这两个限制属于 Adapter 内部资源保护，不改变音频消息格式。
+
 可选 `fast_asr` 使用 sherpa-onnx 在 Adapter 内对 PTT 和 VAD 音频做本地增量识别。在 AG99live Web 控制台设置模型目录与推理后端，并先在 AstrBot 实际运行的 Python 环境安装 `sherpa-onnx` 和 `sherpa-onnx-bin`。原有 AstrBot STT 不参与普通语音输入；只有 Core 判定需要任务交接时，才使用同一 Turn 缓存的 PCM 复核，并将修订文本用于任务规划。音频复核缓存最多保留 8 段、每段 12 MiB，120 秒过期。此功能依赖 Core 提供 `_ag99live_handoff_asr_review` 回调。
 
 `control.interrupt` 只停止目标 Turn。连接断开时，Adapter 请求停止全部在飞 AG99 event，再独立清理 Turn、段、曲线请求和身份映射；晚到输出不会重新进入播放。
