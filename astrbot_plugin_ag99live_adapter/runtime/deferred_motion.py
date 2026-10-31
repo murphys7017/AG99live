@@ -10,6 +10,12 @@ from astrbot.api import logger
 from ..protocol.parser import build_message_envelope
 from ..protocol.schema_versions import OUTPUT_SEGMENT_SCHEMA_VERSION
 
+_DEFERRED_MOTION_MAX_ENTRIES = 64
+_DEFERRED_MOTION_SEND_MAX_ATTEMPTS = 4
+_DEFERRED_MOTION_SEND_INITIAL_RETRY_SECONDS = 0.25
+_DEFERRED_MOTION_SEND_MAX_RETRY_SECONDS = 2.0
+_DEFERRED_MOTION_SEND_WINDOW_SECONDS = 30.0
+
 
 @dataclass
 class _Delivery:
@@ -37,7 +43,7 @@ class DeferredMotionDelivery:
         key = (turn_id, message_id)
         if key in self._entries or self._is_terminal(turn_id):
             raise ValueError("deferred_motion_registration_invalid")
-        if len(self._entries) >= 64:
+        if len(self._entries) >= _DEFERRED_MOTION_MAX_ENTRIES:
             raise ValueError("deferred_motion_capacity_exceeded")
         entry = _Delivery(sent=asyncio.Event(), ready=asyncio.Event())
         self._entries[key] = entry
@@ -47,7 +53,9 @@ class DeferredMotionDelivery:
     async def _deliver(self, key, entry, resolve, timeout_seconds) -> None:
         turn_id, message_id = key
         try:
-            async with asyncio.timeout(min(30, max(1, timeout_seconds))):
+            async with asyncio.timeout(
+                min(_DEFERRED_MOTION_SEND_WINDOW_SECONDS, max(1, timeout_seconds))
+            ):
                 slot = await resolve()
         except asyncio.CancelledError:
             raise
@@ -56,31 +64,102 @@ class DeferredMotionDelivery:
             slot = {"state": "failed", "reason": "deferred_motion_generation_failed"}
         entry.slot = slot
         entry.ready.set()
-        deadline = asyncio.get_running_loop().time() + 30.0
-        while not entry.sent.is_set():
-            if self._is_terminal(turn_id):
+        try:
+            deadline = asyncio.get_running_loop().time() + _DEFERRED_MOTION_SEND_WINDOW_SECONDS
+            while not entry.sent.is_set():
+                if self._is_terminal(turn_id):
+                    return
+                remaining = deadline - asyncio.get_running_loop().time()
+                if remaining <= 0:
+                    logger.info(
+                        "Deferred motion send window expired before segment delivery: "
+                        "turn_id=%s message_id=%s",
+                        turn_id,
+                        message_id,
+                    )
+                    return
+                try:
+                    await asyncio.wait_for(
+                        asyncio.shield(entry.sent.wait()),
+                        timeout=min(0.25, remaining),
+                    )
+                except asyncio.TimeoutError:
+                    continue
+            if self._entries.get(key) is not entry or self._is_terminal(turn_id):
                 return
-            remaining = deadline - asyncio.get_running_loop().time()
-            if remaining <= 0:
-                raise TimeoutError("deferred_motion_send_window_timeout")
-            try:
-                await asyncio.wait_for(
-                    asyncio.shield(entry.sent.wait()),
-                    timeout=min(0.25, remaining),
-                )
-            except asyncio.TimeoutError:
-                continue
-        if self._entries.get(key) is not entry or self._is_terminal(turn_id):
-            return
-        if entry.inline:
-            return
-        sent = await self._send(build_message_envelope(
+            if entry.inline:
+                return
+            await self._send_with_retry(
+                key,
+                entry,
+                slot,
+                deadline=deadline,
+            )
+        finally:
+            if self._entries.get(key) is entry:
+                self._entries.pop(key, None)
+
+    async def _send_with_retry(
+        self,
+        key: tuple[str, str],
+        entry: _Delivery,
+        slot: dict[str, Any],
+        *,
+        deadline: float,
+    ) -> bool:
+        turn_id, message_id = key
+        retry_delay = _DEFERRED_MOTION_SEND_INITIAL_RETRY_SECONDS
+        payload = build_message_envelope(
             "output.segment_motion", source="adapter", turn_id=turn_id,
             message_id=message_id,
             payload={"schema_version": OUTPUT_SEGMENT_SCHEMA_VERSION, "motion": slot},
-        ))
-        if not sent:
-            raise RuntimeError("deferred_motion_send_failed")
+        )
+        for attempt in range(1, _DEFERRED_MOTION_SEND_MAX_ATTEMPTS + 1):
+            if self._entries.get(key) is not entry or self._is_terminal(turn_id):
+                return False
+            try:
+                remaining = deadline - asyncio.get_running_loop().time()
+                if remaining <= 0:
+                    break
+                if await asyncio.wait_for(self._send(payload), timeout=remaining):
+                    if attempt > 1:
+                        logger.info(
+                            "Deferred motion delivery recovered after retry: "
+                            "turn_id=%s message_id=%s attempt=%s",
+                            turn_id,
+                            message_id,
+                            attempt,
+                        )
+                    return True
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "Deferred motion send raised: turn_id=%s message_id=%s "
+                    "attempt=%s error=%s",
+                    turn_id,
+                    message_id,
+                    attempt,
+                    exc,
+                )
+            if attempt >= _DEFERRED_MOTION_SEND_MAX_ATTEMPTS:
+                break
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                break
+            await asyncio.sleep(min(retry_delay, remaining))
+            retry_delay = min(
+                retry_delay * 2,
+                _DEFERRED_MOTION_SEND_MAX_RETRY_SECONDS,
+            )
+        logger.warning(
+            "Deferred motion delivery exhausted retries: turn_id=%s "
+            "message_id=%s attempts=%s",
+            turn_id,
+            message_id,
+            _DEFERRED_MOTION_SEND_MAX_ATTEMPTS,
+        )
+        return False
 
     def mark_sent(self, turn_id: str, message_id: str) -> None:
         entry = self._entries.get((turn_id, message_id))

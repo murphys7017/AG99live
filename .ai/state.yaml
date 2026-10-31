@@ -1,3 +1,19 @@
+deferred_motion_bounded_send_retry_cleanup_20261031:
+  class: bugfix
+  risk: high
+  status: source_reviewed_pending_runtime_acceptance
+  scope: >-
+    Give DeferredMotionDelivery a bounded retry loop for late output.segment_motion
+    sends and remove delivery entries after success, expiry, terminal cancellation,
+    or retry exhaustion. Prompt text, Live2D protocol and C++ remain unchanged.
+  validation: >-
+    Changed Python modules pass py_compile and git diff whitespace inspection.
+    No automated tests or runtime integration checks are run per user scope.
+  limitations: >-
+    Retries are bounded to four attempts with 250ms to 2s backoff inside a
+    30-second post-readiness send window. A permanently unavailable connection
+    still drops the optional late motion after logging the exhaustion reason.
+
 performance_governor_continuity_envelope_20261031:
   class: refactor
   risk: high
