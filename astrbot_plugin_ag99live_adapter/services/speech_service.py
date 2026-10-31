@@ -136,10 +136,13 @@ class AudioStreamState:
     encoding: str = "pcm16le"
     capture_mode: str = "ptt"
     chunks: list[bytes] = field(default_factory=list)
+    started_at_monotonic: float = field(default_factory=time.monotonic)
+    received_bytes: int = 0
     last_seq: int = -1
     vad_engine: Any | None = None
     vad_turn_count: int = 0
     transcription_task: asyncio.Task[str | None] | None = None
+    capture_timeout_task: asyncio.Task[None] | None = None
     context_timeout_task: asyncio.Task[None] | None = None
     sample_count: int = 0
     streaming_asr: StreamingASR | None = None
@@ -184,6 +187,8 @@ TEMP_AUDIO_CLEANUP_DELAY_TURNS = 3
 TEMP_AUDIO_CLEANUP_WARNING_THRESHOLD = 5
 SEALED_INPUT_CONTEXT_TIMEOUT_SECONDS = 15
 MAX_SEALED_INPUTS = 4
+MAX_AUDIO_STREAM_BYTES = 12 * 1024 * 1024
+MAX_AUDIO_STREAM_DURATION_SECONDS = 120
 REVIEW_AUDIO_TTL_SECONDS = 120
 MAX_REVIEW_AUDIO_ENTRIES = 8
 MAX_REVIEW_AUDIO_BYTES = 12 * 1024 * 1024
@@ -354,7 +359,7 @@ class SpeechIngressService:
                     f"vad_initialization_failed:{stream_id}"
                 ) from exc
 
-        self._audio_streams[stream_id] = AudioStreamState(
+        stream = AudioStreamState(
             stream_id=stream_id,
             capture_turn_id=str(getattr(message, "turn_id", "") or "").strip() or None,
             sample_rate=payload["sample_rate"],
@@ -364,6 +369,11 @@ class SpeechIngressService:
             vad_engine=vad_engine,
             streaming_asr=await self._create_streaming_asr_session(),
         )
+        self._audio_streams[stream_id] = stream
+        stream.capture_timeout_task = asyncio.create_task(
+            self._expire_active_input(stream), name=f"audio-capture-timeout:{stream_id}"
+        )
+        stream.capture_timeout_task.add_done_callback(self._observe_input_task)
 
     async def handle_audio_stream_binary_chunk(self, frame: BinaryAudioChunkFrame):
         stream_id = self._normalize_stream_id(frame.stream_id)
@@ -378,6 +388,7 @@ class SpeechIngressService:
             raise ValueError(f"binary_audio_chunk_after_seal:{stream_id}")
 
         if frame.seq <= stream.last_seq:
+            self._cancel_capture_timeout(stream)
             self._audio_streams.pop(stream_id, None)
             raise ValueError(
                 f"binary_audio_chunk_sequence_invalid:{stream_id}:{frame.seq}:{stream.last_seq}"
@@ -392,6 +403,7 @@ class SpeechIngressService:
                 frame.sample_rate,
                 frame.channels,
             )
+            self._cancel_capture_timeout(stream)
             self._audio_streams.pop(stream_id, None)
             await self._send_json(
                 build_control_error(
@@ -406,10 +418,22 @@ class SpeechIngressService:
             default=stream.capture_mode,
         )
         if frame_capture_mode != stream.capture_mode:
+            self._cancel_capture_timeout(stream)
             self._audio_streams.pop(stream_id, None)
             raise ValueError(
                 f"binary_audio_capture_mode_changed:{stream_id}:{stream.capture_mode}:{frame_capture_mode}"
             )
+        limit_reason = self._audio_stream_limit_reason(
+            stream,
+            incoming_bytes=len(frame.payload),
+        )
+        if limit_reason is not None:
+            await self._discard_active_audio_stream(
+                stream,
+                error_message=limit_reason,
+            )
+            return None
+        stream.received_bytes += len(frame.payload)
         if stream.capture_mode in {"manual", "auto"}:
             built_message = await self._handle_vad_pcm16_chunk(
                 frame.payload,
@@ -446,6 +470,16 @@ class SpeechIngressService:
             raise ValueError(f"audio_stream_seal_sequence_mismatch:{stream_id}")
         if sum(s.sealed for s in self._audio_streams.values()) >= MAX_SEALED_INPUTS:
             raise ValueError("audio_stream_sealed_input_limit")
+        limit_reason = self._audio_stream_limit_reason(stream, incoming_bytes=0)
+        if limit_reason is not None:
+            await self._discard_active_audio_stream(
+                stream,
+                error_message=limit_reason,
+            )
+            return
+        if stream.capture_timeout_task is not None:
+            stream.capture_timeout_task.cancel()
+            stream.capture_timeout_task = None
         audio_buffer = self._pcm16_bytes_to_float32(stream.chunks)
         stream.sample_count = int(audio_buffer.size)
         stream.sealed = True
@@ -520,14 +554,24 @@ class SpeechIngressService:
         # Ownership transfers to this handler. Timeout/disconnect cannot consume
         # the same stream again; cancellation below also owns the ASR task.
         self._audio_streams.pop(stream_id, None)
-        if stream is not None and stream.context_timeout_task is not None:
-            stream.context_timeout_task.cancel()
+        timeout_tasks = []
+        if stream is not None:
+            for timeout_task in (
+                stream.capture_timeout_task,
+                stream.context_timeout_task,
+            ):
+                if timeout_task is not None:
+                    timeout_task.cancel()
+                    timeout_tasks.append(timeout_task)
         try:
             return await self._finish_audio_stream(message, stream, stream_id)
         finally:
+            tasks = list(timeout_tasks)
             if stream is not None and stream.transcription_task is not None:
                 stream.transcription_task.cancel()
-                await asyncio.gather(stream.transcription_task, return_exceptions=True)
+                tasks.append(stream.transcription_task)
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
 
     async def _finish_audio_stream(self, message, stream, stream_id):
         payload = message.payload
@@ -662,7 +706,11 @@ class SpeechIngressService:
                 continue
             self._audio_streams.pop(key, None)
             self._review_audio.pop(str(stream.capture_turn_id or "").strip(), None)
-            for task in (stream.transcription_task, stream.context_timeout_task):
+            for task in (
+                stream.transcription_task,
+                stream.capture_timeout_task,
+                stream.context_timeout_task,
+            ):
                 if task is not None:
                     task.cancel()
                     tasks.append(task)
@@ -683,6 +731,75 @@ class SpeechIngressService:
             turn_id=stream.capture_turn_id,
             error_message="Audio input expired while waiting for desktop context.",
         )
+
+    async def _expire_active_input(self, stream: AudioStreamState) -> None:
+        await asyncio.sleep(MAX_AUDIO_STREAM_DURATION_SECONDS)
+        if self._audio_streams.get(stream.stream_id) is not stream or stream.sealed:
+            return
+        await self._discard_active_audio_stream(
+            stream,
+            error_message=(
+                "Microphone audio segment exceeded the maximum capture duration "
+                "and was discarded."
+            ),
+        )
+
+    async def _discard_active_audio_stream(
+        self,
+        stream: AudioStreamState,
+        *,
+        error_message: str,
+    ) -> None:
+        if self._audio_streams.get(stream.stream_id) is not stream:
+            return
+        self._audio_streams.pop(stream.stream_id, None)
+        current_task = asyncio.current_task()
+        tasks = []
+        for task in (
+            stream.capture_timeout_task,
+            stream.context_timeout_task,
+            stream.transcription_task,
+        ):
+            if task is not None and task is not current_task:
+                task.cancel()
+                tasks.append(task)
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        stream.chunks.clear()
+        stream.vad_pcm_chunks.clear()
+        stream.streaming_asr_pending_pcm.clear()
+        stream.streaming_text = ""
+        stream.fast_final_text = ""
+        if self._on_capture_abandoned is not None and stream.capture_turn_id is not None:
+            await self._on_capture_abandoned(stream.capture_turn_id)
+        await self._emit_input_error(
+            turn_id=stream.capture_turn_id,
+            error_message=error_message,
+        )
+
+    @staticmethod
+    def _cancel_capture_timeout(stream: AudioStreamState) -> None:
+        if stream.capture_timeout_task is not None:
+            stream.capture_timeout_task.cancel()
+            stream.capture_timeout_task = None
+
+    @staticmethod
+    def _audio_stream_limit_reason(
+        stream: AudioStreamState,
+        *,
+        incoming_bytes: int,
+    ) -> str | None:
+        if time.monotonic() - stream.started_at_monotonic >= MAX_AUDIO_STREAM_DURATION_SECONDS:
+            return (
+                "Microphone audio segment exceeded the maximum capture duration "
+                "and was discarded."
+            )
+        if stream.received_bytes + incoming_bytes > MAX_AUDIO_STREAM_BYTES:
+            return (
+                "Microphone audio segment exceeded the maximum size "
+                "and was discarded."
+            )
+        return None
 
     @staticmethod
     def _validate_capture_turn(stream: AudioStreamState, turn_id: str | None) -> None:

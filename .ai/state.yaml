@@ -1,3 +1,21 @@
+audio_stream_resource_bounds_20261031:
+  class: bugfix
+  risk: medium
+  status: source_reviewed_pending_runtime_acceptance
+  scope: >-
+    Bound each active microphone stream to 12 MiB of PCM payload and 120 seconds
+    of capture lifetime. Expire unsealed streams, release their buffers and
+    notify the existing control_error path. Prompt text, Live2D protocol and C++
+    remain unchanged.
+  validation: >-
+    The changed Python module passes py_compile and git diff whitespace
+    inspection. No automated tests or runtime integration checks are run per
+    user scope.
+  limitations: >-
+    The limits are adapter-side safety bounds and need live microphone/VAD/STT
+    acceptance to tune for long captures. The existing wire messages and error
+    envelope remain unchanged.
+
 motion_lab_rejection_ack_bounded_outbox_20261031:
   class: bugfix
   risk: high
