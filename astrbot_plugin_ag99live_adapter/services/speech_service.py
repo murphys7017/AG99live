@@ -232,6 +232,7 @@ class SpeechIngressService:
         self._on_capture_abandoned = on_capture_abandoned
         self._on_valid_transcription = on_valid_transcription
         self._audio_streams: dict[str, AudioStreamState] = {}
+        self._reported_missing_audio_streams: set[str] = set()
         self._pending_temp_audio_files: dict[str, PendingTempAudioFile] = {}
         self._review_audio: dict[str, tuple[bytes, int, float]] = {}
         self._streaming_asr_template: StreamingASR | None = None
@@ -344,6 +345,7 @@ class SpeechIngressService:
             raise ValueError("audio_stream_start_stream_id_missing")
         if stream_id in self._audio_streams:
             raise ValueError(f"audio_stream_duplicate_start:{stream_id}")
+        self._reported_missing_audio_streams.discard(stream_id)
 
         capture_mode = self._normalize_capture_mode(
             payload.get("capture_mode"),
@@ -382,7 +384,20 @@ class SpeechIngressService:
 
         stream = self._audio_streams.get(stream_id)
         if stream is None:
-            raise ValueError(f"binary_audio_chunk_without_start:{stream_id}")
+            if stream_id not in self._reported_missing_audio_streams:
+                self._reported_missing_audio_streams.add(stream_id)
+                if len(self._reported_missing_audio_streams) > 256:
+                    self._reported_missing_audio_streams.pop()
+                logger.warning(
+                    "Discarding audio chunk for inactive stream_id=%s; "
+                    "frontend capture must restart.",
+                    stream_id,
+                )
+                await self._emit_input_error(
+                    turn_id=frame.turn_id,
+                    error_message=f"audio_stream_not_active:{stream_id}",
+                )
+            return None
         self._validate_capture_turn(stream, frame.turn_id)
         if stream.transcription_task is not None or stream.sealed:
             raise ValueError(f"binary_audio_chunk_after_seal:{stream_id}")
@@ -549,6 +564,9 @@ class SpeechIngressService:
             raise ValueError("audio_stream_end_stream_id_missing")
 
         stream = self._audio_streams.get(stream_id)
+        if stream is None and stream_id in self._reported_missing_audio_streams:
+            self._reported_missing_audio_streams.discard(stream_id)
+            return None
         if stream is not None:
             self._validate_capture_turn(stream, message.turn_id)
         # Ownership transfers to this handler. Timeout/disconnect cannot consume

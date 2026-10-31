@@ -49,6 +49,7 @@ export interface AdapterInboundRuntimeDeps {
   handleDesktopPresenceRequest: (envelope: ProtocolEnvelope<import("../../types/desktopPresence.js").DesktopPresenceRequest>) => void;
   handleDesktopSettingsQuery: (envelope: ProtocolEnvelope<SystemDesktopSettingsQueryPayload>) => void;
   startMicrophoneCapture: (origin?: "manual" | "ptt" | "auto") => Promise<boolean>;
+  stopMicrophoneCapture: (reason?: string) => Promise<boolean>;
   normalizeMotionPayload: MotionPayloadNormalizer;
   reportOutputSegmentRejected: (
     message: string,
@@ -226,6 +227,7 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
       findActiveAudioSegment: () => deps.findActiveAudioSegment(),
       normalizeMotionPayload: deps.normalizeMotionPayload,
       startMicrophoneCapture: (origin) => deps.startMicrophoneCapture(origin),
+      stopMicrophoneCapture: (reason) => deps.stopMicrophoneCapture(reason),
       notifyTurnLifecycle: (event) => {
         if (event.phase === "started") incremental.beginTurn(event.turnId);
         if (event.phase === "terminal") incremental.cancelTurn(event.turnId);

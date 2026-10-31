@@ -113,6 +113,7 @@ export interface InboundDispatchDeps {
     | { ok: false; reason: string };
   // mic
   startMicrophoneCapture: (origin?: "manual" | "ptt" | "auto") => Promise<boolean>;
+  stopMicrophoneCapture: (reason?: string) => Promise<boolean>;
   notifyTurnLifecycle: (event: { phase: "started" | "terminal"; turnId: string }) => void;
   // protocol warnings
   reportedProtocolWarnings: Set<string>;

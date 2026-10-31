@@ -475,6 +475,7 @@ export function createAdapterConnection(
     acknowledgeMotionLabRawEventPersisted: (eventId) =>
       motionLabRawEventRecordedHandler?.(eventId),
     startMicrophoneCapture: (origin) => startMicrophoneCapture(origin),
+    stopMicrophoneCapture: (reason) => stopMicrophoneCapture(reason),
     normalizeMotionPayload: options.normalizeMotionPayload,
     reportOutputSegmentRejected: (message, envelope) => {
       state.lastError = message;

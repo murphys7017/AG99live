@@ -40,6 +40,7 @@ export interface InboundRuntimeDispatchDeps {
   stopAudioAndSettleTurn: (turnId: string | null, reason: string) => void;
   findActiveAudioSegment: () => { turnId: string | null; messageId: string } | null;
   startMicrophoneCapture: (origin?: "manual" | "ptt" | "auto") => Promise<boolean>;
+  stopMicrophoneCapture: (reason?: string) => Promise<boolean>;
   reportRuntimeProtocolViolation: (message: string) => void;
   notifyTurnLifecycle: (event: { phase: "started" | "terminal"; turnId: string }) => void;
 }
@@ -222,6 +223,9 @@ function applyControlError(
   const motionLabEventId = parseMotionLabEnqueueFailure(envelope.payload.message);
   if (motionLabEventId) {
     deps.rejectMotionLabRawEvent(motionLabEventId, envelope.payload.message);
+  }
+  if (envelope.payload.message.startsWith("audio_stream_not_active:")) {
+    void deps.stopMicrophoneCapture("adapter_audio_stream_reset");
   }
   s.lastError = envelope.payload.message;
   s.statusMessage = envelope.payload.message;
