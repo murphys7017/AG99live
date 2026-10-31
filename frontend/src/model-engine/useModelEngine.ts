@@ -44,6 +44,11 @@ import {
   type PreparedSemanticMotionPayload,
 } from "./runtime/motionStart.js";
 import { buildThinkingSwayInput } from "./runtime/interactionSway.js";
+import {
+  createContinuityEnvelope,
+  mergeContinuityHandoff,
+  type ContinuityEnvelope,
+} from "./compiler/performanceGovernor.js";
 
 function buildSpeechCueKey(cues: readonly OutputSegmentSpeechCue[]): string {
   return cues
@@ -64,7 +69,8 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
   let activePlaybackRun: ModelEngineActivePlaybackRun | null = null;
   const preActionBlockedTurns = new Set<string>();
   const preActionBlockedRequests = new Set<string>();
-  let activePreActionPlan: MotionPlanPayload | null = null;
+  let activePlaybackPlan: MotionPlanPayload | null = null;
+  let continuityEnvelope: ContinuityEnvelope | null = null;
   let thinkingSwayTurnId: string | null = null;
   const preparedSemanticMotions = new Map<string, {
     durationMs: number;
@@ -118,27 +124,20 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     getSettings: dependencies.getSettings,
     playPlan: (plan, model, options) => {
       cancelIdleMotion();
-      if (activePlaybackRun?.origin !== "pre_action" || !activePreActionPlan) {
+      if (!activePlaybackPlan) {
         return dependencies.playPlan(plan, model, options);
       }
       const parsed = parseSemanticParameterPlan(plan);
-      if (!parsed.ok || parsed.value.profile_id !== activePreActionPlan.profile_id
-        || parsed.value.profile_revision !== activePreActionPlan.profile_revision
-        || parsed.value.model_id !== activePreActionPlan.model_id) {
+      if (!parsed.ok) {
         return dependencies.playPlan(plan, model, options);
       }
-      const owned = new Set(parsed.value.parameters.map((p) => p.parameter_id));
-      const release = activePreActionPlan.parameters.filter((p) => !owned.has(p.parameter_id)).map((p) => {
-        const { keyframes, modulation, input_value, ...binding } = p;
-        return { ...binding, source: "continuity" as const, activation_at_ms: 0,
-          target_value: p.neutral_target_value,
-          dynamics: { ...p.dynamics, max_speech_offset: 0 } };
-      });
-      // The existing SDK transfers the actual driven offset and velocity for
-      // matching parameters. Carry orphan parameters to neutral through that
-      // same plan so replacing the preview cannot snap them to the base pose.
-      return dependencies.playPlan({ ...parsed.value,
-        parameters: [...parsed.value.parameters, ...release] }, model, options);
+      // Matching parameters transfer their current offset through the SDK;
+      // append only orphaned bindings so a preempted action eases to neutral.
+      return dependencies.playPlan(
+        mergeContinuityHandoff(activePlaybackPlan, parsed.value),
+        model,
+        options,
+      );
     },
     playMotionResource: (motion, model, options) => {
       cancelIdleMotion();
@@ -146,9 +145,21 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     },
     getPlayerMessage: dependencies.getPlayerMessage,
     stopInteractionSway: dependencies.stopInteractionSway,
+    getContinuityEnvelope: () => continuityEnvelope,
     onPlanStarted: (event) => {
-      activePreActionPlan = event.playbackOrigin === "pre_action" && event.executionKind === "parameter_plan"
-        ? event.plan : null;
+      activePlaybackPlan = event.executionKind === "parameter_plan"
+        ? event.plan
+        : null;
+      continuityEnvelope = event.executionKind === "parameter_plan"
+        ? createContinuityEnvelope({
+            runId: event.runId,
+            origin: event.playbackOrigin,
+            turnId: normalizeTurnId(event.turnId),
+            messageId: event.messageId,
+            semanticMotion: event.semanticMotion,
+            plan: event.plan,
+          })
+        : null;
       if (event.playbackOrigin === "conversation") {
         blockPreAction(event.turnId);
       }
@@ -780,6 +791,8 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     }
     if (activePlaybackRun?.runId === event.runId) {
       activePlaybackRun = null;
+      activePlaybackPlan = null;
+      continuityEnvelope = null;
     }
     if (event.status === "failed" || event.status === "rejected") {
       setState(
@@ -808,6 +821,8 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
       console.error("[ModelEngine] active playback stop failed.", { reason, error });
     } finally {
       activePlaybackRun = null;
+      activePlaybackPlan = null;
+      continuityEnvelope = null;
       state.lastCompileReason = "";
       if (stopFailed) {
         setState("failed", `动作引擎停止失败（${reason}）。`, null);

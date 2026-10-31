@@ -23,11 +23,27 @@ import {
   compilePerformanceSchedule,
   type PerformanceSchedule,
 } from "./performanceSchedule.js";
+import { performanceGovernor } from "./performanceGovernor.js";
 
 export function compileModelParameterPlan(
   semanticMotion: CompiledSemanticMotion,
   options: CompileOptions,
 ): CompileResult {
+  const governed = performanceGovernor.govern(semanticMotion, options.continuityEnvelope ?? null);
+  semanticMotion = {
+    ...governed.motion,
+    diagnostics: {
+      ...governed.motion.diagnostics,
+      performanceGovernor: {
+        version: governed.diagnostics.version,
+        budget: { ...governed.diagnostics.budget },
+        truncatedAxisIds: [...governed.diagnostics.truncatedAxisIds],
+        truncatedStepCount: governed.diagnostics.truncatedStepCount,
+        repeatedDirectionAxisIds: [...governed.diagnostics.repeatedDirectionAxisIds],
+        warnings: [...governed.diagnostics.warnings],
+      },
+    },
+  };
   const performanceScheduleResult = compilePerformanceSchedule({
     assistantText: options.assistantText,
     speechCues: options.speechCues,
@@ -171,13 +187,17 @@ function compileMotionSequenceIntent(
   }
 
   const warnings = Array.from(new Set(
-    stepResults.flatMap((result) => result.diagnostics.warnings ?? []),
+    [
+      ...(semanticMotion.diagnostics.warnings ?? []),
+      ...stepResults.flatMap((result) => result.diagnostics.warnings ?? []),
+    ],
   ));
   const diagnostics = {
     ...stepResults[0].diagnostics,
     compiledParameterCount: trackGraph.parameters.length,
     compiledParameters: trackGraph.parameters.map((item) => item.parameter_id),
     warnings: [...warnings, ...trackGraph.warnings],
+    performanceGovernor: semanticMotion.diagnostics.performanceGovernor,
     transformTrace: stepResults[0].diagnostics.transformTrace
       ? {
           ...stepResults[0].diagnostics.transformTrace,
@@ -318,6 +338,7 @@ function buildModelParameterDiagnostics(
     warnings: context
       ? [...context.state.warnings]
       : [...(semanticMotion.diagnostics.warnings ?? [])],
+    performanceGovernor: semanticMotion.diagnostics.performanceGovernor,
     transformTrace: semanticMotion.diagnostics.transformTrace
       ? {
           ...semanticMotion.diagnostics.transformTrace,

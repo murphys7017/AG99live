@@ -274,6 +274,7 @@ function prepareCompilableMotionPayload(
     source: context.startReason,
     motionSource: context.motionSource,
     settings: dependencies.getSettings(),
+    continuityEnvelope: dependencies.getContinuityEnvelope?.() ?? null,
     runtimeWarnings,
     samplingIdentity: {
       turnId: context.turnId ?? "",

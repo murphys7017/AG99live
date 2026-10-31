@@ -1,3 +1,42 @@
+performance_governor_continuity_envelope_20261031:
+  class: refactor
+  risk: high
+  status: source_reviewed_pending_runtime_acceptance
+  scope: >-
+    Add an internal PerformanceGovernor and ContinuityEnvelope at the Model
+    Engine compile boundary. Bound active action axes and sequence steps, damp
+    repeated semantic directions across consecutive plans, and hand off
+    preempted parameter ownership by releasing orphan bindings to neutral.
+    Prompt text, Live2D protocol and C++ remain unchanged.
+  validation: >-
+    Frontend renderer, WebSDK and Node TypeScript typechecks pass, and git diff
+    whitespace inspection passes. No automated tests or runtime integration
+    checks are run per user scope.
+  limitations: >-
+    Governor budgets are internal defaults (8 active axes, 4 sequence steps) and
+    repeated directions are attenuated rather than rejected. Visual timing and
+    neutral release still require AG99, TTS, Electron and Live2D runtime
+    acceptance.
+
+motion_lab_outbound_retry_idb_preservation_20261031:
+  class: refactor
+  risk: high
+  status: source_reviewed_pending_runtime_acceptance
+  scope: >-
+    Add bounded exponential retry scheduling to the MotionLab IndexedDB outbound
+    queue after transient send rejection. Pause retries while disconnected and
+    resume immediately on reconnect. Upgrade the local database without clearing
+    persisted events; retain valid records and remove only records that fail local
+    storage validation. Prompt, Live2D protocol and C++ remain unchanged.
+  validation: >-
+    Frontend renderer, WebSDK and Node TypeScript typechecks pass, and git diff
+    whitespace inspection passes. No automated tests or runtime integration checks
+    are run per user scope.
+  limitations: >-
+    The retry budget is bounded to 250ms through 5s backoff and does not add a new
+    wire acknowledgement contract. Records that are structurally invalid in the
+    existing store cannot be reconstructed and are removed with a warning.
+
 performance_curve_request_lifecycle_20261031:
   class: refactor
   risk: high

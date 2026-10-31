@@ -8,6 +8,7 @@ import type {
   CompiledSemanticMotion,
 } from "../../types/compiledSemanticMotion.js";
 import type { ModelEngineSettings } from "../settings.js";
+import type { ContinuityEnvelope } from "./performanceGovernor.js";
 
 export type MotionAxisValueSource =
   | "semantic_axis"
@@ -31,6 +32,7 @@ export interface CompileOptions {
     messageId: string;
   };
   allowNeutralAxisPose?: boolean;
+  continuityEnvelope?: ContinuityEnvelope | null;
 }
 
 export interface MotionFeedback {

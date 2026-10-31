@@ -19,6 +19,7 @@ import type {
   CompiledSemanticMotion,
 } from "../../types/compiledSemanticMotion.js";
 import type { MotionFeedback } from "../compiler/contracts.js";
+import type { ContinuityEnvelope } from "../compiler/performanceGovernor.js";
 import type { ModelEngineSettings } from "../settings.js";
 import type { SpeechOnlyMotionRequest } from "./speechOnlyMotion.js";
 import type { InteractionSwayInput } from "../../types/live2d-runtime.d.ts";
@@ -123,6 +124,7 @@ export interface MotionStartDependencies {
   ) => MotionPlaybackStartResult;
   getPlayerMessage?: () => string;
   stopInteractionSway: () => void;
+  getContinuityEnvelope?: () => ContinuityEnvelope | null;
   onPlanStarted: (event: ModelEnginePlanStartedEvent) => void;
   onMotionRejected: (event: {
     turnId: string;

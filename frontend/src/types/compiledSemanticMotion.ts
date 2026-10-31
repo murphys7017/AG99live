@@ -77,6 +77,18 @@ export interface CompileDiagnostics {
   relationEvaluations?: MotionAxisRelationEvaluation[];
   performanceComposition?: PerformanceCompositionSignature;
   transformTrace?: MotionTransformTrace;
+  performanceGovernor?: {
+    version: "performance_governor.v1";
+    budget: {
+      maxActiveAxes: number;
+      maxSequenceSteps: number;
+      repeatDirectionAttenuation: number;
+    };
+    truncatedAxisIds: string[];
+    truncatedStepCount: number;
+    repeatedDirectionAxisIds: string[];
+    warnings: string[];
+  };
 }
 
 export interface MotionAxisRelationAdjustment {
