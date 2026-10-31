@@ -21,7 +21,13 @@ from ..protocol.builder import (
 _OUTBOUND_QUEUE_PUT_TIMEOUT_SECONDS = 1.0
 _OUTBOUND_SEND_RESULT_TIMEOUT_SECONDS = 5.0
 _OUTBOUND_CLIENT_CLOSE_TIMEOUT_SECONDS = 1.0
-_ALLOWED_WEBSOCKET_ORIGINS = [None, "null", "file://"]
+_ALLOWED_WEBSOCKET_ORIGINS = [
+    None,
+    "null",
+    "file://",
+    "http://127.0.0.1:5173",
+    "http://localhost:5173",
+]
 
 
 @dataclass(order=True, slots=True)

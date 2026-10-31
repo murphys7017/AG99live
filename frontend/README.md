@@ -33,6 +33,8 @@ npm install
 npm run dev
 ```
 
+开发服务器默认使用 `http://127.0.0.1:5173`；Adapter WebSocket 已允许该来源以及等价的 `http://localhost:5173`。如果修改 Vite 端口或通过其他 HTTP 来源打开开发页面，需要同步调整 Adapter 的 Origin 白名单。
+
 | 命令 | 用途 |
 | --- | --- |
 | `npm run typecheck` | 检查 renderer、WebSDK 和 Electron main-process 类型。 |
