@@ -10,17 +10,36 @@ from astrbot.api.message_components import Plain
 from astrbot.api.star import Context, Star
 
 from .middleware import register_ag99live_interaction_contributors
+from .motion.observation import resolve_persona_motion_source_route
 from .motion.output_sanitizer import (
     contains_hidden_output_markup,
     sanitize_assistant_output_segment_text,
     sanitize_assistant_output_text,
 )
-from .motion.observation import resolve_persona_motion_source_route
 from .runtime.adapter_event_context import resolve_adapter_event_context
 from .runtime.persona_lifecycle import (
     PersonaExpressionFrame,
     PersonaTurnIdentity,
 )
+
+_PERSONA_STREAM_PARENT_MESSAGE_ID_EXTRA = (
+    "_interaction_persona_stream_parent_message_id"
+)
+
+
+def _resolve_persona_stream_parent_message_id(
+    event: AstrMessageEvent,
+    fallback_message_id: str,
+) -> str:
+    get_extra = getattr(event, "get_extra", None)
+    if callable(get_extra):
+        configured = str(
+            get_extra(_PERSONA_STREAM_PARENT_MESSAGE_ID_EXTRA, "") or ""
+        ).strip()
+        if configured:
+            return configured
+    return fallback_message_id
+
 
 def _optional_tts_state_hook():
     hook = getattr(filter, "on_tts_state_changed", None)
@@ -415,11 +434,16 @@ class MyPlugin(Star):
             return
         normalized_turn_id = str(turn_id or "").strip()
         normalized_result_id = str(persona_result_id or "").strip()
-        normalized_parent_id = str(message_id or "").strip()
+        normalized_segment_id = str(message_id or "").strip()
+        normalized_parent_id = _resolve_persona_stream_parent_message_id(
+            event,
+            normalized_segment_id,
+        )
         if (
             not normalized_turn_id
             or normalized_turn_id != event_context.core_turn_id
             or not normalized_result_id
+            or not normalized_segment_id
             or not normalized_parent_id
             or type(segment_index) is not int
             or segment_index < 0
@@ -431,7 +455,7 @@ class MyPlugin(Star):
             turn=turn_identity,
             persona_result_id=normalized_result_id,
             segment_index=segment_index,
-            segment_message_id=normalized_parent_id,
+            segment_message_id=normalized_segment_id,
             phase=str(intent.get("phase") or "").strip(),
             intent_ready=True,
             actions=actions,
@@ -606,7 +630,7 @@ class MyPlugin(Star):
                                 prepared_context=prepared_context,
                                 persona_result_id=normalized_result_id,
                                 segment_index=segment_index,
-                                segment_message_id=normalized_parent_id,
+                                segment_message_id=normalized_segment_id,
                                 shadow_tasks=self._independent_motion_tasks,
                             )
                             wait_stage = "provider"
@@ -739,11 +763,16 @@ class MyPlugin(Star):
             return
         normalized_turn_id = str(turn_id or "").strip()
         normalized_result_id = str(persona_result_id or "").strip()
-        normalized_parent_id = str(message_id or "").strip()
+        normalized_segment_id = str(message_id or "").strip()
+        normalized_parent_id = _resolve_persona_stream_parent_message_id(
+            event,
+            normalized_segment_id,
+        )
         if (
             not normalized_turn_id
             or normalized_turn_id != event_context.core_turn_id
             or not normalized_result_id
+            or not normalized_segment_id
             or not normalized_parent_id
             or type(segment_index) is not int
             or segment_index < 0
@@ -783,7 +812,7 @@ class MyPlugin(Star):
             turn=PersonaTurnIdentity(normalized_turn_id),
             persona_result_id=normalized_result_id,
             segment_index=segment_index,
-            segment_message_id=normalized_parent_id,
+            segment_message_id=normalized_segment_id,
             phase=phase,
             speech=speech,
             actions=actions,
@@ -873,11 +902,11 @@ class MyPlugin(Star):
                 persona_result_id=normalized_result_id,
                 segment_index=segment_index,
                 segment_count=None,
-                segment_message_id=normalized_parent_id,
+                segment_message_id=normalized_segment_id,
                 source_route="independent_motion",
                 delivery_mode=delivery_mode,
                 record_stage="persona_segment_ready",
-                record_key=f"segment-ready:{normalized_parent_id}",
+                record_key=f"segment-ready:{normalized_segment_id}",
                 input_context={
                     "user_text": _dialogue_text(current_user_text),
                     "capture_kind": "persona_segment_completion_snapshot",
