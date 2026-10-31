@@ -18,6 +18,12 @@ from ..protocol.builder import (
 )
 
 
+_OUTBOUND_QUEUE_PUT_TIMEOUT_SECONDS = 1.0
+_OUTBOUND_SEND_RESULT_TIMEOUT_SECONDS = 5.0
+_OUTBOUND_CLIENT_CLOSE_TIMEOUT_SECONDS = 1.0
+_ALLOWED_WEBSOCKET_ORIGINS = [None, "null", "file://"]
+
+
 @dataclass(order=True, slots=True)
 class _OutboundItem:
     sequence: int
@@ -90,6 +96,7 @@ class WebSocketTransport:
                 self.host,
                 self.port,
                 max_size=16 * 1024 * 1024,
+                origins=_ALLOWED_WEBSOCKET_ORIGINS,
             )
             logger.info(
                 "AG99live websocket listening on ws://%s:%s",
@@ -218,18 +225,47 @@ class WebSocketTransport:
             payload,
             result,
         )
+        phase = "enqueue"
         try:
-            while True:
-                if self._ws_client is not client or self._outbound_queue is not queue:
-                    if not result.done():
-                        result.set_result(False)
-                    return False
+            if self._ws_client is not client or self._outbound_queue is not queue:
+                if not result.done():
+                    result.set_result(False)
+                return False
+            await asyncio.wait_for(
+                queue.put(item),
+                timeout=_OUTBOUND_QUEUE_PUT_TIMEOUT_SECONDS,
+            )
+            phase = "send"
+            return await asyncio.wait_for(
+                result,
+                timeout=_OUTBOUND_SEND_RESULT_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            if phase == "enqueue":
+                if not result.done():
+                    result.set_result(False)
+            elif not result.done():
+                result.cancel()
+            logger.warning(
+                "WebSocket outbound %s timed out; closing stalled client "
+                "type=%s turn_id=%s queue_size=%s",
+                phase,
+                payload.get("type", "<unknown>") if isinstance(payload, dict) else "binary",
+                payload.get("turn_id") if isinstance(payload, dict) else None,
+                queue.qsize(),
+            )
+            if self._ws_client is client:
                 try:
-                    await asyncio.wait_for(queue.put(item), timeout=0.25)
-                    break
-                except asyncio.TimeoutError:
-                    continue
-            return await result
+                    await asyncio.wait_for(
+                        client.close(),
+                        timeout=_OUTBOUND_CLIENT_CLOSE_TIMEOUT_SECONDS,
+                    )
+                except Exception as exc:
+                    logger.debug(
+                        "Failed to close stalled websocket client after outbound timeout: %s",
+                        exc,
+                    )
+            return False
         except asyncio.CancelledError:
             if not result.done():
                 result.cancel()

@@ -11,10 +11,29 @@ import inspect
 import time
 
 from astrbot.api import logger
-from astrbot.core.memory.config import get_memory_config
-from astrbot.core.memory.scope_context import resolve_memory_scope_context
-from astrbot.core.memory.service import get_memory_service
-from astrbot.core.memory.snapshot_builder import memory_injection_to_snapshot_read_options
+
+try:
+    from astrbot.core.memory.config import get_memory_config
+    from astrbot.core.memory.scope_context import resolve_memory_scope_context
+    from astrbot.core.memory.service import get_memory_service
+    from astrbot.core.memory.snapshot_builder import (
+        memory_injection_to_snapshot_read_options,
+    )
+except ImportError:
+    get_memory_config = None
+    resolve_memory_scope_context = None
+    get_memory_service = None
+    memory_injection_to_snapshot_read_options = None
+
+
+_MEMORY_PREPARATION_AVAILABLE = all(
+    (
+        get_memory_config,
+        resolve_memory_scope_context,
+        get_memory_service,
+        memory_injection_to_snapshot_read_options,
+    )
+)
 
 
 class InputPreparation:
@@ -50,6 +69,9 @@ class InputPreparation:
         status = "started"
         logger.debug("DIAG input.prepare: capture_id=%s stage=%s", capture_id, status)
         try:
+            if not _MEMORY_PREPARATION_AVAILABLE:
+                status = "unsupported"
+                return
             async with asyncio.timeout(5):
                 umo = event.unified_msg_origin
                 selection = self._context.astrbot_config_mgr.resolve_configuration_selection(umo)

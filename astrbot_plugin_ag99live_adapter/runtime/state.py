@@ -114,6 +114,10 @@ class RuntimeState:
         self.enable_performance_curve = False
         self.independent_motion_enabled = False
         self.independent_motion_provider_id = ""
+        self.independent_motion_shadow_enabled = False
+        self.independent_motion_shadow_provider_id = ""
+        self.independent_motion_shadow_timeout_seconds = 5.0
+        self.independent_motion_stream_preview_enabled = False
         self.independent_motion_history_turns = 6
         self.independent_motion_parallel = False
         self.independent_motion_max_concurrency = 4
@@ -159,6 +163,7 @@ class RuntimeState:
         self.image_cooldown_seconds = 0
         self.selected_performance_curve_provider: Provider | None = None
         self.selected_independent_motion_provider: Provider | None = None
+        self.selected_independent_motion_shadow_provider: Provider | None = None
         self.selected_passive_behavior_provider: Provider | None = None
         self.performance_curve_runtime = PerformanceCurveRuntime(runtime_state=self)
         self._live2d_runtime_cache_path = (
@@ -203,6 +208,12 @@ class RuntimeState:
         previous_enable_performance_curve = self.enable_performance_curve
         previous_independent_motion_provider_id = self.independent_motion_provider_id
         previous_independent_motion_enabled = self.independent_motion_enabled
+        previous_independent_motion_shadow_provider_id = (
+            self.independent_motion_shadow_provider_id
+        )
+        previous_independent_motion_shadow_enabled = (
+            self.independent_motion_shadow_enabled
+        )
         previous_passive_behavior_provider_id = self.passive_behavior_provider_id
         previous_passive_behavior_enabled = self.passive_behavior_enabled
         general_config = get_config_value(self.plugin_config, "general", {})
@@ -262,6 +273,28 @@ class RuntimeState:
         self.independent_motion_provider_id = str(
             get_config_value(independent_motion_config, "provider_id", "") or ""
         ).strip()
+        self.independent_motion_shadow_enabled = bool(
+            get_config_value(independent_motion_config, "shadow_enabled", False)
+        )
+        self.independent_motion_shadow_provider_id = str(
+            get_config_value(independent_motion_config, "shadow_provider_id", "")
+            or ""
+        ).strip()
+        self.independent_motion_shadow_timeout_seconds = _bounded_config_number(
+            independent_motion_config,
+            "shadow_timeout_seconds",
+            default=5.0,
+            minimum=0.5,
+            maximum=60.0,
+            integer=False,
+        )
+        self.independent_motion_stream_preview_enabled = bool(
+            get_config_value(
+                independent_motion_config,
+                "stream_preview_enabled",
+                False,
+            )
+        )
         self.passive_behavior_enabled = bool(
             get_config_value(passive_behavior_config, "enabled", False)
         )
@@ -436,6 +469,10 @@ class RuntimeState:
             or previous_independent_motion_provider_id
             != self.independent_motion_provider_id
             or previous_independent_motion_enabled != self.independent_motion_enabled
+            or previous_independent_motion_shadow_provider_id
+            != self.independent_motion_shadow_provider_id
+            or previous_independent_motion_shadow_enabled
+            != self.independent_motion_shadow_enabled
             or previous_passive_behavior_provider_id
             != self.passive_behavior_provider_id
             or previous_passive_behavior_enabled != self.passive_behavior_enabled
@@ -458,6 +495,14 @@ class RuntimeState:
                 and self.selected_independent_motion_provider is not None
             )
             or (
+                self.independent_motion_shadow_enabled
+                and self.selected_independent_motion_shadow_provider is None
+            )
+            or (
+                not self.independent_motion_shadow_enabled
+                and self.selected_independent_motion_shadow_provider is not None
+            )
+            or (
                 self.passive_behavior_enabled
                 and self.selected_passive_behavior_provider is None
             )
@@ -477,6 +522,7 @@ class RuntimeState:
             )
             self.selected_performance_curve_provider = None
             self.selected_independent_motion_provider = None
+            self.selected_independent_motion_shadow_provider = None
             self.selected_passive_behavior_provider = None
             self.load_selected_providers()
 
@@ -532,6 +578,34 @@ class RuntimeState:
                     "Independent motion generation is enabled but provider `%s` "
                     "is not available; this turn will not use the independent motion path.",
                     self.independent_motion_provider_id or "<empty>",
+                )
+
+        if self.independent_motion_shadow_enabled:
+            provider = None
+            if self.independent_motion_shadow_provider_id:
+                provider = self.plugin_context.get_provider_by_id(
+                    self.independent_motion_shadow_provider_id
+                )
+                if (
+                    isinstance(provider, Provider)
+                    and self.independent_motion_shadow_provider_id
+                    != self.independent_motion_provider_id
+                ):
+                    self.selected_independent_motion_shadow_provider = provider
+                    logger.info(
+                        "Loaded independent motion shadow provider: %s",
+                        self.independent_motion_shadow_provider_id,
+                    )
+                elif self.independent_motion_shadow_provider_id == self.independent_motion_provider_id:
+                    provider = None
+                    logger.warning(
+                        "Independent motion shadow provider must differ from the primary provider: %s",
+                        self.independent_motion_shadow_provider_id,
+                    )
+            if not isinstance(provider, Provider):
+                logger.warning(
+                    "Independent motion shadow is enabled but provider `%s` is unavailable; shadow collection is paused.",
+                    self.independent_motion_shadow_provider_id or "<empty>",
                 )
 
         if self.passive_behavior_enabled:

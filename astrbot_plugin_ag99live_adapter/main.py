@@ -472,6 +472,27 @@ class MyPlugin(Star):
             return
         if segment_state.result_future is None:
             segment_state.result_future = loop.create_future()
+
+        # The intent hook can arrive before Core has produced the segment
+        # speech. Unless explicitly enabled, defer Provider generation to the
+        # segment-ready hook so the action model sees the actual speech and can
+        # choose motion_steps from the completed phrase.
+        if not bool(
+            getattr(
+                bundle.runtime_state,
+                "independent_motion_stream_preview_enabled",
+                False,
+            )
+        ):
+            logger.debug(
+                "WIRING independent_motion.intent_preview_deferred "
+                "turn_id=%s persona_result_id=%s segment_index=%s reason=segment_speech_not_ready",
+                normalized_turn_id,
+                normalized_result_id,
+                segment_index,
+            )
+            return
+
         segment_state.deadline = loop.time() + motion_budget_seconds()
 
         if not isinstance(result_state.context_task, asyncio.Task):
@@ -575,6 +596,7 @@ class MyPlugin(Star):
                                 persona_result_id=normalized_result_id,
                                 segment_index=segment_index,
                                 segment_message_id=normalized_parent_id,
+                                shadow_tasks=self._independent_motion_tasks,
                             )
                             wait_stage = "provider"
                             result = await await_with_hard_deadline(
@@ -975,6 +997,7 @@ class MyPlugin(Star):
                                 tasks=result_state.tasks,
                                 persona_result_id=normalized_result_id,
                                 prepared_context=prepared_context,
+                                shadow_tasks=self._independent_motion_tasks,
                             ),
                             remaining,
                             background_tasks=result_state.tasks,
@@ -1290,6 +1313,7 @@ class MyPlugin(Star):
                             ),
                             tasks=result_state.tasks,
                             segments_by_index=result_state.segments,
+                            shadow_tasks=self._independent_motion_tasks,
                         )
                         for index, segment_state in result_state.segments.items():
                             future = segment_state.result_future

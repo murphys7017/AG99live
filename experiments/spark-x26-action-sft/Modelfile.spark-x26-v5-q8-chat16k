@@ -1,0 +1,6 @@
+FROM ag99-spark-x26-action-v5:q8_test_raw6144
+
+TEMPLATE """{{- range .Messages }}{{- if eq .Role "system" }}<｜start▁of▁sentence｜><|System|>{{ .Content }}<｜end▁of▁sentence｜>{{- else if eq .Role "user" }}<｜start▁of▁sentence｜><|User|>{{ .Content }}<｜end▁of▁sentence｜><｜start▁of▁sentence｜><|Bot|>{{- else if eq .Role "assistant" }}{{ .Content }}<｜end▁of▁sentence｜>{{- end }}{{- end }}</think>"""
+
+PARAMETER num_ctx 16384
+PARAMETER temperature 0

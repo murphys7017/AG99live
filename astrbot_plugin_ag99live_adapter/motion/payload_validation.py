@@ -6,6 +6,7 @@ from typing import Any
 
 from .motion_intent import (
     MOTION_INTENT_V4_SCHEMA_VERSION,
+    normalize_motion_intent_tags,
     normalize_motion_intent_v4_payload,
     normalize_motion_resource_id,
     resolve_selected_semantic_axis_profile,
@@ -77,13 +78,18 @@ def normalize_motion_arguments_payload(
 
     has_axis_levels = "axis_levels" in motion_hint
     has_motion_steps = "motion_steps" in motion_hint
+    intent_tags = motion_hint.get("intent_tags")
+    tags_defaulted = not normalize_motion_intent_tags(intent_tags)
     contract_payload = {
         "schema_version": MOTION_INTENT_V4_SCHEMA_VERSION,
         "profile_id": semantic_profile.get("profile_id"),
         "profile_revision": semantic_profile.get("revision"),
         "model_id": semantic_profile.get("model_id"),
         "mode": "expressive",
-        "intent_tags": motion_hint.get("intent_tags"),
+        # Tags are inspection/training metadata. Keep the v4 wire shape
+        # populated for downstream consumers without making the Provider
+        # spend output budget on them or reject an otherwise valid action.
+        "intent_tags": intent_tags if not tags_defaulted else ["动作"],
     }
     for optional_field in (
         "duration_hint_ms",
@@ -101,10 +107,13 @@ def normalize_motion_arguments_payload(
     except ValueError as exc:
         return None, append_resolution_reason(base_reason, str(exc))
 
+    reason = base_reason
+    if tags_defaulted:
+        reason = append_resolution_reason(reason, "intent_tags_defaulted")
     return validate_normalized_motion_intent_payload(
         payload,
         runtime_state,
-        base_reason=base_reason,
+        base_reason=reason,
         append_resolution_reason=append_resolution_reason,
         sanitize_reason_fragment=sanitize_reason_fragment,
         semantic_profile=semantic_profile,

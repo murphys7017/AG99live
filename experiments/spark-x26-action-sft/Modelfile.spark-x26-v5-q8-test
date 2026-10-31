@@ -1,0 +1,5 @@
+FROM ./output/spark-x26-production-neurobrain-v5-q8_0.gguf
+
+TEMPLATE {{ .Prompt }}
+PARAMETER num_ctx 6144
+PARAMETER temperature 0

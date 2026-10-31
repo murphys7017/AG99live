@@ -67,9 +67,10 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
         if has_motion_resources
         else ""
     ) + (
-        "回复本身存在清晰的姿态转折、重心切换、追问句尾或短时夸张后的回收时，可以使用 motion_steps，"
-        "按播放顺序输出 2 到 4 个姿态事件；只有一个稳定姿态时使用 axis_levels。"
-        "普通短回复、确认和单一情绪优先 axis_levels；不要因为示例出现 sequence 而生成 motion_steps，也不要按词语、停顿或语音节奏拆分 motion_steps。"
+        "用户要求或本段回复明确包含连续、重复、往返或有先后顺序的可见动作时，优先使用 motion_steps；"
+        "例如连续点头、左右摇摆、先转向再回正，按播放顺序用 2 到 4 步表达关键姿态变化，不要压成一个平均姿态。"
+        "只有一个稳定姿态时使用 axis_levels。普通短回复、确认和单一情绪优先 axis_levels；"
+        "不要因为示例出现 sequence 而生成 motion_steps，也不要按词语、停顿或语音节奏拆分 motion_steps。"
     )
     output_contract_text = (
         "你正在控制一个 Live2D 模型，并为本轮回复生成可见动作。"
@@ -93,7 +94,8 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
     )
     return (
         f"{output_contract_text}"
-        "intent_tags 用开放关键词概括本轮语气、姿态和场景。"
+        "intent_tags 是可选的训练/检索元数据；有余力时用开放关键词概括本轮语气、姿态和场景，"
+        "省略它不会影响动作执行。"
         f"{resource_field_text}"
         f"{axis_shape_text}"
         f"{axis_instruction}"

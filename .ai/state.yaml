@@ -1685,3 +1685,65 @@ continuous_presence_stage1_local_wiring_20261028:
     no paired AG99 runtime is available to verify semantic bridging, model
     switching, delayed events, disconnect recovery, or end-to-end presence
     snapshots. Stage 1 remains incomplete.
+
+live2d_motion_shadow_comparison_20261030:
+  class: feature
+  risk: high
+  status: source_checks_passed_synced_pending_ollama_provider_and_live_acceptance
+  scope: >-
+    Run the configured shadow action Provider beside the existing independent
+    motion Provider with the exact same production system prompt, user prompt,
+    and text contexts. Keep DeepSeek as the only published/played result. Record
+    shadow raw text, normalized candidate, Provider identity and timings in the
+    existing Motion Lab sample for comparison and later manual training review.
+    Bound shadow generation to five seconds by default. Do not change the
+    production prompt or automatically promote shadow output to training target.
+  validation: >-
+    The configured primary Provider is deepseek-nothink/deepseek-flash and
+    independent motion is enabled. Local Ollama contains
+    ag99-spark-x26-action-v5:q8_test. Two focused tests passed for M2 prompt
+    identity/primary-only publication and Reducer candidate preservation.
+    Ruff, changed-file Python compilation, Reducer CLI help, and git diff --check
+    passed. Five deployed plugin targets matched workspace HEAD before selective
+    synchronization.
+  evidence_gap: >-
+    No Ollama Provider is configured in AstrBot yet, so shadow_enabled remains
+    false and no shadow_provider_id is selected. Reload the selectively synced
+    plugin after adding the local Ollama model as an AstrBot Provider; then
+    collect paired Motion Lab samples and verify DeepSeek playback, shadow
+    latency, comparison review, and later approved training export.
+
+live2d_motion_training_input_20261031:
+  class: feature
+  risk: high
+  status: prompt_synced_pending_plugin_reload_and_new_sample_acceptance
+  scope: >-
+    Treat intent_tags as optional Provider metadata while preserving the v4 wire
+    shape with an Adapter-generated minimal tag when omitted. Defer stream action
+    Provider requests until persona segment speech is ready by default, with an
+    explicit stream_preview_enabled opt-in for the older early-preview behavior.
+    Preserve per-segment generation, primary-only publication, shadow comparison,
+    motion_steps validation, and DeepSeek teacher-data collection. Strengthen
+    production guidance for explicit repeated, bidirectional, and ordered motion.
+    Exclude samples whose captured request has empty segment.speech, omit
+    intent_tags from production SFT targets, and report motion-shape distribution.
+    Remove the fixed 234-sample cap and direct the next full-dataset SFT run to a
+    new v6 adapter output while retaining the prior v5 adapter.
+  validation: >-
+    Motion contract tests passed (6) and independent shadow tests passed (2).
+    Changed Python files compile; direct production-prompt smoke confirmed the
+    sequence guidance and optional intent_tags language. Evaluator boundary
+    checks accept motion_steps without intent_tags and reject a one-step sequence.
+    Training YAML parsed with the new v3 dataset path, v6 output path, and no
+    max_samples cap. Dataset and evaluator CLI help, source/deployed plugin
+    structure checks, and git diff --check passed. The two changed prompt files
+    were selectively synced to the AstrBot plugin directory and verified byte
+    identical. Ruff is unavailable; model evaluation and training were not run
+    because this environment lacks peft and the experiment virtualenv.
+  evidence_gap: >-
+    Restart or reload the target AstrBot before collecting the next teacher-data
+    window. Then confirm motion_request.prompt.segment.speech is populated,
+    DeepSeek remains the played primary result, shadow remains comparison-only,
+    and explicit repeated or ordered requests produce useful motion_steps.
+    Prepare the cumulative dataset after collection and inspect its speech filter
+    and motion-shape counts before starting v6 training.

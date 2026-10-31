@@ -1,0 +1,9 @@
+.venv/
+.tooling/
+.cache/
+data/
+output/
+reports/
+__pycache__/
+*.pyc
+*.log

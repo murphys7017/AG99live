@@ -679,11 +679,29 @@ class OutputSegmentCoordinator:
             raise RuntimeError(f"output_segment_sequence_missing:{segment.message_id}")
         audio_slot: dict[str, Any] = {"state": "absent"}
         if segment.audio_path:
-            _, audio_url = await asyncio.to_thread(
-                self.media_service.cache_audio_file,
-                segment.audio_path,
-            )
-            audio_slot = {"state": "present", "url": audio_url}
+            try:
+                _, audio_url = await asyncio.to_thread(
+                    self.media_service.cache_audio_file,
+                    segment.audio_path,
+                )
+                audio_slot = {"state": "present", "url": audio_url}
+            except Exception as exc:  # noqa: BLE001
+                failure_reason = f"audio_cache_failed:{type(exc).__name__}"
+                if not segment.audio_failure_reason:
+                    segment.audio_failure_reason = failure_reason
+                logger.warning(
+                    "WIRING output_audio_cache_failed turn_id=%s message_id=%s "
+                    "path=%s reason=%s",
+                    segment.turn_id,
+                    segment.message_id,
+                    segment.audio_path,
+                    failure_reason,
+                    exc_info=True,
+                )
+                audio_slot = {
+                    "state": "failed",
+                    "reason": segment.audio_failure_reason,
+                }
 
         motion_slot = self.build_motion_slot(segment)
         if self.deferred_motion.contains(segment.turn_id, segment.message_id):

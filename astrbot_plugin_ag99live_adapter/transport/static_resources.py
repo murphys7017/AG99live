@@ -12,6 +12,24 @@ from urllib.parse import unquote, urlparse
 from astrbot.api import logger
 
 
+def _allowed_cors_origin(origin: str | None) -> str | None:
+    if not origin:
+        return None
+    if origin in {"null", "file://"}:
+        return origin
+    try:
+        parsed = urlparse(origin)
+    except ValueError:
+        return None
+    if parsed.scheme not in {"http", "https"}:
+        return None
+    if parsed.username or parsed.password:
+        return None
+    if parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
+        return None
+    return origin
+
+
 def _build_handler(routes: dict[str, Path]):
     normalized_routes = {prefix: path.resolve() for prefix, path in routes.items()}
 
@@ -39,7 +57,10 @@ def _build_handler(routes: dict[str, Path]):
             return str(target)
 
         def end_headers(self) -> None:
-            self.send_header("Access-Control-Allow-Origin", "*")
+            allowed_origin = _allowed_cors_origin(self.headers.get("Origin"))
+            if allowed_origin is not None:
+                self.send_header("Access-Control-Allow-Origin", allowed_origin)
+                self.send_header("Vary", "Origin")
             self.send_header("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
             self.send_header("Access-Control-Allow-Headers", "*")
             super().end_headers()

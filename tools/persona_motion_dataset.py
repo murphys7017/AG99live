@@ -348,6 +348,13 @@ def _merge_snapshots(events: list[dict[str, Any]]) -> dict[str, Any]:
         snapshots,
         key=lambda item: (
             -stage_priority.get(item["stage"], 0),
+            0
+            if (
+                isinstance(item["input"].get("motion_request"), dict)
+                and item["input"]["motion_request"].get("candidate_role")
+                == "primary"
+            )
+            else 1,
             item["event"]["created_at"],
         ),
     )
@@ -486,8 +493,16 @@ def _merge_snapshots(events: list[dict[str, Any]]) -> dict[str, Any]:
         candidates.append(
             {
                 "provider_update_index": snapshot["motion"].get("provider_update_index"),
+                "provider_id": snapshot["motion"].get("provider_id"),
+                "candidate_role": snapshot["motion"].get("candidate_role"),
                 "status": snapshot["motion"].get("status"),
                 "accepted_payload": snapshot["motion"].get("accepted_payload"),
+                "raw_output": snapshot["motion"].get("raw_output"),
+                "generation_elapsed_ms": snapshot["motion"].get("generation_elapsed_ms"),
+                "provider_elapsed_ms": snapshot["motion"].get("provider_elapsed_ms"),
+                "provider_started_at_epoch_ms": snapshot["motion"].get(
+                    "provider_started_at_epoch_ms"
+                ),
                 "reason": snapshot["motion"].get("reason"),
                 "provider_final": snapshot["motion"].get("provider_final"),
             }

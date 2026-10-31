@@ -2,6 +2,9 @@
   "extends": "./tsconfig.test.json",
   "include": [
     "tests/playbackTimelineEngine.test.ts",
-    "tests/playbackTimelineRuntime.test.ts"
+    "tests/playbackTimelineRuntime.test.ts",
+    "tests/test-window.d.ts",
+    "src/types/**/*.d.ts",
+    "src/live2d/WebSDK/Core/live2dcubismcore.d.ts"
   ]
 }

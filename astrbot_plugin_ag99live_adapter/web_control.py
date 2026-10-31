@@ -261,6 +261,40 @@ CONFIG_SCHEMA: tuple[ConfigSection, ...] = (
                 options_from="providers",
             ),
             ConfigField(
+                key="shadow_enabled",
+                kind="bool",
+                label="并行记录影子动作模型",
+                description="与主动作 Provider 使用相同 prompt 并行生成；结果只校验并记录，不参与动作播放。",
+                default=False,
+            ),
+            ConfigField(
+                key="shadow_provider_id",
+                kind="provider",
+                label="影子动作 Provider",
+                description="用于动作对比和后续训练数据采集的聊天 Provider。请与主动作 Provider 选择不同模型。",
+                default="",
+                max_length=255,
+                required=False,
+                options_from="providers",
+            ),
+            ConfigField(
+                key="shadow_timeout_seconds",
+                kind="float",
+                label="影子请求超时（秒）",
+                description="后台影子生成的最长时间；超时会记录失败，不影响 DeepSeek 动作。",
+                default=5.0,
+                minimum=0.5,
+                maximum=60,
+                step=0.5,
+            ),
+            ConfigField(
+                key="stream_preview_enabled",
+                kind="bool",
+                label="允许流式段提前预览",
+                description="默认关闭；关闭时等当前 speech 段完成后再请求动作，保证动作模型看到真实段文本。开启后可降低首帧等待，但可能在 speech 为空时提前生成。",
+                default=False,
+            ),
+            ConfigField(
                 key="history_turns",
                 kind="int",
                 label="历史上下文轮数",
@@ -992,6 +1026,26 @@ def _normalize_cross_field(normalized: dict[str, dict[str, Any]]) -> None:
         raise ConfigValidationError(
             "independent_motion_provider_required",
             "independent_motion.provider_id",
+        )
+    if (
+        independent_motion
+        and independent_motion.get("shadow_enabled")
+        and not str(independent_motion.get("shadow_provider_id") or "").strip()
+    ):
+        raise ConfigValidationError(
+            "independent_motion_shadow_provider_required",
+            "independent_motion.shadow_provider_id",
+        )
+    if (
+        independent_motion
+        and independent_motion.get("shadow_enabled")
+        and independent_motion.get("provider_id")
+        and independent_motion.get("provider_id")
+        == independent_motion.get("shadow_provider_id")
+    ):
+        raise ConfigValidationError(
+            "independent_motion_shadow_provider_must_differ",
+            "independent_motion.shadow_provider_id",
         )
     passive_behavior = normalized.get("passive_behavior")
     if (

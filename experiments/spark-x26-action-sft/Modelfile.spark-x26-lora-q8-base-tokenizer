@@ -1,0 +1,4 @@
+FROM ./output/spark-x26-1p7b-lora-q8_0-base-tokenizer.gguf
+
+PARAMETER num_ctx 4096
+PARAMETER temperature 0

@@ -84,6 +84,7 @@ class VTSClient:
             raise VTSConnectionError(
                 f"Unable to connect to VTube Studio at {self.endpoint}: {exc}"
             ) from exc
+        self._reader_error = None
         self._closed = False
         self._reader_task = asyncio.create_task(
             self._read_messages(),

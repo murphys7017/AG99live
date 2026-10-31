@@ -376,6 +376,7 @@ async def generate_independent_motion_for_segments(
     segment_intents: tuple[dict[str, Any], ...] = (),
     segments_by_index: dict[int, PersonaSegmentState] | None = None,
     prepared_context: IndependentMotionContext | None = None,
+    shadow_tasks: set[asyncio.Task[Any]] | None = None,
 ) -> dict[int, IndependentMotionResult]:
     """Generate one Provider result for each speech or explicit intent segment."""
     started = perf_counter()
@@ -551,6 +552,8 @@ async def generate_independent_motion_for_segments(
                         kwargs["segment_index"] = index
                     if shared_context is not None:
                         kwargs["prepared_context"] = shared_context
+                    if shadow_tasks is not None:
+                        kwargs["shadow_tasks"] = shadow_tasks
                     return await generate_independent_motion(
                         event,
                         bundle,
@@ -697,12 +700,34 @@ async def generate_independent_motion(
     persona_result_id: str | None = None,
     segment_index: int | None = None,
     segment_message_id: str | None = None,
+    shadow: bool = False,
+    shadow_timeout_seconds: float = 5.0,
+    shadow_tasks: set[asyncio.Task[Any]] | None = None,
+    prompt_snapshot: (
+        tuple[
+            str,
+            str,
+            list[dict[str, str]],
+            dict[str, Any] | None,
+            dict[str, Any],
+        ]
+        | None
+    ) = None,
 ) -> IndependentMotionResult:
     images: list[str] = []
     motion_request_id = uuid4().hex
     generation_started = perf_counter()
     turn_id = event.get_extra("_turn_id") or "<missing>"
-    provider_id = getattr(bundle.runtime_state, "independent_motion_provider_id", "<missing>")
+    provider_id = str(
+        getattr(
+            bundle.runtime_state,
+            "independent_motion_shadow_provider_id"
+            if shadow
+            else "independent_motion_provider_id",
+            "<missing>",
+        )
+        or "<missing>"
+    )
     mode = (
         "parallel"
         if bool(getattr(bundle.runtime_state, "independent_motion_parallel", False))
@@ -711,9 +736,15 @@ async def generate_independent_motion(
     sample_input_context: dict[str, Any] = {
         "user_text": _dialogue_text(str(getattr(event, "message_str", "") or "")),
         "recent_context": [],
-        "motion_request": {"provider_id": provider_id, "state": "not_prepared"},
+        "motion_request": {
+            "provider_id": provider_id,
+            "candidate_role": "shadow" if shadow else "primary",
+            "state": "not_prepared",
+        },
     }
     sample_raw_output: Any = None
+    provider_elapsed_ms: float | None = None
+    provider_started_at_epoch_ms: int | None = None
     provider_update_index = 0
     get_extra = getattr(event, "get_extra", None)
     stream_active = bool(
@@ -760,6 +791,13 @@ async def generate_independent_motion(
             "motion_request_id": motion_request_id,
             "provider_id": provider_id,
             "provider_final": provider_final,
+            "candidate_role": "shadow" if shadow else "primary",
+            "generation_elapsed_ms": round(
+                (perf_counter() - generation_started) * 1000,
+                1,
+            ),
+            "provider_elapsed_ms": provider_elapsed_ms,
+            "provider_started_at_epoch_ms": provider_started_at_epoch_ms,
         }
         if provider_update_index is not None:
             motion_output["provider_update_index"] = provider_update_index
@@ -793,17 +831,26 @@ async def generate_independent_motion(
             image_count=image_count,
         )
         record_sample(
-            stage="motion_result",
-            record_key=f"result:{motion_request_id}",
+            stage="motion_candidate" if shadow else "motion_result",
+            record_key=(
+                f"shadow-result:{motion_request_id}"
+                if shadow
+                else f"result:{motion_request_id}"
+            ),
             motion_payload=motion_payload,
             status=(
-                "provider_normalized"
+                "shadow_provider_normalized"
+                if shadow and motion_payload is not None
+                else "shadow_provider_failed"
+                if shadow
+                else "provider_normalized"
                 if motion_payload is not None
                 else "provider_failed"
             ),
             reason=reason,
             raw_output=sample_raw_output,
-            provider_final=True,
+            provider_final=not shadow,
+            provider_update_index=0 if shadow else None,
         )
         logger.info(
             "DIAG latency.motion_result_ready turn_id=%s motion_request_id=%s "
@@ -956,22 +1003,37 @@ async def generate_independent_motion(
         capability_payload = prepared_context.capability_payload
         runtime_payload = prepared_context.runtime_payload
 
-        neurobrain_state = (
-            _read_neurobrain_state(bundle) if segment_intent is not None else None
-        )
-
-        capability = _build_motion_capability_prompt_payload(capability_payload)
-        system_prompt = _build_independent_system_prompt(
-            capability=capability,
-            persona_guidance=prepared_context.persona_guidance,
-        )
-        prompt = _build_current_turn_prompt(
-            current_user_text=current_user_text,
-            assistant_text=assistant_text,
-            segment_intent=segment_intent,
-            neurobrain_state=neurobrain_state,
-            motion_guidance=_motion_guidance_for_prompt(capability, runtime_payload),
-        )
+        if prompt_snapshot is not None:
+            (
+                system_prompt,
+                prompt,
+                contexts,
+                neurobrain_state,
+                runtime_payload,
+            ) = prompt_snapshot
+        else:
+            neurobrain_state = (
+                _read_neurobrain_state(bundle)
+                if segment_intent is not None
+                else None
+            )
+            capability = _build_motion_capability_prompt_payload(
+                capability_payload
+            )
+            system_prompt = _build_independent_system_prompt(
+                capability=capability,
+                persona_guidance=prepared_context.persona_guidance,
+            )
+            prompt = _build_current_turn_prompt(
+                current_user_text=current_user_text,
+                assistant_text=assistant_text,
+                segment_intent=segment_intent,
+                neurobrain_state=neurobrain_state,
+                motion_guidance=_motion_guidance_for_prompt(
+                    capability,
+                    runtime_payload,
+                ),
+            )
         expected_transport = (
             "stream" if supports_text_chat_stream(provider) else "unsupported"
         )
@@ -981,6 +1043,7 @@ async def generate_independent_motion(
             "motion_request": {
                 "motion_request_id": motion_request_id,
                 "provider_id": provider_id,
+                "candidate_role": "shadow" if shadow else "primary",
                 "prompt": prompt,
                 "system_prompt": system_prompt,
                 "neurobrain_state": neurobrain_state,
@@ -1015,7 +1078,96 @@ async def generate_independent_motion(
             raw_output=None,
             provider_final=False,
         )
-        response_text, transport = await _request_motion_provider_text(
+
+        if (
+            not shadow
+            and bool(
+                getattr(
+                    bundle.runtime_state,
+                    "independent_motion_shadow_enabled",
+                    False,
+                )
+            )
+        ):
+            shadow_provider = getattr(
+                bundle.runtime_state,
+                "selected_independent_motion_shadow_provider",
+                None,
+            )
+            shadow_provider_id = str(
+                getattr(
+                    bundle.runtime_state,
+                    "independent_motion_shadow_provider_id",
+                    "",
+                )
+                or ""
+            ).strip()
+            primary_provider_id = str(
+                getattr(bundle.runtime_state, "independent_motion_provider_id", "")
+                or ""
+            ).strip()
+            if (
+                shadow_provider is not None
+                and shadow_provider_id
+                and shadow_provider_id != primary_provider_id
+            ):
+                try:
+                    shadow_timeout_seconds = max(
+                        0.5,
+                        min(
+                            float(
+                                getattr(
+                                    bundle.runtime_state,
+                                    "independent_motion_shadow_timeout_seconds",
+                                    5.0,
+                                )
+                            ),
+                            60.0,
+                        ),
+                    )
+                except (TypeError, ValueError):
+                    shadow_timeout_seconds = 5.0
+                shadow_task = asyncio.create_task(
+                    generate_independent_motion(
+                        event,
+                        bundle,
+                        provider=shadow_provider,
+                        assistant_text=assistant_text,
+                        prepared_context=prepared_context,
+                        segment_intent=segment_intent,
+                        persona_result_id=persona_result_id,
+                        segment_index=segment_index,
+                        segment_message_id=segment_message_id,
+                        shadow=True,
+                        shadow_timeout_seconds=shadow_timeout_seconds,
+                        prompt_snapshot=(
+                            system_prompt,
+                            prompt,
+                            list(contexts),
+                            neurobrain_state,
+                            dict(runtime_payload),
+                        ),
+                    ),
+                    name=f"ag99live-motion-shadow-{motion_request_id[:12]}",
+                )
+                if shadow_tasks is not None:
+                    shadow_tasks.add(shadow_task)
+                    shadow_task.add_done_callback(shadow_tasks.discard)
+                shadow_task.add_done_callback(_consume_background_motion_exception)
+                logger.info(
+                    "DIAG motion.shadow_request_started turn_id=%s "
+                    "motion_request_id=%s persona_result_id=%s segment_index=%s "
+                    "provider=%s timestamp_epoch_ms=%s",
+                    turn_id,
+                    motion_request_id,
+                    persona_result_id or "<none>",
+                    segment_index,
+                    shadow_provider_id,
+                    time_ns() // 1_000_000,
+                )
+        provider_started_at_epoch_ms = time_ns() // 1_000_000
+        provider_started = perf_counter()
+        provider_request = _request_motion_provider_text(
             provider,
             prompt=prompt,
             system_prompt=system_prompt,
@@ -1024,8 +1176,16 @@ async def generate_independent_motion(
             motion_request_id=motion_request_id,
             persona_result_id=persona_result_id,
             segment_index=segment_index,
-            on_complete_json=publish_completed_motion_record,
+            on_complete_json=(None if shadow else publish_completed_motion_record),
         )
+        if shadow:
+            response_text, transport = await asyncio.wait_for(
+                provider_request,
+                timeout=shadow_timeout_seconds,
+            )
+        else:
+            response_text, transport = await provider_request
+        provider_elapsed_ms = round((perf_counter() - provider_started) * 1000, 1)
         sample_raw_output = response_text
         logger.debug(
             "WIRING independent_motion.provider_response_received turn_id=%s "
@@ -1319,7 +1479,7 @@ def _build_independent_system_prompt(
         ),
         "",
     )
-    contract: dict[str, Any] = {"intent_tags": ["用简短关键词概括当前表达"]}
+    contract: dict[str, Any] = {}
     if motion_resource:
         contract["motion_resource_id"] = motion_resource
     else:
@@ -1345,14 +1505,18 @@ def _build_independent_system_prompt(
         "优先落实 actions，以 tendency 调整情绪强度，只描述角色本段应该呈现的动作。"
         "这是长期陪伴中的身体表达，不是独立的舞台表演；动作要自然亲近，并服务于同一人格的语气和关系。"
         "动作幅度跟随当前语气和 tendency：普通确认、轻声安慰或停顿思考保持克制；"
-        "只有明确的动作意图、强烈情绪或用户明确要求时才提高幅度或使用动作序列。"
+        "用户要求或当前 segment 的 speech 明确包含连续、重复、往返或有先后顺序的可见动作时，"
+        "优先用 motion_steps 按播放顺序表达 2 到 4 个关键姿态变化，不要压成一个平均姿态；"
+        "例如连续点头、左右摇摆、先转向再回正。普通确认、单一情绪或只有一个稳定姿态时使用 axis_levels。"
+        "只有明确动作意图、强烈情绪或用户明确要求时才提高动作幅度。"
         "若当前内容没有清晰动作信号，可以保持中性或不控制无关轴；不要把每条回复都演成明显动作。"
         "每个动作都要服务于当前语义，不要为了显眼而制造与语义冲突的动作。"
         "如果当前输入包含 neurobrain_state，它只是连续状态的参考，不能当作动作命令；"
         "不要输出或复述这个字段，也不要因此改变既有 JSON 输出契约。"
         "参考示例的 output 就是输出格式；最近执行动作只用于衔接和避免机械重复，勿照搬。"
         "只输出一个 JSON 对象，不要 Markdown、解释文字、工具调用或额外字段。"
-        "必需字段 intent_tags 是 1 到 6 个简短关键词。执行形状必须且只能选择一种："
+        "intent_tags 是可选的训练/检索元数据；可以省略，若输出则使用 1 到 6 个简短关键词。"
+        "执行形状必须且只能选择一种："
         "axis_levels（单个姿态）、motion_steps（2 到 4 个动作步骤，每步必须包含 axis_levels 和 1 到 3 的 duration_weight），"
         "或 motion_resource_id（完整动作资源）。axis_levels 的值必须是能力数据里对应轴可用的等级。"
         "动作序列采用稀疏语义：每一步只写新开始控制或需要改变的轴，后续步骤可以新增或省略轴；"

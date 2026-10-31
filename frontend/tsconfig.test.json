@@ -10,7 +10,13 @@
     "paths": {
       "@/*": ["src/*"],
       "@framework/*": ["src/live2d/WebSDK/Framework/src/*"]
-    }
+    },
+    "strictNullChecks": false
   },
-  "include": ["tests/**/*.ts"]
+  "include": [
+    "tests/**/*.ts",
+    "tests/**/*.d.ts",
+    "src/types/**/*.d.ts",
+    "src/live2d/WebSDK/Core/live2dcubismcore.d.ts"
+  ]
 }

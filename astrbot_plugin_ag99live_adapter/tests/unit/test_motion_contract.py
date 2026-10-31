@@ -9,6 +9,7 @@ from astrbot_plugin_ag99live_adapter.middleware.interaction_motion.prompt_refere
     _project_reference_examples_for_prompt,
 )
 from astrbot_plugin_ag99live_adapter.motion.payload_validation import (
+    normalize_motion_arguments_payload,
     validate_normalized_motion_intent_payload,
 )
 from astrbot_plugin_ag99live_adapter.motion.resource_catalog import (
@@ -114,6 +115,26 @@ def test_expression_resource_rejects_conflicting_prompt_source_axis() -> None:
         "expression_id_validated:"
         "expression_resource_axis_conflict:expr_body:head_yaw"
     )
+
+
+def test_missing_intent_tags_are_defaulted_without_rejecting_motion() -> None:
+    model = _build_model()
+    runtime_state = _RuntimeState(model)
+
+    normalized, reason = normalize_motion_arguments_payload(
+        {"axis_levels": {"head_yaw": 2}, "duration_hint_ms": 900},
+        runtime_state,
+        base_reason="independent_provider",
+        append_resolution_reason=lambda base, suffix: (
+            f"{base}:{suffix}" if base and suffix else base or suffix
+        ),
+        sanitize_reason_fragment=lambda value: str(value),
+    )
+
+    assert normalized is not None
+    assert normalized["intent_tags"] == ["动作"]
+    assert normalized["axis_levels"] == {"head_yaw": 2}
+    assert "intent_tags_defaulted" in reason
 
 
 def test_reference_projection_uses_user_text_and_nearest_available_levels() -> None:
