@@ -6,11 +6,13 @@ import {
   canReleaseAudio,
   canReleaseMotion,
   getActivePlaybackSegment,
+  isPlaybackSegmentResolved,
 } from "./selectors.js";
 import type { TurnPlaybackSegment } from "./session.js";
 import type { PlaybackTimelineRuntime } from "../playback-timeline/playbackTimelineRuntime.js";
 
 type SessionStore = ReturnType<typeof useTurnPlaybackSessionStore>;
+const MAX_LATE_MOTION_TAIL_MS = 1800;
 
 interface TurnPlaybackOrchestratorOptions {
   sessionStore: SessionStore;
@@ -20,7 +22,6 @@ interface TurnPlaybackOrchestratorOptions {
     | "handoffSpeechMotionTail"
     | "startIncrementalMotion"
     | "rejectMotionBeforeStart"
-    | "findPlaybackReleaseBlockers"
     | "subscribeExecutionStateChanges"
   >;
 }
@@ -36,7 +37,7 @@ export function useTurnPlaybackOrchestrator(
         const next = session.segments.get(session.segmentOrder[index + 1]!);
         if (!previous || !next || previous.incremental || next.incremental
           || previous.audio.terminal !== "completed" || !previous.text.delivered
-          || !isAtomicSegmentResolved(next) || !canReleaseAudio(next)) continue;
+          || !isPlaybackSegmentResolved(next) || !canReleaseAudio(next)) continue;
         if (previous.motion.pending) {
           // A generated result is still acknowledged later, but can no longer
           // animate this completed speech window or hold up the following audio.
@@ -92,18 +93,6 @@ export function useTurnPlaybackOrchestrator(
         return;
       }
     }
-    const blockers = options.timelineRuntime.findPlaybackReleaseBlockers().filter((blocker) => !(
-      segment?.incremental
-      && segment.audio.terminal === "completed"
-      && segment.motion.payload
-      && !segment.motion.released
-      && blocker.turnId === segment.turnId
-      && blocker.messageId === segment.messageId
-    ));
-    if (blockers.length > 0) {
-      console.debug("[TurnPlaybackOrchestrator] playback release blocked by active timeline.", { blockers });
-      return;
-    }
     // Text/PCM remain owned by the stream consumer. Once audio is absent or
     // complete, a valid action gets its own motion timeline without audio replay.
     if (segment?.incremental) {
@@ -115,24 +104,35 @@ export function useTurnPlaybackOrchestrator(
         && (segment.audio.terminal === "absent" || segment.audio.terminal === "completed")
         && segment.motion.receivedAtMs !== null
       ) {
-        options.timelineRuntime.startSegmentJob({
-          turnId: segment.turnId,
-          messageId: segment.messageId,
-          reason: segment.audio.terminal === "completed"
-            ? "incremental_motion_after_audio"
-            : "incremental_motion_without_audio",
-          text: { release: false, content: segment.text.content },
-          audio: { release: false, url: null, noAudioConfirmed: true },
-          motion: {
-            payload: cloneReleasedMotionPayload(segment.motion.payload),
-            source: segment.motion.source, receivedAtMs: segment.motion.receivedAtMs,
-          },
-          speech: { cues: segment.speech.cues },
-        });
+        if (segment.motion.lateByMs !== null
+          && segment.motion.lateByMs > MAX_LATE_MOTION_TAIL_MS) {
+          options.timelineRuntime.rejectMotionBeforeStart(
+            segment.turnId,
+            segment.messageId,
+            `motion_late_tail_expired:${Math.round(segment.motion.lateByMs)}ms`,
+          );
+        } else {
+          options.timelineRuntime.startSegmentJob({
+            turnId: segment.turnId,
+            messageId: segment.messageId,
+            reason: segment.audio.terminal === "completed"
+              ? "incremental_motion_after_audio"
+              : "incremental_motion_without_audio",
+            text: { release: false, content: segment.text.content },
+            audio: { release: false, url: null, noAudioConfirmed: true },
+            motion: {
+              payload: cloneReleasedMotionPayload(segment.motion.payload),
+              source: segment.motion.source,
+              receivedAtMs: segment.motion.receivedAtMs,
+              lateByMs: segment.motion.lateByMs,
+            },
+            speech: { cues: segment.speech.cues },
+          });
+        }
       }
       return;
     }
-    if (!segment || !isAtomicSegmentResolved(segment)) {
+    if (!segment || !isPlaybackSegmentResolved(segment)) {
       if (segment) {
         console.debug("[TurnPlaybackOrchestrator] candidate segment is not atomically resolved.", {
           turnId: segment.turnId,
@@ -201,6 +201,7 @@ export function useTurnPlaybackOrchestrator(
       ? cloneReleasedMotionPayload(segment.motion.payload)
       : null;
     const receivedAtMs = releaseMotion ? segment.motion.receivedAtMs : null;
+    const lateByMs = releaseMotion ? segment.motion.lateByMs : null;
     if (
       releaseMotion
       && (
@@ -216,6 +217,16 @@ export function useTurnPlaybackOrchestrator(
       );
       return;
     }
+    if (lateByMs !== null && lateByMs > MAX_LATE_MOTION_TAIL_MS) {
+      options.timelineRuntime.rejectMotionBeforeStart(
+        segment.turnId,
+        segment.messageId,
+        `motion_late_tail_expired:${Math.round(lateByMs)}ms`,
+      );
+      return;
+    }
+    const motionOnlyRelease = !releaseAudio
+      && (segment.audio.terminal === "absent" || segment.audio.terminal === "completed");
 
     console.info("[TurnPlaybackOrchestrator] releasing atomic segment to playback timeline.", {
       turnId: segment.turnId,
@@ -223,7 +234,7 @@ export function useTurnPlaybackOrchestrator(
       releaseText,
       releaseAudio,
       releaseMotion,
-      timelineMode: segment.audio.terminal === "absent" && !releaseAudio
+      timelineMode: motionOnlyRelease
         ? "motion_only"
         : "audio",
       audioTerminal: segment.audio.terminal,
@@ -240,12 +251,13 @@ export function useTurnPlaybackOrchestrator(
       audio: {
         release: releaseAudio,
         url: segment.audio.url,
-        noAudioConfirmed: segment.audio.terminal === "absent",
+        noAudioConfirmed: motionOnlyRelease,
       },
       motion: {
         payload: motionPayload,
         source: releaseMotion ? segment.motion.source : null,
         receivedAtMs,
+        lateByMs,
       },
       speech: {
         cues: segment.speech.cues,
@@ -292,18 +304,6 @@ export function useTurnPlaybackOrchestrator(
       unsubscribeExecutionStateChanges();
     },
   };
-}
-
-function isAtomicSegmentResolved(
-  segment: DeepReadonly<TurnPlaybackSegment>,
-): boolean {
-  const textResolved = Boolean(segment.text.content) || segment.text.delivered;
-  const audioResolved = Boolean(segment.audio.url) || segment.audio.terminal !== "idle";
-  const motionResolved = Boolean(segment.motion.payload)
-    || segment.motion.pending
-    || segment.motion.absent
-    || segment.motion.failed;
-  return textResolved && audioResolved && motionResolved;
 }
 
 function cloneReleasedMotionPayload(

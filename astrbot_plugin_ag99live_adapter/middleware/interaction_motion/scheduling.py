@@ -24,6 +24,7 @@ from ...runtime.persona_lifecycle import (
     PersonaTtsBinding,
     PersonaTurnIdentity,
 )
+from ...runtime.adapter_event_context import resolve_adapter_event_context
 from .effects import (
     _effect_call_get,
     _extract_ag99live_motion_effect_arguments,
@@ -157,7 +158,7 @@ def _resolve_hidden_markup_text_override(
     if not raw_assistant_text or not contains_hidden_output_markup(raw_assistant_text):
         return None
 
-    event.set_extra("ag99live_raw_reply_text", raw_assistant_text)
+    resolve_adapter_event_context(event).set_raw_reply_text(event, raw_assistant_text)
     raw_segments = _extract_raw_persona_speech_segments(view)
     if not raw_segments:
         return sanitize_assistant_output_text(raw_assistant_text)
@@ -235,8 +236,9 @@ class AG99liveMotionResultContributor:
         capabilities = get_interaction_capabilities()
         if capabilities is None:
             return None
-        event.set_extra("_ag99live_pending_performance_curve", None)
-        event.set_extra("ag99live_raw_reply_text", None)
+        event_context = resolve_adapter_event_context(event)
+        event_context.set_pending_performance_curve(event, None)
+        event_context.set_raw_reply_text(event, None)
         bundle = _resolve_motion_runtime_bundle(event)
         persona_result_id = str(
             (
@@ -248,7 +250,7 @@ class AG99liveMotionResultContributor:
         ).strip()
         turn_id = str(
             getattr(view, "turn_id", None)
-            or _call_event_method(event, "get_extra", "_turn_id", "")
+            or event_context.core_turn_id
             or ""
         ).strip()
         deferred_work = (
@@ -536,7 +538,7 @@ class AG99liveMotionResultContributor:
             )
             results_by_index = {}
 
-        if event.get_extra("agent_stop_requested", False):
+        if resolve_adapter_event_context(event).agent_stop_requested:
             logger.debug(
                 "WIRING independent_motion.finalization_discarded "
                 "reason=turn_terminated turn_id=%s persona_result_id=%s",
@@ -760,8 +762,8 @@ def _defer_optional_performance_curve_request(
 ) -> None:
     if attempt.motion_payload is None or not attempt.assistant_text:
         return
-    event.set_extra(
-        "_ag99live_pending_performance_curve",
+    resolve_adapter_event_context(event).set_pending_performance_curve(
+        event,
         {
             "assistant_text": attempt.assistant_text,
             "motion_payload": attempt.motion_payload,
@@ -785,7 +787,8 @@ def start_deferred_performance_curve_request(
     if stage != "interaction.outbound_tts":
         return None
 
-    if event.get_extra("_interaction_persona_segment_stream_active", False):
+    event_context = resolve_adapter_event_context(event)
+    if event_context.persona_segment_stream_active:
         # Stream delivery binds each TTS part to its runtime-owned motion Future.
         # The ordinary Persona result path requires the complete segment count.
         logger.debug(
@@ -849,10 +852,10 @@ def start_deferred_performance_curve_request(
     else:
         if status != "generating":
             return None
-        pending = event.get_extra("_ag99live_pending_performance_curve")
+        pending = event_context.pending_performance_curve
         if not isinstance(pending, dict):
             return None
-        event.set_extra("_ag99live_pending_performance_curve", None)
+        event_context.set_pending_performance_curve(event, None)
         motion_payload = pending.get("motion_payload")
         assistant_text = str(pending.get("assistant_text") or "")
 

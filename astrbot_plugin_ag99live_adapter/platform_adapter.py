@@ -22,6 +22,7 @@ from .runtime.client_profile import (
     normalize_client_nickname,
     normalize_client_uid,
 )
+from .runtime.adapter_event_context import resolve_adapter_event_context
 from .services.frontend_system_service import FrontendSystemCommandHandler
 from .services.history_service import ConversationHistoryBridge
 from .services.media_service import MediaService
@@ -450,16 +451,18 @@ class OLVPetPlatformAdapter(Platform):
     async def open_incremental_output(self, *, event, persona_result_id: str):
         if not self.desktop_audio_credit_enabled:
             raise RuntimeError("incremental_audio_credit_not_negotiated")
+        event_context = resolve_adapter_event_context(event)
         return await self.turn_coordinator.open_incremental_output(
-            turn_id=str(event.get_extra("output_correlation_id", "") or "").strip(),
-            core_turn_id=str(event.get_extra("_turn_id", "") or "").strip(),
+            turn_id=event_context.delivery_turn_id,
+            core_turn_id=event_context.core_turn_id,
             persona_result_id=persona_result_id,
             send_payload=self.transport.bind_current_client_sender(),
         )
 
     async def discard_incremental_output(self, *, event, persona_result_id: str) -> bool:
+        event_context = resolve_adapter_event_context(event)
         return await self.turn_coordinator.discard_incremental_output(
-            turn_id=str(event.get_extra("output_correlation_id", "") or "").strip(),
+            turn_id=event_context.delivery_turn_id,
             persona_result_id=persona_result_id,
         )
 

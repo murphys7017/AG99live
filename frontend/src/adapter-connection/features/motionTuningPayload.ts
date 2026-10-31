@@ -12,19 +12,78 @@ import { isObject, isPresent, normalizeText } from "../../utils/guards.js";
 export function serializeMotionTuningSample(
   sample: DesktopMotionTuningSample,
 ): MotionTuningSampleProtocolPayload {
+  const id = sample.id.trim();
+  const createdAt = sample.createdAt.trim();
+  const sourceRecordId = sample.sourceRecordId.trim();
+  const turnId = sample.turnId.trim();
+  const messageId = sample.messageId.trim();
+  const modelName = sample.modelName.trim();
+  const profileId = sample.profileId?.trim() ?? "";
+  const profileRevision = sample.profileRevision;
+  const userText = sample.userText.trim();
+  const assistantText = sample.assistantText.trim();
+  if (
+    !id
+    || !createdAt
+    || !sourceRecordId
+    || !turnId
+    || !messageId
+    || !modelName
+    || !profileId
+    || typeof profileRevision !== "number"
+    || !Number.isInteger(profileRevision)
+    || profileRevision <= 0
+  ) {
+    throw new Error("motion_tuning_sample_profile_identity_required");
+  }
+  if (!userText || !assistantText) {
+    throw new Error("motion_tuning_sample_recorded_context_required");
+  }
+  const compiledSemanticMotion = cloneCompiledSemanticMotion(
+    sample.compiledSemanticMotion,
+  );
+  if (!compiledSemanticMotion) {
+    throw new Error("motion_tuning_sample_compiled_motion_invalid");
+  }
+  if (
+    compiledSemanticMotion.modelId !== modelName
+  ) {
+    throw new Error("motion_tuning_sample_compiled_motion_model_conflict");
+  }
+  if (
+    compiledSemanticMotion.profileId !== profileId
+    || compiledSemanticMotion.profileRevision !== profileRevision
+  ) {
+    throw new Error("motion_tuning_sample_compiled_motion_identity_conflict");
+  }
+  if (
+    compiledSemanticMotion.kind === "pose"
+    && (!sample.adjustedAxes || Object.keys(sample.adjustedAxes).length === 0)
+  ) {
+    throw new Error("motion_tuning_sample_adjusted_axes_required");
+  }
+  if (
+    compiledSemanticMotion.kind === "sequence"
+    && sample.adjustedAxes
+    && Object.keys(sample.adjustedAxes).length > 0
+  ) {
+    throw new Error("motion_tuning_sample_sequence_adjusted_axes_forbidden");
+  }
   return {
     schema_version: SCHEMA_MOTION_TUNING_SAMPLE_V2,
-    id: sample.id,
-    created_at: sample.createdAt,
-    source_record_id: sample.sourceRecordId,
-    turn_id: sample.turnId,
-    message_id: sample.messageId,
-    model_name: sample.modelName,
-    profile_id: sample.profileId ?? "",
-    profile_revision: sample.profileRevision ?? 0,
+    id,
+    created_at: createdAt,
+    source_record_id: sourceRecordId,
+    turn_id: turnId,
+    message_id: messageId,
+    model_name: modelName,
+    profile_id: profileId,
+    profile_revision: profileRevision,
     profile_hash: sample.profileHash ?? "",
     transform_version: sample.transformVersion ?? "",
     emotion_label: sample.emotionLabel,
+    user_text: userText,
+    assistant_text: assistantText,
     feedback: sample.feedback,
     tags: [...sample.tags],
     enabled_for_llm_reference: Boolean(sample.enabledForLlmReference),
@@ -33,7 +92,7 @@ export function serializeMotionTuningSample(
     resolved_axes: { ...(sample.resolvedAxes ?? {}) },
     constrained_axes: { ...(sample.constrainedAxes ?? {}) },
     adjusted_axes: sample.adjustedAxes ? { ...sample.adjustedAxes } : undefined,
-    compiled_semantic_motion: cloneJson(sample.compiledSemanticMotion),
+    compiled_semantic_motion: cloneJson(compiledSemanticMotion),
   };
 }
 

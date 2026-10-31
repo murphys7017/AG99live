@@ -16,6 +16,7 @@ from .motion.output_sanitizer import (
     sanitize_assistant_output_text,
 )
 from .motion.observation import resolve_persona_motion_source_route
+from .runtime.adapter_event_context import resolve_adapter_event_context
 from .runtime.persona_lifecycle import (
     PersonaExpressionFrame,
     PersonaTurnIdentity,
@@ -192,7 +193,10 @@ class MyPlugin(Star):
 
         raw_reply_text = "\n".join(original_plain_texts).strip()
         if changed and raw_reply_text:
-            event.set_extra("ag99live_raw_reply_text", raw_reply_text)
+            resolve_adapter_event_context(event).set_raw_reply_text(
+                event,
+                raw_reply_text,
+            )
             logger.debug(
                 "WIRING assistant_output_normalized=true platform=%s raw_len=%s",
                 event.get_platform_name(),
@@ -360,11 +364,12 @@ class MyPlugin(Star):
         execution_surface: str | None = None,
     ) -> None:
         del turn_action, execution_surface
+        event_context = resolve_adapter_event_context(event)
         if (
             self._enhanced_interaction_unavailable
             or str(event.get_platform_name() or "").strip() != "olv_pet_adapter"
-            or not event.get_extra("_interaction_persona_segment_stream_active", False)
-            or event.get_extra("agent_stop_requested", False)
+            or not event_context.persona_segment_stream_active
+            or event_context.agent_stop_requested
         ):
             return
         from .middleware.interaction_motion.independent import (
@@ -413,7 +418,7 @@ class MyPlugin(Star):
         normalized_parent_id = str(message_id or "").strip()
         if (
             not normalized_turn_id
-            or normalized_turn_id != str(event.get_extra("_turn_id") or "").strip()
+            or normalized_turn_id != event_context.core_turn_id
             or not normalized_result_id
             or not normalized_parent_id
             or type(segment_index) is not int
@@ -687,16 +692,14 @@ class MyPlugin(Star):
         execution_surface: str | None = None,
     ) -> None:
         del turn_action, execution_surface
+        event_context = resolve_adapter_event_context(event)
         if (
             self._enhanced_interaction_unavailable
             or str(event.get_platform_name() or "").strip() != "olv_pet_adapter"
-            or not event.get_extra(
-                "_interaction_persona_segment_stream_active",
-                False,
-            )
+            or not event_context.persona_segment_stream_active
         ):
             return
-        if event.get_extra("agent_stop_requested", False):
+        if event_context.agent_stop_requested:
             return
 
         from .middleware.interaction_motion.independent import (
@@ -739,7 +742,7 @@ class MyPlugin(Star):
         normalized_parent_id = str(message_id or "").strip()
         if (
             not normalized_turn_id
-            or normalized_turn_id != str(event.get_extra("_turn_id") or "").strip()
+            or normalized_turn_id != event_context.core_turn_id
             or not normalized_result_id
             or not normalized_parent_id
             or type(segment_index) is not int
@@ -1163,6 +1166,7 @@ class MyPlugin(Star):
             PERSONA_RESULT_ID_METADATA_KEY,
         )
 
+        event_context = resolve_adapter_event_context(event)
         result_metadata = getattr(result, "metadata", None)
         persona_result_id = str(
             result_metadata.get(PERSONA_RESULT_ID_METADATA_KEY)
@@ -1174,16 +1178,13 @@ class MyPlugin(Star):
             logger.info(
                 "DIAG latency.persona_result_ready turn_id=%s persona_result_id=%s "
                 "segment_count=%s timestamp_epoch_ms=%s",
-                str(event.get_extra("_turn_id") or "<missing>"),
+                event_context.core_turn_id or "<missing>",
                 persona_result_id,
                 len(raw_segments),
                 time.time_ns() // 1_000_000,
             )
 
-        if event.get_extra(
-            "_interaction_persona_segment_stream_active",
-            False,
-        ):
+        if event_context.persona_segment_stream_active:
             return
 
         from .middleware.interaction_motion.independent import (
@@ -1206,7 +1207,7 @@ class MyPlugin(Star):
                 )
                 == "independent_motion"
             ):
-                turn_id = str(event.get_extra("_turn_id") or "").strip()
+                turn_id = event_context.core_turn_id
                 if not turn_id:
                     logger.warning(
                         "WIRING independent_motion.segment_generation_skipped "
@@ -1221,7 +1222,7 @@ class MyPlugin(Star):
                     or str(intent.get("phase") or "").strip()
                     not in {"immediate", "final"}
                     or str(intent.get("kind") or "").strip() != "reply"
-                    or event.get_extra("agent_stop_requested", False)
+                    or event_context.agent_stop_requested
                 ):
                     return
                 phase = str(intent.get("phase") or "").strip()
@@ -1330,7 +1331,7 @@ class MyPlugin(Star):
                             future = segment_state.result_future
                             if future is not None and not future.done():
                                 future.set_result(result_map.get(index))
-                        if event.get_extra("agent_stop_requested", False):
+                        if event_context.agent_stop_requested:
                             logger.debug(
                                 "WIRING independent_motion.segment_results_discarded "
                                 "reason=turn_terminated turn_id=%s persona_result_id=%s",
@@ -1355,7 +1356,7 @@ class MyPlugin(Star):
                         for segment_state in result_state.segments.values():
                             future = segment_state.result_future
                             if future is not None and not future.done():
-                                if event.get_extra("agent_stop_requested", False):
+                                if event_context.agent_stop_requested:
                                     future.cancel()
                                 else:
                                     future.set_result(None)

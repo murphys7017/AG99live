@@ -1,3 +1,44 @@
+playback_release_late_motion_continuity_20261031:
+  class: refactor
+  risk: high
+  status: source_reviewed_pending_runtime_acceptance
+  scope: >-
+    Move segment release blocker arbitration into PlaybackTimeline.startSegmentJob,
+    keep session material readiness in turn-playback selectors, and allow deferred
+    motion that arrives after completed audio to use a bounded motion-only tail.
+    Late tails older than 1800ms are rejected with an explicit reason. Prompt,
+    Live2D protocol and C++ remain unchanged.
+  validation: >-
+    Frontend renderer, WebSDK and Node TypeScript typechecks pass; git diff
+    whitespace inspection passes. No automated tests or runtime integration checks
+    were run, per user scope.
+  limitations: >-
+    Segment handoff still interrupts the previous direct plan through the existing
+    ModelEngine ownership path; the runtime captures the current model base for the
+    next plan, but real visual continuity needs AG99/TTS/Electron/Live2D runtime
+    acceptance. The 1800ms late-tail budget is an adapter policy and may need tuning.
+
+adapter_event_context_motion_tuning_contract_20261031:
+  class: refactor
+  risk: high
+  status: source_reviewed_pending_runtime_acceptance
+  scope: >-
+    Centralize Adapter event identity, stop state, Persona stream state, motion
+    route and deferred performance-curve state in AdapterEventContext. Keep
+    AstrBot extras as a compatibility mirror at the boundary, and reject
+    motion-tuning samples before transport when required recorded context or
+    compiled-motion identity is missing. Prompt, Live2D protocol and C++ remain
+    unchanged.
+  validation: >-
+    Changed Python modules pass py_compile and git diff whitespace inspection;
+    frontend renderer, WebSDK and Node TypeScript typechecks pass. Static review
+    confirmed identity and termination writes now go through AdapterEventContext.
+    No automated tests or runtime integration checks were run, per user scope.
+  limitations: >-
+    TurnCoordinator still mirrors the established AstrBot identity/stop extras
+    at the ingress/termination boundary through AdapterEventContext. The output
+    protocol metadata remains unchanged. Runtime acceptance is still pending.
+
 platform_event_adapter_state_20261031:
   class: refactor
   risk: high

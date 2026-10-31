@@ -19,6 +19,7 @@ export interface PendingInboundMotionPayload {
   playbackClock: MotionPlaybackClockContext | null;
   playbackClockReader: MotionPlaybackClockReader | null;
   timelineMode: InboundPayloadContext["timelineMode"];
+  lateByMs: number | null;
 }
 
 export interface StartPayloadContext {
@@ -33,6 +34,7 @@ export interface StartPayloadContext {
   queuedDelayMs: number;
   playbackClock?: MotionPlaybackClockContext | null;
   playbackClockReader?: MotionPlaybackClockReader | null;
+  lateByMs?: number | null;
 }
 
 export interface PendingMotionPreparation {
@@ -139,6 +141,7 @@ export function createMotionRuntimeScheduler(
       queuedDelayMs: Math.max(0, Math.round(performance.now() - entry.receivedAtMs)),
       playbackClock: entry.playbackClock,
       playbackClockReader: entry.playbackClockReader,
+      lateByMs: entry.lateByMs,
     };
   }
 
@@ -318,6 +321,7 @@ export function createMotionRuntimeScheduler(
         queuedDelayMs: 0,
         playbackClock: context.playbackClock ?? null,
         playbackClockReader: context.playbackClockReader ?? null,
+        lateByMs: context.lateByMs ?? null,
       });
       return false;
     }
@@ -343,6 +347,7 @@ export function createMotionRuntimeScheduler(
       playbackClock: context.playbackClock ?? null,
       playbackClockReader: context.playbackClockReader ?? null,
       timelineMode: context.timelineMode,
+      lateByMs: context.lateByMs ?? null,
     };
 
     if (entry.playbackClock && !matchesPlaybackTimeline(entry, entry.playbackClock)) {
@@ -357,6 +362,7 @@ export function createMotionRuntimeScheduler(
         queuedDelayMs: 0,
         playbackClock: entry.playbackClock,
         playbackClockReader: entry.playbackClockReader,
+        lateByMs: entry.lateByMs,
       });
       return false;
     }

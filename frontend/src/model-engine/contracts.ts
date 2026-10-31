@@ -16,4 +16,5 @@ export interface InboundPayloadContext {
   playbackClock?: MotionPlaybackClockContext | null;
   playbackClockReader?: MotionPlaybackClockReader | null;
   timelineMode?: "audio" | "motion_only";
+  lateByMs?: number | null;
 }

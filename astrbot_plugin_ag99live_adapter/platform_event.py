@@ -6,7 +6,6 @@ import asyncio
 import inspect
 import math
 from copy import copy
-from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from astrbot.api import logger
@@ -18,6 +17,7 @@ from .motion.output_sanitizer import (
     sanitize_assistant_output_segment_text,
 )
 from .runtime.message_utils import resolve_platform_segment_message_id
+from .runtime.adapter_event_context import AdapterEventContext
 from .runtime.persona_lifecycle import (
     PersonaResultState,
     PersonaSegmentIdentity,
@@ -25,45 +25,6 @@ from .runtime.persona_lifecycle import (
 )
 
 ACTION_ONLY_MOTION_ACK_TIMEOUT_SECONDS = 30.0
-
-
-@dataclass(slots=True)
-class _AdapterEventInternalState:
-    """Adapter-owned state mirrored to AstrBot extras only at the boundary."""
-
-    plugin_runtime_target_overrides: dict[str, str] = field(default_factory=dict)
-    persona_segment_stream_requested: bool = False
-    incremental_output_requested: bool = False
-    wait_for_motion_execution_ack: bool = False
-    incremental_motion_states: dict[str, Any] = field(default_factory=dict)
-    core_turn_id: str = ""
-    delivery_turn_id: str = ""
-    agent_stop_requested: bool = False
-    raw_reply_text: str = ""
-
-    def observe_extra(self, key: str, value: Any) -> None:
-        if key == "_interaction_plugin_runtime_target_overrides":
-            self.plugin_runtime_target_overrides = (
-                dict(value) if isinstance(value, dict) else {}
-            )
-        elif key == "_interaction_persona_segment_stream_requested":
-            self.persona_segment_stream_requested = value is True
-        elif key == "_interaction_incremental_output_requested":
-            self.incremental_output_requested = value is True
-        elif key == "_interaction_wait_for_motion_execution_ack":
-            self.wait_for_motion_execution_ack = value is True
-        elif key == "_interaction_incremental_motion_states":
-            self.incremental_motion_states = (
-                dict(value) if isinstance(value, dict) else {}
-            )
-        elif key == "_turn_id":
-            self.core_turn_id = str(value or "").strip()
-        elif key == "output_correlation_id":
-            self.delivery_turn_id = str(value or "").strip()
-        elif key == "agent_stop_requested":
-            self.agent_stop_requested = value is True
-        elif key == "ag99live_raw_reply_text":
-            self.raw_reply_text = str(value or "")
 
 
 class OutputSegmentDeliveryPort(Protocol):
@@ -101,7 +62,7 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         session_id,
         adapter: PlatformEventAdapterPort,
     ):
-        self._adapter_internal_state = _AdapterEventInternalState()
+        self._adapter_internal_state = AdapterEventContext()
         super().__init__(message_str, message_obj, platform_meta, session_id)
         self.adapter = adapter
         runtime_state = getattr(adapter, "runtime_state", None)

@@ -423,12 +423,21 @@ export function useTurnPlaybackSessionStore(options?: { normalizeMotionPayload?:
       throw new Error("deferred_motion_identity_or_state_invalid");
     }
     segment.motion.pending = false;
-    if (segment.audio.terminal !== "idle") {
+    if (segment.audio.terminal === "failed") {
       markMotionFailed(turnId, messageId, "deferred_motion_audio_already_terminal");
     } else if (material.state === "present") {
       segment.motion.payload = material.payload;
       segment.motion.source = material.source;
       segment.motion.receivedAtMs = performance.now();
+      segment.motion.lateByMs = segment.audio.terminal === "completed"
+        && segment.audio.startedAtMs !== null
+        && segment.audio.durationMs !== null
+        ? Math.max(
+          0,
+          segment.motion.receivedAtMs
+            - (segment.audio.startedAtMs + segment.audio.durationMs),
+        )
+        : null;
     } else if (material.state === "absent") {
       markMotionAbsent(turnId, messageId, "deferred_motion_absent");
     } else {
@@ -563,6 +572,7 @@ export function useTurnPlaybackSessionStore(options?: { normalizeMotionPayload?:
     segment.motion.payload = null;
     segment.motion.source = null;
     segment.motion.receivedAtMs = null;
+    segment.motion.lateByMs = null;
     segment.motion.absent = true;
     segment.motion.released = false;
     segment.motion.started = false;
@@ -591,6 +601,7 @@ export function useTurnPlaybackSessionStore(options?: { normalizeMotionPayload?:
       return;
     }
     segment.motion.absent = false;
+    segment.motion.lateByMs = null;
     segment.motion.released = true;
     segment.motion.started = false;
     segment.motion.completed = false;
@@ -614,6 +625,7 @@ export function useTurnPlaybackSessionStore(options?: { normalizeMotionPayload?:
       return;
     }
     segment.motion.absent = false;
+    segment.motion.lateByMs = null;
     segment.motion.failed = false;
     segment.motion.reason = "";
     segment.motion.released = true;
@@ -634,6 +646,7 @@ export function useTurnPlaybackSessionStore(options?: { normalizeMotionPayload?:
       return;
     }
     segment.motion.absent = false;
+    segment.motion.lateByMs = null;
     segment.motion.failed = false;
     segment.motion.reason = "";
     segment.motion.released = true;

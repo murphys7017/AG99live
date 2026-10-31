@@ -175,6 +175,15 @@ export function createIncrementalSegmentWriter(options: {
     segment.motion.payload = normalized.payload;
     segment.motion.source = "incremental_stream";
     segment.motion.receivedAtMs = performance.now();
+    segment.motion.lateByMs = segment.audio.terminal === "completed"
+      && segment.audio.startedAtMs !== null
+      && segment.audio.durationMs !== null
+      ? Math.max(
+        0,
+        segment.motion.receivedAtMs
+          - (segment.audio.startedAtMs + segment.audio.durationMs),
+      )
+      : null;
     segment.motion.absent = false;
     segment.motion.failed = false;
     segment.motion.released = false;

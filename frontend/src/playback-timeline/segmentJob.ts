@@ -18,6 +18,7 @@ export interface PlaybackTimelineSegmentJob<TMotionPayload = unknown> {
     payload: TMotionPayload | null;
     source: string | null;
     receivedAtMs: number | null;
+    lateByMs?: number | null;
   };
   speech: {
     cues: readonly OutputSegmentSpeechCue[];

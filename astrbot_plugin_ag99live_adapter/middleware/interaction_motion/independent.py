@@ -12,6 +12,7 @@ from uuid import uuid4
 
 from astrbot.api import logger
 
+from ...runtime.adapter_event_context import resolve_adapter_event_context
 from ...runtime.persona_lifecycle import PersonaSegmentState
 from ...motion.observation import (
     record_persona_motion_sample,
@@ -324,15 +325,11 @@ async def _prepare_independent_motion_context(
             current_user_text=current_user_text,
         )
     )
+    event_context = resolve_adapter_event_context(event)
     logger.debug(
         "WIRING independent_motion.shared_context_prepared turn_id=%s "
         "requested_turns=%s message_count=%s image_count=%s",
-        (
-            event.get_extra("_turn_id")
-            if callable(getattr(event, "get_extra", None))
-            else "<missing>"
-        )
-        or "<missing>",
+        event_context.core_turn_id or "<missing>",
         history_turns,
         len(contexts),
         0,
@@ -420,12 +417,8 @@ async def generate_independent_motion_for_segments(
         )
     except (TypeError, ValueError):
         segment_timeout_seconds = _DEFAULT_SEGMENT_TIMEOUT_SECONDS
-    get_extra = getattr(event, "get_extra", None)
-    stream_active = bool(
-        get_extra("_interaction_persona_segment_stream_active", False)
-        if callable(get_extra)
-        else False
-    )
+    event_context = resolve_adapter_event_context(event)
+    stream_active = event_context.persona_segment_stream_active
     stream_deadlines: dict[int, float] = {}
     if stream_active:
         configured_timeout = segment_timeout_seconds
@@ -436,9 +429,7 @@ async def generate_independent_motion_for_segments(
             logger.debug(
                 "WIRING independent_motion.stream_timeout_capped "
                 "turn_id=%s configured_seconds=%.2f effective_seconds=%.2f",
-                get_extra("_turn_id", "<missing>")
-                if callable(get_extra)
-                else "<missing>",
+                event_context.core_turn_id or "<missing>",
                 configured_timeout,
                 segment_timeout_seconds,
             )
@@ -474,9 +465,7 @@ async def generate_independent_motion_for_segments(
             logger.warning(
                 "WIRING independent_motion.shared_context_timeout turn_id=%s "
                 "timeout_seconds=%.2f",
-                get_extra("_turn_id", "<missing>")
-                if callable(get_extra)
-                else "<missing>",
+                event_context.core_turn_id or "<missing>",
                 segment_timeout_seconds,
             )
             return {
@@ -489,12 +478,7 @@ async def generate_independent_motion_for_segments(
                 for index, speech in inputs
             }
         except Exception as exc:  # noqa: BLE001
-            get_extra = getattr(event, "get_extra", None)
-            turn_id = (
-                get_extra("_turn_id")
-                if callable(get_extra)
-                else "<missing>"
-            )
+            turn_id = event_context.core_turn_id or "<missing>"
             logger.warning(
                 "WIRING independent_motion.shared_context_unavailable turn_id=%s "
                 "error=%s; falling back to per-segment preparation",
@@ -577,12 +561,7 @@ async def generate_independent_motion_for_segments(
                     )
                 return await _call_provider()
             except asyncio.TimeoutError:
-                get_extra = getattr(event, "get_extra", None)
-                turn_id = (
-                    get_extra("_turn_id")
-                    if callable(get_extra)
-                    else "<missing>"
-                )
+                turn_id = event_context.core_turn_id or "<missing>"
                 logger.warning(
                     "WIRING independent_motion.segment_timeout turn_id=%s "
                     "segment_index=%s timeout_seconds=%.2f",
@@ -599,8 +578,7 @@ async def generate_independent_motion_for_segments(
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001
-                get_extra = getattr(event, "get_extra", None)
-                turn_id = get_extra("_turn_id", "<missing>") if callable(get_extra) else "<missing>"
+                turn_id = event_context.core_turn_id or "<missing>"
                 logger.warning(
                     "WIRING independent_motion.segment_failed turn_id=%s "
                     "segment_index=%s error=%s action=continue_core_dialogue",
@@ -683,7 +661,7 @@ async def generate_independent_motion_for_segments(
         sum(result.motion_payload is not None for result in results.values()),
         max_concurrency,
         segment_timeout_seconds,
-        event.get_extra("_turn_id") if callable(getattr(event, "get_extra", None)) else "<missing>",
+        event_context.core_turn_id or "<missing>",
         (perf_counter() - started) * 1000,
     )
     return results
@@ -717,7 +695,8 @@ async def generate_independent_motion(
     images: list[str] = []
     motion_request_id = uuid4().hex
     generation_started = perf_counter()
-    turn_id = event.get_extra("_turn_id") or "<missing>"
+    event_context = resolve_adapter_event_context(event)
+    turn_id = event_context.core_turn_id or "<missing>"
     provider_id = str(
         getattr(
             bundle.runtime_state,
@@ -746,12 +725,7 @@ async def generate_independent_motion(
     provider_elapsed_ms: float | None = None
     provider_started_at_epoch_ms: int | None = None
     provider_update_index = 0
-    get_extra = getattr(event, "get_extra", None)
-    stream_active = bool(
-        get_extra("_interaction_persona_segment_stream_active", False)
-        if callable(get_extra)
-        else False
-    )
+    stream_active = event_context.persona_segment_stream_active
 
     def record_sample(
         *,
@@ -1375,7 +1349,7 @@ async def _load_recent_history(
         logger.debug(
             "WIRING independent_motion.history_resolved turn_id=%s "
             "round_count=%s message_count=%s",
-            event.get_extra("_turn_id") or "<missing>",
+            resolve_adapter_event_context(event).core_turn_id or "<missing>",
             min(len(rounds), history_turns),
             len(contexts),
         )
@@ -1383,7 +1357,7 @@ async def _load_recent_history(
     except Exception as exc:  # noqa: BLE001
         logger.warning(
             "WIRING independent_motion.history_unavailable turn_id=%s error=%s",
-            event.get_extra("_turn_id") or "<missing>",
+            resolve_adapter_event_context(event).core_turn_id or "<missing>",
             exc,
         )
         return []

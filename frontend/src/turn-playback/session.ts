@@ -133,6 +133,8 @@ export interface TurnPlaybackSessionMotion {
   payload: NormalizedMotionPayload | null;
   source: string | null;
   receivedAtMs: number | null;
+  /** Delay after the audio clock ended before a deferred motion arrived. */
+  lateByMs: number | null;
   released: boolean;
   started: boolean;
   completed: boolean;
@@ -276,6 +278,7 @@ export function createEmptyMotionState(): TurnPlaybackSessionMotion {
     payload: null,
     source: null,
     receivedAtMs: null,
+    lateByMs: null,
     released: false,
     started: false,
     completed: false,

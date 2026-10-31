@@ -57,6 +57,7 @@ from ..protocol.constants import (
 from ..protocol.parser import parse_inbound_message
 from ..services.speech_service import SpeechIngressService
 from .pre_action import PreActionRuntime
+from .adapter_event_context import resolve_adapter_event_context
 from .persona_lifecycle import PersonaTurnIdentity
 from .conversation_observation_window import ConversationObservationWindow
 from .image_diagnostics import (
@@ -70,14 +71,12 @@ from .incremental_output import IncrementalOutputSession, SendPayload
 
 MAX_REMEMBERED_TERMINAL_TURNS = 256
 def _resolve_motion_work_turn_id(event: Any, fallback_turn_id: str) -> str:
-    get_extra = getattr(event, "get_extra", None)
-    if callable(get_extra):
-        try:
-            runtime_turn_id = str(get_extra("_turn_id", "") or "").strip()
-        except Exception:  # noqa: BLE001 - cleanup must retain its fallback.
-            runtime_turn_id = ""
-        if runtime_turn_id:
-            return runtime_turn_id
+    try:
+        runtime_turn_id = resolve_adapter_event_context(event).core_turn_id
+    except Exception:  # noqa: BLE001 - cleanup must retain its fallback.
+        runtime_turn_id = ""
+    if runtime_turn_id:
+        return runtime_turn_id
     return str(fallback_turn_id or "").strip()
 
 
@@ -639,15 +638,19 @@ class TurnCoordinator:
                 event = self._build_platform_event(message_obj)
                 set_extra = getattr(event, "set_extra", None)
                 if callable(set_extra):
-                    existing_core_id = str(event.get_extra("_turn_id", "") or "").strip()
+                    event_context = resolve_adapter_event_context(event)
+                    existing_core_id = event_context.core_turn_id
                     if existing_core_id and existing_core_id != backend_turn_id:
                         raise RuntimeError("input_event_turn_identity_conflict")
                     # Core's PlatformTurnContextFactory explicitly adopts this
                     # server-created input identity. The map and admitted Turn
                     # must not independently mint different IDs for one input.
-                    set_extra("_turn_id", backend_turn_id)
+                    event_context.set_turn_identity(
+                        event,
+                        core_turn_id=backend_turn_id,
+                        delivery_turn_id=current_turn_id,
+                    )
                     set_extra("enable_streaming", False)
-                    set_extra("output_correlation_id", current_turn_id)
                     logger.debug(
                         "DIAG input.turn_bound: frontend_turn_id=%s core_turn_id=%s",
                         current_turn_id, backend_turn_id,
@@ -771,7 +774,9 @@ class TurnCoordinator:
                 )
                 set_extra = getattr(event, "set_extra", None)
                 if callable(set_extra):
-                    set_extra("agent_stop_requested", True)
+                    resolve_adapter_event_context(event).set_agent_stop_requested(
+                        event,
+                    )
                 stop_event = getattr(event, "stop_event", None)
                 if callable(stop_event):
                     stop_event()
@@ -827,7 +832,7 @@ class TurnCoordinator:
             )
             set_extra = getattr(event, "set_extra", None)
             if callable(set_extra):
-                set_extra("agent_stop_requested", True)
+                resolve_adapter_event_context(event).set_agent_stop_requested(event)
         try:
             sent = await self._send_json(
                 build_control_turn_finished(

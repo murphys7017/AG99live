@@ -8,6 +8,8 @@ export interface PlaybackTimelineMotionContext {
   speechCues: readonly OutputSegmentSpeechCue[];
   motionSource?: string | null;
   receivedAtMs: number;
+  /** Present when a deferred action is intentionally played as a short tail. */
+  lateByMs?: number | null;
   playbackTimeline?: PlaybackTimelineSnapshot | null;
   timelineMode?: "audio" | "motion_only";
 }

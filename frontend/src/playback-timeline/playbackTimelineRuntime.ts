@@ -83,7 +83,7 @@ export interface PlaybackTimelineRuntime<TMotionPayload = unknown> {
   handoffSpeechMotionTail: (turnId: string | null, messageId: string) => boolean;
   startSegmentJob: (
     job: PlaybackTimelineSegmentJob<TMotionPayload>,
-  ) => void;
+  ) => boolean;
   startIncrementalMotion: (options: {
     turnId: string | null;
     messageId: string;
@@ -432,7 +432,23 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
 
   function startSegmentJob(
     job: PlaybackTimelineSegmentJob<TMotionPayload>,
-  ): void {
+  ): boolean {
+    const blockers = findPlaybackReleaseBlockers().filter((blocker) => !(
+      !job.audio.release
+      && job.audio.noAudioConfirmed
+      && job.motion.payload !== null
+      && blocker.turnId === job.turnId
+      && blocker.messageId === job.messageId
+    ));
+    if (blockers.length > 0) {
+      console.debug("[PlaybackTimelineRuntime] segment release blocked.", {
+        turnId: job.turnId,
+        messageId: job.messageId,
+        reason: job.reason,
+        blockers,
+      });
+      return false;
+    }
     console.info("[PlaybackTimelineRuntime] segment job started.", {
       turnId: job.turnId,
       messageId: job.messageId,
@@ -448,6 +464,7 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
       timeline: segmentExecutorTimelinePort,
     });
     notifyExecutionStateChanged();
+    return true;
   }
 
   function startIncrementalMotion(options: {
@@ -477,6 +494,7 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
           speechCues: options.speechCues,
           motionSource: options.source,
           receivedAtMs: options.receivedAtMs,
+          lateByMs: null,
           timelineMode: "audio",
         }),
         onInterrupt: interrupt,

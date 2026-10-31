@@ -599,8 +599,8 @@ export interface MotionTuningSampleProtocolPayload {
   profile_hash?: string;
   transform_version?: string;
   emotion_label: string;
-  user_text?: string;
-  assistant_text?: string;
+  user_text: string;
+  assistant_text: string;
   feedback: string;
   tags: string[];
   enabled_for_llm_reference?: boolean;

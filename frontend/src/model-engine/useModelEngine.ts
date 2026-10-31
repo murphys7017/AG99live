@@ -202,6 +202,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
         messageId: context.messageId,
         startReason: context.startReason,
         queuedDelayMs: context.queuedDelayMs,
+        lateByMs: context.lateByMs ?? null,
         timeline: context.playbackClock,
       });
       const key = buildSegmentKey(context.turnId, context.messageId);

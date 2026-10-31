@@ -42,6 +42,23 @@ export function canReleaseMotion(
 }
 
 /**
+ * Whether all material for an atomic output segment has arrived and can be
+ * handed to the playback timeline. This intentionally excludes local
+ * delivery/terminal state; Timeline owns the actual release decision.
+ */
+export function isPlaybackSegmentResolved(
+  segment: DeepReadonly<TurnPlaybackSegment>,
+): boolean {
+  const textResolved = Boolean(segment.text.content) || segment.text.delivered;
+  const audioResolved = Boolean(segment.audio.url) || segment.audio.terminal !== "idle";
+  const motionResolved = Boolean(segment.motion.payload)
+    || segment.motion.pending
+    || segment.motion.absent
+    || segment.motion.failed;
+  return textResolved && audioResolved && motionResolved;
+}
+
+/**
  * Whether local playback has fully settled on the frontend side.
  *
  * Requires:

@@ -212,6 +212,7 @@ export function executePlaybackTimelineSegmentJob<TMotionPayload>(
           speechCues: job.speech.cues,
           motionSource: job.motion.source,
           receivedAtMs,
+          lateByMs: job.motion.lateByMs,
           timelineMode,
         },
       );

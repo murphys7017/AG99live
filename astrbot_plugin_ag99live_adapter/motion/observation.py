@@ -6,6 +6,7 @@ from typing import Any, Callable, Protocol
 
 from astrbot.api import logger
 
+from ..runtime.adapter_event_context import resolve_adapter_event_context
 from ..runtime.persona_lifecycle import PersonaTurnIdentity
 
 
@@ -29,10 +30,8 @@ def resolve_persona_motion_source_route(
     capture_if_missing: bool = False,
 ) -> str | None:
     """Return the route latched for this event, optionally capturing it once."""
-    get_extra = getattr(event, "get_extra", None)
-    if not callable(get_extra):
-        return None
-    existing = str(get_extra(PERSONA_MOTION_SOURCE_ROUTE_EXTRA_KEY, "") or "").strip()
+    event_context = resolve_adapter_event_context(event)
+    existing = event_context.persona_motion_source_route
     if existing in {"persona_effect", "independent_motion"}:
         return existing
     if not capture_if_missing:
@@ -43,23 +42,19 @@ def resolve_persona_motion_source_route(
         if bool(getattr(runtime_state, "independent_motion_enabled", False))
         else "persona_effect"
     )
-    set_extra = getattr(event, "set_extra", None)
-    if callable(set_extra):
-        set_extra(PERSONA_MOTION_SOURCE_ROUTE_EXTRA_KEY, source_route)
+    event_context.set_persona_motion_source_route(event, source_route)
     return source_route
 
 
 def resolve_persona_delivery_mode(event: Any) -> str:
     """Resolve the actual Persona delivery path from Adapter-owned state."""
-    get_extra = getattr(event, "get_extra", None)
-    if not callable(get_extra):
-        return "M0_nonstreaming"
-    if get_extra("_interaction_persona_segment_stream_active", False) is not True:
+    event_context = resolve_adapter_event_context(event)
+    if not event_context.persona_segment_stream_active:
         return "M0_nonstreaming"
     adapter = getattr(event, "adapter", None)
     runtime_state = getattr(adapter, "runtime_state", None)
     sessions = getattr(runtime_state, "persona_sessions", None)
-    turn_id = str(get_extra("_turn_id", "") or "").strip()
+    turn_id = event_context.core_turn_id
     if (
         sessions is not None
         and turn_id
@@ -70,10 +65,10 @@ def resolve_persona_delivery_mode(event: Any) -> str:
 
 
 def resolve_persona_core_turn_id(event: Any) -> str | None:
-    get_extra = getattr(event, "get_extra", None)
+    event_context = resolve_adapter_event_context(event)
     adapter = getattr(event, "adapter", None)
     sessions = getattr(getattr(adapter, "runtime_state", None), "persona_sessions", None)
-    turn_id = str(get_extra("_turn_id", "") or "").strip() if callable(get_extra) else ""
+    turn_id = event_context.core_turn_id
     result = (
         sessions.get_active_result(PersonaTurnIdentity(turn_id))
         if sessions is not None and turn_id

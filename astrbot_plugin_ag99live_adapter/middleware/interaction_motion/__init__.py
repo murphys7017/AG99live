@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from ...core_compatibility import supports_interaction_result_event_filter
+from ...runtime.adapter_event_context import resolve_adapter_event_context
 from .companion import AG99liveCompanionIdentityPromptContributor
 from .effects import _register_ag99live_motion_persona_effect
 from .prompt import AG99liveMotionPromptContributor
@@ -36,9 +37,7 @@ def register_ag99live_interaction_contributors(
 
 
 def _include_legacy_motion_result_contributor(event: Any) -> bool:
-    return not bool(
-        event.get_extra("_interaction_persona_segment_stream_active", False)
-    )
+    return not resolve_adapter_event_context(event).persona_segment_stream_active
 
 
 __all__ = [

@@ -102,12 +102,24 @@ export function useAdapterMotionTuning(
       return false;
     }
 
+    let serializedSample: SystemMotionTuningSampleSavePayload["sample"];
+    try {
+      serializedSample = serializeMotionTuningSample(sample);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      const message = `动作调参样本无效：${reason}`;
+      deps.setLastError(message);
+      deps.setStatusMessage(message);
+      deps.pushHistory("error", message);
+      return false;
+    }
+
     deps.getSocket()!.send(
       JSON.stringify(
         deps.buildMessageEnvelope<SystemMotionTuningSampleSavePayload>(
           "system.motion_tuning_sample_save",
           {
-            sample: serializeMotionTuningSample(sample),
+            sample: serializedSample,
           },
         ),
       ),
