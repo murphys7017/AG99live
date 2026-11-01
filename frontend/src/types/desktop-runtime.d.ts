@@ -63,6 +63,7 @@ export interface Ag99DesktopApi {
   setPttMode: (enabled: boolean, binding?: DesktopPttKeyBinding) => void;
   reportLatencyEvent?: (event: DesktopLatencyEvent) => void;
   getPttHookStatus: () => Promise<DesktopPttHookStatus>;
+  restartAsAdministrator: () => Promise<boolean>;
   reportPttEventAck: (ack: DesktopPttEventAck) => void;
   sendRuntimeBridgeMessage: (payload: unknown) => void;
   onRuntimeBridgeMessage: (callback: (payload: unknown) => void) => () => void;

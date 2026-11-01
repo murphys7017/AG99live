@@ -28,6 +28,7 @@ const {
   pttKeyBinding,
   pttKeyCaptureActive,
   pttKeyStatus,
+  administratorRestartStatus,
   motionEngineSettings,
   live2dPresentationSettings,
   bilibiliLiveSettings,
@@ -57,6 +58,7 @@ const {
   applyLive2dPresentationSettings,
   applyPttModeEnabled,
   startPttKeyCapture,
+  restartAsAdministrator,
   capturePttKey,
   applyMotionEngineSettings,
   resetLive2dPresentationSettings,
@@ -588,6 +590,30 @@ onMounted(() => {
         >
           全局按键不可用，当前会退回到桌宠窗口获得焦点时触发。
           {{ bridgeState.snapshot.pttHookStatus.reason }}
+        </p>
+        <p
+          v-else-if="pttModeEnabled && bridgeState.snapshot.pttHookStatus.enabled"
+          class="settings-card__hint"
+        >
+          全局按键钩子已启用。若全屏游戏仍无响应，通常是游戏以管理员权限运行或反作弊拦截了低级键盘钩子。
+        </p>
+        <div
+          v-if="pttModeEnabled"
+          class="settings-card__actions"
+        >
+          <button
+            type="button"
+            class="settings-card__button settings-card__button--ghost"
+            @click="restartAsAdministrator"
+          >
+            以管理员身份重启
+          </button>
+        </div>
+        <p
+          v-if="administratorRestartStatus"
+          class="settings-card__hint"
+        >
+          {{ administratorRestartStatus }}
         </p>
       </article>
 

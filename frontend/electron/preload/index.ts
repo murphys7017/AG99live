@@ -134,6 +134,9 @@ const api = {
   getPttHookStatus: () => {
     return ipcRenderer.invoke("desktop:get-ptt-hook-status") as Promise<DesktopPttHookStatus>;
   },
+  restartAsAdministrator: () => {
+    return ipcRenderer.invoke("desktop:restart-as-administrator") as Promise<boolean>;
+  },
   reportPttEventAck: (ack: DesktopPttEventAck) => {
     ipcRenderer.send("desktop:ptt-event-ack", ack);
   },

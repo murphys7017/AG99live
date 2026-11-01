@@ -59,6 +59,7 @@ export function useSettingsWindow() {
   );
   const pttKeyCaptureActive = ref(false);
   const pttKeyStatus = ref("");
+  const administratorRestartStatus = ref("");
   const motionEngineSettings = reactive(
     cloneModelEngineSettings(bridge.state.snapshot.motionEngineSettings),
   );
@@ -288,6 +289,14 @@ export function useSettingsWindow() {
     installPttCaptureListener();
   }
 
+  async function restartAsAdministrator(): Promise<void> {
+    administratorRestartStatus.value = "正在请求管理员权限...";
+    const requested = await window.ag99desktop?.restartAsAdministrator?.();
+    if (!requested) {
+      administratorRestartStatus.value = "管理员重启请求失败，请手动右键应用并选择“以管理员身份运行”。";
+    }
+  }
+
   function capturePttKey(event: KeyboardEvent): void {
     if (!pttKeyCaptureActive.value) {
       return;
@@ -383,6 +392,8 @@ export function useSettingsWindow() {
     pttKeyBinding,
     pttKeyCaptureActive,
     pttKeyStatus,
+    administratorRestartStatus,
+    restartAsAdministrator,
     motionEngineSettings,
     live2dPresentationSettings,
     bilibiliLiveSettings,

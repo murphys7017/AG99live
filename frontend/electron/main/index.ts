@@ -1,4 +1,5 @@
 import { app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, screen, session } from "electron";
+import { spawn } from "node:child_process";
 import { appendDesktopLatencyEvent } from "./desktop-latency-log";
 import { MenuManager } from "./menu-manager";
 import { WindowManager } from "./window-manager";
@@ -282,6 +283,29 @@ function normalizePttKeycode(binding: unknown): number | null {
   return typeof keycode === "number" && Number.isInteger(keycode) && keycode > 0
     ? keycode
     : null;
+}
+
+function restartAsAdministrator(): boolean {
+  if (process.platform !== "win32") {
+    return false;
+  }
+  const executable = app.getPath("exe").replace(/'/g, "''");
+  const argumentsList = process.argv.slice(1)
+    .map((argument) => `'${argument.replace(/'/g, "''")}'`)
+    .join(",");
+  const script = `Start-Process -FilePath '${executable}' -ArgumentList ${argumentsList || "@()"} -Verb RunAs`;
+  try {
+    const child = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    child.unref();
+    return true;
+  } catch (error) {
+    console.warn("[PTT] failed to request administrator restart.", error);
+    return false;
+  }
 }
 
 function sendGlobalPttEvent(kind: DesktopPttEventKind, keycode: number): void {
@@ -578,6 +602,14 @@ function setupIpc(): void {
   });
 
   ipcMain.handle("desktop:get-ptt-hook-status", async () => lastPttHookStatus);
+
+  ipcMain.handle("desktop:restart-as-administrator", async () => {
+    const requested = restartAsAdministrator();
+    if (requested) {
+      setTimeout(() => app.quit(), 150);
+    }
+    return requested;
+  });
 
   ipcMain.on("desktop:ptt-event-ack", (_event, ack: unknown) => {
     recordPttAck(ack);
