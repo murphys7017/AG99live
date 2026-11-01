@@ -47,6 +47,7 @@ const {
   disconnectAdapter,
   toggleHistoryWindow,
   toggleActionLabWindow,
+  toggleSubtitleWindow,
   applyDesktopScreenshotOnSend,
   applyMicrophoneDevice,
   applySpeechVolume,
@@ -667,6 +668,18 @@ onMounted(() => {
         >
           打开动作实验室
         </button>
+        <label class="settings-toggle">
+          <input
+            :checked="bridgeState.windowState.subtitleVisible"
+            class="settings-toggle__input"
+            type="checkbox"
+            @change="toggleSubtitleWindow"
+          />
+          <span class="settings-toggle__control" aria-hidden="true"></span>
+          <span class="settings-toggle__copy">
+            显示桌面字幕窗口。关闭后不会再显示独立字幕，但不会影响语音播放和回复内容。
+          </span>
+        </label>
         <button
           type="button"
           class="settings-card__button settings-card__button--ghost"

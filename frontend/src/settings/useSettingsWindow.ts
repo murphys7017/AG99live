@@ -161,6 +161,10 @@ export function useSettingsWindow() {
     window.ag99desktop?.toggleAuxWindow("action_lab");
   }
 
+  function toggleSubtitleWindow(): void {
+    window.ag99desktop?.toggleSubtitleWindow();
+  }
+
   function requestModelProjectionSync(): void {
     bridge.sendCommand({ type: "request_model_projection_sync" });
   }
@@ -398,6 +402,7 @@ export function useSettingsWindow() {
     disconnectAdapter,
     toggleHistoryWindow,
     toggleActionLabWindow,
+    toggleSubtitleWindow,
     applyDesktopScreenshotOnSend,
     applyMicrophoneDevice,
     applySpeechVolume,

@@ -49,16 +49,20 @@ body {
 
 :root[data-window-role="pet"],
 :root[data-window-role="overlay"],
+:root[data-window-role="subtitle"],
 html[data-window-role="pet"],
 body[data-window-role="pet"],
 html[data-window-role="overlay"],
-body[data-window-role="overlay"] {
+body[data-window-role="overlay"],
+html[data-window-role="subtitle"],
+body[data-window-role="subtitle"] {
   background: transparent !important;
   background-image: none !important;
 }
 
 body[data-window-role="pet"] #app,
-body[data-window-role="overlay"] #app {
+body[data-window-role="overlay"] #app,
+body[data-window-role="subtitle"] #app {
   background: transparent !important;
   background-image: none !important;
 }

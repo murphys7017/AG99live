@@ -97,6 +97,7 @@ export const desktopBridgeKey: InjectionKey<DesktopBridgeInstance> =
 const defaultWindowState: DesktopWindowVisibilityState = {
   petVisible: true,
   overlayVisible: true,
+  subtitleVisible: true,
   settingsVisible: false,
   historyVisible: false,
   actionLabVisible: false,

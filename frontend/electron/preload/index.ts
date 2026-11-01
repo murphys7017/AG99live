@@ -116,6 +116,9 @@ const api = {
   toggleAuxWindow: (target: DesktopAuxWindowRole) => {
     ipcRenderer.send("desktop:toggle-aux-window", target);
   },
+  toggleSubtitleWindow: () => {
+    ipcRenderer.send("desktop:toggle-subtitle-window");
+  },
   closeCurrentWindow: () => {
     ipcRenderer.send("desktop:close-current-window");
   },

@@ -1,5 +1,6 @@
 import { app, BrowserWindow, screen, shell } from "electron";
 import path from "node:path";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import type { Event as ElectronEvent } from "electron";
 import type { BrowserWindowConstructorOptions } from "electron";
 import type { Rectangle } from "electron";
@@ -25,9 +26,12 @@ interface WindowDragState {
 interface TransparentWindowSnapshot {
   petBounds: Rectangle | null;
   overlayBounds: Rectangle | null;
+  subtitleBounds: Rectangle | null;
   petVisible: boolean;
   overlayVisible: boolean;
+  subtitleVisible: boolean;
   overlayVisiblePreference: boolean;
+  subtitleVisiblePreference: boolean;
   overlayFollowsPet?: boolean;
   petIgnoreMouseEvents: boolean;
 }
@@ -45,6 +49,9 @@ const PET_OVERLAY_WIDTH = 420;
 const PET_OVERLAY_HEIGHT = 168;
 const PET_OVERLAY_WINDOW_TITLE = "AG99live Input";
 const PET_OVERLAY_GAP = 16;
+const PET_SUBTITLE_WIDTH = 760;
+const PET_SUBTITLE_HEIGHT = 124;
+const PET_SUBTITLE_WINDOW_TITLE = "AG99live 字幕";
 const OVERLAY_DRAG_DETACH_THRESHOLD_PX = 12;
 const APP_ICON_PATH = path.resolve(__dirname, "../../resources/app-icon.png");
 const WIN32_TRANSPARENT_WINDOW_COMPAT_OPTIONS: BrowserWindowConstructorOptions =
@@ -69,8 +76,10 @@ function isSafeExternalLink(url: string): boolean {
 }
 
 export class WindowManager {
+  private readonly subtitlePreferencePath: string;
   private isAppQuitting = false;
   private overlayVisiblePreference = true;
+  private subtitleVisiblePreference: boolean;
   private overlayFollowsPet = true;
   private overlayDragOrigin: OverlayDragOrigin | null = null;
   private activeDragState: WindowDragState | null = null;
@@ -79,9 +88,15 @@ export class WindowManager {
   private petWindowIgnoreMouseEvents = true;
   private readonly rendererReadyWindows = new WeakSet<BrowserWindow>();
 
+  constructor(userDataPath = app.getPath("userData")) {
+    this.subtitlePreferencePath = path.join(userDataPath, "subtitle-preferences.json");
+    this.subtitleVisiblePreference = this.loadSubtitleVisiblePreference();
+  }
+
   private windows: ManagedWindowMap = {
     pet: null,
     overlay: null,
+    subtitle: null,
     settings: null,
     history: null,
     action_lab: null,
@@ -91,11 +106,15 @@ export class WindowManager {
   createWindows(): void {
     this.windows.pet = this.createPetWindow();
     this.windows.overlay = this.createOverlayWindow();
+    this.windows.subtitle = this.createSubtitleWindow();
     this.showWindowWhenReady(this.windows.pet, () => {
       this.windows.pet?.show();
     });
     this.showWindowWhenReady(this.windows.overlay, () => {
       this.showOverlayIfReady();
+    });
+    this.showWindowWhenReady(this.windows.subtitle, () => {
+      this.showSubtitleIfReady();
     });
     this.broadcastWindowState();
   }
@@ -110,6 +129,10 @@ export class WindowManager {
 
   getOverlayWindow(): BrowserWindow | null {
     return this.windows.overlay;
+  }
+
+  getSubtitleWindow(): BrowserWindow | null {
+    return this.windows.subtitle;
   }
 
   markAppQuitting(): void {
@@ -127,10 +150,12 @@ export class WindowManager {
 
     const petWindow = this.windows.pet;
     const overlayWindow = this.windows.overlay;
+    const subtitleWindow = this.windows.subtitle;
     const hasPetWindow = Boolean(petWindow && !petWindow.isDestroyed());
     const hasOverlayWindow = Boolean(overlayWindow && !overlayWindow.isDestroyed());
+    const hasSubtitleWindow = Boolean(subtitleWindow && !subtitleWindow.isDestroyed());
 
-    if (!hasPetWindow && !hasOverlayWindow) {
+    if (!hasPetWindow && !hasOverlayWindow && !hasSubtitleWindow) {
       return false;
     }
 
@@ -147,11 +172,23 @@ export class WindowManager {
       petWindow.destroy();
     }
 
+    if (hasSubtitleWindow && subtitleWindow) {
+      this.endWindowDrag(subtitleWindow);
+      subtitleWindow.destroy();
+    }
+
     const nextPetWindow = this.createPetWindow();
     const nextOverlayWindow = this.createOverlayWindow();
+    const nextSubtitleWindow = this.createSubtitleWindow();
     this.windows.pet = nextPetWindow;
     this.windows.overlay = nextOverlayWindow;
-    this.restoreTransparentWindowSnapshot(snapshot, nextPetWindow, nextOverlayWindow);
+    this.windows.subtitle = nextSubtitleWindow;
+    this.restoreTransparentWindowSnapshot(
+      snapshot,
+      nextPetWindow,
+      nextOverlayWindow,
+      nextSubtitleWindow,
+    );
     this.broadcastWindowState();
     return true;
   }
@@ -177,6 +214,31 @@ export class WindowManager {
         }
         target.show();
         target.focus();
+      });
+    }
+
+    this.broadcastWindowState();
+  }
+
+  toggleSubtitleWindow(): void {
+    const target = this.windows.subtitle ?? this.createSubtitleWindow();
+    this.windows.subtitle = target;
+
+    if (target.isVisible()) {
+      this.subtitleVisiblePreference = false;
+      this.persistSubtitleVisiblePreference();
+      target.hide();
+    } else {
+      this.subtitleVisiblePreference = true;
+      this.persistSubtitleVisiblePreference();
+      this.showWindowWhenReady(target, () => {
+        if (
+          !this.subtitleVisiblePreference
+          || target.isDestroyed()
+        ) {
+          return;
+        }
+        this.showSubtitleIfReady();
       });
     }
 
@@ -219,7 +281,17 @@ export class WindowManager {
 
   setIgnoreMouseEvents(targetWindow: BrowserWindow | null, ignore: boolean): void {
     const petWindow = this.windows.pet;
-    if (!targetWindow || !petWindow || targetWindow !== petWindow || targetWindow.isDestroyed()) {
+    const subtitleWindow = this.windows.subtitle;
+    if (!targetWindow || targetWindow.isDestroyed()) {
+      return;
+    }
+
+    if (targetWindow === subtitleWindow) {
+      targetWindow.setIgnoreMouseEvents(ignore, { forward: true });
+      return;
+    }
+
+    if (!petWindow || targetWindow !== petWindow) {
       return;
     }
 
@@ -422,6 +494,7 @@ export class WindowManager {
     return {
       petVisible: Boolean(this.windows.pet?.isVisible()),
       overlayVisible: Boolean(this.windows.overlay?.isVisible()),
+      subtitleVisible: Boolean(this.windows.subtitle?.isVisible()),
       settingsVisible: Boolean(this.windows.settings?.isVisible()),
       historyVisible: Boolean(this.windows.history?.isVisible()),
       actionLabVisible: Boolean(this.windows.action_lab?.isVisible()),
@@ -493,6 +566,7 @@ export class WindowManager {
       petWindow.setIgnoreMouseEvents(true, { forward: true });
       this.keepPetWindowPassive(petWindow);
       this.showOverlayIfReady();
+      this.showSubtitleIfReady();
       if (this.overlayFollowsPet) {
         this.positionOverlayWindow();
       }
@@ -501,6 +575,7 @@ export class WindowManager {
     petWindow.on("hide", () => {
       this.endWindowDrag(petWindow);
       this.windows.overlay?.hide();
+      this.windows.subtitle?.hide();
       this.broadcastWindowState();
     });
     petWindow.on("move", () => {
@@ -602,6 +677,80 @@ export class WindowManager {
     this.loadWindow(overlayWindow, "overlay");
     this.positionOverlayWindow();
     return overlayWindow;
+  }
+
+  private createSubtitleWindow(): BrowserWindow {
+    const workArea = screen.getPrimaryDisplay().workArea;
+    const subtitleWindow = new BrowserWindow({
+      width: PET_SUBTITLE_WIDTH,
+      height: PET_SUBTITLE_HEIGHT,
+      icon: APP_ICON_PATH,
+      title: PET_SUBTITLE_WINDOW_TITLE,
+      frame: false,
+      transparent: true,
+      show: false,
+      skipTaskbar: true,
+      hasShadow: false,
+      backgroundColor: "#00000000",
+      resizable: false,
+      maximizable: false,
+      minimizable: true,
+      alwaysOnTop: true,
+      webPreferences: {
+        preload: this.resolvePreloadPath(),
+        contextIsolation: true,
+        sandbox: false,
+      },
+      ...WIN32_TRANSPARENT_WINDOW_COMPAT_OPTIONS,
+    });
+
+    subtitleWindow.setAlwaysOnTop(true, "screen-saver");
+    if (process.platform === "darwin") {
+      subtitleWindow.setVisibleOnAllWorkspaces(true, {
+        visibleOnFullScreen: true,
+      });
+    }
+    subtitleWindow.setMenuBarVisibility(false);
+    subtitleWindow.setPosition(
+      Math.max(
+        workArea.x + Math.round((workArea.width - PET_SUBTITLE_WIDTH) / 2),
+        workArea.x + PET_WINDOW_MARGIN,
+      ),
+      Math.max(
+        workArea.y + workArea.height - PET_SUBTITLE_HEIGHT - PET_WINDOW_MARGIN,
+        workArea.y + PET_WINDOW_MARGIN,
+      ),
+    );
+
+    subtitleWindow.on("show", () => {
+      this.subtitleVisiblePreference = true;
+      this.broadcastWindowState();
+    });
+    subtitleWindow.on("hide", () => {
+      this.endWindowDrag(subtitleWindow);
+      this.broadcastWindowState();
+    });
+    subtitleWindow.on("close", (event: ElectronEvent) => {
+      if (this.isAppQuitting) {
+        return;
+      }
+
+      event.preventDefault();
+      this.subtitleVisiblePreference = false;
+      this.persistSubtitleVisiblePreference();
+      subtitleWindow.hide();
+    });
+    subtitleWindow.on("resize", () => {
+      this.normalizeTransparentWindowSize(subtitleWindow, "subtitle");
+    });
+    subtitleWindow.on("closed", () => {
+      this.endWindowDrag(subtitleWindow);
+      this.windows.subtitle = null;
+    });
+
+    this.attachExternalLinkGuard(subtitleWindow);
+    this.loadWindow(subtitleWindow, "subtitle");
+    return subtitleWindow;
   }
 
   private createUtilityWindow(role: DesktopAuxWindowRole): BrowserWindow {
@@ -752,6 +901,24 @@ export class WindowManager {
     overlayWindow.show();
   }
 
+  private showSubtitleIfReady(): void {
+    const petWindow = this.windows.pet;
+    const subtitleWindow = this.windows.subtitle;
+    if (
+      !this.subtitleVisiblePreference
+      || !petWindow
+      || petWindow.isDestroyed()
+      || !petWindow.isVisible()
+      || !subtitleWindow
+      || subtitleWindow.isDestroyed()
+      || !this.rendererReadyWindows.has(subtitleWindow)
+    ) {
+      return;
+    }
+
+    subtitleWindow.show();
+  }
+
   private findRole(targetWindow: BrowserWindow): DesktopWindowRole | null {
     for (const [role, currentWindow] of Object.entries(this.windows)) {
       if (currentWindow === targetWindow) {
@@ -768,13 +935,17 @@ export class WindowManager {
   private captureTransparentWindowSnapshot(): TransparentWindowSnapshot {
     const petWindow = this.windows.pet;
     const overlayWindow = this.windows.overlay;
+    const subtitleWindow = this.windows.subtitle;
 
     return {
       petBounds: petWindow && !petWindow.isDestroyed() ? petWindow.getBounds() : null,
       overlayBounds: overlayWindow && !overlayWindow.isDestroyed() ? overlayWindow.getBounds() : null,
+      subtitleBounds: subtitleWindow && !subtitleWindow.isDestroyed() ? subtitleWindow.getBounds() : null,
       petVisible: Boolean(petWindow?.isVisible()),
       overlayVisible: Boolean(overlayWindow?.isVisible()),
+      subtitleVisible: Boolean(subtitleWindow?.isVisible()),
       overlayVisiblePreference: this.overlayVisiblePreference,
+      subtitleVisiblePreference: this.subtitleVisiblePreference,
       overlayFollowsPet: this.overlayFollowsPet,
       petIgnoreMouseEvents: this.petWindowIgnoreMouseEvents,
     };
@@ -784,8 +955,10 @@ export class WindowManager {
     snapshot: TransparentWindowSnapshot,
     petWindow: BrowserWindow,
     overlayWindow: BrowserWindow,
+    subtitleWindow: BrowserWindow,
   ): void {
     this.overlayVisiblePreference = snapshot.overlayVisiblePreference;
+    this.subtitleVisiblePreference = snapshot.subtitleVisiblePreference;
     this.overlayFollowsPet = snapshot.overlayFollowsPet ?? true;
     this.petWindowIgnoreMouseEvents = snapshot.petIgnoreMouseEvents;
 
@@ -800,6 +973,11 @@ export class WindowManager {
       this.positionOverlayWindow();
     }
     this.normalizeTransparentWindowSize(overlayWindow, "overlay");
+
+    if (snapshot.subtitleBounds) {
+      subtitleWindow.setBounds(snapshot.subtitleBounds, false);
+    }
+    this.normalizeTransparentWindowSize(subtitleWindow, "subtitle");
 
     if (this.petWindowIgnoreMouseEvents) {
       petWindow.setIgnoreMouseEvents(true, { forward: true });
@@ -826,6 +1004,18 @@ export class WindowManager {
       });
     } else {
       overlayWindow.hide();
+    }
+
+    const shouldShowSubtitle = snapshot.petVisible
+      && snapshot.subtitleVisible
+      && snapshot.subtitleVisiblePreference;
+
+    if (shouldShowSubtitle) {
+      this.showWindowWhenReady(subtitleWindow, () => {
+        this.showSubtitleIfReady();
+      });
+    } else {
+      subtitleWindow.hide();
     }
   }
 
@@ -903,13 +1093,24 @@ export class WindowManager {
     targetWindow: BrowserWindow,
     role: DesktopWindowRole | null,
   ): boolean {
-    if (targetWindow.isDestroyed() || (role !== "pet" && role !== "overlay")) {
+    if (
+      targetWindow.isDestroyed()
+      || (role !== "pet" && role !== "overlay" && role !== "subtitle")
+    ) {
       return false;
     }
 
     const bounds = targetWindow.getBounds();
-    const expectedWidth = role === "pet" ? PET_WINDOW_WIDTH : PET_OVERLAY_WIDTH;
-    const expectedHeight = role === "pet" ? PET_WINDOW_HEIGHT : PET_OVERLAY_HEIGHT;
+    const expectedWidth = role === "pet"
+      ? PET_WINDOW_WIDTH
+      : role === "overlay"
+        ? PET_OVERLAY_WIDTH
+        : PET_SUBTITLE_WIDTH;
+    const expectedHeight = role === "pet"
+      ? PET_WINDOW_HEIGHT
+      : role === "overlay"
+        ? PET_OVERLAY_HEIGHT
+        : PET_SUBTITLE_HEIGHT;
 
     if (bounds.width === expectedWidth && bounds.height === expectedHeight) {
       return false;
@@ -931,6 +1132,39 @@ export class WindowManager {
 
     this.invalidateTransparentWindowSurface(targetWindow);
     return true;
+  }
+
+  private loadSubtitleVisiblePreference(): boolean {
+    try {
+      const raw = JSON.parse(readFileSync(this.subtitlePreferencePath, "utf8")) as unknown;
+      if (
+        raw
+        && typeof raw === "object"
+        && !Array.isArray(raw)
+        && "visible" in raw
+        && typeof raw.visible === "boolean"
+      ) {
+        return raw.visible;
+      }
+    } catch (error) {
+      if (!isMissingFile(error)) {
+        console.warn("[window-preferences] failed to read subtitle preference; using enabled.", error);
+      }
+    }
+    return true;
+  }
+
+  private persistSubtitleVisiblePreference(): void {
+    try {
+      mkdirSync(path.dirname(this.subtitlePreferencePath), { recursive: true });
+      writeFileSync(
+        this.subtitlePreferencePath,
+        JSON.stringify({ visible: this.subtitleVisiblePreference }),
+        { encoding: "utf8", mode: 0o600 },
+      );
+    } catch (error) {
+      console.warn("[window-preferences] failed to save subtitle preference.", error);
+    }
   }
 
   private invalidateTransparentWindowSurface(targetWindow: BrowserWindow): void {
@@ -963,4 +1197,11 @@ export class WindowManager {
     this.overlayFollowsPet = true;
     this.positionOverlayWindow();
   }
+}
+
+function isMissingFile(error: unknown): boolean {
+  return !!error
+    && typeof error === "object"
+    && "code" in error
+    && error.code === "ENOENT";
 }

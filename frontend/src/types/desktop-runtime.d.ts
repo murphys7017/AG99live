@@ -57,6 +57,7 @@ export interface Ag99DesktopApi {
   stopNativeMicrophoneCapture: (sessionId: string) => Promise<boolean>;
   flushNativeMicrophoneCapture: (sessionId: string, flushId: string) => Promise<boolean>;
   toggleAuxWindow: (target: DesktopAuxWindowRole) => void;
+  toggleSubtitleWindow: () => void;
   closeCurrentWindow: () => void;
   minimizeCurrentWindow: () => void;
   setPttMode: (enabled: boolean, binding?: DesktopPttKeyBinding) => void;

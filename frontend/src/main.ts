@@ -12,6 +12,7 @@ const role = getWindowRole();
 const roleTitles: Record<string, string> = {
   pet: "AG99live Live2D",
   overlay: "AG99live Input",
+  subtitle: "AG99live 字幕",
   settings: "AG99live 设置",
   history: "AG99live 历史",
   action_lab: "AG99live 动作实验室",

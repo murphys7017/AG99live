@@ -520,6 +520,10 @@ function setupIpc(): void {
     }
   });
 
+  ipcMain.on("desktop:toggle-subtitle-window", () => {
+    windowManager.toggleSubtitleWindow();
+  });
+
   ipcMain.on("desktop:close-current-window", (event) => {
     windowManager.closeCurrentWindow(BrowserWindow.fromWebContents(event.sender));
   });

@@ -59,6 +59,7 @@ export class MenuManager {
       },
       this.buildOverlayToggleItem(),
       this.buildOverlayReattachItem(),
+      this.buildSubtitleToggleItem(),
       { type: "separator" },
       {
         label: "本机工具",
@@ -155,6 +156,18 @@ export class MenuManager {
       label: "输入框恢复跟随",
       click: () => {
         this.windowManager.resetOverlayFollowMode();
+      },
+    };
+  }
+
+  private buildSubtitleToggleItem() {
+    const subtitleWindow = this.windowManager.getSubtitleWindow();
+    const visible = Boolean(subtitleWindow?.isVisible());
+
+    return {
+      label: visible ? "关闭字幕" : "打开字幕",
+      click: () => {
+        this.windowManager.toggleSubtitleWindow();
       },
     };
   }

@@ -17,6 +17,7 @@ import type {
 export type DesktopWindowRole =
   | "pet"
   | "overlay"
+  | "subtitle"
   | "settings"
   | "history"
   | "action_lab"
@@ -26,6 +27,7 @@ export type DesktopAuxWindowRole = "settings" | "history" | "action_lab" | "prof
 export interface DesktopWindowVisibilityState {
   petVisible: boolean;
   overlayVisible: boolean;
+  subtitleVisible: boolean;
   settingsVisible: boolean;
   historyVisible: boolean;
   actionLabVisible: boolean;
