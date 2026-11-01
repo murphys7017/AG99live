@@ -1272,7 +1272,7 @@ class MyPlugin(Star):
                     return
 
                 sessions = bundle.runtime_state.persona_sessions
-                result_state = sessions.session(turn_id).result(
+                result_state = sessions.session(PersonaTurnIdentity(turn_id)).result(
                     persona_result_id,
                     phase=phase,
                     parallel=bool(

@@ -619,7 +619,9 @@ function setupIpc(): void {
     const primaryDisplayId = String(screen.getPrimaryDisplay().id);
     const sources = await desktopCapturer.getSources({
       types: ["screen"],
-      thumbnailSize: { width: 1280, height: 720 },
+      // Keep the live prompt image useful for visual understanding while
+      // avoiding a 200KB+ base64 payload on every Persona request.
+      thumbnailSize: { width: 1024, height: 576 },
       fetchWindowIcons: false,
     });
     const selectedSource = sources.find((source) => source.display_id === primaryDisplayId)
@@ -630,7 +632,7 @@ function setupIpc(): void {
       return null;
     }
 
-    const jpegBuffer = selectedSource.thumbnail.toJPEG(76);
+    const jpegBuffer = selectedSource.thumbnail.toJPEG(62);
     return {
       data: `data:image/jpeg;base64,${jpegBuffer.toString("base64")}`,
       mime_type: "image/jpeg",
