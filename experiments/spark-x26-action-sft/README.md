@@ -98,6 +98,36 @@ contains motion fields but omits intent_tags, which remain available in the
 Motion Lab records for review. The dataset report includes target-shape counts
 so the share of motion_steps examples is visible before training.
 
+When the small model is the runtime primary and DeepSeek is configured as the
+shadow Provider, pass `--teacher-provider-id` with DeepSeek's AstrBot Provider
+ID to use successful shadow candidates as the offline SFT target:
+
+```powershell
+.\.venv\Scripts\python.exe .\prepare_dataset.py `
+  --db $db `
+  --include-neurobrain `
+  --production-prompt `
+  --teacher-provider-id 'deepseek-nothink/deepseek-flash' `
+  --output-dir .\data\production_neurobrain_teacher
+```
+
+The option is explicit: samples without a successful normalized shadow result
+from that exact Provider are excluded, and the primary model result is never
+used as a silent fallback. A valid shadow teacher is retained even when the
+primary model's terminal result failed or never closed; input and prompt
+integrity blockers still exclude the sample. Without the option, the primary
+final result remains the target as before. The command output reports
+`target_origins` and the number of missing teacher candidates so a
+teacher-labeled run can be checked before training.
+
+For a high-coverage weak-label run, add `--relaxed-quality
+--all-delivery-modes --teacher-fallback-primary`. This keeps parseable
+production prompts with an executable normalized target, includes M0 and M2,
+prefers the requested shadow teacher, and uses the primary final result only
+when that teacher candidate is unavailable. The report records the selected
+target origin and the relaxed mode, so this dataset can be kept separate from
+the strict teacher set.
+
 This run starts from the base checkpoint and trains on the full accumulated
 eligible dataset, including previous and newly collected DeepSeek samples. It
 has no fixed sample cap and writes a new v6 adapter directory, preserving the

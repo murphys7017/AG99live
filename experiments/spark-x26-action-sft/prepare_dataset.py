@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,18 @@ PROVIDER_OUTPUT_FIELDS = (
     "duration_hint_ms",
     "expression_resource_id",
     "motion_resource_id",
+)
+TEACHER_PRIMARY_RESULT_BLOCKERS = frozenset(
+    {
+        "final_motion_payload_missing",
+        "final_motion_failed",
+        "final_motion_status_invalid",
+        "provider_result_not_final",
+        "motion_result_reason_conflict",
+        "motion_provider_final_conflict",
+        "motion_terminal_status_conflict",
+        "final_motion_payload_conflict",
+    }
 )
 
 
@@ -43,8 +56,60 @@ def _parse_request_prompt(request: dict[str, Any]) -> dict[str, Any] | None:
     return payload
 
 
+def _select_training_target(
+    sample: dict[str, Any],
+    *,
+    teacher_provider_id: str | None = None,
+    teacher_fallback_primary: bool = False,
+) -> tuple[dict[str, Any] | None, str]:
+    """Select the final primary target or an explicitly requested shadow teacher."""
+    motion = sample.get("motion", {})
+    if not isinstance(motion, dict):
+        return None, "missing"
+
+    if teacher_provider_id:
+        candidates = motion.get("provider_candidates")
+        if not isinstance(candidates, list):
+            if teacher_fallback_primary:
+                payload = motion.get("target_payload")
+                if isinstance(payload, dict):
+                    return payload, "primary_fallback"
+            return None, "teacher_candidate_missing"
+        for candidate in reversed(candidates):
+            if not isinstance(candidate, dict):
+                continue
+            if (
+                candidate.get("candidate_role") != "shadow"
+                or str(candidate.get("provider_id") or "").strip()
+                != teacher_provider_id
+                or candidate.get("status") != "shadow_provider_normalized"
+                or candidate.get("provider_final") is not False
+            ):
+                continue
+            payload = candidate.get("accepted_payload")
+            if isinstance(payload, dict):
+                return payload, "shadow_teacher"
+        if teacher_fallback_primary:
+            payload = motion.get("target_payload")
+            if isinstance(payload, dict):
+                return payload, "primary_fallback"
+        return None, "teacher_candidate_missing"
+
+    payload = motion.get("target_payload")
+    if isinstance(payload, dict):
+        return payload, "primary_final"
+    return None, "missing"
+
+
 def _training_record(
-    sample: dict[str, Any], reducer: Any, *, include_neurobrain: bool = False
+    sample: dict[str, Any],
+    reducer: Any,
+    *,
+    include_neurobrain: bool = False,
+    teacher_provider_id: str | None = None,
+    teacher_fallback_primary: bool = False,
+    relaxed_quality: bool = False,
+    all_delivery_modes: bool = False,
 ) -> dict[str, Any] | None:
     quality = sample.get("quality", {})
     request = sample.get("input", {}).get("motion_request")
@@ -52,22 +117,62 @@ def _training_record(
         return None
     neurobrain_state = request.get("neurobrain_state")
     has_neurobrain_state = isinstance(neurobrain_state, dict) and bool(neurobrain_state)
+    target, target_origin = _select_training_target(
+        sample,
+        teacher_provider_id=teacher_provider_id,
+        teacher_fallback_primary=teacher_fallback_primary,
+    )
+    if target is None:
+        return None
+    using_shadow_teacher = target_origin == "shadow_teacher"
     if (
-        sample.get("collection_status") != "closed"
+        (
+            sample.get("collection_status") != "closed"
+            and not using_shadow_teacher
+        )
         or sample.get("source_route") != "independent_motion"
-        or sample.get("delivery_mode") != "M2_olv_incremental"
+        or (
+            not all_delivery_modes
+            and sample.get("delivery_mode") != "M2_olv_incremental"
+        )
+        or (
+            all_delivery_modes
+            and sample.get("delivery_mode")
+            not in {"M0_nonstreaming", "M2_olv_incremental"}
+        )
     ):
         return None
 
-    if include_neurobrain:
-        expected_blockers = ["neurobrain_state_present"] if has_neurobrain_state else []
-        expected_quality_status = "blocked" if has_neurobrain_state else "reviewable"
-        if (
-            quality.get("status") != expected_quality_status
-            or quality.get("blockers") != expected_blockers
-            or quality.get("neurobrain_state_present") is not has_neurobrain_state
-        ):
-            return None
+    if relaxed_quality:
+        pass
+    elif include_neurobrain:
+        if using_shadow_teacher:
+            raw_blockers = quality.get("blockers")
+            blockers = {
+                str(blocker).strip()
+                for blocker in (
+                    raw_blockers
+                    if isinstance(raw_blockers, (list, tuple, set))
+                    else ()
+                )
+                if str(blocker).strip()
+            }
+            allowed_blockers = set(TEACHER_PRIMARY_RESULT_BLOCKERS)
+            if has_neurobrain_state:
+                allowed_blockers.add("neurobrain_state_present")
+            if blockers - allowed_blockers:
+                return None
+            if quality.get("neurobrain_state_present") is not has_neurobrain_state:
+                return None
+        else:
+            expected_blockers = ["neurobrain_state_present"] if has_neurobrain_state else []
+            expected_quality_status = "blocked" if has_neurobrain_state else "reviewable"
+            if (
+                quality.get("status") != expected_quality_status
+                or quality.get("blockers") != expected_blockers
+                or quality.get("neurobrain_state_present") is not has_neurobrain_state
+            ):
+                return None
     elif (
         quality.get("status") != "reviewable"
         or quality.get("neurobrain_state_present") is not False
@@ -75,9 +180,6 @@ def _training_record(
     ):
         return None
 
-    target = sample.get("motion", {}).get("target_payload")
-    if not isinstance(target, dict):
-        return None
     prompt_payload = _parse_request_prompt(request)
     prompt = request.get("prompt")
     if prompt_payload is None or not isinstance(prompt, str):
@@ -103,16 +205,37 @@ def _training_record(
 
 
 def _production_training_record(
-    sample: dict[str, Any], reducer: Any
+    sample: dict[str, Any],
+    reducer: Any,
+    *,
+    teacher_provider_id: str | None = None,
+    teacher_fallback_primary: bool = False,
+    relaxed_quality: bool = False,
+    all_delivery_modes: bool = False,
 ) -> dict[str, Any] | None:
-    if _training_record(sample, reducer, include_neurobrain=True) is None:
+    if (
+        _training_record(
+            sample,
+            reducer,
+            include_neurobrain=True,
+            teacher_provider_id=teacher_provider_id,
+            teacher_fallback_primary=teacher_fallback_primary,
+            relaxed_quality=relaxed_quality,
+            all_delivery_modes=all_delivery_modes,
+        )
+        is None
+    ):
         return None
 
     motion_request = sample["input"]["motion_request"]
     system_prompt = motion_request.get("system_prompt")
     prompt = motion_request.get("prompt")
     contexts = sample["input"].get("recent_context")
-    target = sample.get("motion", {}).get("target_payload")
+    target, _ = _select_training_target(
+        sample,
+        teacher_provider_id=teacher_provider_id,
+        teacher_fallback_primary=teacher_fallback_primary,
+    )
     if (
         not isinstance(system_prompt, str)
         or not system_prompt.strip()
@@ -179,7 +302,30 @@ def main() -> int:
             "with Provider-shaped action targets"
         ),
     )
+    parser.add_argument(
+        "--teacher-provider-id",
+        help=(
+            "use a successful shadow candidate from this Provider as the SFT target; "
+            "without this option the primary final result remains the target"
+        ),
+    )
+    parser.add_argument(
+        "--teacher-fallback-primary",
+        action="store_true",
+        help="use the primary final result when the requested shadow teacher is missing",
+    )
+    parser.add_argument(
+        "--relaxed-quality",
+        action="store_true",
+        help="keep any parseable target/prompt sample and ignore review blockers",
+    )
+    parser.add_argument(
+        "--all-delivery-modes",
+        action="store_true",
+        help="include both M0_nonstreaming and M2_olv_incremental samples",
+    )
     args = parser.parse_args()
+    teacher_provider_id = str(args.teacher_provider_id or "").strip() or None
 
     reducer = _load_reducer()
     samples, _, malformed = reducer._reduce_database(args.db)
@@ -187,7 +333,10 @@ def main() -> int:
         1
         for sample in samples
         if sample.get("source_route") == "independent_motion"
-        and sample.get("delivery_mode") == "M2_olv_incremental"
+        and (
+            args.all_delivery_modes
+            or sample.get("delivery_mode") == "M2_olv_incremental"
+        )
         and _parse_request_prompt(
             sample.get("input", {}).get("motion_request", {})
             if isinstance(sample.get("input", {}).get("motion_request"), dict)
@@ -196,20 +345,56 @@ def main() -> int:
         is None
     )
     eligible = []
+    target_origin_counts: Counter[str] = Counter()
+    teacher_candidate_missing = 0
     for sample in samples:
+        if (
+            teacher_provider_id
+            and sample.get("source_route") == "independent_motion"
+            and (
+                args.all_delivery_modes
+                or sample.get("delivery_mode") == "M2_olv_incremental"
+            )
+        ):
+            _, target_origin = _select_training_target(
+                sample,
+                teacher_provider_id=teacher_provider_id,
+                teacher_fallback_primary=args.teacher_fallback_primary,
+            )
+            if target_origin == "teacher_candidate_missing":
+                teacher_candidate_missing += 1
         record = (
-            _production_training_record(sample, reducer)
+            _production_training_record(
+                sample,
+                reducer,
+                teacher_provider_id=teacher_provider_id,
+                teacher_fallback_primary=args.teacher_fallback_primary,
+                relaxed_quality=args.relaxed_quality,
+                all_delivery_modes=args.all_delivery_modes,
+            )
             if args.production_prompt
             else _training_record(
-                sample, reducer, include_neurobrain=args.include_neurobrain
+                sample,
+                reducer,
+                include_neurobrain=args.include_neurobrain,
+                teacher_provider_id=teacher_provider_id,
+                teacher_fallback_primary=args.teacher_fallback_primary,
+                relaxed_quality=args.relaxed_quality,
+                all_delivery_modes=args.all_delivery_modes,
             )
         )
         if record is not None:
             eligible.append((sample, record))
+            _, target_origin = _select_training_target(
+                sample,
+                teacher_provider_id=teacher_provider_id,
+                teacher_fallback_primary=args.teacher_fallback_primary,
+            )
+            target_origin_counts[target_origin] += 1
     records = [record for _, record in eligible]
     if not records:
         raise SystemExit(
-            "No eligible closed M2 samples found; "
+            "No eligible motion samples found; "
             f"{missing_prompt_speech} M2 samples have missing or invalid prompt segment speech."
         )
 
@@ -247,8 +432,12 @@ def main() -> int:
     )
     shape_counts: dict[str, int] = {}
     for sample, _ in eligible:
-        target = sample.get("motion", {}).get("target_payload")
-        if not isinstance(target, dict):
+        target, _ = _select_training_target(
+            sample,
+            teacher_provider_id=teacher_provider_id,
+            teacher_fallback_primary=args.teacher_fallback_primary,
+        )
+        if target is None:
             continue
         shape = next(
             (
@@ -272,6 +461,12 @@ def main() -> int:
                 ),
                 "m2_samples_with_missing_or_invalid_prompt_segment_speech": missing_prompt_speech,
                 "target_motion_shapes": shape_counts,
+                "teacher_provider_id": teacher_provider_id,
+                "teacher_fallback_primary": args.teacher_fallback_primary,
+                "relaxed_quality": args.relaxed_quality,
+                "all_delivery_modes": args.all_delivery_modes,
+                "target_origins": dict(target_origin_counts),
+                "teacher_candidate_missing": teacher_candidate_missing,
                 "production_targets_exclude_intent_tags": args.production_prompt,
                 "malformed_raw_events": len(malformed),
             },
