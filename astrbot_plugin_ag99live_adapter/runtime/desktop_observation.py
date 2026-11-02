@@ -11,8 +11,10 @@ from typing import Any
 from uuid import uuid4
 
 from astrbot.api import logger
-from astrbot.core.plugin_admission import build_plugin_admission_snapshot
-
+from ..adapters.astrbot.admission import (
+    build_plugin_admission_snapshot,
+    list_runtime_observation_sensors,
+)
 from ..protocol.parser import build_message_envelope
 from ..protocol.desktop_observation import SCHEMA, REQUEST_TYPE, validate_frame_result
 from .plugin_runtime import get_plugin_config_snapshot, reconcile_control_platforms
@@ -230,7 +232,7 @@ class DesktopObservationRuntime:
                 await build_plugin_admission_snapshot(event=event)
                 admitted = any(
                     item.plugin_id == "ag99live" and item.source_id == "desktop_change"
-                    for item in self.context.list_runtime_observation_sensors(event)
+                    for item in list_runtime_observation_sensors(self.context, event)
                 )
                 if not admitted:
                     previous = None

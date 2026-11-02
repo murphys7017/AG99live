@@ -41,6 +41,7 @@ AG99 是以桌面体验为中心的智能体主应用；AG99live 是 AG99 的身
 | 已有能力的可用性、入口和拟人化问题 | [已有能力可用性与拟人化审计](02-设计文档/09-已有能力可用性与拟人化审计.md) |
 | 参考项目与能力契约 | [参考项目与能力契约](02-设计文档/08-参考项目与能力契约.md) |
 | AG99live 与 AG99 的边界和实施路线 | [AG99live 与 AG99 联合边界与扩展路线](02-设计文档/07-AG99live与AG99联合边界与扩展路线.md) |
+| Adapter、Interaction Orchestrator 与 Provider 重构计划 | [Adapter、Interaction Orchestrator 与 Provider 重构计划](02-设计文档/15-Adapter-Orchestrator-Provider重构计划.md) |
 | AG99 桌面主应用与身体接入计划 | AG99 仓库 `docs/Yakumo/dev/desktop-application-and-body-integration-plan.md` |
 | 小模型和 VTube Studio 原始数据的边界 | [小模型训练](05-小模型训练/01-动作小模型训练前置条件与职责边界.md) |
 | Persona 输出、M0/M1/M2 与动作意图训练样本如何归一化 | [Persona 动作意图样本归一化契约](05-小模型训练/04-Persona动作意图样本归一化契约.md) |

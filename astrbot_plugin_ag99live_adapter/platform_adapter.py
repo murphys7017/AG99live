@@ -53,8 +53,22 @@ from .runtime.turn_identity_map import TurnIdentityMap
 from .transport.websocket_server import WebSocketTransport
 from .runtime.turn_coordinator import TurnCoordinator
 from .runtime.passive_behavior import PassiveBehaviorRuntime
+from .runtime.interaction_orchestrator import InteractionOrchestrator, ProviderEvent
 from .platform_event import OLVPetPlatformEvent
 from .transport.static_resources import StaticResourceServer
+from .adapters.astrbot.provider_bridge import (
+    AstrBotAvatarOutputPort,
+    ProviderBridgeCallbacks,
+)
+from .adapters.astrbot.capabilities import AstrBotCapabilityBinding
+from .adapters.astrbot.provider_registry import AstrBotProviderRegistry
+from .adapters.astrbot.composition import (
+    AstrBotProviderBinding,
+    build_provider_bridge,
+)
+from .providers.contracts import (
+    ConversationInput,
+)
 
 PLUGIN_DIR = Path(__file__).resolve().parent
 ASSETS_DIR = PLUGIN_DIR / "assets"
@@ -149,6 +163,10 @@ class OLVPetPlatformAdapter(Platform):
         self.runtime_state = RuntimeState(
             platform_config=self.config,
             plugin_context=self._plugin_context,
+            provider_registry=AstrBotProviderRegistry(
+                self._plugin_context,
+                platform_id=self.platform_id,
+            ),
             plugin_config=self._plugin_config,
             plugin_config_loader=get_plugin_config_snapshot,
             host=self.host,
@@ -220,6 +238,9 @@ class OLVPetPlatformAdapter(Platform):
             send_json=self.transport.send_json,
             is_connected=lambda: self.transport._ws_client is not None,
         )
+        self.avatar_output_port = AstrBotAvatarOutputPort(
+            send_json=self.transport.send_json,
+        )
         self.turn_coordinator = TurnCoordinator(
             input_preparation=InputPreparation(
                 plugin_context=self._plugin_context,
@@ -239,12 +260,55 @@ class OLVPetPlatformAdapter(Platform):
             refresh_runtime_settings=self._refresh_runtime_settings,
             send_current_model_and_conf=self._send_current_model_and_conf,
             send_json=self.transport.send_json,
+            output_port=self.avatar_output_port,
             build_platform_event=self._build_platform_event,
             commit_event=self.commit_event,
             create_vad_engine=lambda: create_stream_vad_engine(
                 engine_type="silero_vad",
                 kwargs=self.runtime_state.vad_config,
             ),
+        )
+        self.astrbot_capabilities = AstrBotCapabilityBinding(
+            plugin_context=self._plugin_context,
+            recognize_audio=self._recognize_provider_audio,
+        )
+        self.provider_bridge = build_provider_bridge(
+            AstrBotProviderBinding(
+                callbacks=ProviderBridgeCallbacks(
+                    submit_conversation=self._submit_provider_conversation,
+                    interrupt_conversation=self._interrupt_provider_conversation,
+                    close_conversation=self._close_provider_conversation,
+                    recognize_audio=self._recognize_provider_audio,
+                    synthesize_tts=self.astrbot_capabilities.synthesize_tts,
+                    cancel_tts=self.astrbot_capabilities.cancel_tts,
+                    generate_motion=self.astrbot_capabilities.generate_motion,
+                    cancel_motion=self.astrbot_capabilities.cancel_motion,
+                    send_json=self.transport.send_json,
+                ),
+                avatar_output=self.avatar_output_port,
+            )
+        )
+        self.interaction_orchestrator = InteractionOrchestrator(
+            conversation_provider=self.provider_bridge.conversation,
+            stt_provider=self.provider_bridge.stt,
+            tts_provider=self.provider_bridge.tts,
+            motion_provider=self.provider_bridge.motion,
+            output_port=self.avatar_output_port,
+            event_sink=self._handle_provider_event,
+            active_event_motion_cancel=(
+                lambda event, turn_id, reason: self.turn_coordinator._cancel_turn_owned_motion_task(
+                    event,
+                    turn_id=turn_id,
+                    reason=reason,
+                )
+            ),
+        )
+        self.interaction_orchestrator.start()
+        self.turn_coordinator.attach_interaction_orchestrator(
+            self.interaction_orchestrator
+        )
+        self.interaction_orchestrator.attach_segment_assembler(
+            self.turn_coordinator.output_segments
         )
         self.passive_behavior_runtime = PassiveBehaviorRuntime(
             runtime_state=self.runtime_state,
@@ -263,6 +327,45 @@ class OLVPetPlatformAdapter(Platform):
         )
         self._refresh_runtime_settings()
         register_control_platform(self.platform_id, self)
+
+    async def _submit_provider_conversation(self, request: ConversationInput) -> None:
+        await self.turn_coordinator.submit_provider_message(request)
+
+    async def _interrupt_provider_conversation(self, turn_id: str | None) -> None:
+        normalized_turn_id = str(
+            turn_id or self.session_state.current_turn_id or ""
+        ).strip()
+        if not normalized_turn_id:
+            return
+        await self.turn_coordinator.abort_turn_from_backend(
+            turn_id=normalized_turn_id,
+            reason="provider_interrupt",
+        )
+
+    async def _close_provider_conversation(self) -> None:
+        return None
+
+    @staticmethod
+    def _handle_provider_event(event: ProviderEvent) -> None:
+        logger.debug(
+            "WIRING interaction_orchestrator.provider_event source=%s kind=%s",
+            event.source,
+            getattr(getattr(event.value, "kind", None), "value", None)
+            or getattr(event.value, "kind", None)
+            or type(event.value).__name__,
+        )
+
+    async def _recognize_provider_audio(
+        self,
+        stream_id: str,
+        pcm_bytes: bytes,
+        options,
+    ):
+        return await self.turn_coordinator.speech_ingress.transcribe_provider_audio(
+            stream_id,
+            pcm_bytes,
+            options,
+        )
 
     def meta(self) -> PlatformMetadata:
         metadata = PlatformMetadata(
@@ -304,6 +407,7 @@ class OLVPetPlatformAdapter(Platform):
             await asyncio.gather(asr_prewarm_task, return_exceptions=True)
             self.desktop_observation.disconnect()
             self.desktop_presence.disconnect()
+            await self.interaction_orchestrator.close()
             await self.passive_behavior_runtime.stop()
             unregister_control_platform(self.platform_id, self)
             self._event_loop = None
@@ -321,11 +425,11 @@ class OLVPetPlatformAdapter(Platform):
                     "logical_segment_index": 0,
                 },
             )
-            await self.turn_coordinator.finalize_output_segment(
+            await self.finalize_output_segment(
                 turn_id=turn_id,
                 message_id=message_id,
             )
-            await self.turn_coordinator.close_turn_output_queue(turn_id=turn_id)
+            await self.close_turn_output_queue(turn_id=turn_id)
         except asyncio.CancelledError:
             try:
                 await self.turn_coordinator.fail_proactive_output_turn(
@@ -395,12 +499,68 @@ class OLVPetPlatformAdapter(Platform):
         参数含义、发送顺序与 motion 分发策略都在 turn_coordinator 那一层；
         本方法只负责把命名参数一一对应。
         """
+        orchestrator = getattr(self, "interaction_orchestrator", None)
+        if orchestrator is not None:
+            await orchestrator.emit_message_chain(
+                message_chain=message_chain,
+                turn_id=turn_id,
+                unified_msg_origin=unified_msg_origin,
+                raw_reply_text_override=raw_reply_text_override,
+                platform_extras=platform_extras,
+            )
+            return
         await self.turn_coordinator.emit_message_chain(
             message_chain=message_chain,
             turn_id=turn_id,
             unified_msg_origin=unified_msg_origin,
             raw_reply_text_override=raw_reply_text_override,
             platform_extras=platform_extras,
+        )
+
+    async def finalize_output_segment(self, *, turn_id: str, message_id: str) -> None:
+        orchestrator = getattr(self, "interaction_orchestrator", None)
+        if orchestrator is not None:
+            await orchestrator.finalize_output_segment(
+                turn_id=turn_id,
+                message_id=message_id,
+            )
+            return
+        await self.turn_coordinator.finalize_output_segment(
+            turn_id=turn_id,
+            message_id=message_id,
+        )
+
+    async def close_turn_output_queue(
+        self,
+        *,
+        turn_id: str,
+        failure_reason: str | None = None,
+    ) -> None:
+        orchestrator = getattr(self, "interaction_orchestrator", None)
+        if orchestrator is not None:
+            await orchestrator.close_turn_output_queue(
+                turn_id=turn_id,
+                failure_reason=failure_reason,
+            )
+            return
+        if failure_reason is None:
+            await self.turn_coordinator.close_turn_output_queue(turn_id=turn_id)
+        else:
+            await self.turn_coordinator.close_turn_output_queue(
+                turn_id=turn_id,
+                failure_reason=failure_reason,
+            )
+
+    def has_pending_persona_segment(self, *, turn_id: str, message_id: str) -> bool:
+        orchestrator = getattr(self, "interaction_orchestrator", None)
+        if orchestrator is not None:
+            return orchestrator.has_pending_persona_segment(
+                turn_id=turn_id,
+                message_id=message_id,
+            )
+        return self.turn_coordinator.has_pending_persona_segment(
+            turn_id=turn_id,
+            message_id=message_id,
         )
 
     def _refresh_runtime_settings(self) -> None:
@@ -452,6 +612,18 @@ class OLVPetPlatformAdapter(Platform):
         if not self.desktop_audio_credit_enabled:
             raise RuntimeError("incremental_audio_credit_not_negotiated")
         event_context = resolve_adapter_event_context(event)
+        orchestrator = getattr(self, "interaction_orchestrator", None)
+        if orchestrator is not None:
+            return await orchestrator.open_incremental_output(
+            turn_id=event_context.delivery_turn_id,
+            core_turn_id=event_context.core_turn_id,
+            persona_result_id=persona_result_id,
+            send_payload=self.transport.bind_current_client_sender(),
+            require_turn_active=lambda: self.turn_coordinator.require_incremental_turn_active(
+                turn_id=event_context.delivery_turn_id,
+                core_turn_id=event_context.core_turn_id,
+            ),
+            )
         return await self.turn_coordinator.open_incremental_output(
             turn_id=event_context.delivery_turn_id,
             core_turn_id=event_context.core_turn_id,
@@ -461,6 +633,12 @@ class OLVPetPlatformAdapter(Platform):
 
     async def discard_incremental_output(self, *, event, persona_result_id: str) -> bool:
         event_context = resolve_adapter_event_context(event)
+        orchestrator = getattr(self, "interaction_orchestrator", None)
+        if orchestrator is not None:
+            return await orchestrator.discard_incremental_output(
+                turn_id=event_context.delivery_turn_id,
+                persona_result_id=persona_result_id,
+            )
         return await self.turn_coordinator.discard_incremental_output(
             turn_id=event_context.delivery_turn_id,
             persona_result_id=persona_result_id,
@@ -499,6 +677,7 @@ class OLVPetPlatformAdapter(Platform):
     async def terminate(self) -> None:
         logger.info("AG99live adapter terminate() called")
         try:
+            await self.interaction_orchestrator.close()
             await self.passive_behavior_runtime.stop()
             self.desktop_settings_broker.fail_pending("adapter_terminated")
             await self.transport.stop()
@@ -520,8 +699,12 @@ class OLVPetPlatformAdapter(Platform):
         各连接级所有者按固定顺序释放资源；任一所有者失败都必须留下诊断，但不能阻止
         后续所有者清理。全部尝试结束后再把失败汇总交回 transport。
         """
-        self.desktop_observation.disconnect()
-        self.desktop_presence.disconnect()
+        desktop_observation = getattr(self, "desktop_observation", None)
+        if desktop_observation is not None:
+            desktop_observation.disconnect()
+        desktop_presence = getattr(self, "desktop_presence", None)
+        if desktop_presence is not None:
+            desktop_presence.disconnect()
         cleanup_failures: list[tuple[str, Exception]] = []
         self.desktop_persona_segment_stream_enabled = False
         self.desktop_audio_credit_enabled = False

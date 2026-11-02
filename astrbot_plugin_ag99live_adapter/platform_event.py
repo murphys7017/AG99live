@@ -621,6 +621,31 @@ class OLVPetPlatformEvent(AstrMessageEvent):
             reason=reason,
         )
 
+    async def _finalize_output_segment(self, *, turn_id: str, message_id: str) -> None:
+        finalize = getattr(self.adapter, "finalize_output_segment", None)
+        if callable(finalize):
+            await finalize(turn_id=turn_id, message_id=message_id)
+            return
+        await self.adapter.turn_coordinator.finalize_output_segment(
+            turn_id=turn_id,
+            message_id=message_id,
+        )
+
+    async def _close_turn_output_queue(
+        self,
+        *,
+        turn_id: str,
+        failure_reason: str | None = None,
+    ) -> None:
+        close_queue = getattr(self.adapter, "close_turn_output_queue", None)
+        if callable(close_queue):
+            await close_queue(turn_id=turn_id, failure_reason=failure_reason)
+            return
+        await self.adapter.turn_coordinator.close_turn_output_queue(
+            turn_id=turn_id,
+            failure_reason=failure_reason,
+        )
+
     async def flush_visible_segment(self, *, message_id: str) -> None:
         """Emit one ready segment without completing its parent or Turn."""
         if self._is_stop_requested():
@@ -628,7 +653,7 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         turn_id = self._adapter_internal_state.delivery_turn_id
         if not turn_id or not str(message_id or "").strip():
             raise RuntimeError("output_event_segment_identity_missing")
-        await self.adapter.turn_coordinator.finalize_output_segment(
+        await self._finalize_output_segment(
             turn_id=turn_id, message_id=message_id,
         )
 
@@ -651,7 +676,7 @@ class OLVPetPlatformEvent(AstrMessageEvent):
             [normalized_message_id],
         )
         for child_message_id in child_message_ids:
-            await self.adapter.turn_coordinator.finalize_output_segment(
+            await self._finalize_output_segment(
                 turn_id=turn_id,
                 message_id=child_message_id,
             )
@@ -725,7 +750,7 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         turn_id = self._adapter_internal_state.delivery_turn_id
         if not turn_id:
             raise RuntimeError("output_event_turn_id_missing")
-        await self.adapter.turn_coordinator.close_turn_output_queue(
+        await self._close_turn_output_queue(
             turn_id=turn_id, failure_reason=self._persona_session().output_failure_reason
         )
 

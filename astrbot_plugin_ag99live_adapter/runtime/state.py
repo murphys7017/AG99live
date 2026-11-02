@@ -8,10 +8,6 @@ from pathlib import Path
 from typing import Any, Callable
 
 from astrbot.api import logger
-from astrbot.api.provider import Provider, STTProvider
-from astrbot.core.platform.message_session import MessageSession
-from astrbot.core.platform.message_type import MessageType
-
 from ..core_compatibility import (
     supports_interaction_contributors,
     supports_interaction_result_event_filter,
@@ -37,6 +33,7 @@ from ..prompts.motion_selector import (
 )
 from ..protocol.builder import build_system_model_sync
 from ..protocol.schema_versions import MODEL_INFO_SCHEMA_VERSION
+from ..providers.contracts import ProviderRegistry
 from .client_profile import (
     DEFAULT_CLIENT_NICKNAME,
     DEFAULT_CLIENT_UID,
@@ -83,6 +80,7 @@ class RuntimeState:
         *,
         platform_config: Any,
         plugin_context: Any,
+        provider_registry: ProviderRegistry | None = None,
         plugin_config: Any,
         plugin_config_loader: Callable[[], PluginConfigSnapshot | None] | None,
         host: str,
@@ -108,6 +106,7 @@ class RuntimeState:
         self.plugin_config_path: str | None = None
         self.plugin_config_mtime_ns: int | None = None
         self.plugin_context = plugin_context
+        self.provider_registry = provider_registry
         self.plugin_config_loader = plugin_config_loader
 
         self.performance_curve_provider_id = ""
@@ -161,10 +160,10 @@ class RuntimeState:
         self.vad_config: dict[str, Any] = {}
         self.model_info: dict[str, Any] = {}
         self.image_cooldown_seconds = 0
-        self.selected_performance_curve_provider: Provider | None = None
-        self.selected_independent_motion_provider: Provider | None = None
-        self.selected_independent_motion_shadow_provider: Provider | None = None
-        self.selected_passive_behavior_provider: Provider | None = None
+        self.selected_performance_curve_provider: Any | None = None
+        self.selected_independent_motion_provider: Any | None = None
+        self.selected_independent_motion_shadow_provider: Any | None = None
+        self.selected_passive_behavior_provider: Any | None = None
         self.performance_curve_runtime = PerformanceCurveRuntime(runtime_state=self)
         self._live2d_runtime_cache_path = (
             self.runtime_cache_dir / "live2d_runtime_cache.json"
@@ -536,9 +535,9 @@ class RuntimeState:
         return self.refresh(reload_providers=reload_providers)
 
     def load_selected_providers(self) -> None:
-        if self.plugin_context is None:
+        if self.provider_registry is None:
             raise RuntimeStateConfigurationError(
-                "Plugin context is unavailable while loading provider bindings."
+                "Provider registry is unavailable while loading provider bindings."
             )
 
         if self.enable_performance_curve:
@@ -547,10 +546,10 @@ class RuntimeState:
                     "Performance curve generation is enabled but "
                     "`performance_curve_provider_id` is empty."
                 )
-            provider = self.plugin_context.get_provider_by_id(
+            provider = self.provider_registry.get_chat_provider(
                 self.performance_curve_provider_id
             )
-            if not isinstance(provider, Provider):
+            if provider is None:
                 raise RuntimeStateConfigurationError(
                     "Configured performance curve provider "
                     f"`{self.performance_curve_provider_id}` was not found or is not a chat Provider."
@@ -564,16 +563,16 @@ class RuntimeState:
         if self.independent_motion_enabled:
             provider = None
             if self.independent_motion_provider_id:
-                provider = self.plugin_context.get_provider_by_id(
+                provider = self.provider_registry.get_chat_provider(
                     self.independent_motion_provider_id
                 )
-                if isinstance(provider, Provider):
+                if provider is not None:
                     self.selected_independent_motion_provider = provider
                     logger.info(
                         "Loaded independent motion provider from plugin config: %s",
                         self.independent_motion_provider_id,
                     )
-            if not isinstance(provider, Provider):
+            if provider is None:
                 logger.warning(
                     "Independent motion generation is enabled but provider `%s` "
                     "is not available; this turn will not use the independent motion path.",
@@ -583,11 +582,11 @@ class RuntimeState:
         if self.independent_motion_shadow_enabled:
             provider = None
             if self.independent_motion_shadow_provider_id:
-                provider = self.plugin_context.get_provider_by_id(
+                provider = self.provider_registry.get_chat_provider(
                     self.independent_motion_shadow_provider_id
                 )
                 if (
-                    isinstance(provider, Provider)
+                    provider is not None
                     and self.independent_motion_shadow_provider_id
                     != self.independent_motion_provider_id
                 ):
@@ -602,7 +601,7 @@ class RuntimeState:
                         "Independent motion shadow provider must differ from the primary provider: %s",
                         self.independent_motion_shadow_provider_id,
                     )
-            if not isinstance(provider, Provider):
+            if provider is None:
                 logger.warning(
                     "Independent motion shadow is enabled but provider `%s` is unavailable; shadow collection is paused.",
                     self.independent_motion_shadow_provider_id or "<empty>",
@@ -610,13 +609,13 @@ class RuntimeState:
 
         if self.passive_behavior_enabled:
             provider = (
-                self.plugin_context.get_provider_by_id(
+                self.provider_registry.get_chat_provider(
                     self.passive_behavior_provider_id
                 )
                 if self.passive_behavior_provider_id
                 else None
             )
-            if isinstance(provider, Provider):
+            if provider is not None:
                 self.selected_passive_behavior_provider = provider
                 logger.info(
                     "Loaded passive behavior streaming provider: %s",
@@ -629,27 +628,18 @@ class RuntimeState:
                     self.passive_behavior_provider_id or "<empty>",
                 )
 
-    def resolve_stt_provider(self) -> STTProvider:
-        """Resolve AstrBot's current STT provider for the desktop session.
-
-        STT selection belongs to AstrBot. Resolve it at transcription time so a
-        provider switch takes effect without leaving a stale adapter binding.
-        """
-        if self.plugin_context is None:
+    def resolve_stt_provider(self) -> Any:
+        """Resolve the current host STT provider for the desktop session."""
+        if self.provider_registry is None:
             raise RuntimeStateConfigurationError(
-                "Plugin context is unavailable while resolving the STT provider."
+                "Provider registry is unavailable while resolving the STT provider."
             )
 
-        provider = self.plugin_context.get_using_stt_provider(
-            umo=str(
-                MessageSession(
-                    platform_name=self.platform_id,
-                    message_type=MessageType.FRIEND_MESSAGE,
-                    session_id=self.client_uid,
-                )
-            )
+        provider = self.provider_registry.get_stt_provider(
+            platform_id=self.platform_id,
+            client_uid=self.client_uid,
         )
-        if not isinstance(provider, STTProvider):
+        if provider is None:
             raise RuntimeStateConfigurationError(
                 "AstrBot has no active STT provider for the AG99live desktop session."
             )

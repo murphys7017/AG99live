@@ -23,8 +23,15 @@ from ..protocol.builder import (
     build_control_synth_finished,
     build_output_segment,
 )
-from ..protocol.constants import TYPE_ENGINE_MOTION_INTENT
+from ..protocol.constants import TYPE_CONTROL_SYNTH_FINISHED, TYPE_ENGINE_MOTION_INTENT
 from ..protocol.schema_versions import MOTION_INTENT_V4_SCHEMA_VERSION
+from ..providers.contracts import (
+    AvatarOutputPort,
+    ControlEvent,
+    OutputSegmentEnvelope,
+    ProtocolError,
+)
+from .interaction_orchestrator import InteractionOrchestrator
 from .audio_credit import AudioCredit
 from .deferred_motion import DeferredMotionDelivery
 from .incremental_output import IncrementalOutputSession, SendPayload
@@ -52,6 +59,8 @@ class OutputSegmentCoordinator:
         chat_buffer: Any,
         speaker_name: str,
         send_json: Callable[[dict[str, Any]], Awaitable[bool]],
+        output_port: AvatarOutputPort | None = None,
+        interaction_orchestrator: InteractionOrchestrator | None = None,
         performance_curves: PerformanceCurveCoordinator,
         observations: MotionObservationRecorder,
         is_turn_terminal: Callable[[str], bool],
@@ -63,6 +72,8 @@ class OutputSegmentCoordinator:
         self.chat_buffer = chat_buffer
         self.speaker_name = speaker_name
         self._send_json = send_json
+        self._output_port = output_port
+        self._interaction_orchestrator = interaction_orchestrator
         self.performance_curves = performance_curves
         self.observations = observations
         self._is_turn_terminal = is_turn_terminal
@@ -103,6 +114,12 @@ class OutputSegmentCoordinator:
         self._emitted_turn_ids.clear()
         self._output_failures.clear()
         self._turn_level_motion_consumed.clear()
+
+    def set_interaction_orchestrator(
+        self,
+        orchestrator: InteractionOrchestrator | None,
+    ) -> None:
+        self._interaction_orchestrator = orchestrator
 
     def tracked_turn_ids(self) -> set[str]:
         return (
@@ -499,8 +516,9 @@ class OutputSegmentCoordinator:
                         "output_segment_not_finalized:"
                         f"{normalized_turn_id}:{pending_segment.message_id}"
                     )
-                    error_sent = await self._send_json(
-                        build_control_error(turn_id=normalized_turn_id, message=reason)
+                    error_sent = await self._publish_output_error(
+                        turn_id=normalized_turn_id,
+                        message=reason,
                     )
                     if not error_sent:
                         raise RuntimeError(f"control_error_send_failed:{normalized_turn_id}")
@@ -514,8 +532,9 @@ class OutputSegmentCoordinator:
                     reason = self._output_failures.get(normalized_turn_id) or (
                         f"output_segment_missing:{normalized_turn_id}"
                     )
-                    error_sent = await self._send_json(
-                        build_control_error(turn_id=normalized_turn_id, message=reason)
+                    error_sent = await self._publish_output_error(
+                        turn_id=normalized_turn_id,
+                        message=reason,
                     )
                     if not error_sent:
                         raise RuntimeError(
@@ -527,14 +546,41 @@ class OutputSegmentCoordinator:
                         reason=reason,
                     )
                     return
-                send_close = incremental.send_final_control if incremental else self._send_json
-                sent = await send_close(
-                    build_control_synth_finished(
-                        turn_id=normalized_turn_id,
-                        success=normalized_turn_id not in self._output_failures,
-                        reason=self._output_failures.get(normalized_turn_id),
+                success = normalized_turn_id not in self._output_failures
+                reason = self._output_failures.get(normalized_turn_id)
+                if incremental is not None:
+                    sent = await incremental.send_final_control(
+                        build_control_synth_finished(
+                            turn_id=normalized_turn_id,
+                            success=success,
+                            reason=reason,
+                        )
                     )
-                )
+                elif self._output_port is not None:
+                    try:
+                        await self._output_port.publish_control(
+                            ControlEvent(
+                                type=TYPE_CONTROL_SYNTH_FINISHED,
+                                turn_id=normalized_turn_id,
+                                payload={
+                                    "success": success,
+                                    "reason": reason or "",
+                                },
+                            )
+                        )
+                    except Exception as exc:
+                        raise RuntimeError(
+                            f"synth_finished_send_failed:{normalized_turn_id}"
+                        ) from exc
+                    sent = True
+                else:
+                    sent = await self._send_json(
+                        build_control_synth_finished(
+                            turn_id=normalized_turn_id,
+                            success=success,
+                            reason=reason,
+                        )
+                    )
                 if not sent:
                     raise RuntimeError(f"synth_finished_send_failed:{normalized_turn_id}")
                 self._closed_turn_ids.add(normalized_turn_id)
@@ -555,6 +601,23 @@ class OutputSegmentCoordinator:
             segment = PendingOutputSegment(turn_id=turn_id, message_id=message_id)
             self._pending_segments[key] = segment
         return segment
+
+    async def _publish_output_error(self, *, turn_id: str, message: str) -> bool:
+        if self._output_port is None:
+            return await self._send_json(
+                build_control_error(turn_id=turn_id, message=message)
+            )
+        try:
+            await self._output_port.publish_error(
+                ProtocolError(
+                    code="output_segment_error",
+                    message=message,
+                    turn_id=turn_id,
+                )
+            )
+        except Exception as exc:
+            raise RuntimeError(f"control_error_send_failed:{turn_id}") from exc
+        return True
 
     def _require_output_queue_open(self, turn_id: str, *, incremental: bool = False) -> None:
         if turn_id in self._incremental_outputs and not incremental:
@@ -742,22 +805,53 @@ class OutputSegmentCoordinator:
             if segment.text
             else {"state": "absent"}
         )
-        sent = await self._send_json(
-            build_output_segment(
+        segment_payload = {
+            "text": text_slot,
+            "audio": audio_slot,
+            "motion": motion_slot,
+            "speech": speech_slot,
+            "images": list(segment.images),
+            "speaker_name": self.speaker_name,
+            "avatar": "",
+        }
+        if self._output_port is not None:
+            try:
+                await self._output_port.publish_segment(
+                    OutputSegmentEnvelope(
+                        turn_id=segment.turn_id,
+                        message_id=segment.message_id,
+                        sequence=segment.sequence,
+                        payload=segment_payload,
+                    )
+                )
+            except Exception as exc:
+                raise RuntimeError(
+                    f"output_segment_send_failed:{segment.message_id}"
+                ) from exc
+        else:
+            sent = await self._send_json(
+                build_output_segment(
+                    turn_id=segment.turn_id,
+                    message_id=segment.message_id,
+                    sequence=segment.sequence,
+                    text=text_slot,
+                    audio=audio_slot,
+                    motion=motion_slot,
+                    speech=speech_slot,
+                    images=segment.images,
+                    speaker_name=self.speaker_name,
+                    avatar="",
+                )
+            )
+            if not sent:
+                raise RuntimeError(f"output_segment_send_failed:{segment.message_id}")
+        if self._interaction_orchestrator is not None:
+            self._interaction_orchestrator.register_segment(
                 turn_id=segment.turn_id,
                 message_id=segment.message_id,
                 sequence=segment.sequence,
-                text=text_slot,
-                audio=audio_slot,
-                motion=motion_slot,
-                speech=speech_slot,
-                images=segment.images,
-                speaker_name=self.speaker_name,
-                avatar="",
+                published=True,
             )
-        )
-        if not sent:
-            raise RuntimeError(f"output_segment_send_failed:{segment.message_id}")
         logger.info(
             "WIRING output_segment_sent turn_id=%s message_id=%s sequence=%s "
             "motion_state=%s motion_source=%s timestamp_epoch_ms=%s",

@@ -11,8 +11,10 @@ from uuid import uuid4
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
-from astrbot.core.plugin_admission import build_plugin_admission_snapshot
-
+from ..adapters.astrbot.admission import (
+    build_plugin_admission_snapshot,
+    list_runtime_observation_sensors,
+)
 from ..protocol.desktop_presence import SCHEMA, REQUEST_TYPE, validate_presence_result
 from ..protocol.parser import build_message_envelope
 from .plugin_runtime import get_plugin_config_snapshot, reconcile_control_platforms
@@ -216,7 +218,7 @@ class DesktopPresenceRuntime:
                     admitted = any(
                         item.plugin_id == "ag99live"
                         and item.source_id == "desktop_return"
-                        for item in self.context.list_runtime_observation_sensors(event)
+                        for item in list_runtime_observation_sensors(self.context, event)
                     )
                     if not admitted:
                         if cancellation is not None:

@@ -27,6 +27,7 @@ from ..protocol.builder import (
     build_control_error,
     build_output_transcription,
 )
+from ..providers.contracts import SttResult, SttSessionOptions
 
 
 class StreamingASRError(RuntimeError):
@@ -1233,6 +1234,38 @@ class SpeechIngressService:
             return await stt_provider.get_text(temp_path)
         finally:
             self._schedule_temp_file_cleanup(temp_path)
+
+    async def transcribe_provider_audio(
+        self,
+        stream_id: str,
+        pcm_bytes: bytes,
+        options: SttSessionOptions,
+    ) -> SttResult:
+        """Expose the existing AstrBot STT path as a neutral Provider callback.
+
+        The desktop microphone path continues to use its current VAD and local
+        streaming ASR flow. This method is only the bridge entry for callers
+        that already own a complete PCM stream and want the existing
+        ``runtime_state.resolve_stt_provider`` implementation.
+        """
+
+        normalized_stream_id = str(stream_id or "").strip()
+        if not normalized_stream_id:
+            raise ValueError("stt_stream_id_required")
+        if not isinstance(pcm_bytes, bytes):
+            raise TypeError("stt_pcm_bytes_must_be_bytes")
+        if options.channels != 1 or options.encoding not in {"pcm_s16le", "pcm16le"}:
+            raise ValueError("stt_provider_audio_format_unsupported")
+        if len(pcm_bytes) % PCM16_BYTES_PER_SAMPLE:
+            raise ValueError("stt_pcm_bytes_odd_length")
+        samples = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+        if not samples.size:
+            return SttResult(stream_id=normalized_stream_id, text="")
+        text = await self._transcribe_audio(
+            samples,
+            sample_rate=options.sample_rate,
+        )
+        return SttResult(stream_id=normalized_stream_id, text=str(text or "").strip())
 
     def _schedule_temp_file_cleanup(self, temp_path: str) -> None:
         if not temp_path:

@@ -9,6 +9,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.message_components import Plain
 from astrbot.api.star import Context, Star
 
+from .adapters.astrbot.lifecycle_bridge import AstrBotLifecycleBridge
 from .middleware import register_ag99live_interaction_contributors
 from .motion.observation import resolve_persona_motion_source_route
 from .motion.output_sanitizer import (
@@ -234,6 +235,7 @@ class MyPlugin(Star):
             return
         if state.stage != "interaction.outbound_tts":
             return
+        await self._publish_tts_lifecycle_event(event, state)
         self._record_persona_tts_identity(event, state)
         if state.status == "succeeded":
             logger.info(
@@ -269,10 +271,40 @@ class MyPlugin(Star):
         )
 
     @staticmethod
+    async def _publish_tts_lifecycle_event(
+        event: AstrMessageEvent,
+        state: Any,
+    ) -> None:
+        await AstrBotLifecycleBridge.publish_tts_state(event, state)
+
+    @staticmethod
+    async def _publish_motion_lifecycle_event(
+        event: AstrMessageEvent,
+        *,
+        request_id: str,
+        turn_id: str | None,
+        message_id: str | None,
+        payload: Mapping[str, Any] | None,
+        reason: str | None,
+        origin: str = "turn",
+    ) -> None:
+        await AstrBotLifecycleBridge.publish_motion_state(
+            event,
+            request_id=request_id,
+            turn_id=turn_id,
+            message_id=message_id,
+            payload=payload,
+            reason=reason,
+            origin=origin,
+        )
+
+    @staticmethod
     def _record_persona_tts_identity(
         event: AstrMessageEvent,
         state: Any,
     ) -> None:
+        if getattr(event, "adapter", None) is None:
+            return
         from .middleware.interaction_motion.shared import _resolve_motion_runtime_bundle
         from .motion.observation import (
             record_persona_motion_sample,
@@ -663,6 +695,15 @@ class MyPlugin(Star):
                     and not segment_state.result_future.done()
                 ):
                     segment_state.result_future.set_result(result)
+                if result is not None:
+                    await self._publish_motion_lifecycle_event(
+                        event,
+                        request_id=f"motion:{normalized_result_id}:{segment_index}",
+                        turn_id=normalized_turn_id,
+                        message_id=normalized_segment_id,
+                        payload=result.motion_payload,
+                        reason=result.reason,
+                    )
                 publish_motion = getattr(
                     event,
                     "publish_interaction_incremental_motion",
@@ -1077,6 +1118,15 @@ class MyPlugin(Star):
             finally:
                 if result is not None and not result_future.done():
                     result_future.set_result(result)
+                if result is not None:
+                    await self._publish_motion_lifecycle_event(
+                        event,
+                        request_id=f"motion:{normalized_result_id}:{segment_index}",
+                        turn_id=normalized_turn_id,
+                        message_id=normalized_segment_id,
+                        payload=result.motion_payload,
+                        reason=result.reason,
+                    )
                 publish_motion = getattr(
                     event,
                     "publish_interaction_incremental_motion",
@@ -1228,13 +1278,35 @@ class MyPlugin(Star):
 
         bundle = _resolve_motion_runtime_bundle(event)
         if bundle is not None:
+            source_route = resolve_persona_motion_source_route(
+                event,
+                bundle.runtime_state,
+                capture_if_missing=True,
+            )
+            if source_route != "independent_motion" and persona_result_id:
+                for index, raw_segment in enumerate(raw_segments):
+                    actions = getattr(raw_segment, "actions", ())
+                    tendency = getattr(raw_segment, "tendency", {})
+                    await self._publish_motion_lifecycle_event(
+                        event,
+                        request_id=f"persona:{persona_result_id}:{index}",
+                        turn_id=event_context.core_turn_id,
+                        message_id=(
+                            str(getattr(raw_segment, "message_id", "") or "").strip()
+                            or None
+                        ),
+                        payload={
+                            "actions": list(actions)
+                            if isinstance(actions, (list, tuple))
+                            else [],
+                            "tendency": dict(tendency)
+                            if isinstance(tendency, Mapping)
+                            else {},
+                        },
+                        reason=None,
+                    )
             if (
-                resolve_persona_motion_source_route(
-                    event,
-                    bundle.runtime_state,
-                    capture_if_missing=True,
-                )
-                == "independent_motion"
+                source_route == "independent_motion"
             ):
                 turn_id = event_context.core_turn_id
                 if not turn_id:
@@ -1356,6 +1428,28 @@ class MyPlugin(Star):
                             segments_by_index=result_state.segments,
                             shadow_tasks=self._independent_motion_tasks,
                         )
+                        for index, motion_result in result_map.items():
+                            segment_state = result_state.segments.get(index)
+                            await self._publish_motion_lifecycle_event(
+                                event,
+                                request_id=f"motion:{persona_result_id}:{index}",
+                                turn_id=turn_id,
+                                message_id=(
+                                    segment_state.segment_message_id
+                                    if segment_state is not None
+                                    else None
+                                ),
+                                payload=(
+                                    motion_result.motion_payload
+                                    if motion_result is not None
+                                    else None
+                                ),
+                                reason=(
+                                    motion_result.reason
+                                    if motion_result is not None
+                                    else "motion_result_missing"
+                                ),
+                            )
                         for index, segment_state in result_state.segments.items():
                             future = segment_state.result_future
                             if future is not None and not future.done():
