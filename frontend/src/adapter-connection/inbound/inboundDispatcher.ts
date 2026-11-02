@@ -163,6 +163,13 @@ export async function dispatchInboundEvent(
     case "output_transcription":
       await dispatchInboundOutputEvent(deps, event);
       return;
+    case "output_execution": {
+      const payload = event.envelope.payload;
+      const suffix = payload.output || payload.reason || payload.phase;
+      deps.pushHistory("system", `执行：${payload.name} · ${payload.phase}${suffix ? `：${suffix}` : ""}`);
+      deps.state.statusMessage = `执行：${payload.name}（${payload.phase}）`;
+      return;
+    }
     case "turn_started":
     case "turn_finished":
     case "interrupt":

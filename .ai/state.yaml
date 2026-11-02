@@ -1,3 +1,31 @@
+dual_conversation_platform_dsh_execution_20261102:
+  class: feature
+  risk: high
+  status: source_reviewed_dsh_configured_astrbot_active
+  scope: >-
+    Add a selectable conversation platform with AstrBot as the unchanged default
+    and DeepSeek Harness as a local stdio JSON-RPC ConversationProvider. DSH
+    assistant text uses the existing Turn/Segment/output.segment.v6 path; tool,
+    code, PTC and approval activity uses a separate ExecutionEvent contract and
+    output.execution.v1 presentation event. Existing AstrBot composition and
+    output.segment.v6 behavior remain the default path.
+  validation: >-
+    Focused Python provider/orchestrator/output/turn tests pass (18 tests),
+    Python compileall, scoped Ruff, protocol schema manifest check and diff
+    whitespace checks pass. Renderer vue-tsc typecheck passes and the AstrBot
+    plugin checker reports zero errors. A temporary fake DSH JSON-RPC process
+    smoke test completed initialize, prompt notifications, assistant and
+    turn-end delivery. The real DSH sdk profile initializes successfully with
+    the configured ttds route.
+  limitations: >-
+    The stored credential for the configured real DSH route is rejected with an
+    AUTH terminal result, so AstrBot remains the active platform in the local
+    runtime config until credentials are refreshed. Code-execution approval
+    policy, TTS/Live2D joint playback, reconnect and production frontend
+    acceptance are not yet run. Platform switching is composition-time and
+    requires an adapter restart; saving the setting while a platform is live
+    logs that requirement.
+
 motion_provider_stream_output_bound_20261101:
   class: bugfix
   risk: medium

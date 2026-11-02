@@ -3,6 +3,7 @@ import type {
   ControlErrorPayload,
   ControlTurnFinishedPayload,
   OutputSegmentPayload,
+  OutputExecutionPayload,
   OutputTranscriptionPayload,
   ProtocolEnvelope,
   SystemHistoryCreatedPayload,
@@ -122,6 +123,61 @@ export function parseOutputSegmentPayload(
       avatar: optionalString(record.payload.avatar) ?? "",
     },
   }
+}
+
+export function parseOutputExecutionPayload(
+  envelope: ProtocolEnvelope<unknown>,
+): PayloadParseResult<OutputExecutionPayload> {
+  const record = parseObjectPayload(envelope);
+  if (!record.ok) return record;
+  const rootKeys = validateExactKeys(
+    envelope.type,
+    "payload",
+    record.payload,
+    ["schema_version", "execution_id", "phase", "name", "arguments", "output", "error", "reason", "metadata"],
+  );
+  if (!rootKeys.ok) return rootKeys;
+  if (record.payload.schema_version !== "ag99.execution.v1") {
+    return invalidPayload(envelope.type, "payload.schema_version", "ag99.execution.v1");
+  }
+  const executionId = requiredString(envelope.type, record.payload, "execution_id");
+  if (!executionId.ok) return executionId;
+  const phase = requiredString(envelope.type, record.payload, "phase");
+  if (!phase.ok) return phase;
+  const name = requiredString(envelope.type, record.payload, "name");
+  if (!name.ok) return name;
+  if (
+    !["requested", "started", "output", "completed", "failed", "cancelled", "approval_required"].includes(phase.payload)
+  ) {
+    return invalidPayload(envelope.type, "payload.phase", "supported execution phase");
+  }
+  const args = asRecord(record.payload.arguments);
+  if (!args) return invalidPayload(envelope.type, "payload.arguments", "object");
+  if (typeof record.payload.output !== "string") {
+    return invalidPayload(envelope.type, "payload.output", "string");
+  }
+  if (record.payload.error !== null && !asRecord(record.payload.error)) {
+    return invalidPayload(envelope.type, "payload.error", "object or null");
+  }
+  if (typeof record.payload.reason !== "string") {
+    return invalidPayload(envelope.type, "payload.reason", "string");
+  }
+  const metadata = asRecord(record.payload.metadata);
+  if (!metadata) return invalidPayload(envelope.type, "payload.metadata", "object");
+  return {
+    ok: true,
+    payload: {
+      schema_version: "ag99.execution.v1",
+      execution_id: executionId.payload,
+      phase: phase.payload as OutputExecutionPayload["phase"],
+      name: name.payload,
+      arguments: args,
+      output: record.payload.output,
+      error: record.payload.error === null ? null : asRecord(record.payload.error),
+      reason: record.payload.reason,
+      metadata,
+    },
+  };
 }
 
 function parseSegmentTextSlot(type: string, value: unknown): PayloadParseResult<OutputSegmentPayload["text"]> {

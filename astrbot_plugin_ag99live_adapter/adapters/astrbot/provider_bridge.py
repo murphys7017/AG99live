@@ -16,6 +16,7 @@ from typing import Any, TypeAlias
 from ...providers.contracts import (
     AudioArtifact,
     AvatarOutputPort,
+    ExecutionEvent,
     ControlEvent,
     ConversationEvent,
     ConversationInput,
@@ -43,7 +44,11 @@ from ...providers.contracts import (
     TtsEventKind,
     MotionEventKind,
 )
-from ...protocol.builder import build_control_error, build_output_segment
+from ...protocol.builder import (
+    build_control_error,
+    build_output_execution,
+    build_output_segment,
+)
 from ...protocol.constants import SOURCE_ADAPTER
 from ...protocol.parser import build_message_envelope
 
@@ -585,6 +590,31 @@ class AstrBotAvatarOutputPort(AvatarOutputPort):
                     code="protocol_error_send_failed",
                     message="The existing AstrBot WebSocket sender rejected the error.",
                     turn_id=error.turn_id,
+                )
+            )
+
+    async def publish_execution(self, event: ExecutionEvent) -> None:
+        envelope = build_output_execution(
+            turn_id=event.turn_id,
+            message_id=f"execution:{event.execution_id}:{event.kind.value}",
+            execution_id=event.execution_id,
+            phase=event.kind.value,
+            name=event.name,
+            arguments=dict(event.arguments),
+            output=event.output,
+            error=dict(event.error) if event.error is not None else None,
+            reason=event.reason,
+            metadata=dict(event.metadata),
+        )
+        sent = await self._send_json(envelope)
+        if not sent:
+            raise ProviderBridgeError(
+                ProviderFailure(
+                    provider="astrbot.avatar_output",
+                    request_id=event.execution_id,
+                    code="execution_event_send_failed",
+                    message="The existing AstrBot WebSocket sender rejected the execution event.",
+                    turn_id=event.turn_id,
                 )
             )
 

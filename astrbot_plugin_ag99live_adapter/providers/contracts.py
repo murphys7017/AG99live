@@ -30,6 +30,18 @@ class ConversationEventKind(str, Enum):
     INTERRUPTED = "interrupted"
 
 
+class ExecutionEventKind(str, Enum):
+    """Facts emitted by an agent while it performs a non-conversation action."""
+
+    REQUESTED = "requested"
+    STARTED = "started"
+    OUTPUT = "output"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+    APPROVAL_REQUIRED = "approval_required"
+
+
 class MotionOrigin(str, Enum):
     """Whether motion belongs to a conversational Turn or passive behavior."""
 
@@ -120,6 +132,36 @@ class ConversationEvent:
             raise ValueError("segment_boundary_required")
         if self.reason is not None and not str(self.reason).strip():
             raise ValueError("conversation_event_reason_invalid")
+
+
+@dataclass(frozen=True)
+class ExecutionEvent:
+    """A structured tool/code-execution fact, separate from assistant text."""
+
+    execution_id: str
+    kind: ExecutionEventKind
+    turn_id: str
+    name: str
+    arguments: Mapping[str, Any] = field(default_factory=dict)
+    output: str = ""
+    error: Mapping[str, Any] | None = None
+    reason: str | None = None
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        _require_id(self.execution_id, "execution_id")
+        if not isinstance(self.kind, ExecutionEventKind):
+            raise TypeError("execution_event_kind_invalid")
+        _require_id(self.turn_id, "turn_id")
+        _require_id(self.name, "execution_name")
+        if not isinstance(self.arguments, Mapping):
+            raise TypeError("execution_arguments_must_be_mapping")
+        if not isinstance(self.output, str):
+            raise TypeError("execution_output_must_be_string")
+        if self.error is not None and not isinstance(self.error, Mapping):
+            raise TypeError("execution_error_must_be_mapping")
+        if self.reason is not None and not str(self.reason).strip():
+            raise ValueError("execution_event_reason_invalid")
 
 
 @dataclass(frozen=True)
@@ -386,6 +428,7 @@ class ProtocolError:
 
 
 ConversationListener: TypeAlias = Callable[[ConversationEvent], ListenerResult]
+ExecutionListener: TypeAlias = Callable[[ExecutionEvent], ListenerResult]
 PartialTranscriptListener: TypeAlias = Callable[[str, str], ListenerResult]
 FinalTranscriptListener: TypeAlias = Callable[[SttResult], ListenerResult]
 TtsEventListener: TypeAlias = Callable[[TtsLifecycleEvent], ListenerResult]
@@ -402,6 +445,12 @@ class ConversationProvider(Protocol):
     async def close(self) -> None: ...
 
     def subscribe(self, listener: ConversationListener) -> Unsubscribe: ...
+
+
+class ExecutionProvider(Protocol):
+    """Optional execution-event stream owned by an agent host."""
+
+    def subscribe_execution(self, listener: ExecutionListener) -> Unsubscribe: ...
 
 
 class SttProvider(Protocol):
@@ -450,6 +499,12 @@ class AvatarOutputPort(Protocol):
     async def publish_error(self, error: ProtocolError) -> None: ...
 
 
+class AvatarExecutionPort(Protocol):
+    """Optional structured output for tool and code-execution activity."""
+
+    async def publish_execution(self, event: ExecutionEvent) -> None: ...
+
+
 class ProviderRegistry(Protocol):
     """Host-owned registry used by RuntimeState without importing a host SDK."""
 
@@ -460,11 +515,16 @@ class ProviderRegistry(Protocol):
 
 __all__ = [
     "AudioArtifact",
+    "AvatarExecutionPort",
     "AvatarOutputPort",
     "ConversationEvent",
     "ConversationEventKind",
     "ConversationInput",
     "ConversationProvider",
+    "ExecutionEvent",
+    "ExecutionEventKind",
+    "ExecutionListener",
+    "ExecutionProvider",
     "ControlEvent",
     "FinalTranscriptListener",
     "MotionEventKind",

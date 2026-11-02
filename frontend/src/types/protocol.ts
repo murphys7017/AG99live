@@ -108,6 +108,18 @@ export interface OutputTranscriptionPayload {
   stage?: "streaming" | "final" | "review";
 }
 
+export interface OutputExecutionPayload {
+  schema_version: "ag99.execution.v1";
+  execution_id: string;
+  phase: "requested" | "started" | "output" | "completed" | "failed" | "cancelled" | "approval_required";
+  name: string;
+  arguments: Record<string, unknown>;
+  output: string;
+  error: Record<string, unknown> | null;
+  reason: string;
+  metadata: Record<string, unknown>;
+}
+
 export interface ControlTurnFinishedPayload {
   success: boolean;
   reason?: string;

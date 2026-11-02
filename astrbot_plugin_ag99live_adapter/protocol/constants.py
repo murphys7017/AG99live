@@ -15,6 +15,7 @@ TYPE_INPUT_AUDIO_STREAM_END = "input.audio_stream_end"
 
 TYPE_OUTPUT_SEGMENT = "output.segment"
 TYPE_OUTPUT_TRANSCRIPTION = "output.transcription"
+TYPE_OUTPUT_EXECUTION = "output.execution"
 
 TYPE_CONTROL_TURN_STARTED = "control.turn_started"
 TYPE_CONTROL_TURN_FINISHED = "control.turn_finished"
@@ -79,6 +80,7 @@ OUTPUT_TYPES = {
     "output.segment_motion",
     TYPE_OUTPUT_SEGMENT,
     TYPE_OUTPUT_TRANSCRIPTION,
+    TYPE_OUTPUT_EXECUTION,
     "output.text_stream_start",
     "output.text_stream_delta",
     "output.text_stream_end",

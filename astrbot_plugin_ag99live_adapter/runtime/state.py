@@ -132,6 +132,16 @@ class RuntimeState:
         self.fast_asr_model_dir = ""
         self.fast_asr_provider = "cpu"
         self.fast_asr_num_threads = 4
+        self.conversation_platform = "astrbot"
+        self.dsh_bin = ""
+        self.dsh_home = ""
+        self.dsh_profile = "sdk"
+        self.dsh_workspace = ""
+        self.dsh_provider = "deepseek-official"
+        self.dsh_model = "deepseek-v4-flash"
+        self.dsh_reasoning_effort = ""
+        self.dsh_max_tokens = 0
+        self.dsh_request_timeout_seconds = 0.0
         self.interaction_contributors_available = supports_interaction_contributors(
             plugin_context
         )
@@ -216,6 +226,11 @@ class RuntimeState:
         previous_passive_behavior_provider_id = self.passive_behavior_provider_id
         previous_passive_behavior_enabled = self.passive_behavior_enabled
         general_config = get_config_value(self.plugin_config, "general", {})
+        conversation_config = get_config_value(
+            self.plugin_config,
+            "conversation",
+            {},
+        )
         live2d_input_config = get_config_value(self.plugin_config, "live2d_input", {})
         performance_curve_config = get_config_value(
             self.plugin_config,
@@ -337,6 +352,49 @@ class RuntimeState:
                 default=3.0,
                 minimum=0.5,
                 maximum=30.0,
+                integer=False,
+            )
+        )
+        platform = str(
+            get_config_value(conversation_config, "platform", "astrbot") or "astrbot"
+        ).strip().lower()
+        self.conversation_platform = platform if platform in {"astrbot", "dsh"} else "astrbot"
+        self.dsh_bin = str(get_config_value(conversation_config, "dsh_bin", "") or "").strip()
+        self.dsh_home = str(get_config_value(conversation_config, "dsh_home", "") or "").strip()
+        self.dsh_profile = str(
+            get_config_value(conversation_config, "profile", "sdk") or "sdk"
+        ).strip()
+        self.dsh_workspace = str(
+            get_config_value(conversation_config, "workspace", "") or ""
+        ).strip()
+        self.dsh_provider = str(
+            get_config_value(conversation_config, "provider", "deepseek-official")
+            or "deepseek-official"
+        ).strip()
+        self.dsh_model = str(
+            get_config_value(conversation_config, "model", "deepseek-v4-flash")
+            or "deepseek-v4-flash"
+        ).strip()
+        self.dsh_reasoning_effort = str(
+            get_config_value(conversation_config, "reasoning_effort", "") or ""
+        ).strip()
+        self.dsh_max_tokens = int(
+            _bounded_config_number(
+                conversation_config,
+                "max_tokens",
+                default=0,
+                minimum=0,
+                maximum=200000,
+                integer=True,
+            )
+        )
+        self.dsh_request_timeout_seconds = float(
+            _bounded_config_number(
+                conversation_config,
+                "request_timeout_seconds",
+                default=0.0,
+                minimum=0.0,
+                maximum=86400.0,
                 integer=False,
             )
         )

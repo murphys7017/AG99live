@@ -28,6 +28,7 @@ from .constants import (
     TYPE_CONTROL_TURN_FINISHED,
     TYPE_CONTROL_TURN_STARTED,
     TYPE_OUTPUT_SEGMENT,
+    TYPE_OUTPUT_EXECUTION,
     TYPE_OUTPUT_TRANSCRIPTION,
     TYPE_SYSTEM_BACKGROUND_LIST,
     TYPE_SYSTEM_DESKTOP_SETTINGS_QUERY,
@@ -288,6 +289,39 @@ def build_output_transcription(
         turn_id=turn_id,
         source=SOURCE_ADAPTER,
         payload={"text": text, "stage": stage},
+    )
+
+
+def build_output_execution(
+    *,
+    turn_id: str,
+    message_id: str,
+    execution_id: str,
+    phase: str,
+    name: str,
+    arguments: dict[str, Any],
+    output: str = "",
+    error: dict[str, Any] | None = None,
+    reason: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "schema_version": "ag99.execution.v1",
+        "execution_id": execution_id,
+        "phase": phase,
+        "name": name,
+        "arguments": dict(arguments),
+        "output": str(output or "")[:12000],
+        "error": dict(error) if isinstance(error, dict) else None,
+        "reason": reason or "",
+        "metadata": dict(metadata or {}),
+    }
+    return build_message_envelope(
+        TYPE_OUTPUT_EXECUTION,
+        turn_id=turn_id,
+        message_id=message_id,
+        source=SOURCE_ADAPTER,
+        payload=payload,
     )
 
 

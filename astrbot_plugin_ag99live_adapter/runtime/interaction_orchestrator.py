@@ -20,6 +20,7 @@ from ..providers.contracts import (
     ConversationEventKind,
     ConversationProvider,
     ControlEvent,
+    ExecutionEvent,
     MotionLifecycleEvent,
     MotionProvider,
     ProtocolError,
@@ -48,7 +49,7 @@ class ProviderEvent:
     """A tagged Provider fact routed to the future Orchestrator core."""
 
     source: str
-    value: ConversationEvent | TtsLifecycleEvent | MotionLifecycleEvent | SttResult
+    value: ConversationEvent | ExecutionEvent | TtsLifecycleEvent | MotionLifecycleEvent | SttResult
 
 
 @dataclass(frozen=True)
@@ -151,6 +152,13 @@ class InteractionOrchestrator:
                 lambda event: self._route("motion", event)
             ),
         ]
+        subscribe_execution = getattr(
+            self.conversation_provider, "subscribe_execution", None
+        )
+        if callable(subscribe_execution):
+            self._unsubscribers.append(
+                subscribe_execution(lambda event: self._route("execution", event))
+            )
         if self.stt_provider is not None:
             self._unsubscribers.append(
                 self.stt_provider.on_final(lambda result: self._route("stt", result))
@@ -793,6 +801,10 @@ class InteractionOrchestrator:
                 handle_event = getattr(event_assembler, "handle_event", None)
                 if callable(handle_event):
                     await _await_handler(handle_event(value))
+            if source == "execution" and isinstance(value, ExecutionEvent):
+                publish_execution = getattr(self.output_port, "publish_execution", None)
+                if callable(publish_execution):
+                    await _await_handler(publish_execution(value))
             if sink is not None:
                 result = sink(ProviderEvent(source=source, value=value))  # type: ignore[arg-type]
                 await _await_handler(result)

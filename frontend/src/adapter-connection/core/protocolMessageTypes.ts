@@ -14,6 +14,7 @@ export const INBOUND_MESSAGE_TYPES = {
   SYSTEM_HISTORY_DELETED: "system.history_deleted",
   OUTPUT_SEGMENT: "output.segment",
   OUTPUT_TRANSCRIPTION: "output.transcription",
+  OUTPUT_EXECUTION: "output.execution",
   CONTROL_TURN_STARTED: "control.turn_started",
   CONTROL_TURN_FINISHED: "control.turn_finished",
   CONTROL_INTERRUPT: "control.interrupt",

@@ -4,9 +4,9 @@
 >
 > **复核日期：2026-11-02**
 >
-> **当前进度：Phase 0/1 的中立契约、黄金事件序列、AstrBot callback bridge、TTS/Motion 生命周期事件适配和首条文本/Avatar Output 垂直切片已建立；Interaction Orchestrator 已承接 Provider 事件订阅、STT/TTS/Motion 主动请求入口、前端协议解析与 Turn 行为分发、活动事件 owner、连接清理、AstrBot event stop 调度、SegmentAssembler 与增量输出入口、Turn/Segment 事实快照、Conversation 事实回流、取消注册、terminal registry、终态提交/回滚、`control.turn_started`/`control.turn_finished` 和 timing 状态；`output.segment.v6` 与 `control.synth_finished` 已统一通过 AvatarOutputPort 发布。AstrBot TTS/Motion/STT capability binding、生命周期事实转换、Provider Registry 和 Provider 组合根已收敛到 `adapters/astrbot`。Phase 5 已增加不绑定具体端点的 DSH ConversationProvider、共享文本段装配器和 DSH runtime composition。AstrBot 4.14.6 的本地 Adapter import 和平台/hook 聚焦测试已通过；实际 DSH 会话、TTS/Live2D 联合运行和目标环境验收仍待接入。**
+> **当前进度：Phase 0/1 的中立契约、黄金事件序列、AstrBot callback bridge、TTS/Motion 生命周期事件适配和首条文本/Avatar Output 垂直切片已建立；Interaction Orchestrator 已承接 Provider 事件订阅、STT/TTS/Motion 主动请求入口、前端协议解析与 Turn 行为分发、活动事件 owner、连接清理、AstrBot event stop 调度、SegmentAssembler 与增量输出入口、Turn/Segment 事实快照、Conversation 事实回流、取消注册、terminal registry、终态提交/回滚、`control.turn_started`/`control.turn_finished` 和 timing 状态；`output.segment.v6` 与 `control.synth_finished` 已统一通过 AvatarOutputPort 发布。AstrBot TTS/Motion/STT capability binding、生命周期事实转换、Provider Registry 和 Provider 组合根已收敛到 `adapters/astrbot`。Phase 5 已增加 DSH ConversationProvider、共享文本段装配器、DSH runtime composition 和本地 Harness JSON-RPC 进程桥；设置中可选择 AstrBot 或 DSH。工具/代码执行通过独立 Execution 事件流和 `output.execution` 发送，不再伪装成普通对话文本。AstrBot 4.14.6 的本地 Adapter import 和平台/hook 聚焦测试已通过；真实 DSH profile、TTS/Live2D 联合运行和目标环境验收仍待接入。**
 >
-> 本文基于当前 AG99live 源码、协议清单和前端播放链路整理。它描述目标边界与实施顺序，不代表 DSH Adapter、独立 Conversation Provider 或完整 Provider 接口已经存在。
+> 本文基于当前 AG99live 源码、协议清单和前端播放链路整理。它描述目标边界与实施顺序；当前已存在中立 Conversation/Execution 契约、AstrBot 实现和 DSH Harness 适配骨架，但真实 DSH profile 与目标环境联合验收仍属于接入工作。
 
 ## 1. 目标
 
@@ -363,7 +363,7 @@ AG99live 文本输入
 
 DSH Adapter 不复制 `TurnCoordinator`、`OutputSegmentCoordinator`、PlaybackTimeline 或 ModelEngine。
 
-当前代码已提供 `adapters/dsh/DshConversationProvider` 和 `DshConversationRuntime`。它只接受 DSH 适配层注入的发送、打断和关闭回调，并把 DSH 流中的中立事件交给共享 `InteractionOrchestrator`；文本事件由 `TextConversationEventAssembler` 经 `AvatarOutputPort` 生成现有 `output.segment.v6` 和 `control.synth_finished`，不创建第二套 Turn 或 WebSocket 路径。具体 DSH API、认证和会话选择仍由调用方提供。
+当前代码已提供 `adapters/dsh/DshConversationProvider`、`DshConversationRuntime` 和 `DshHarnessConversationProvider`。后者通过 DSH profile 的 stdio JSON-RPC 运行时建立或复用会话，把 `assistant/message`、`turn/end` 映射到中立 Conversation 事件，把 `tool/call`、`tool/result` 和 PTC 执行事件映射到独立 Execution 事件；文本事件由 `TextConversationEventAssembler` 经现有输出队列生成 `output.segment.v6` 和 `control.synth_finished`，执行事件由 AvatarOutputPort 发布为 `output.execution`。它不创建第二套 Turn 或 WebSocket 路径。具体 DSH profile、凭据和工作区仍由设置提供。
 
 ### Phase 6：按真实约束决定进程化
 

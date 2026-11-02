@@ -7,12 +7,16 @@ depend on these ports; the ports must remain usable in isolation.
 
 from .contracts import (
     AudioArtifact,
+    AvatarExecutionPort,
     AvatarOutputPort,
     ConversationEvent,
     ConversationEventKind,
     ConversationInput,
     ConversationProvider,
     ControlEvent,
+    ExecutionEvent,
+    ExecutionEventKind,
+    ExecutionProvider,
     MotionOrigin,
     MotionEventKind,
     MotionLifecycleEvent,
@@ -38,12 +42,16 @@ from .contracts import (
 
 __all__ = [
     "AudioArtifact",
+    "AvatarExecutionPort",
     "AvatarOutputPort",
     "ConversationEvent",
     "ConversationEventKind",
     "ConversationInput",
     "ConversationProvider",
     "ControlEvent",
+    "ExecutionEvent",
+    "ExecutionEventKind",
+    "ExecutionProvider",
     "MotionOrigin",
     "MotionEventKind",
     "MotionLifecycleEvent",

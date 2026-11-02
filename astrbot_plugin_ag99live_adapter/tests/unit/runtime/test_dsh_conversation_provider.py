@@ -14,6 +14,7 @@ from astrbot_plugin_ag99live_adapter.adapters.astrbot.provider_bridge import (
 from astrbot_plugin_ag99live_adapter.providers.contracts import (
     ConversationEventKind,
     ConversationInput,
+    ExecutionEventKind,
 )
 
 
@@ -106,3 +107,92 @@ def test_dsh_runtime_uses_shared_avatar_output_port_for_text_segments() -> None:
     assert segment.turn_id == "dsh-runtime-1"
     assert segment.payload["text"] == {"state": "present", "content": "hello"}
     assert published[2][1].type == "control.synth_finished"
+
+
+def test_dsh_tool_events_use_execution_stream_without_becoming_conversation_text() -> None:
+    async def replies(_request):
+        yield {
+            "type": "tool/call",
+            "data": {
+                "callId": "call-1",
+                "name": "run_code",
+                "arguments": {"code": "print(1)"},
+            },
+        }
+        yield {
+            "type": "tool/result",
+            "data": {
+                "callId": "call-1",
+                "name": "run_code",
+                "content": [{"type": "text", "text": "1"}],
+            },
+        }
+
+    async def run() -> tuple[list, list]:
+        conversations = []
+        executions = []
+        provider = DshConversationProvider(
+            DshConversationCallbacks(
+                send=replies,
+                interrupt=lambda _turn_id: asyncio.sleep(0),
+                close=lambda: asyncio.sleep(0),
+            )
+        )
+        provider.subscribe(conversations.append)
+        provider.subscribe_execution(executions.append)
+        await provider.send_message(
+            ConversationInput(turn_id="dsh-execution-1", text="run it")
+        )
+        await provider.close()
+        return conversations, executions
+
+    conversations, executions = asyncio.run(run())
+    assert conversations == []
+    assert [event.kind for event in executions] == [
+        ExecutionEventKind.STARTED,
+        ExecutionEventKind.COMPLETED,
+    ]
+    assert executions[0].name == "run_code"
+    assert executions[1].output == "1"
+
+
+def test_dsh_assistant_attempt_stream_and_stop_terminal_are_conversation_facts() -> None:
+    async def replies(_request):
+        yield {
+            "type": "assistant/attempt",
+            "data": {
+                "stream": [
+                    {
+                        "type": "text-chunks",
+                        "texts": ["DSH", "_READY"],
+                    }
+                ]
+            },
+        }
+        yield {
+            "type": "turn/end",
+            "data": {"reason": {"kind": "stop"}},
+        }
+
+    async def run() -> list:
+        events = []
+        provider = DshConversationProvider(
+            DshConversationCallbacks(
+                send=replies,
+                interrupt=lambda _turn_id: asyncio.sleep(0),
+                close=lambda: asyncio.sleep(0),
+            )
+        )
+        provider.subscribe(events.append)
+        await provider.send_message(
+            ConversationInput(turn_id="dsh-assistant-attempt-1", text="hi")
+        )
+        await provider.close()
+        return events
+
+    events = asyncio.run(run())
+    assert [event.kind for event in events] == [
+        ConversationEventKind.TEXT_COMPLETED,
+        ConversationEventKind.TURN_COMPLETED,
+    ]
+    assert events[0].text == "DSH_READY"

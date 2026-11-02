@@ -18,6 +18,7 @@ import type {
   ControlTurnFinishedPayload,
   OutputSegmentPayload,
   OutputTranscriptionPayload,
+  OutputExecutionPayload,
   ProtocolEnvelope,
   SystemHistoryCreatedPayload,
   SystemHistoryDataPayload,
@@ -48,6 +49,7 @@ import {
   parseSystemDesktopPresenceRequestPayload,
   parseOutputSegmentPayload,
   parseOutputTranscriptionPayload,
+  parseOutputExecutionPayload,
   parseSemanticAxisProfileSaveFailedPayload,
   parseSemanticAxisProfileSavedPayload,
   parseSystemModelSyncPayload,
@@ -131,6 +133,7 @@ type InboundPassthroughEvent =
   | { kind: "history_data"; envelope: ProtocolEnvelope<SystemHistoryDataPayload> }
   | { kind: "history_deleted"; envelope: ProtocolEnvelope<SystemHistoryDeletedPayload> }
   | { kind: "output_transcription"; envelope: ProtocolEnvelope<OutputTranscriptionPayload> }
+  | { kind: "output_execution"; envelope: ProtocolEnvelope<OutputExecutionPayload> }
   | { kind: "control_error"; envelope: ProtocolEnvelope<ControlErrorPayload> }
   | { kind: "start_mic"; envelope: ProtocolEnvelope<unknown> }
   | {
@@ -335,6 +338,18 @@ export function mapInboundEnvelopeToEvent(
       }
       return {
         kind: "output_transcription",
+        envelope: withPayload(envelope, parsed.payload),
+      };
+    }
+    case INBOUND_MESSAGE_TYPES.OUTPUT_EXECUTION: {
+      const parsed = parseOutputExecutionPayload(envelope);
+      if (!parsed.ok) {
+        return protocolPayloadError(envelope, parsed.error);
+      }
+      const turnId = requireTurnId(envelope);
+      if (!turnId.ok) return turnId.event;
+      return {
+        kind: "output_execution",
         envelope: withPayload(envelope, parsed.payload),
       };
     }
