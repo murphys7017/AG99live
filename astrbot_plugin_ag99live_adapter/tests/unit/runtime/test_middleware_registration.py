@@ -605,7 +605,7 @@ def test_independent_motion_segment_results_preserve_speech_indexes(
 
 
 @pytest.mark.parametrize(
-    ("matched_snapshot", "expected_step"),
+    ("matched_snapshot", "expected_state"),
     [
         (
             {
@@ -614,16 +614,16 @@ def test_independent_motion_segment_results_preserve_speech_indexes(
                 "behavior": {"engagement": 0.5},
                 "last_tendency": {"Joy": 8},
             },
-            7,
+            True,
         ),
-        (None, None),
+        (None, False),
     ],
 )
 def test_segment_motion_reads_current_neurobrain_state(
     install_fake_astrbot,
     monkeypatch,
     matched_snapshot,
-    expected_step,
+    expected_state,
 ) -> None:
     _install_middleware_astrbot_stubs(install_fake_astrbot, monkeypatch)
     module = importlib.import_module(
@@ -707,10 +707,13 @@ def test_segment_motion_reads_current_neurobrain_state(
 
     assert len(prompts) == 2
     for prompt in prompts:
-        if expected_step is None:
+        if not expected_state:
             assert "neurobrain_state" not in prompt
         else:
-            assert prompt["neurobrain_state"]["step"] == expected_step
+            assert prompt["neurobrain_state"]["emotion"]["joy"] == 0.7
+            assert prompt["neurobrain_state"]["behavior"]["engagement"] == 0.5
+            assert "step" not in prompt["neurobrain_state"]
+            assert "last_tendency" not in prompt["neurobrain_state"]
 
 
 def test_persona_hook_cancellation_reaches_segment_provider_requests(

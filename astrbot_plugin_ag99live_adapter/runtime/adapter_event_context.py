@@ -114,7 +114,13 @@ def resolve_adapter_event_context(event: Any) -> AdapterEventContext:
     context = getattr(event, "_adapter_event_context", None)
     if not isinstance(context, AdapterEventContext):
         context = AdapterEventContext()
-        setattr(event, "_adapter_event_context", context)
+        # A few provider/test boundaries pass opaque or slot-only objects.
+        # They cannot retain adapter state, but they can still be used for a
+        # read-only operation that only needs the current context snapshot.
+        try:
+            setattr(event, "_adapter_event_context", context)
+        except (AttributeError, TypeError):
+            pass
 
     getter = getattr(event, "get_extra", None)
     if callable(getter):

@@ -121,6 +121,12 @@ class PerformanceCurveRuntime:
             return False
         if key in self._requested_keys:
             return False
+        provider = getattr(self.runtime_state, "selected_performance_curve_provider", None)
+        if provider is not None and not supports_text_chat_stream(provider):
+            # A legacy final-only provider cannot serve this stream-only
+            # feature. Treat the request as handled, but do not retain an
+            # ownership record that could block the next segment.
+            return True
         self._requested_keys.add(key)
 
         self._record_event(

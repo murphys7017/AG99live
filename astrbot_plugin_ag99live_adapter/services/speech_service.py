@@ -242,7 +242,7 @@ class SpeechIngressService:
         self._completed_transcription_turns = 0
 
     def _create_streaming_asr(self) -> StreamingASR | None:
-        if not self.runtime_state.fast_asr_enabled:
+        if not bool(getattr(self.runtime_state, "fast_asr_enabled", False)):
             return None
         template_key = (
             self.runtime_state.fast_asr_model_dir,
@@ -270,13 +270,13 @@ class SpeechIngressService:
         return session
 
     async def _create_streaming_asr_session(self) -> StreamingASR | None:
-        if not self.runtime_state.fast_asr_enabled:
+        if not bool(getattr(self.runtime_state, "fast_asr_enabled", False)):
             return None
         async with self._streaming_asr_creation_lock:
             return await asyncio.to_thread(self._create_streaming_asr)
 
     async def prewarm_streaming_asr(self) -> None:
-        if not self.runtime_state.fast_asr_enabled:
+        if not bool(getattr(self.runtime_state, "fast_asr_enabled", False)):
             return
         try:
             await self._create_streaming_asr_session()
@@ -533,7 +533,7 @@ class SpeechIngressService:
                     )
                 stream.chunks.clear()
                 return
-        if self.runtime_state.fast_asr_enabled:
+        if bool(getattr(self.runtime_state, "fast_asr_enabled", False)):
             # Preserve real PCM on failure; end must report an ASR error, not
             # mistake a nonempty recording for an empty microphone capture.
             return
@@ -590,7 +590,23 @@ class SpeechIngressService:
                 stream.transcription_task.cancel()
                 tasks.append(stream.transcription_task)
             if tasks:
-                await asyncio.gather(*tasks, return_exceptions=True)
+                current_loop = asyncio.get_running_loop()
+                awaitable_tasks = []
+                for task in tasks:
+                    try:
+                        task_loop = task.get_loop()
+                    except RuntimeError:
+                        continue
+                    if task_loop is current_loop:
+                        awaitable_tasks.append(task)
+                    else:
+                        # A direct caller may hand a stream across event-loop
+                        # boundaries (unit tests and embedded hosts do this).
+                        # It is already cancelled; a closed foreign loop cannot
+                        # be awaited from this loop.
+                        task.cancel()
+                if awaitable_tasks:
+                    await asyncio.gather(*awaitable_tasks, return_exceptions=True)
 
     async def _finish_audio_stream(self, message, stream, stream_id):
         payload = message.payload
@@ -699,7 +715,7 @@ class SpeechIngressService:
                 sample_rate=stream.sample_rate,
                 stream_id=stream_id,
             )
-        if self.runtime_state.fast_asr_enabled:
+        if bool(getattr(self.runtime_state, "fast_asr_enabled", False)):
             await self._emit_input_error(
                 turn_id=message.turn_id,
                 error_message="Local streaming speech recognition did not produce text.",
@@ -1168,7 +1184,7 @@ class SpeechIngressService:
                     stream_id=message.stream_id,
                 )
 
-        if self.runtime_state.fast_asr_enabled:
+        if bool(getattr(self.runtime_state, "fast_asr_enabled", False)):
             await self._emit_input_error(
                 turn_id=vad_turn_id,
                 error_message="Local streaming speech recognition did not produce text.",

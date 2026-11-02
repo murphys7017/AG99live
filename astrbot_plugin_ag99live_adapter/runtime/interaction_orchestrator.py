@@ -793,7 +793,12 @@ class InteractionOrchestrator:
             if source == "conversation" and isinstance(value, ConversationEvent)
             else None
         )
-        if sink is None and event_assembler is None:
+        execution_publisher = (
+            getattr(self.output_port, "publish_execution", None)
+            if source == "execution" and isinstance(value, ExecutionEvent)
+            else None
+        )
+        if sink is None and event_assembler is None and not callable(execution_publisher):
             return None
 
         async def deliver() -> None:
@@ -801,10 +806,8 @@ class InteractionOrchestrator:
                 handle_event = getattr(event_assembler, "handle_event", None)
                 if callable(handle_event):
                     await _await_handler(handle_event(value))
-            if source == "execution" and isinstance(value, ExecutionEvent):
-                publish_execution = getattr(self.output_port, "publish_execution", None)
-                if callable(publish_execution):
-                    await _await_handler(publish_execution(value))
+            if callable(execution_publisher):
+                await _await_handler(execution_publisher(value))
             if sink is not None:
                 result = sink(ProviderEvent(source=source, value=value))  # type: ignore[arg-type]
                 await _await_handler(result)

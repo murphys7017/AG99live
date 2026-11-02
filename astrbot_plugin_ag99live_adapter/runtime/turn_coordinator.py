@@ -587,7 +587,10 @@ class TurnCoordinator:
             self._active_vad_turn_by_capture_turn.clear()
             self._active_speech_capture_turns.clear()
             self.motion_observations.reset()
-            self.runtime_state.persona_sessions.reset()
+            persona_sessions = getattr(self.runtime_state, "persona_sessions", None)
+            reset_persona_sessions = getattr(persona_sessions, "reset", None)
+            if callable(reset_persona_sessions):
+                reset_persona_sessions()
 
         if cleanup_failures:
             raise RuntimeError(

@@ -46,6 +46,14 @@ _BEHAVIOR_KEYS = (
     "initiative",
     "activation",
 )
+
+
+async def _discard_passive_output(_message: dict[str, Any]) -> bool:
+    """Keep direct unit/test construction side-effect free without a sender."""
+
+    return False
+
+
 class PassiveBehaviorRuntime:
     """Run the OLV-only NeuroBrain action stream independently of chat Turns."""
 
@@ -56,13 +64,13 @@ class PassiveBehaviorRuntime:
         session_state: Any,
         turn_coordinator: Any,
         is_desktop_connected: Callable[[], bool],
-        send_json: Callable[[dict[str, Any]], Awaitable[bool]],
+        send_json: Callable[[dict[str, Any]], Awaitable[bool]] | None = None,
     ) -> None:
         self.runtime_state = runtime_state
         self.session_state = session_state
         self.turn_coordinator = turn_coordinator
         self.is_desktop_connected = is_desktop_connected
-        self._send_json = send_json
+        self._send_json = send_json or _discard_passive_output
         self._task: asyncio.Task[None] | None = None
         self._active_stream_task: asyncio.Task[None] | None = None
         self._stopping = False

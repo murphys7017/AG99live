@@ -1,7 +1,7 @@
 dual_conversation_platform_dsh_execution_20261102:
   class: feature
   risk: high
-  status: source_reviewed_dsh_configured_astrbot_active
+  status: source_reviewed_protocol_chain_smoke_pending_live_dsh
   scope: >-
     Add a selectable conversation platform with AstrBot as the unchanged default
     and DeepSeek Harness as a local stdio JSON-RPC ConversationProvider. DSH
@@ -10,21 +10,17 @@ dual_conversation_platform_dsh_execution_20261102:
     output.execution.v1 presentation event. Existing AstrBot composition and
     output.segment.v6 behavior remain the default path.
   validation: >-
-    Focused Python provider/orchestrator/output/turn tests pass (18 tests),
-    Python compileall, scoped Ruff, protocol schema manifest check and diff
-    whitespace checks pass. Renderer vue-tsc typecheck passes and the AstrBot
-    plugin checker reports zero errors. A temporary fake DSH JSON-RPC process
-    smoke test completed initialize, prompt notifications, assistant and
-    turn-end delivery. The real DSH sdk profile initializes successfully with
-    the configured ttds route.
+    Focused DSH provider/orchestrator/middleware tests pass (35 tests),
+    including real SessionEvent tool/result and PTC sub-call envelopes through
+    output.execution and final output.segment delivery. Python compileall,
+    protocol schema manifest, and diff whitespace checks pass. Existing
+    renderer typecheck and plugin checks remain recorded from the prior slice.
   limitations: >-
-    The stored credential for the configured real DSH route is rejected with an
-    AUTH terminal result, so AstrBot remains the active platform in the local
-    runtime config until credentials are refreshed. Code-execution approval
-    policy, TTS/Live2D joint playback, reconnect and production frontend
-    acceptance are not yet run. Platform switching is composition-time and
-    requires an adapter restart; saving the setting while a platform is live
-    logs that requirement.
+    No dsh executable is available in this workspace, so a live SDK process,
+    credential, approval policy, TTS/Live2D joint playback, reconnect, and
+    production frontend acceptance remain unverified. Platform switching is
+    composition-time and requires an adapter restart; saving the setting while
+    a platform is live logs that requirement.
 
 motion_provider_stream_output_bound_20261101:
   class: bugfix

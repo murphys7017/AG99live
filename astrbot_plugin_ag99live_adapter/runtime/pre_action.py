@@ -28,6 +28,24 @@ from ..prompts.semantic_axis_prompt import (
 from ..protocol.parser import build_message_envelope
 
 
+def _fallback_persona_motion_prompt(prompt: str) -> str:
+    """Project legacy persona text when newer AstrBot prompt helpers are absent."""
+
+    relation_headings = {"身份与关系", "关系", "对话关系"}
+    retained: list[str] = []
+    skip_relation = False
+    for raw_line in str(prompt or "").splitlines():
+        line = raw_line.strip()
+        if line in relation_headings:
+            skip_relation = True
+            continue
+        if line and not line.startswith(("-", "•")):
+            skip_relation = False
+        if not skip_relation:
+            retained.append(raw_line)
+    return "\n".join(retained).strip()
+
+
 class PreActionRuntime:
     def __init__(self, *, runtime_state, send_json, build_event) -> None:
         self.state = runtime_state
@@ -92,8 +110,14 @@ class PreActionRuntime:
                 logger.debug("Pre-action cancellation delivery failed: %s", exc)
 
     async def _prepare(self) -> dict[str, Any]:
-        from astrbot.core.persona_resolution import resolve_event_persona
-        from astrbot.core.prompt.persona_segments import build_persona_motion_prompt
+        try:
+            from astrbot.core.persona_resolution import resolve_event_persona
+        except ImportError:
+            resolve_event_persona = None
+        try:
+            from astrbot.core.prompt.persona_segments import build_persona_motion_prompt
+        except ImportError:
+            build_persona_motion_prompt = _fallback_persona_motion_prompt
 
         context = self.state.plugin_context
         event = self.build_event()
@@ -107,13 +131,35 @@ class PreActionRuntime:
             if conversation_id
             else None
         )
-        resolution = await resolve_event_persona(
-            event=event,
-            persona_manager=context.persona_manager,
-            conversation_persona_id=getattr(conversation, "persona_id", None),
-            provider_settings=config.get("provider_settings", {}),
-        )
-        persona = resolution.persona or {}
+        if resolve_event_persona is not None:
+            resolution = await resolve_event_persona(
+                event=event,
+                persona_manager=context.persona_manager,
+                conversation_persona_id=getattr(conversation, "persona_id", None),
+                provider_settings=config.get("provider_settings", {}),
+            )
+            persona = resolution.persona or {}
+            persona_id = resolution.persona_id
+        else:
+            legacy_resolver = getattr(
+                getattr(context, "persona_manager", None),
+                "resolve_selected_persona",
+                None,
+            )
+            if not callable(legacy_resolver):
+                raise RuntimeError("pre_action_persona_resolution_unavailable")
+            legacy = await legacy_resolver(
+                event=event,
+                umo=umo,
+                conversation=conversation,
+                provider_settings=config.get("provider_settings", {}),
+            )
+            if isinstance(legacy, tuple):
+                persona_id = str(legacy[0] or "").strip()
+                persona = legacy[1] if isinstance(legacy[1], dict) else {}
+            else:
+                persona_id = ""
+                persona = legacy if isinstance(legacy, dict) else {}
         settings = self.state.plugin_config.get("pre_action", {})
         core = str(settings.get("character_core", "") or "").strip()
         if not core:
@@ -122,7 +168,7 @@ class PreActionRuntime:
             raise ValueError("pre_action_character_core_unavailable")
         return {
             "character_core": core,
-            "persona_id": resolution.persona_id,
+            "persona_id": persona_id,
             "umo": umo,
             "settings": dict(settings),
         }
