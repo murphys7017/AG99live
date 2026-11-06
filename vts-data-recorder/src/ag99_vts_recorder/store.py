@@ -436,7 +436,233 @@ class RecorderStore:
                 for event in event_rows
             ],
             "sampling_report": _decode_json(row["sampling_report_json"]),
+            "annotation": self.get_annotation(take_id),
         }
+
+    def get_annotation(self, take_id: int) -> dict[str, Any] | None:
+        row = self._connection.execute(
+            """
+            SELECT review_status, context_json, target_json, derivation_version,
+                   reviewed_at_utc, reviewer_note
+            FROM take_annotations WHERE take_id = ?
+            """,
+            (take_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "review_status": row["review_status"],
+            "context": _decode_json(row["context_json"]),
+            "target": _decode_json(row["target_json"]),
+            "derivation_version": row["derivation_version"],
+            "reviewed_at_utc": row["reviewed_at_utc"],
+            "reviewer_note": row["reviewer_note"],
+        }
+
+    def save_annotation(
+        self,
+        take_id: int,
+        *,
+        review_status: str,
+        context: Mapping[str, Any] | None,
+        target: Mapping[str, Any] | None,
+        reviewer_note: str | None,
+        derivation_version: str = "manual.v1",
+    ) -> None:
+        allowed = {"draft", "accepted", "rejected", "needs_review"}
+        if review_status not in allowed:
+            raise ValueError(f"review_status must be one of: {', '.join(sorted(allowed))}")
+        with self._connection:
+            cursor = self._connection.execute(
+                """
+                INSERT INTO take_annotations (
+                    take_id, review_status, context_json, target_json,
+                    derivation_version, reviewed_at_utc, reviewer_note
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(take_id) DO UPDATE SET
+                    review_status = excluded.review_status,
+                    context_json = excluded.context_json,
+                    target_json = excluded.target_json,
+                    derivation_version = excluded.derivation_version,
+                    reviewed_at_utc = excluded.reviewed_at_utc,
+                    reviewer_note = excluded.reviewer_note
+                """,
+                (
+                    take_id,
+                    review_status,
+                    _json(context) if context is not None else None,
+                    _json(target) if target is not None else None,
+                    derivation_version,
+                    _utc_now(),
+                    reviewer_note.strip() if reviewer_note else None,
+                ),
+            )
+        _require_row(cursor, "recording take", take_id)
+
+    def save_audio_source(
+        self,
+        take_id: int,
+        *,
+        path: str,
+        sample_rate: int,
+        channels: int,
+        encoding: str = "pcm_s16le",
+    ) -> None:
+        with self._connection:
+            cursor = self._connection.execute(
+                """
+                INSERT INTO recording_audio_sources (
+                    take_id, path, sample_rate, channels, encoding
+                ) VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(take_id) DO UPDATE SET
+                    path = excluded.path,
+                    sample_rate = excluded.sample_rate,
+                    channels = excluded.channels,
+                    encoding = excluded.encoding
+                """,
+                (take_id, path, sample_rate, channels, encoding),
+            )
+        _require_row(cursor, "recording take", take_id)
+
+    def update_audio_start_offset(self, take_id: int, *, start_offset_ns: int) -> None:
+        with self._connection:
+            cursor = self._connection.execute(
+                "UPDATE recording_audio_sources SET start_offset_ns = ? WHERE take_id = ?",
+                (max(start_offset_ns, 0), take_id),
+            )
+        _require_row(cursor, "recording take audio source", take_id)
+
+    def append_transcript_event(
+        self,
+        take_id: int,
+        *,
+        kind: str,
+        text: str,
+        audio_start_offset_ns: int,
+        audio_end_offset_ns: int,
+        emitted_offset_ns: int,
+        revision: int,
+        model: str,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> int:
+        if kind not in {"partial", "final", "error"}:
+            raise ValueError("transcript event kind must be partial, final, or error")
+        with self._connection:
+            cursor = self._connection.execute(
+                """
+                INSERT INTO recording_transcript_events (
+                    take_id, sequence_no, kind, text,
+                    audio_start_offset_ns, audio_end_offset_ns,
+                    emitted_offset_ns, revision, model, metadata_json
+                )
+                SELECT ?, COALESCE(MAX(sequence_no), -1) + 1, ?, ?, ?, ?, ?, ?, ?, ?
+                FROM recording_transcript_events WHERE take_id = ?
+                """,
+                (
+                    take_id,
+                    kind,
+                    text,
+                    max(audio_start_offset_ns, 0),
+                    max(audio_end_offset_ns, 0),
+                    max(emitted_offset_ns, 0),
+                    max(revision, 0),
+                    model,
+                    _json(metadata) if metadata is not None else None,
+                    take_id,
+                ),
+            )
+        return _last_row_id(cursor)
+
+    def export_take(self, take_id: int) -> dict[str, Any] | None:
+        take = self.inspect_take(take_id)
+        if take is None:
+            return None
+        catalog_rows = self._connection.execute(
+            """
+            SELECT source, parameter_name, min_value, max_value, default_value,
+                   captured_at_utc, definition_json
+            FROM parameter_catalog_snapshots
+            WHERE session_id = ?
+            ORDER BY source, parameter_name
+            """,
+            (take["session_id"],),
+        ).fetchall()
+        take["parameter_catalog"] = [
+            {
+                "source": row["source"],
+                "name": row["parameter_name"],
+                "min": row["min_value"],
+                "max": row["max_value"],
+                "default": row["default_value"],
+                "captured_at_utc": row["captured_at_utc"],
+                "definition": _decode_json(row["definition_json"]),
+            }
+            for row in catalog_rows
+        ]
+        rows = self._connection.execute(
+            """
+            SELECT source, sequence_no, scheduled_offset_ns, sent_offset_ns,
+                   received_offset_ns, vts_timestamp_ms, model_id, values_json
+            FROM parameter_frames WHERE take_id = ? ORDER BY source, sequence_no
+            """,
+            (take_id,),
+        ).fetchall()
+        take["frames"] = [
+            {
+                "source": row["source"],
+                "sequence_no": int(row["sequence_no"]),
+                "scheduled_offset_ns": int(row["scheduled_offset_ns"]),
+                "sent_offset_ns": int(row["sent_offset_ns"]),
+                "received_offset_ns": int(row["received_offset_ns"]),
+                "vts_timestamp_ms": row["vts_timestamp_ms"],
+                "model_id": row["model_id"],
+                "values": _decode_json(row["values_json"]),
+            }
+            for row in rows
+        ]
+        audio_row = self._connection.execute(
+            """
+            SELECT path, sample_rate, channels, encoding, start_offset_ns
+            FROM recording_audio_sources WHERE take_id = ?
+            """,
+            (take_id,),
+        ).fetchone()
+        take["audio"] = (
+            {
+                "path": audio_row["path"],
+                "sample_rate": int(audio_row["sample_rate"]),
+                "channels": int(audio_row["channels"]),
+                "encoding": audio_row["encoding"],
+                "start_offset_ns": int(audio_row["start_offset_ns"]),
+            }
+            if audio_row is not None
+            else None
+        )
+        transcript_rows = self._connection.execute(
+            """
+            SELECT sequence_no, kind, text, audio_start_offset_ns,
+                   audio_end_offset_ns, emitted_offset_ns, revision, model,
+                   metadata_json
+            FROM recording_transcript_events
+            WHERE take_id = ? ORDER BY sequence_no
+            """,
+            (take_id,),
+        ).fetchall()
+        take["transcript_events"] = [
+            {
+                "sequence_no": int(row["sequence_no"]),
+                "kind": row["kind"],
+                "text": row["text"],
+                "audio_start_offset_ns": int(row["audio_start_offset_ns"]),
+                "audio_end_offset_ns": int(row["audio_end_offset_ns"]),
+                "emitted_offset_ns": int(row["emitted_offset_ns"]),
+                "revision": int(row["revision"]),
+                "model": row["model"],
+                "metadata": _decode_json(row["metadata_json"]),
+            }
+            for row in transcript_rows
+        ]
+        return take
 
     def delete_take(self, take_id: int) -> bool:
         with self._connection:
@@ -543,6 +769,30 @@ class RecorderStore:
                     data_json TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS recording_audio_sources (
+                    take_id INTEGER PRIMARY KEY REFERENCES recording_takes(id) ON DELETE CASCADE,
+                    path TEXT NOT NULL,
+                    sample_rate INTEGER NOT NULL,
+                    channels INTEGER NOT NULL,
+                    encoding TEXT NOT NULL,
+                    start_offset_ns INTEGER NOT NULL DEFAULT 0
+                );
+
+                CREATE TABLE IF NOT EXISTS recording_transcript_events (
+                    id INTEGER PRIMARY KEY,
+                    take_id INTEGER NOT NULL REFERENCES recording_takes(id) ON DELETE CASCADE,
+                    sequence_no INTEGER NOT NULL,
+                    kind TEXT NOT NULL,
+                    text TEXT NOT NULL,
+                    audio_start_offset_ns INTEGER NOT NULL,
+                    audio_end_offset_ns INTEGER NOT NULL,
+                    emitted_offset_ns INTEGER NOT NULL,
+                    revision INTEGER NOT NULL,
+                    model TEXT NOT NULL,
+                    metadata_json TEXT,
+                    UNIQUE(take_id, sequence_no)
+                );
+
                 CREATE TABLE IF NOT EXISTS take_annotations (
                     take_id INTEGER PRIMARY KEY REFERENCES recording_takes(id) ON DELETE CASCADE,
                     review_status TEXT NOT NULL DEFAULT 'draft',
@@ -557,8 +807,21 @@ class RecorderStore:
                     ON parameter_frames(take_id, source, sequence_no);
                 CREATE INDEX IF NOT EXISTS recording_events_take_idx
                     ON recording_events(take_id, id);
+                CREATE INDEX IF NOT EXISTS recording_transcript_events_take_idx
+                    ON recording_transcript_events(take_id, sequence_no);
                 """
             )
+            audio_columns = {
+                str(column["name"])
+                for column in self._connection.execute(
+                    "PRAGMA table_info(recording_audio_sources)"
+                ).fetchall()
+            }
+            if "start_offset_ns" not in audio_columns:
+                self._connection.execute(
+                    "ALTER TABLE recording_audio_sources "
+                    "ADD COLUMN start_offset_ns INTEGER NOT NULL DEFAULT 0"
+                )
             row = self._connection.execute(
                 "SELECT value FROM recorder_schema_metadata WHERE key = 'schema_version'"
             ).fetchone()

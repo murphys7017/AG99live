@@ -93,6 +93,43 @@ def test_recording_store_persists_inspects_and_deletes_a_take(tmp_path) -> None:
         assert inspected["frame_counts"] == {"live2d_parameter": 1, "tracking_input": 1}
         assert inspected["events"][0]["type"] == "TrackingStatusChangedEvent"
         assert inspected["session"]["model_id"] == "model-id"
+        assert inspected["annotation"] is None
+
+        store.save_annotation(
+            take_id,
+            review_status="accepted",
+            context={"prompt": "摇头后恢复", "action_kind": "motion_steps"},
+            target={"motion_steps": [{"axis": "head_yaw", "level": 0.5}]},
+            reviewer_note="可用于序列动作训练",
+        )
+        store.save_audio_source(
+            take_id,
+            path="audio/take-1.wav",
+            sample_rate=16000,
+            channels=1,
+        )
+        store.append_transcript_event(
+            take_id,
+            kind="final",
+            text="摇头后恢复",
+            audio_start_offset_ns=0,
+            audio_end_offset_ns=1_500_000_000,
+            emitted_offset_ns=1_600_000_000,
+            revision=1,
+            model="test-stt",
+        )
+        annotated = store.inspect_take(take_id)
+        assert annotated is not None
+        assert annotated["annotation"]["context"]["action_kind"] == "motion_steps"
+        exported = store.export_take(take_id)
+        assert exported is not None
+        assert len(exported["frames"]) == 2
+        assert exported["audio"]["sample_rate"] == 16000
+        assert exported["transcript_events"][0]["text"] == "摇头后恢复"
+        assert {item["name"] for item in exported["parameter_catalog"]} == {
+            "FaceAngleX",
+            "ParamAngleX",
+        }
 
         assert store.delete_take(take_id) is True
         assert store.inspect_take(take_id) is None

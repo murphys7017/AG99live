@@ -66,19 +66,24 @@ async def sample_parameters(
     client: VTSClient,
     *,
     hz: float,
-    seconds: float,
+    seconds: float | None,
     known_model_id: str | None,
     on_progress: Callable[[SamplingProgress], None] | None = None,
     on_batch: Callable[[list[ProbeSample], list[SamplingEvent]], None] | None = None,
+    stop_event: asyncio.Event | None = None,
 ) -> SamplingResult:
     if hz <= 0 or hz > 30:
         raise ValueError("hz must be greater than 0 and no greater than 30 for this probe")
-    if seconds <= 0:
+    if seconds is not None and seconds <= 0:
         raise ValueError("seconds must be greater than 0")
 
     period_ns = int(1_000_000_000 / hz)
     start_ns = time.monotonic_ns()
-    deadline_ns = start_ns + int(seconds * 1_000_000_000)
+    deadline_ns = (
+        start_ns + int(seconds * 1_000_000_000)
+        if seconds is not None
+        else None
+    )
     scheduled_ns = start_ns
     skipped_schedule_slots = 0
     samples: list[ProbeSample] = []
@@ -91,7 +96,10 @@ async def sample_parameters(
     client.drain_events()
 
     try:
-        while scheduled_ns < deadline_ns:
+        while deadline_ns is None or scheduled_ns < deadline_ns:
+            if stop_event is not None and stop_event.is_set():
+                interrupted = True
+                break
             now_ns = time.monotonic_ns()
             if now_ns < scheduled_ns:
                 await asyncio.sleep((scheduled_ns - now_ns) / 1_000_000_000)
@@ -144,7 +152,7 @@ async def sample_parameters(
                 on_progress(
                     SamplingProgress(
                         elapsed_seconds=(now_ns - start_ns) / 1_000_000_000,
-                        target_seconds=seconds,
+                        target_seconds=seconds if seconds is not None else 0.0,
                         sample_count=len(samples),
                         error_count=len(errors),
                         skipped_schedule_slots=skipped_schedule_slots,

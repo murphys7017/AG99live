@@ -12,6 +12,23 @@ dependencies = [
   "websockets>=15,<16",
 ]
 
+[project.optional-dependencies]
+recording = [
+  "numpy>=1.24",
+  "sounddevice>=0.5",
+]
+stt = [
+  "numpy>=1.24",
+  "sherpa-onnx>=1.10",
+  "sherpa-onnx-bin>=1.10",
+]
+live = [
+  "numpy>=1.24",
+  "sounddevice>=0.5",
+  "sherpa-onnx>=1.10",
+  "sherpa-onnx-bin>=1.10",
+]
+
 [project.scripts]
 ag99-vts-recorder = "ag99_vts_recorder.cli:main"
 
