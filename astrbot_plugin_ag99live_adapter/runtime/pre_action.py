@@ -230,7 +230,7 @@ class PreActionRuntime:
                 settings = snapshot["settings"]
                 if settings.get("enabled", True) is not True:
                     return
-                provider = self.state.selected_independent_motion_provider
+                provider = self.state.selected_pre_action_provider
                 if provider is None:
                     raise ValueError("pre_action_provider_unavailable")
                 profile = resolve_selected_semantic_axis_profile(
@@ -266,9 +266,12 @@ class PreActionRuntime:
                     0, 800 - (time.monotonic() - started) * 1000
                 )
                 logger.info(
-                    "DIAG latency.pre_action_request turn_id=%s request_id=%s preparation_ms=%.1f prompt_chars=%s timestamp_epoch_ms=%s",
+                    "DIAG latency.pre_action_request turn_id=%s request_id=%s provider_id=%s preparation_ms=%.1f prompt_chars=%s timestamp_epoch_ms=%s",
                     turn_id,
                     request_id,
+                    self.state.pre_action_provider_id
+                    or self.state.independent_motion_provider_id
+                    or "<fallback>",
                     (time.monotonic() - started) * 1000,
                     len(prompt),
                     time.time_ns() // 1_000_000,
@@ -308,9 +311,8 @@ class PreActionRuntime:
                     if self.turn_id != turn_id or self.request_id != request_id:
                         return
                     if (
-                        not self.state.independent_motion_enabled
-                        or provider
-                        is not self.state.selected_independent_motion_provider
+                        not self.state.pre_action_enabled
+                        or provider is not self.state.selected_pre_action_provider
                         or settings != self.state.plugin_config.get("pre_action", {})
                     ):
                         raise ValueError("pre_action_configuration_changed")

@@ -113,6 +113,8 @@ class RuntimeState:
         self.enable_performance_curve = False
         self.independent_motion_enabled = False
         self.independent_motion_provider_id = ""
+        self.pre_action_enabled = True
+        self.pre_action_provider_id = ""
         self.independent_motion_shadow_enabled = False
         self.independent_motion_shadow_provider_id = ""
         self.independent_motion_shadow_timeout_seconds = 5.0
@@ -172,6 +174,7 @@ class RuntimeState:
         self.image_cooldown_seconds = 0
         self.selected_performance_curve_provider: Any | None = None
         self.selected_independent_motion_provider: Any | None = None
+        self.selected_pre_action_provider: Any | None = None
         self.selected_independent_motion_shadow_provider: Any | None = None
         self.selected_passive_behavior_provider: Any | None = None
         self.performance_curve_runtime = PerformanceCurveRuntime(runtime_state=self)
@@ -217,6 +220,8 @@ class RuntimeState:
         previous_enable_performance_curve = self.enable_performance_curve
         previous_independent_motion_provider_id = self.independent_motion_provider_id
         previous_independent_motion_enabled = self.independent_motion_enabled
+        previous_pre_action_provider_id = self.pre_action_provider_id
+        previous_pre_action_enabled = self.pre_action_enabled
         previous_independent_motion_shadow_provider_id = (
             self.independent_motion_shadow_provider_id
         )
@@ -240,6 +245,11 @@ class RuntimeState:
         independent_motion_config = get_config_value(
             self.plugin_config,
             "independent_motion",
+            {},
+        )
+        pre_action_config = get_config_value(
+            self.plugin_config,
+            "pre_action",
             {},
         )
         passive_behavior_config = get_config_value(
@@ -286,6 +296,12 @@ class RuntimeState:
             self._registered_persona_effect_enabled = persona_effect_enabled
         self.independent_motion_provider_id = str(
             get_config_value(independent_motion_config, "provider_id", "") or ""
+        ).strip()
+        self.pre_action_enabled = bool(
+            get_config_value(pre_action_config, "enabled", True)
+        )
+        self.pre_action_provider_id = str(
+            get_config_value(pre_action_config, "provider_id", "") or ""
         ).strip()
         self.independent_motion_shadow_enabled = bool(
             get_config_value(independent_motion_config, "shadow_enabled", False)
@@ -526,6 +542,8 @@ class RuntimeState:
             or previous_independent_motion_provider_id
             != self.independent_motion_provider_id
             or previous_independent_motion_enabled != self.independent_motion_enabled
+            or previous_pre_action_provider_id != self.pre_action_provider_id
+            or previous_pre_action_enabled != self.pre_action_enabled
             or previous_independent_motion_shadow_provider_id
             != self.independent_motion_shadow_provider_id
             or previous_independent_motion_shadow_enabled
@@ -550,6 +568,14 @@ class RuntimeState:
             or (
                 not self.independent_motion_enabled
                 and self.selected_independent_motion_provider is not None
+            )
+            or (
+                self.pre_action_enabled
+                and self.selected_pre_action_provider is None
+            )
+            or (
+                not self.pre_action_enabled
+                and self.selected_pre_action_provider is not None
             )
             or (
                 self.independent_motion_shadow_enabled
@@ -579,6 +605,7 @@ class RuntimeState:
             )
             self.selected_performance_curve_provider = None
             self.selected_independent_motion_provider = None
+            self.selected_pre_action_provider = None
             self.selected_independent_motion_shadow_provider = None
             self.selected_passive_behavior_provider = None
             self.load_selected_providers()
@@ -635,6 +662,34 @@ class RuntimeState:
                     "Independent motion generation is enabled but provider `%s` "
                     "is not available; this turn will not use the independent motion path.",
                     self.independent_motion_provider_id or "<empty>",
+                )
+
+        if self.pre_action_enabled:
+            provider = None
+            if self.pre_action_provider_id:
+                provider = self.provider_registry.get_chat_provider(
+                    self.pre_action_provider_id
+                )
+                if provider is not None:
+                    self.selected_pre_action_provider = provider
+                    logger.info(
+                        "Loaded pre-action provider from plugin config: %s",
+                        self.pre_action_provider_id,
+                    )
+            else:
+                provider = self.selected_independent_motion_provider
+                if provider is not None:
+                    self.selected_pre_action_provider = provider
+                    logger.info(
+                        "Pre-action provider is not configured; falling back to independent motion provider: %s",
+                        self.independent_motion_provider_id or "<empty>",
+                    )
+            if provider is None:
+                logger.warning(
+                    "Pre-action is enabled but provider `%s` is not available; pre-action is paused.",
+                    self.pre_action_provider_id
+                    or self.independent_motion_provider_id
+                    or "<empty>",
                 )
 
         if self.independent_motion_shadow_enabled:
