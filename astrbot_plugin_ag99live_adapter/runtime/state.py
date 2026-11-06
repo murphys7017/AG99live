@@ -43,7 +43,11 @@ from .client_profile import (
 from .motion_lab import MotionLabRawEventStore, MotionLabRecorder
 from .motion_state import MotionTuningStore
 from .persona_lifecycle import PersonaTurnSessionRegistry
-from .plugin_runtime import PluginConfigSnapshot, get_config_value
+from .plugin_runtime import (
+    DEFAULT_PRE_ACTION_PROVIDER_ID,
+    PluginConfigSnapshot,
+    get_config_value,
+)
 
 LIVE2D_SCAN_CACHE_VERSION = "live2d_scan_cache.v3"
 
@@ -114,7 +118,7 @@ class RuntimeState:
         self.independent_motion_enabled = False
         self.independent_motion_provider_id = ""
         self.pre_action_enabled = True
-        self.pre_action_provider_id = ""
+        self.pre_action_provider_id = DEFAULT_PRE_ACTION_PROVIDER_ID
         self.independent_motion_shadow_enabled = False
         self.independent_motion_shadow_provider_id = ""
         self.independent_motion_shadow_timeout_seconds = 5.0
@@ -301,7 +305,12 @@ class RuntimeState:
             get_config_value(pre_action_config, "enabled", True)
         )
         self.pre_action_provider_id = str(
-            get_config_value(pre_action_config, "provider_id", "") or ""
+            get_config_value(
+                pre_action_config,
+                "provider_id",
+                DEFAULT_PRE_ACTION_PROVIDER_ID,
+            )
+            or ""
         ).strip()
         self.independent_motion_shadow_enabled = bool(
             get_config_value(independent_motion_config, "shadow_enabled", False)

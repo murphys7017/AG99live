@@ -19,6 +19,10 @@ _control_platforms: dict[str, Any] = {}
 ADAPTER_PLATFORM_NAME = "olv_pet_adapter"
 ADAPTER_DISPLAY_NAME = "AG99live 桌宠适配器"
 PLUGIN_CONFIG_BASENAME = "astrbot_plugin_ag99live_adapter_config.json"
+# Keep the pre-action model lightweight by default. The control page still
+# exposes this as an override, and deployments may set an empty value to use
+# the legacy independent-motion fallback.
+DEFAULT_PRE_ACTION_PROVIDER_ID = "ollama/qwen3:1.7b"
 _RETIRED_PLUGIN_CONFIG_PATHS = {
     "independent_motion": ("per_speech_segment", "segment_stream_enabled"),
     "desktop_observation": ("provider_id", "timeout_seconds"),

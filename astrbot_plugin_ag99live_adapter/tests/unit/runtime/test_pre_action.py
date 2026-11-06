@@ -66,7 +66,10 @@ def make_runtime(provider, sent):
         plugin_context=context,
         plugin_config={},
         independent_motion_enabled=True,
-        selected_independent_motion_provider=provider,
+        selected_independent_motion_provider=object(),
+        pre_action_enabled=True,
+        pre_action_provider_id="pre-action-provider",
+        selected_pre_action_provider=provider,
         model_info={
             "selected_model": "m",
             "models": [

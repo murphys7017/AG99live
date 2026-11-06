@@ -64,8 +64,7 @@ class PreActionRuntime:
             return
         if (
             not getattr(self.state, "independent_motion_enabled", False)
-            or self.state.plugin_config.get("pre_action", {}).get("enabled", True)
-            is not True
+            or not getattr(self.state, "pre_action_enabled", True)
         ):
             return
         self.turn_id = turn_id

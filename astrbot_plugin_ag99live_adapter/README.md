@@ -56,6 +56,8 @@ AG99 Persona
 
 `independent_motion.enabled` 默认关闭。关闭时由 Persona Effect 为 Persona 回复段生成动作。开启后停用 Persona Effect，改由单独选择的聊天 Provider 为每个非空 `segments[].speech` 分别生成动作，并绑定到同索引的 TTS/输出段。独立动作没有整回复生成模式；旧配置中的 `per_speech_segment` 会在启动时清除，不再决定动作粒度。
 
+输入预动作由 `pre_action.enabled` 控制，在有效转写到达后并行调用一个轻量 Provider，不等待主对话。`pre_action.provider_id` 默认使用 `ollama/qwen3:1.7b`，可以在 AG99live 控制台中替换为其他聊天 Provider；留空时回退到 `independent_motion.provider_id`。该 Provider 需要支持 `text_chat_stream()`，输出仍经过现有动作契约校验，失败只会跳过预动作，不影响主回复、TTS 或正式动作。
+
 动作 Provider 的通用流式响应最多收集 16,000 个字符。超限会关闭 Provider 流并跳过该段动作，保留核心文本和 TTS；Motion Lab 会记录 `provider_output_too_large` 或 `output_too_large` 失败原因。
 
 `parallel` 控制非流式 Persona 结果中的逐段动作请求是并发还是串行；并发数由 `max_concurrency` 限制。独立动作 Provider 使用 `text_chat_stream()`。OLV Persona 段流开启且 Core 能力检查通过时，默认等当前 `speech` 段完成后再启动对应动作请求，确保模型看到真实段文本；`stream_preview_enabled` 可显式开启旧的提前预览模式，以降低首帧等待但允许在 speech 为空时先生成。每段使用同一绝对时限约束上下文准备和 Provider 请求。Provider 不支持聊天流、请求超时或失败时，该段跳过动作并保留失败原因，核心文本/TTS 继续。TTS 身份到达后 Adapter 按 `turn_id`、`persona_result_id` 和分段索引绑定动作；支持段级物料化时，Core 最多并发准备 2 段语音，每段只等待对应动作 Future，按序提交并 flush 原子 `output.segment`，首段不等待其余段的动作。Persona 段流未启用或能力检查未通过时，不请求增量动作，继续使用 Core 的普通 Persona 输出流程。段索引决定对应关系，Provider 的返回先后不决定播放顺序。
