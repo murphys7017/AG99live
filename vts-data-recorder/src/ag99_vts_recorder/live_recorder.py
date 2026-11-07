@@ -193,7 +193,7 @@ async def record_live(
         sampling = await sampling_task
         stop_event.set()
         producer.stop.set()
-        await audio_task
+        await _stop_audio_task(audio_task, producer)
         writer.flush()
         errors = [str(error) for error in sampling.report["errors"]]
         if producer.error is not None:
@@ -220,6 +220,35 @@ async def record_live(
         )
         store.finish_session(session_id, status=_take_status(termination, capture_usable=usable))
         return LiveRecordingResult(session_id, take_id, sampling, audio_path)
+    except asyncio.CancelledError:
+        stop_event.set()
+        producer.stop.set()
+        sampling: SamplingResult | None = None
+        if sampling_task is not None:
+            sampling_task.cancel()
+            result = await asyncio.gather(sampling_task, return_exceptions=True)
+            sampling = result[0] if isinstance(result[0], SamplingResult) else None
+        if audio_task is not None:
+            await _stop_audio_task(audio_task, producer)
+        writer.flush()
+        if sampling is None:
+            store.fail_take(take_id, message="CancelledError")
+            store.finish_session(session_id, status="failed")
+            raise
+        sampling.report["termination_reason"] = "interrupted"
+        sampling.report["capture_complete"] = False
+        sampling.report.setdefault("errors", []).append("recording interrupted by Ctrl+C")
+        stable = bool(sampling.report.get("environment", {}).get("capture_stable", True))
+        store.finish_take(
+            take_id,
+            status="interrupted",
+            termination_reason="interrupted",
+            environment_stable=stable,
+            duration_ms=round(float(sampling.report["elapsed_seconds"]) * 1000),
+            sampling_report=sampling.report,
+        )
+        store.finish_session(session_id, status="interrupted")
+        return LiveRecordingResult(session_id, take_id, sampling, audio_path)
     except BaseException as exc:
         stop_event.set()
         producer.stop.set()
@@ -227,9 +256,9 @@ async def record_live(
             sampling_task.cancel()
             await asyncio.gather(sampling_task, return_exceptions=True)
         if audio_task is not None:
-            await audio_task
+            await _stop_audio_task(audio_task, producer)
         writer.flush()
-        store.fail_take(take_id, message=str(exc) or type(exc).__name__)
+        store.fail_take(take_id, message=_format_error(exc))
         store.finish_session(session_id, status="failed")
         raise
 
@@ -304,7 +333,23 @@ async def _consume_audio(
                 )
         finally:
             producer.stop.set()
-            await producer_task
+            try:
+                await asyncio.wait_for(producer_task, timeout=2.0)
+            except asyncio.TimeoutError:
+                producer_task.cancel()
+                await asyncio.gather(producer_task, return_exceptions=True)
+
+
+async def _stop_audio_task(
+    audio_task: asyncio.Task[None],
+    producer: _MicrophoneProducer,
+) -> None:
+    producer.stop.set()
+    try:
+        await asyncio.wait_for(asyncio.shield(audio_task), timeout=5.0)
+    except asyncio.TimeoutError:
+        audio_task.cancel()
+        await asyncio.gather(audio_task, return_exceptions=True)
 
 
 def _resolve_microphone(sounddevice_module, microphone_name: str | None):
