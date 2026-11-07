@@ -37,30 +37,6 @@ export function compileSemanticMotion(
   intent: SemanticMotionIntent,
   options: CompileOptions,
 ): CompileSemanticMotionResult {
-  if (intent.schema_version === SCHEMA_MOTION_INTENT_V4 && intent.phases) {
-    const totalDurationMs = Object.values(intent.phases).reduce((sum, phase) => sum + phase.duration_ms, 0);
-    const profile = options.model.semantic_axis_profile;
-    if (!profile || profile.profile_id !== intent.profile_id || profile.revision !== intent.profile_revision || profile.model_id !== intent.model_id) {
-      return {
-        ok: false, motion: null, reason: "model_parameter_semantic_profile_mismatch",
-        diagnostics: { usedActionLibrary: false, compiledParameterCount: 0, timingSource: "default", resolvedMode: intent.mode, intensityApplied: false, motionIntensityScale: 1 },
-        feedback: { code: "model_parameter_semantic_profile_mismatch", message: "model_parameter_semantic_profile_mismatch", fields: [] },
-      };
-    }
-    const hasParameters = Object.values(intent.phases).some((phase) => Object.keys(phase.parameters).length > 0);
-    if (!hasParameters) {
-      return { ok: false, motion: null, reason: "motion_phases_parameters_empty", diagnostics: { usedActionLibrary: false, compiledParameterCount: 0, timingSource: "hint", resolvedMode: intent.mode, intensityApplied: false, motionIntensityScale: 1 }, feedback: { code: "motion_phases_parameters_empty", message: "motion_phases_parameters_empty", fields: [] } };
-    }
-    return {
-      ok: true, reason: "", motion: {
-        schemaVersion: "engine.compiled_semantic_motion.v1", kind: "pose", axes: [], phases: intent.phases,
-        profileId: intent.profile_id, profileRevision: intent.profile_revision, modelId: intent.model_id,
-        mode: intent.mode, emotionLabel: intent.emotion_label, intentTags: [...(intent.intent_tags ?? [])],
-        timing: { resolvedDurationMs: totalDurationMs, timingSource: "hint", timing: { duration_ms: totalDurationMs, blend_in_ms: Math.round(totalDurationMs * 0.15), hold_ms: Math.round(totalDurationMs * 0.5), blend_out_ms: Math.round(totalDurationMs * 0.35) } },
-        diagnostics: { usedActionLibrary: false, compiledParameterCount: 0, timingSource: "hint", resolvedMode: intent.mode, intensityApplied: false, motionIntensityScale: 1, warnings: ["motion_phases_compiled"] },
-      },
-    };
-  }
   if (
     intent.schema_version === SCHEMA_MOTION_INTENT_V4
     && Array.isArray(intent.motion_steps)

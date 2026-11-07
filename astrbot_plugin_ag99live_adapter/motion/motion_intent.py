@@ -13,8 +13,6 @@ from .performance_curve import normalize_performance_curve_hint
 from .resource_catalog import ModelInfoRuntimeContext
 
 DEFAULT_MOTION_INTENT_DURATION_MS = 1000
-MIN_MOTION_PHASE_TOTAL_DURATION_MS = 320
-MAX_MOTION_PHASE_TOTAL_DURATION_MS = 15000
 
 
 def resolve_selected_semantic_axis_profile(
@@ -98,9 +96,8 @@ def normalize_motion_intent_v4_payload(intent: Any) -> dict[str, Any]:
     has_axis_levels = "axis_levels" in intent
     has_motion_steps = "motion_steps" in intent
     has_motion_resource = "motion_resource_id" in intent
-    has_phases = "phases" in intent
     execution_shape_count = sum(
-        (has_axis_levels, has_motion_steps, has_motion_resource, has_phases)
+        (has_axis_levels, has_motion_steps, has_motion_resource)
     )
     if execution_shape_count == 0:
         raise ValueError("motion_execution_shape_missing")
@@ -116,7 +113,6 @@ def normalize_motion_intent_v4_payload(intent: Any) -> dict[str, Any]:
         if has_motion_steps
         else None
     )
-    normalized_phases = _normalize_motion_phases(intent.get("phases")) if has_phases else None
     if "axes" in intent:
         raise ValueError("axis_levels_axes_mutually_exclusive")
     if "resource_id" in intent:
@@ -125,8 +121,6 @@ def normalize_motion_intent_v4_payload(intent: Any) -> dict[str, Any]:
     expression_resource_id = normalize_motion_resource_id(
         intent.get("expression_resource_id")
     )
-    if has_phases and expression_resource_id:
-        raise ValueError("phases_expression_resource_conflict")
     motion_resource_id = normalize_motion_resource_id(intent.get("motion_resource_id"))
     if has_motion_resource and not motion_resource_id:
         raise ValueError("motion_resource_id_empty")
@@ -179,54 +173,9 @@ def normalize_motion_intent_v4_payload(intent: Any) -> dict[str, Any]:
         normalized_intent["axis_levels"] = normalized_levels
     if normalized_steps:
         normalized_intent["motion_steps"] = normalized_steps
-    if normalized_phases:
-        normalized_intent["phases"] = normalized_phases
     if performance_curve_hint is not None:
         normalized_intent["performance_curve_hint"] = performance_curve_hint
     return normalized_intent
-
-
-def _normalize_motion_phases(value: Any) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        raise ValueError("phases_not_object")
-    names = ("enter", "hold", "release", "settle")
-    normalized: dict[str, Any] = {}
-    total_duration = 0
-    for name in names:
-        phase = value.get(name)
-        if not isinstance(phase, dict):
-            raise ValueError(f"phase_not_object:{name}")
-        duration = _coerce_finite_number(phase.get("duration_ms"))
-        parameters = phase.get("parameters")
-        if duration is None or duration <= 0 or not isinstance(parameters, dict):
-            raise ValueError(f"phase_invalid:{name}")
-        phase_parameters: dict[str, Any] = {}
-        for parameter_raw, summary in parameters.items():
-            parameter_id = str(parameter_raw or "").strip()
-            if not parameter_id or not isinstance(summary, dict):
-                raise ValueError(f"phase_parameter_invalid:{name}")
-            median = _coerce_finite_number(summary.get("median"))
-            observed_min = _coerce_finite_number(summary.get("observed_min"))
-            observed_max = _coerce_finite_number(summary.get("observed_max"))
-            if median is None or observed_min is None or observed_max is None:
-                raise ValueError(f"phase_parameter_invalid:{name}:{parameter_id}")
-            if observed_min > median or median > observed_max:
-                raise ValueError(f"phase_parameter_order_invalid:{name}:{parameter_id}")
-            phase_parameters[parameter_id] = {
-                "median": median,
-                "observed_min": observed_min,
-                "observed_max": observed_max,
-            }
-        normalized_duration = int(round(duration))
-        if normalized_duration <= 0:
-            raise ValueError(f"phase_duration_invalid:{name}")
-        total_duration += normalized_duration
-        normalized[name] = {"duration_ms": normalized_duration, "parameters": phase_parameters}
-    if total_duration < MIN_MOTION_PHASE_TOTAL_DURATION_MS or total_duration > MAX_MOTION_PHASE_TOTAL_DURATION_MS:
-        raise ValueError("phases_duration_invalid")
-    if not any(phase["parameters"] for phase in normalized.values()):
-        raise ValueError("phases_parameters_empty")
-    return normalized
 
 
 def _normalize_axis_levels(value: Any) -> dict[str, int]:

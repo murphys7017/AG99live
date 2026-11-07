@@ -364,24 +364,6 @@ export interface MotionAxisLevelStep {
   duration_weight: 1 | 2 | 3;
 }
 
-export interface MotionPhaseParameterSummary {
-  median: number;
-  observed_min: number;
-  observed_max: number;
-}
-
-export interface MotionPhase {
-  duration_ms: number;
-  parameters: Record<string, MotionPhaseParameterSummary>;
-}
-
-export type MotionIntentPhases = {
-  enter: MotionPhase;
-  hold: MotionPhase;
-  release: MotionPhase;
-  settle: MotionPhase;
-};
-
 interface NormalizedSemanticMotionIntentBase {
   profile_id: string;
   profile_revision: number;
@@ -389,7 +371,6 @@ interface NormalizedSemanticMotionIntentBase {
   mode: "expressive" | "idle";
   intent_tags?: string[];
   emotion_label: string;
-  phases?: MotionIntentPhases;
   duration_hint_ms?: number | null;
   performance_curve_hint?: PerformanceCurveHint;
   summary?: {
@@ -415,13 +396,27 @@ interface NormalizedSemanticMotionIntentV4Base
   resource_id?: never;
 }
 
-export type NormalizedSemanticMotionIntentV4 = NormalizedSemanticMotionIntentV4Base & {
-  axis_levels?: MotionAxisLevelMap;
-  motion_steps?: MotionAxisLevelStep[];
-  phases?: MotionIntentPhases;
-  expression_resource_id?: string;
-  motion_resource_id?: string;
-};
+export type NormalizedSemanticMotionIntentV4 =
+  NormalizedSemanticMotionIntentV4Base & (
+    | {
+      axis_levels: MotionAxisLevelMap;
+      motion_steps?: never;
+      expression_resource_id?: string;
+      motion_resource_id?: never;
+    }
+    | {
+      axis_levels?: never;
+      motion_steps: MotionAxisLevelStep[];
+      motion_resource_id?: never;
+      expression_resource_id?: string;
+    }
+    | {
+      axis_levels?: never;
+      motion_steps?: never;
+      expression_resource_id?: never;
+      motion_resource_id: string;
+    }
+  );
 
 /** Normalized semantic motion intent consumed by ModelEngine. */
 export type NormalizedSemanticMotionIntent = NormalizedSemanticMotionIntentV4;
