@@ -62,6 +62,7 @@ def normalize_motion_arguments_payload(
         "motion_resource_id" in motion_hint
         and "axis_levels" not in motion_hint
         and "motion_steps" not in motion_hint
+        and "phases" not in motion_hint
     )
     if is_motion_resource_only and "performance_curve_hint" in motion_hint:
         return None, append_resolution_reason(
@@ -78,6 +79,7 @@ def normalize_motion_arguments_payload(
 
     has_axis_levels = "axis_levels" in motion_hint
     has_motion_steps = "motion_steps" in motion_hint
+    has_phases = "phases" in motion_hint
     intent_tags = motion_hint.get("intent_tags")
     tags_defaulted = not normalize_motion_intent_tags(intent_tags)
     contract_payload = {
@@ -102,6 +104,8 @@ def normalize_motion_arguments_payload(
         contract_payload["axis_levels"] = motion_hint.get("axis_levels")
     if has_motion_steps:
         contract_payload["motion_steps"] = motion_hint.get("motion_steps")
+    if has_phases:
+        contract_payload["phases"] = motion_hint.get("phases")
     try:
         payload = normalize_motion_intent_v4_payload(contract_payload)
     except ValueError as exc:
@@ -164,6 +168,7 @@ def validate_normalized_motion_intent_payload(
     requested_motion_resource_id = payload.get("motion_resource_id")
     validated_levels = payload.get("axis_levels")
     motion_steps = payload.get("motion_steps")
+    phases = payload.get("phases")
     reason = base_reason
     resource_candidates = build_motion_resource_candidates(
         runtime_state=runtime_state,
@@ -231,6 +236,25 @@ def validate_normalized_motion_intent_payload(
     else:
         payload.pop("motion_resource_id", None)
     if motion_resource_id:
+        return payload, reason
+
+    if phases is not None:
+        parameter_catalog = {
+            str(binding.get("parameter_id") or "").strip(): binding
+            for axis in semantic_profile.get("axes", [])
+            if isinstance(axis, dict)
+            for binding in (axis.get("parameter_bindings") or [])
+            if isinstance(binding, dict) and str(binding.get("parameter_id") or "").strip()
+        }
+        for phase in phases.values():
+            for parameter_id, sample in phase.get("parameters", {}).items():
+                binding = parameter_catalog.get(parameter_id)
+                if binding is None:
+                    return None, append_resolution_reason(reason, f"unknown_motion_parameter:{parameter_id}")
+                output_range = binding.get("output_range")
+                if isinstance(output_range, list) and len(output_range) == 2:
+                    if sample["observed_min"] < output_range[0] or sample["observed_max"] > output_range[1]:
+                        return None, append_resolution_reason(reason, f"motion_parameter_out_of_range:{parameter_id}")
         return payload, reason
 
     prompt_axes = profile_prompt_axes(semantic_profile)

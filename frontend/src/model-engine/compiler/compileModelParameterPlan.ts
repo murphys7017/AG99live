@@ -24,11 +24,13 @@ import {
   type PerformanceSchedule,
 } from "./performanceSchedule.js";
 import { performanceGovernor } from "./performanceGovernor.js";
+import { MOTION_PHASE_JITTER_RATIO } from "../normalize.js";
 
 export function compileModelParameterPlan(
   semanticMotion: CompiledSemanticMotion,
   options: CompileOptions,
 ): CompileResult {
+  if (semanticMotion.phases) return compilePhaseParameterPlan(semanticMotion as Extract<CompiledSemanticMotion, { kind: "pose" }> & { phases: NonNullable<CompiledSemanticMotion["phases"]> }, options);
   const governed = performanceGovernor.govern(semanticMotion, options.continuityEnvelope ?? null);
   semanticMotion = {
     ...governed.motion,
@@ -75,6 +77,45 @@ export function compileModelParameterPlan(
     options,
   );
 }
+
+function compilePhaseParameterPlan(
+  semanticMotion: Extract<CompiledSemanticMotion, { kind: "pose" }> & { phases: NonNullable<CompiledSemanticMotion["phases"]> },
+  options: CompileOptions,
+): CompileResult {
+  const profile = options.model.semantic_axis_profile;
+  if (!profile) return failCompile("model_parameter_semantic_profile_mismatch", semanticMotion);
+  const catalog = new Map<string, { axisId: string; binding: (typeof profile.axes)[number]["parameter_bindings"][number]; dynamics: (typeof profile.axes)[number]["dynamics"] }>();
+  for (const axis of profile.axes) for (const binding of axis.parameter_bindings) catalog.set(binding.parameter_id, { axisId: axis.id, binding, dynamics: axis.dynamics });
+  const phaseNames = ["enter", "hold", "release", "settle"] as const;
+  const offsets: number[] = []; let offset = 0;
+  for (const name of phaseNames) { offsets.push(offset); offset += semanticMotion.phases[name].duration_ms; }
+  const parameters: SemanticParameterPlan["parameters"] = [];
+  for (const parameterId of new Set(phaseNames.flatMap((name) => Object.keys(semanticMotion.phases[name].parameters)))) {
+    const entry = catalog.get(parameterId);
+    if (!entry) return failCompile(`motion_phases_unknown_parameter:${parameterId}`, semanticMotion);
+    const keyframes = phaseNames.map((name, index) => {
+      const sample = semanticMotion.phases[name].parameters[parameterId]
+        ?? semanticMotion.phases[phaseNames[Math.max(0, index - 1)]].parameters[parameterId]
+        ?? { median: 0, observed_min: 0, observed_max: 0 };
+      if (sample.observed_min < entry.binding.output_range[0] || sample.observed_max > entry.binding.output_range[1]) {
+        return { at_ms: offsets[index], transition_ms: 0, target_value: Number.NaN };
+      }
+      const span = Math.max(0, sample.observed_max - sample.observed_min);
+      const seed = hashPhase(`${parameterId}:${name}:${options.samplingIdentity?.messageId ?? ""}`);
+      const raw = sample.median + (seed * 2 - 1) * span * MOTION_PHASE_JITTER_RATIO;
+      const min = entry.binding.output_range[0]; const max = entry.binding.output_range[1];
+      return { at_ms: offsets[index], transition_ms: Math.max(1, Math.round(semanticMotion.phases[name].duration_ms * 0.2)), target_value: Math.max(min, Math.min(max, raw)) };
+    });
+    const last = keyframes[keyframes.length - 1];
+    if (keyframes.some((frame) => !Number.isFinite(frame.target_value))) return failCompile(`motion_phases_parameter_out_of_range:${parameterId}`, semanticMotion);
+    const neutral = Math.max(entry.binding.output_range[0], Math.min(entry.binding.output_range[1], 0));
+    parameters.push({ axis_id: entry.axisId, parameter_id: parameterId, activation_at_ms: 0, target_value: last.target_value, neutral_target_value: neutral, weight: entry.binding.default_weight, source: "manual", keyframes, dynamics: { max_velocity: entry.dynamics.max_velocity, max_acceleration: entry.dynamics.max_acceleration, max_speech_offset: 0, response: { kind: "bounded" } } });
+  }
+  const plan: SemanticParameterPlan = { schema_version: SCHEMA_PARAMETER_PLAN_V3, profile_id: profile.profile_id, profile_revision: profile.revision, model_id: profile.model_id, mode: semanticMotion.mode, emotion_label: semanticMotion.emotionLabel, timing: semanticMotion.timing.timing, parameters, diagnostics: { warnings: ["motion_phases_parameter_plan_compiled"] }, summary: { axis_count: 0, parameter_count: parameters.length, target_duration_ms: semanticMotion.timing.resolvedDurationMs } };
+  return { ok: true, plan, reason: "", diagnostics: { ...semanticMotion.diagnostics, compiledParameterCount: parameters.length, compiledParameters: parameters.map((item) => item.parameter_id) }, semanticMotion };
+}
+
+function hashPhase(value: string): number { let hash = 2166136261; for (const char of value) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619); return (hash >>> 0) / 4294967295; }
 
 function compileModelParameterPose(
   semanticMotion: Extract<CompiledSemanticMotion, { kind: "pose" }>,

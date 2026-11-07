@@ -1,5 +1,6 @@
 import type {
   DirectParameterPlanTiming,
+  MotionIntentPhases,
   MotionAxisLevelMap,
   MotionAxisLevelStep,
   PerformanceCurveHint,
@@ -291,6 +292,7 @@ interface CompiledSemanticMotionBase {
   expressionResourceId?: string;
   timing: MotionTimingResolution;
   diagnostics: CompileDiagnostics;
+  phases?: MotionIntentPhases;
 }
 
 export type CompiledSemanticMotion = CompiledSemanticMotionBase & (

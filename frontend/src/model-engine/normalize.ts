@@ -3,6 +3,7 @@ import type {
   MotionAxisLevel,
   MotionAxisLevelMap,
   MotionAxisLevelStep,
+  MotionIntentPhases,
   SemanticMotionIntent,
 } from "../types/protocol.js";
 import {
@@ -77,6 +78,36 @@ function normalizeMotionStepsV4(value: unknown): MotionAxisLevelStep[] | null {
   return steps;
 }
 
+export const MOTION_PHASE_JITTER_RATIO = 0.2;
+
+function normalizeMotionPhases(value: unknown): MotionIntentPhases | null {
+  if (!isObject(value)) return null;
+  const names = ["enter", "hold", "release", "settle"] as const;
+  const phases = {} as MotionIntentPhases;
+  for (const name of names) {
+    const phase = value[name];
+    if (!isObject(phase) || !isFiniteNumber(phase.duration_ms) || phase.duration_ms <= 0 || !isObject(phase.parameters)) {
+      return null;
+    }
+    const parameters: Record<string, { median: number; observed_min: number; observed_max: number }> = {};
+    for (const [parameter, raw] of Object.entries(phase.parameters)) {
+      const normalizedParameter = normalizeText(parameter);
+      if (!normalizedParameter || !isObject(raw) || !isFiniteNumber(raw.median) || !isFiniteNumber(raw.observed_min) || !isFiniteNumber(raw.observed_max) || raw.observed_min > raw.median || raw.median > raw.observed_max) {
+        return null;
+      }
+      parameters[normalizedParameter] = {
+        median: raw.median,
+        observed_min: raw.observed_min,
+        observed_max: raw.observed_max,
+      };
+    }
+    phases[name] = { duration_ms: Math.round(phase.duration_ms), parameters };
+  }
+  const totalDuration = names.reduce((sum, name) => sum + phases[name].duration_ms, 0);
+  if (totalDuration < MIN_MOTION_DURATION_MS || totalDuration > MAX_MOTION_DURATION_MS) return null;
+  return phases;
+}
+
 function normalizeIntentTags(value: unknown): string[] | null {
   if (!Array.isArray(value)) {
     return null;
@@ -149,6 +180,11 @@ function parseSemanticMotionIntent(value: unknown): ParseResult<SemanticMotionIn
   const hasAxisLevels = Object.prototype.hasOwnProperty.call(value, "axis_levels");
   const hasMotionSteps = Object.prototype.hasOwnProperty.call(value, "motion_steps");
   const hasMotionResource = Object.prototype.hasOwnProperty.call(value, "motion_resource_id");
+  const hasPhases = Object.prototype.hasOwnProperty.call(value, "phases");
+  const phases = hasPhases ? normalizeMotionPhases(value.phases) : undefined;
+  if (hasPhases && !phases) {
+    return { ok: false, reason: "motion_intent_v4.invalid_phases" };
+  }
   const axisLevels = hasAxisLevels ? normalizeAxisLevelsV4(value.axis_levels) : null;
   const motionSteps = hasMotionSteps ? normalizeMotionStepsV4(value.motion_steps) : null;
   const motionResourceId = normalizeText(value.motion_resource_id) || undefined;
@@ -164,7 +200,7 @@ function parseSemanticMotionIntent(value: unknown): ParseResult<SemanticMotionIn
   if (hasMotionResource && !motionResourceId) {
     return { ok: false, reason: "motion_intent_v4.motion_resource_id_empty" };
   }
-  if (Number(hasAxisLevels) + Number(hasMotionSteps) + Number(hasMotionResource) !== 1) {
+  if (Number(hasAxisLevels) + Number(hasMotionSteps) + Number(hasMotionResource) + Number(hasPhases) !== 1) {
     return { ok: false, reason: "motion_intent_v4.invalid_motion_shape" };
   }
 
@@ -208,6 +244,7 @@ function parseSemanticMotionIntent(value: unknown): ParseResult<SemanticMotionIn
     mode,
     intent_tags: intentTags,
     emotion_label: emotionLabel,
+    phases: phases || undefined,
     duration_hint_ms: durationHintMs,
     performance_curve_hint: performanceCurveHint,
     summary: normalizeMotionVisibilitySummary(value.summary),
@@ -219,6 +256,9 @@ function parseSemanticMotionIntent(value: unknown): ParseResult<SemanticMotionIn
       };
   }
   const expressionResourceId = normalizeText(value.expression_resource_id) || undefined;
+  if (phases && expressionResourceId) {
+    return { ok: false, reason: "motion_intent_v4.phases_expression_resource_conflict" };
+  }
   if (expressionResourceId && motionResourceId) {
     return { ok: false, reason: "motion_intent_v4.multiple_resource_layers_forbidden" };
   }
@@ -234,6 +274,9 @@ function parseSemanticMotionIntent(value: unknown): ParseResult<SemanticMotionIn
         motion_resource_id: motionResourceId,
       },
     };
+  }
+  if (phases) {
+    return { ok: true, value: { ...common, schema_version: SCHEMA_MOTION_INTENT_V4, phases } };
   }
   if (motionSteps) {
       return {
