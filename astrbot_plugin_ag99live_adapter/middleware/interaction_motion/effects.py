@@ -50,7 +50,7 @@ def _register_ag99live_motion_persona_effect(
             plugin_id=AG99LIVE_PLUGIN_ID,
             name=AG99LIVE_MOTION_EFFECT_NAME,
             description=(
-                "Generate Live2D motion intent for persona expression. This effect "
+                "Generate motion intent for persona expression. This effect "
                 "is mandatory exactly once for every assistant segment, including "
                 "greetings, short acknowledgements, and neutral replies. Describe "
                 "the visible performance with intent_tags and valid continuous semantic axis "

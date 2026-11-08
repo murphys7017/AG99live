@@ -1,7 +1,7 @@
 import { app, BrowserWindow, ipcMain, Menu, screen, Tray } from "electron";
 import path from "node:path";
 import type { DesktopAuxWindowRole } from "../../src/types/desktop";
-import { WindowManager } from "./window-manager";
+import { PET_WINDOW_SIZE_PRESETS, WindowManager } from "./window-manager";
 import { WebControlLauncher } from "./web-control-launcher";
 
 export class MenuManager {
@@ -57,6 +57,7 @@ export class MenuManager {
           else this.showPet();
         },
       },
+      this.buildPetWindowSizeItem(),
       this.buildOverlayToggleItem(),
       this.buildOverlayReattachItem(),
       this.buildSubtitleToggleItem(),
@@ -148,6 +149,18 @@ export class MenuManager {
       click: () => {
         this.windowManager.toggleOverlayWindow();
       },
+    };
+  }
+
+  private buildPetWindowSizeItem() {
+    return {
+      label: "调整桌宠窗口大小",
+      submenu: PET_WINDOW_SIZE_PRESETS.map((preset) => ({
+        label: preset.label,
+        click: () => {
+          this.windowManager.setPetWindowSize(preset.width, preset.height);
+        },
+      })),
     };
   }
 

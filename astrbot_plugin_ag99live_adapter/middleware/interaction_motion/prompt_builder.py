@@ -72,7 +72,7 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
         "不要按词语、停顿或语音节奏拆分 motion_steps。"
     )
     output_contract_text = (
-        "你正在控制一个 Live2D 模型，并为本轮回复生成可见动作。"
+        "你正在为本轮回复生成可见动作。"
         "每个回复片段必须且只能调用一次动作效果；"
         "不要用多个动作调用表达动作序列。"
         f"{sequence_guidance}"
@@ -100,7 +100,7 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
         f"{axis_instruction}"
         "只输出本轮直接需要控制的轴；关系图可派生的跟随轴不要为了凑完整而重复输出。"
         "优先选择能表达姿态方向、视线焦点和身体重心的关键轴，再用少量表情轴补充情绪细节。"
-        "优先使用当前 Profile 中 control_role=primary 且 semantic_group 属于 head、body、gaze 的轴表达姿态骨架；"
+        "优先使用已列出的 control_role=primary 且 semantic_group 属于 head、body、gaze 的轴表达姿态骨架；"
         "视线和表情细节使用对应的辅助轴。数值必须落在每个轴自己的 value_range 内："
         "强烈表达取靠近区间端点的值，克制表达取靠近中性附近的值，短时夸张才取到端点。"
         "示例只展示结构和数值，不要照抄示例内容或把示例的动作形状当作本轮必须复用的模板。"

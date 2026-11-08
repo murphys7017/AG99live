@@ -155,7 +155,11 @@ function updateMouseIgnoreState(ignore: boolean): void {
     return;
   }
 
-  if ((window as Window & { __ag99PetWindowDragging?: boolean }).__ag99PetWindowDragging) {
+  const desktopWindow = window as Window & {
+    __ag99PetWindowDragging?: boolean;
+    __ag99PetWindowPointerPending?: boolean;
+  };
+  if (desktopWindow.__ag99PetWindowDragging || desktopWindow.__ag99PetWindowPointerPending) {
     return;
   }
 
@@ -200,6 +204,7 @@ function cleanupHitTestPointerHandlers(): void {
   boundWheelHandler = null;
   boundScaleStorageHandler = null;
   delete (window as any).__ag99SetPetMouseIgnoreState;
+  delete (window as any).__ag99PetWindowPointerPending;
   setIgnoreMouseEventsBridge = null;
   lastIgnoreMouseEventsValue = null;
   lastPointerHitTestAt = 0;

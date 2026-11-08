@@ -1558,7 +1558,7 @@ def _build_independent_system_prompt(
                 }
             ]
     return (
-        "你负责为 AG99live 的 Live2D 角色生成动作参数。"
+        "你负责为桌面 Live2D 角色生成动作参数。"
         "根据当前用户输入、提供的近期纯文本对话，以及当前 segment 的 speech、actions、tendency，"
         "你的输出不是动作建议或文字描述，而是会直接交给 Live2D ModelEngine 执行的工作参数。"
         "优先落实 actions，以 tendency 调整情绪强度，只描述角色本段应该呈现的动作。"
@@ -1585,7 +1585,6 @@ def _build_independent_system_prompt(
         "可选字段只有 duration_hint_ms、expression_resource_id、motion_resource_id；"
         "motion_resource_id 不得和 motion_steps 或 duration_hint_ms 同时使用；"
         "expression_resource_id 不得和 motion_resource_id 同时使用。"
-        "不要输出 profile_id、profile_revision、model_id、schema_version，这些由程序补入。"
         f"JSON 形状示例：{json.dumps(contract, ensure_ascii=False, separators=(',', ':'))}\n\n"
         "Live2D 能力：\n"
         f"{json.dumps(capability, ensure_ascii=False, separators=(',', ':'))}\n\n"

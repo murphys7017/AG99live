@@ -43,6 +43,11 @@ interface OverlayDragOrigin {
 
 const PET_WINDOW_WIDTH = 540;
 const PET_WINDOW_HEIGHT = 820;
+export const PET_WINDOW_SIZE_PRESETS = [
+  { label: "小（420 × 640）", width: 420, height: 640 },
+  { label: "默认（540 × 820）", width: PET_WINDOW_WIDTH, height: PET_WINDOW_HEIGHT },
+  { label: "大（720 × 1080）", width: 720, height: 1080 },
+] as const;
 const PET_WINDOW_TITLE = "AG99live Live2D";
 const PET_WINDOW_MARGIN = 24;
 const PET_OVERLAY_WIDTH = 420;
@@ -58,6 +63,15 @@ const WIN32_TRANSPARENT_WINDOW_COMPAT_OPTIONS: BrowserWindowConstructorOptions =
   process.platform === "win32"
     ? {
         thickFrame: false,
+        roundedCorners: false,
+      }
+    : {};
+const WIN32_RESIZABLE_TRANSPARENT_WINDOW_COMPAT_OPTIONS: BrowserWindowConstructorOptions =
+  process.platform === "win32"
+    ? {
+        // Frameless transparent windows need the native thick-frame hit area
+        // for edge resizing on Windows.
+        thickFrame: true,
         roundedCorners: false,
       }
     : {};
@@ -133,6 +147,49 @@ export class WindowManager {
 
   getSubtitleWindow(): BrowserWindow | null {
     return this.windows.subtitle;
+  }
+
+  setPetWindowSize(width: number, height: number): void {
+    const petWindow = this.windows.pet;
+    if (
+      !petWindow
+      || petWindow.isDestroyed()
+      || !Number.isFinite(width)
+      || !Number.isFinite(height)
+    ) {
+      return;
+    }
+
+    const bounds = petWindow.getBounds();
+    const workArea = screen.getDisplayMatching(bounds).workArea;
+    const nextWidth = Math.max(
+      320,
+      Math.min(Math.round(width), workArea.width - PET_WINDOW_MARGIN * 2),
+    );
+    const nextHeight = Math.max(
+      480,
+      Math.min(Math.round(height), workArea.height - PET_WINDOW_MARGIN * 2),
+    );
+    const nextX = Math.min(
+      Math.max(bounds.x, workArea.x + PET_WINDOW_MARGIN),
+      workArea.x + workArea.width - nextWidth - PET_WINDOW_MARGIN,
+    );
+    const nextY = Math.min(
+      Math.max(bounds.y, workArea.y + PET_WINDOW_MARGIN),
+      workArea.y + workArea.height - nextHeight - PET_WINDOW_MARGIN,
+    );
+
+    this.endWindowDrag(petWindow);
+    petWindow.setBounds(
+      {
+        x: nextX,
+        y: nextY,
+        width: nextWidth,
+        height: nextHeight,
+      },
+      false,
+    );
+    this.positionOverlayWindow();
   }
 
   markAppQuitting(): void {
@@ -350,12 +407,12 @@ export class WindowManager {
     this.normalizeTransparentWindowSize(targetWindow, role);
     const bounds = targetWindow.getBounds();
     const lockedWidth = role === "pet"
-      ? PET_WINDOW_WIDTH
+      ? bounds.width
       : role === "overlay"
         ? PET_OVERLAY_WIDTH
         : bounds.width;
     const lockedHeight = role === "pet"
-      ? PET_WINDOW_HEIGHT
+      ? bounds.height
       : role === "overlay"
         ? PET_OVERLAY_HEIGHT
         : bounds.height;
@@ -529,7 +586,9 @@ export class WindowManager {
       skipTaskbar: true,
       hasShadow: false,
       backgroundColor: "#00000000",
-      resizable: false,
+      resizable: true,
+      minWidth: 320,
+      minHeight: 480,
       maximizable: false,
       minimizable: true,
       alwaysOnTop: true,
@@ -539,7 +598,7 @@ export class WindowManager {
         contextIsolation: true,
         sandbox: false,
       },
-      ...WIN32_TRANSPARENT_WINDOW_COMPAT_OPTIONS,
+      ...WIN32_RESIZABLE_TRANSPARENT_WINDOW_COMPAT_OPTIONS,
     });
 
     petWindow.setAlwaysOnTop(true, "screen-saver");
@@ -587,7 +646,7 @@ export class WindowManager {
       }
     });
     petWindow.on("resize", () => {
-      this.normalizeTransparentWindowSize(petWindow, "pet");
+      this.invalidateTransparentWindowSurface(petWindow);
       if (this.activeDragState?.targetWindow === petWindow) {
         return;
       }
@@ -1100,17 +1159,17 @@ export class WindowManager {
       return false;
     }
 
+    if (role === "pet") {
+      return false;
+    }
+
     const bounds = targetWindow.getBounds();
-    const expectedWidth = role === "pet"
-      ? PET_WINDOW_WIDTH
-      : role === "overlay"
-        ? PET_OVERLAY_WIDTH
-        : PET_SUBTITLE_WIDTH;
-    const expectedHeight = role === "pet"
-      ? PET_WINDOW_HEIGHT
-      : role === "overlay"
-        ? PET_OVERLAY_HEIGHT
-        : PET_SUBTITLE_HEIGHT;
+    const expectedWidth = role === "overlay"
+      ? PET_OVERLAY_WIDTH
+      : PET_SUBTITLE_WIDTH;
+    const expectedHeight = role === "overlay"
+      ? PET_OVERLAY_HEIGHT
+      : PET_SUBTITLE_HEIGHT;
 
     if (bounds.width === expectedWidth && bounds.height === expectedHeight) {
       return false;

@@ -1,10 +1,19 @@
 import { onBeforeUnmount, ref } from "vue";
 
+const WINDOW_DRAG_THRESHOLD_PX = 6;
+
 function setPetWindowDragging(dragging: boolean): void {
   const targetWindow = window as Window & {
     __ag99PetWindowDragging?: boolean;
   };
   targetWindow.__ag99PetWindowDragging = dragging;
+}
+
+function setPetWindowPointerPending(pending: boolean): void {
+  const targetWindow = window as Window & {
+    __ag99PetWindowPointerPending?: boolean;
+  };
+  targetWindow.__ag99PetWindowPointerPending = pending;
 }
 
 function syncMouseIgnoreState(ignore: boolean): boolean {
@@ -27,20 +36,27 @@ export function usePetWindowDrag(): {
   isDragging: typeof isDragging;
   finishWindowDrag: () => void;
   handlePointerDown: (event: PointerEvent) => void;
+  handlePointerMove: (event: PointerEvent) => void;
   handlePointerUp: (event: PointerEvent) => void;
   handlePointerCancel: (event: PointerEvent) => void;
 } {
   const activePointerId = ref<number | null>(null);
   const isDragging = ref(false);
+  let startScreenX = 0;
+  let startScreenY = 0;
   function finishWindowDrag(): void {
-    if (activePointerId.value === null) {
-      return;
-    }
-
+    const hadPointer = activePointerId.value !== null;
+    const wasDragging = isDragging.value;
     setPetWindowDragging(false);
+    setPetWindowPointerPending(false);
     activePointerId.value = null;
     isDragging.value = false;
-    window.ag99desktop?.endWindowDrag();
+    if (wasDragging) {
+      window.ag99desktop?.endWindowDrag();
+    }
+    if (!hadPointer && !wasDragging) {
+      return;
+    }
     if (syncMouseIgnoreState(true)) {
       return;
     }
@@ -58,12 +74,35 @@ export function usePetWindowDrag(): {
       return;
     }
 
-    setPetWindowDragging(true);
-    window.ag99desktop?.setIgnoreMouseEvents(false);
+    setPetWindowPointerPending(true);
     activePointerId.value = event.pointerId;
-    isDragging.value = true;
-    window.ag99desktop?.startWindowDrag(event.screenX, event.screenY);
+    startScreenX = event.screenX;
+    startScreenY = event.screenY;
     (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+    event.preventDefault();
+  }
+
+  function handlePointerMove(event: PointerEvent): void {
+    if (activePointerId.value !== event.pointerId) {
+      return;
+    }
+
+    if (!isDragging.value) {
+      const distance = Math.hypot(
+        event.screenX - startScreenX,
+        event.screenY - startScreenY,
+      );
+      if (distance < WINDOW_DRAG_THRESHOLD_PX) {
+        return;
+      }
+
+      setPetWindowPointerPending(false);
+      setPetWindowDragging(true);
+      window.ag99desktop?.setIgnoreMouseEvents(false);
+      isDragging.value = true;
+      window.ag99desktop?.startWindowDrag(event.screenX, event.screenY);
+    }
+
     event.preventDefault();
   }
 
@@ -92,6 +131,7 @@ export function usePetWindowDrag(): {
     isDragging,
     finishWindowDrag,
     handlePointerDown,
+    handlePointerMove,
     handlePointerUp,
     handlePointerCancel,
   };
