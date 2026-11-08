@@ -77,6 +77,8 @@ def normalize_motion_intent_v4_payload(intent: Any) -> dict[str, Any]:
     if str(intent.get("schema_version") or "").strip() != MOTION_INTENT_V4_SCHEMA_VERSION:
         raise ValueError("invalid_schema_version")
 
+    intent = _apply_execution_shape_priority(intent)
+
     profile_id = str(intent.get("profile_id") or "").strip()
     model_id = str(intent.get("model_id") or "").strip()
     if not profile_id:
@@ -174,6 +176,25 @@ def normalize_motion_intent_v4_payload(intent: Any) -> dict[str, Any]:
     if performance_curve_hint is not None:
         normalized_intent["performance_curve_hint"] = performance_curve_hint
     return normalized_intent
+
+
+def _apply_execution_shape_priority(intent: dict[str, Any]) -> dict[str, Any]:
+    """Keep the highest-priority executable shape from a mixed model output."""
+    motion_resource_id = normalize_motion_resource_id(intent.get("motion_resource_id"))
+    if motion_resource_id:
+        prioritized = dict(intent)
+        prioritized.pop("motion_steps", None)
+        prioritized.pop("duration_hint_ms", None)
+        prioritized.pop("performance_curve_hint", None)
+        prioritized.pop("expression_resource_id", None)
+        return prioritized
+
+    if "motion_steps" in intent:
+        prioritized = dict(intent)
+        prioritized.pop("expression_resource_id", None)
+        return prioritized
+
+    return dict(intent)
 
 
 def _normalize_axis_values(value: Any) -> dict[str, float]:
