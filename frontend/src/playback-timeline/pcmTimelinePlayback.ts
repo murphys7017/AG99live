@@ -69,7 +69,7 @@ export function createPcmTimelinePlayback<TMotion>(options: {
       throw new Error("pcm_timeline_previous_audio_unsettled");
     }
     reportLatencyStage("pcm_prepare_start", turnId, null, messageId);
-    const output = options.speechOutput.attachPcm();
+    const output = options.speechOutput.attachPcm({ turnId, messageId });
     let lipSync: PlaybackTimelineAudioLipSyncSink;
     try {
       lipSync = options.createLipSyncSink(turnId, messageId);

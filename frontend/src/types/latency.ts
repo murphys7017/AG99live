@@ -6,6 +6,6 @@ export const DESKTOP_LATENCY_STAGES = [
   "output_warmup_start", "output_warmup_ready", "output_warmup_failed",
   "motion_started", "motion_ended", "motion_failed", "motion_interrupted", "motion_handoff",
   "incremental_text_first", "incremental_pcm_first",
-  "pcm_prepare_start", "pcm_prepare_end", "pcm_first_sample", "pcm_drained",
+  "pcm_prepare_start", "pcm_prepare_end", "pcm_first_sample", "pcm_schedule_gap", "pcm_drained",
 ] as const;
 export type DesktopLatencyStage = typeof DESKTOP_LATENCY_STAGES[number];

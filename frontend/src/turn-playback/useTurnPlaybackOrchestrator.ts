@@ -69,6 +69,7 @@ export function useTurnPlaybackOrchestrator(
             turnId: segment.turnId, messageId: segment.messageId,
             payload: cloneReleasedMotionPayload(segment.motion.payload),
             source: segment.motion.source, receivedAtMs: segment.motion.receivedAtMs,
+            lateByMs: segment.motion.lateByMs,
             assistantText: segment.text.content ?? "", speechCues: segment.speech.cues,
           });
         }

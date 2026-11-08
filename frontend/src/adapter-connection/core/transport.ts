@@ -121,8 +121,14 @@ export function openAdapterConnectionTransport(
     options.onError(socket, opened);
   });
 
-  socket.addEventListener("close", () => {
+  socket.addEventListener("close", (event) => {
     stop();
+    console.warn("[AdapterTransport] websocket closed.", {
+      opened,
+      code: event.code,
+      reason: event.reason,
+      wasClean: event.wasClean,
+    });
     options.onClose(socket, opened);
   });
 

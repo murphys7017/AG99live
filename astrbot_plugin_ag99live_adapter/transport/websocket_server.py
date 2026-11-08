@@ -410,11 +410,18 @@ class WebSocketTransport:
                     )
         except asyncio.CancelledError:
             raise
-        except ConnectionClosedOK:
-            logger.debug("Desktop frontend websocket closed cleanly")
+        except ConnectionClosedOK as exc:
+            logger.debug(
+                "Desktop frontend websocket closed cleanly: code=%s reason=%r",
+                exc.code,
+                exc.reason,
+            )
         except ConnectionClosedError as exc:
             logger.debug(
-                "Desktop frontend websocket closed without a graceful close frame: %s",
+                "Desktop frontend websocket closed without a graceful close frame: "
+                "code=%s reason=%r details=%s",
+                exc.code,
+                exc.reason,
                 exc,
             )
         except Exception as exc:

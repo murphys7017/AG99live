@@ -90,6 +90,7 @@ export interface PlaybackTimelineRuntime<TMotionPayload = unknown> {
     payload: TMotionPayload;
     source: string | null;
     receivedAtMs: number;
+    lateByMs?: number | null;
     assistantText: string;
     speechCues: readonly import("../types/protocol.js").OutputSegmentSpeechCue[];
   }) => boolean;
@@ -473,6 +474,7 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     payload: TMotionPayload;
     source: string | null;
     receivedAtMs: number;
+    lateByMs?: number | null;
     assistantText: string;
     speechCues: readonly import("../types/protocol.js").OutputSegmentSpeechCue[];
   }): boolean {
@@ -483,6 +485,15 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     );
     const timeline = getTimeline(options.turnId, options.messageId);
     if (timeline) timeline.projectsMotionSession = true;
+    const timelineSnapshot = timeline?.engine.getSnapshot() ?? null;
+    console.info("[PlaybackTimelineRuntime] incremental motion start requested.", {
+      turnId: options.turnId,
+      messageId: options.messageId,
+      queuedDelayMs: Math.max(0, performance.now() - options.receivedAtMs),
+      lateByMs: options.lateByMs ?? null,
+      audioCurrentTimeMs: timelineSnapshot?.currentTimeMs ?? null,
+      audioDurationMs: timelineSnapshot?.durationMs ?? null,
+    });
     const prepared = ensureMotionTimelineSink(
       options.turnId,
       options.messageId,
@@ -494,7 +505,7 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
           speechCues: options.speechCues,
           motionSource: options.source,
           receivedAtMs: options.receivedAtMs,
-          lateByMs: null,
+          lateByMs: options.lateByMs ?? null,
           timelineMode: "audio",
         }),
         onInterrupt: interrupt,

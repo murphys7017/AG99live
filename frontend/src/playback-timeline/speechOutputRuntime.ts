@@ -1,7 +1,9 @@
 import { createPcmOutputSession, type PcmOutputSession } from "./pcmOutputSession.js";
 
-const SPEECH_OUTPUT_FADE_INITIAL_GAIN = 0.86;
-const SPEECH_OUTPUT_FADE_DURATION_SECONDS = 0.04;
+// Start from silence so the first non-zero PCM sample cannot form a step
+// against the output device's previous state.
+const SPEECH_OUTPUT_FADE_INITIAL_GAIN = 0;
+const SPEECH_OUTPUT_FADE_DURATION_SECONDS = 0.02;
 const SPEECH_OUTPUT_PRIMER_DURATION_SECONDS = 0.35;
 const SPEECH_OUTPUT_REPRIME_IDLE_MS = 30_000;
 const SPEECH_OUTPUT_KEEPALIVE_GAIN = 1 / 1_000_000;
@@ -18,7 +20,7 @@ export interface SpeechOutputSession {
 export interface SpeechOutputRuntime {
   prepare(): Promise<void>;
   attach(audio: HTMLAudioElement): SpeechOutputSession;
-  attachPcm(): PcmOutputSession;
+  attachPcm(identity: { turnId: string; messageId: string }): PcmOutputSession;
   dispose(): Promise<void>;
 }
 
@@ -216,11 +218,11 @@ export function createSpeechOutputRuntime(): SpeechOutputRuntime {
       const context = requireAudioContext();
       return attachSource(context, context.createMediaElementSource(audio));
     },
-    attachPcm() {
+    attachPcm(identity) {
       const context = requireAudioContext();
       const input = context.createGain();
       const output = attachSource(context, input);
-      const session = createPcmOutputSession(context, input, output);
+      const session = createPcmOutputSession(context, input, output, identity);
       activeSession = session;
       return session;
     },

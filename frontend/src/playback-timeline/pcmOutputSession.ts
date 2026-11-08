@@ -1,4 +1,5 @@
 import { loadSpeechVolume, SPEECH_VOLUME_KEY } from "../app/petPreferences.js";
+import { reportLatencyStage } from "../adapter-connection/runtime/latency.js";
 import type { AudioPlaybackClock } from "./contracts.js";
 import type { SpeechOutputSession } from "./speechOutputRuntime.js";
 
@@ -7,6 +8,9 @@ const MAX_CHUNK_BYTES = 65536;
 const MAX_BUFFERED_SAMPLES = SAMPLE_RATE * 4;
 const MAX_BUFFERED_NODES = 128;
 const SCHEDULE_LEAD_SECONDS = 0.005;
+const INITIAL_PREBUFFER_SAMPLES = Math.round(SAMPLE_RATE * 0.08);
+const INITIAL_PREBUFFER_MAX_WAIT_MS = 120;
+const MIN_SCHEDULE_GAP_SAMPLES = 2;
 
 export interface PcmOutputSession extends SpeechOutputSession {
   readonly clock: AudioPlaybackClock;
@@ -26,13 +30,20 @@ interface ScheduledChunk {
   ended: boolean;
 }
 
+interface PendingChunk {
+  buffer: AudioBuffer;
+  samples: number;
+}
+
 /** One segment, one serialized writer, using the runtime's existing output graph. */
 export function createPcmOutputSession(
   context: AudioContext,
   input: GainNode,
   output: SpeechOutputSession,
+  identity: { turnId: string; messageId: string },
 ): PcmOutputSession {
   const chunks: ScheduledChunk[] = [];
+  const pendingChunks: PendingChunk[] = [];
   let acceptedSamples = 0;
   let drainedSamples = 0;
   let tailTime = 0;
@@ -43,6 +54,7 @@ export function createPcmOutputSession(
   let wakeWriter: (() => void) | null = null;
   let firstStartTime: number | null = null;
   let startTimer: ReturnType<typeof setTimeout> | null = null;
+  let prebufferTimer: ReturnType<typeof setTimeout> | null = null;
   let startNotified = false;
   let resolveStarted!: (atMs: number) => void;
   let rejectStarted!: (error: Error) => void;
@@ -83,12 +95,81 @@ export function createPcmOutputSession(
     return samples;
   }
 
+  function timelineSamples(): number {
+    if (firstStartTime === null) return 0;
+    const endTime = Math.min(context.currentTime, tailTime);
+    return Math.max(0, Math.floor((endTime - firstStartTime) * SAMPLE_RATE));
+  }
+
+  function clearPrebufferTimer(): void {
+    if (prebufferTimer !== null) {
+      clearTimeout(prebufferTimer);
+      prebufferTimer = null;
+    }
+  }
+
   function settleDrain(): void {
     while (chunks[0]?.ended) {
       drainedSamples += chunks.shift()!.samples;
     }
     wakeWriter?.();
     if (finished && chunks.length === 0) resolveCompleted();
+  }
+
+  function scheduledDurationSamples(): number {
+    if (firstStartTime === null) return 0;
+    return Math.max(0, Math.floor((tailTime - firstStartTime) * SAMPLE_RATE));
+  }
+
+  function schedulePendingChunks(): void {
+    if (disposed || pendingChunks.length === 0) return;
+    clearPrebufferTimer();
+    output.start();
+    while (pendingChunks.length > 0) {
+      const pending = pendingChunks.shift()!;
+      const previousTailTime = tailTime;
+      const start = Math.max(context.currentTime + SCHEDULE_LEAD_SECONDS, previousTailTime);
+      const gapSamples = previousTailTime > 0
+        ? Math.floor(Math.max(0, start - previousTailTime) * SAMPLE_RATE)
+        : 0;
+      if (gapSamples >= MIN_SCHEDULE_GAP_SAMPLES) {
+        reportLatencyStage("pcm_schedule_gap", identity.turnId, null, identity.messageId);
+        console.warn("[PcmOutput] scheduled PCM gap detected.", {
+          gapMs: gapSamples * 1000 / SAMPLE_RATE,
+          bufferedMs: Math.max(0, (previousTailTime - context.currentTime) * 1000),
+          pendingSamples: pending.samples,
+        });
+      }
+      const source = context.createBufferSource();
+      source.buffer = pending.buffer;
+      source.connect(input);
+      const chunk = {
+        source,
+        start,
+        end: start + pending.samples / SAMPLE_RATE,
+        samples: pending.samples,
+        ended: false,
+      };
+      source.onended = () => {
+        observeStart();
+        chunk.ended = true;
+        source.disconnect();
+        settleDrain();
+      };
+      try {
+        source.start(start);
+      } catch (error) {
+        source.onended = null;
+        source.disconnect();
+        throw error;
+      }
+      chunks.push(chunk);
+      tailTime = chunk.end;
+      if (firstStartTime === null) {
+        firstStartTime = start;
+        observeStart();
+      }
+    }
   }
 
   function observeStart(): void {
@@ -109,8 +190,10 @@ export function createPcmOutputSession(
     completed,
     started,
     clock: {
-      getCurrentTimeMs: () => currentSamples() * 1000 / SAMPLE_RATE,
-      getDurationMs: () => finished ? acceptedSamples * 1000 / SAMPLE_RATE : null,
+      getCurrentTimeMs: () => timelineSamples() * 1000 / SAMPLE_RATE,
+      getDurationMs: () => finished
+        ? Math.max(acceptedSamples, scheduledDurationSamples()) * 1000 / SAMPLE_RATE
+        : null,
       getPlaybackRate: () => 1,
       isPlaying: () => !disposed && context.state === "running" && chunks.some(
         (chunk) => context.currentTime >= chunk.start && context.currentTime < chunk.end,
@@ -146,31 +229,21 @@ export function createPcmOutputSession(
         const target = buffer.getChannelData(0);
         const view = new DataView(pcm.buffer, pcm.byteOffset, pcm.byteLength);
         for (let i = 0; i < count; i++) target[i] = view.getInt16(i * 2, true) / 32768;
-        const source = context.createBufferSource();
-        source.buffer = buffer;
-        source.connect(input);
-        const start = Math.max(context.currentTime + SCHEDULE_LEAD_SECONDS, tailTime);
-        const chunk = { source, start, end: start + count / SAMPLE_RATE, samples: count, ended: false };
-        source.onended = () => {
-          observeStart();
-          chunk.ended = true;
-          source.disconnect();
-          settleDrain();
-        };
-        output.start();
-        try {
-          source.start(start);
-        } catch (error) {
-          source.onended = null;
-          source.disconnect();
-          throw error;
-        }
-        chunks.push(chunk);
-        tailTime = chunk.end;
+        pendingChunks.push({ buffer, samples: count });
         acceptedSamples += count;
+
         if (firstStartTime === null) {
-          firstStartTime = start;
-          observeStart();
+          const pendingSamples = pendingChunks.reduce((sum, chunk) => sum + chunk.samples, 0);
+          if (pendingSamples >= INITIAL_PREBUFFER_SAMPLES) {
+            schedulePendingChunks();
+          } else if (prebufferTimer === null) {
+            prebufferTimer = setTimeout(() => {
+              prebufferTimer = null;
+              schedulePendingChunks();
+            }, INITIAL_PREBUFFER_MAX_WAIT_MS);
+          }
+        } else {
+          schedulePendingChunks();
         }
       } finally {
         appending = false;
@@ -181,6 +254,7 @@ export function createPcmOutputSession(
       if (appending || !Number.isSafeInteger(totalSamples) || totalSamples !== acceptedSamples) {
         throw new Error("pcm_output_incomplete_or_invalid_end");
       }
+      schedulePendingChunks();
       finished = true;
       if (acceptedSamples === 0) {
         rejectStarted(new Error("pcm_output_empty"));
@@ -193,6 +267,7 @@ export function createPcmOutputSession(
       const consumed = currentSamples();
       disposed = true;
       if (startTimer !== null) clearTimeout(startTimer);
+      clearPrebufferTimer();
       rejectStarted(new DOMException("PCM playback stopped.", "AbortError"));
       window.removeEventListener("storage", syncVolume);
       for (const chunk of chunks) {
@@ -201,6 +276,7 @@ export function createPcmOutputSession(
         chunk.source.disconnect();
       }
       chunks.length = 0;
+      pendingChunks.length = 0;
       drainedSamples = consumed;
       wakeWriter?.();
       rejectCompleted(new DOMException("PCM playback stopped.", "AbortError"));
