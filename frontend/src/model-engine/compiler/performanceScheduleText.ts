@@ -113,7 +113,7 @@ export function compileSemanticStepSlots(
     return { ok: true, semanticSteps: [] };
   }
   if (
-    durationWeights.length < 2
+    durationWeights.length < 1
     || durationWeights.length > 4
     || durationWeights.some(
       (weight) => !Number.isInteger(weight) || weight < 1 || weight > 3,

@@ -8,6 +8,7 @@ left untouched and are rejected by the v4 normalizer.
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from .motion_intent import normalize_motion_intent_tags
@@ -30,12 +31,47 @@ def normalize_provider_motion_record(
     steps = record.get("motion_steps")
     if isinstance(steps, dict):
         record["motion_steps"] = [steps]
+    if "motion_steps" in record:
+        record["motion_steps"] = _coerce_provider_duration_weights(
+            record.get("motion_steps")
+        )
 
     tags = normalize_motion_intent_tags(record.get("intent_tags"))
     record["intent_tags"] = tags or [default_intent_tag]
     if infer_emit_decision and "motion_steps" in record:
         record.setdefault("decision", "emit")
     return record
+
+
+def _coerce_provider_duration_weights(value: Any) -> Any:
+    """Keep provider-generated step sequences executable without changing shape."""
+
+    if not isinstance(value, list):
+        return value
+    normalized: list[Any] = []
+    for raw_step in value:
+        if not isinstance(raw_step, dict) or "duration_weight" not in raw_step:
+            normalized.append(raw_step)
+            continue
+        raw_weight = raw_step.get("duration_weight")
+        if isinstance(raw_weight, bool):
+            normalized.append(raw_step)
+            continue
+        try:
+            number = float(raw_weight)
+        except (TypeError, ValueError, OverflowError):
+            normalized.append(raw_step)
+            continue
+        if not math.isfinite(number):
+            normalized.append(raw_step)
+            continue
+        bounded = min(3.0, max(1.0, number))
+        weight = int(math.floor(bounded + 0.5))
+        if type(raw_weight) is int and raw_weight == weight:
+            normalized.append(raw_step)
+            continue
+        normalized.append({**raw_step, "duration_weight": weight})
+    return normalized
 
 
 def describe_provider_motion_record(value: Any) -> str:

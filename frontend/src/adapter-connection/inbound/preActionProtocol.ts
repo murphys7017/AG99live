@@ -31,7 +31,7 @@ export function parsePreAction(
   if (!steps || steps.length !== 1 || !values
     || Object.keys(values).length < 1 || Object.keys(values).length > 2
     || Object.values(values).some((v) => !Number.isFinite(v))
-    || !tags || tags.length < 1 || tags.length > 2 || tags.some((tag) => tag.length > 16)
+    || !tags || tags.length < 1 || tags.length > 6 || tags.some((tag) => tag.length > 48)
     || intent.motion_resource_id || intent.expression_resource_id) {
     throw new Error("pre_action_execution_shape_invalid");
   }

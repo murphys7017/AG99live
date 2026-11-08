@@ -23,6 +23,7 @@ from ...motion.output_sanitizer import sanitize_assistant_output_text
 from ...motion.payload_validation import (
     normalize_motion_arguments_payload,
 )
+from ...motion.provider_contract import normalize_provider_motion_record
 from ...motion.text_stream import (
     TextChatStreamOutputTooLarge,
     TextChatStreamUnavailable,
@@ -1236,6 +1237,10 @@ async def generate_independent_motion(
             )
             if raw_arguments is None:
                 raise ValueError("independent_motion_json_unrecoverable")
+            raw_arguments = normalize_provider_motion_record(
+                raw_arguments,
+                default_intent_tag="动作",
+            )
             sample_raw_output = {
                 "provider_text": response_text,
                 "parsed_arguments": raw_arguments,
