@@ -10,4 +10,4 @@ Implement AG99live NeuroBrain passive behavior using an adapter-plugin async tas
 ## Open
 
 ## Next
-Inspect AG99live plugin lifecycle/config, NeuroBrain plugin read-only API, and Live2D idle loop action ownership
+等待真实 dsh 可执行文件与凭据后做现场 SDK 验收
