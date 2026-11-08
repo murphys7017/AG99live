@@ -65,6 +65,8 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         self._adapter_internal_state = AdapterEventContext()
         super().__init__(message_str, message_obj, platform_meta, session_id)
         self.adapter = adapter
+        raw_message = getattr(message_obj, "raw_message", None)
+        emit_wiring_logs = isinstance(raw_message, dict) and bool(raw_message)
         runtime_state = getattr(adapter, "runtime_state", None)
         source_route = resolve_persona_motion_source_route(
             self,
@@ -106,14 +108,15 @@ class OLVPetPlatformEvent(AstrMessageEvent):
                 "_interaction_plugin_runtime_target_overrides",
                 {"astrbot_plugin_ag99live_adapter": "personal_expression"},
             )
-            logger.info(
-                "WIRING interaction.independent_motion_route "
-                "mode=persona_speech_segment core_bypass=false "
-                "plugin_target=personal_expression provider=%s "
-                "persona_segment_stream_enabled=%s",
-                getattr(runtime_state, "independent_motion_provider_id", "<missing>"),
-                persona_segment_stream_enabled,
-            )
+            if emit_wiring_logs:
+                logger.info(
+                    "WIRING interaction.independent_motion_route "
+                    "mode=persona_speech_segment core_bypass=false "
+                    "plugin_target=personal_expression provider=%s "
+                    "persona_segment_stream_enabled=%s",
+                    getattr(runtime_state, "independent_motion_provider_id", "<missing>"),
+                    persona_segment_stream_enabled,
+                )
         if persona_segment_stream_enabled:
             gate_failure = None
             if not independent_motion_enabled:
@@ -144,10 +147,11 @@ class OLVPetPlatformEvent(AstrMessageEvent):
                     "_interaction_incremental_output_requested",
                     True,
                 )
-                logger.info(
-                    "WIRING interaction.persona_segment_stream_requested "
-                    "independent_motion=true"
-                )
+                if emit_wiring_logs:
+                    logger.info(
+                        "WIRING interaction.persona_segment_stream_requested "
+                        "independent_motion=true"
+                    )
         self._standard_output_platform_extras = {
             "logical_message_id": "standard_reply",
         }

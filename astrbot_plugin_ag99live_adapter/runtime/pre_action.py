@@ -16,6 +16,10 @@ from ..motion.motion_intent import (
     resolve_selected_semantic_axis_profile,
 )
 from ..motion.payload_validation import validate_normalized_motion_intent_payload
+from ..motion.provider_contract import (
+    describe_provider_motion_record,
+    normalize_provider_motion_record,
+)
 from ..motion.text_stream import read_text_chat_stream
 from ..prompts.pre_action import (
     PRE_ACTION_SYSTEM_PROMPT,
@@ -220,6 +224,7 @@ class PreActionRuntime:
         return result
 
     async def _run(self, text, turn_id, request_id, started) -> None:
+        candidate_shape = ""
         try:
             async with asyncio.timeout(0.8):
                 snapshot = await self.preparation
@@ -275,9 +280,19 @@ class PreActionRuntime:
                 )
 
                 async def accept(value):
+                    nonlocal candidate_shape
+                    candidate_shape = describe_provider_motion_record(value)
+                    value = normalize_provider_motion_record(
+                        value,
+                        default_intent_tag="反应",
+                    )
                     if value == {"skip": True}:
                         return
-                    if set(value) != {"intent_tags", "motion_steps"}:
+                    if set(value) - {
+                        "intent_tags",
+                        "motion_steps",
+                        "duration_hint_ms",
+                    }:
                         raise ValueError("pre_action_output_fields_invalid")
                     steps, tags = value["motion_steps"], value["intent_tags"]
                     if not isinstance(steps, list) or len(steps) != 1:
@@ -285,10 +300,10 @@ class PreActionRuntime:
                     values = steps[0].get("axis_values") if isinstance(steps[0], dict) else None
                     if not isinstance(values, dict) or not 1 <= len(values) <= 2:
                         raise ValueError("pre_action_axis_count_invalid")
-                    if not isinstance(tags, list) or not 1 <= len(tags) <= 2:
+                    if not isinstance(tags, list) or not 1 <= len(tags) <= 6:
                         raise ValueError("pre_action_tags_invalid")
                     if any(
-                        not isinstance(tag, str) or not tag.strip() or len(tag) > 16
+                        not isinstance(tag, str) or not tag.strip() or len(tag) > 48
                         for tag in tags
                     ):
                         raise ValueError("pre_action_tag_text_invalid")
@@ -372,7 +387,15 @@ class PreActionRuntime:
         except TimeoutError:
             logger.debug("Pre-action expired: turn_id=%s", turn_id)
         except Exception as exc:
-            logger.warning("Pre-action skipped: turn_id=%s reason=%s", turn_id, exc)
+            logger.warning(
+                "Pre-action skipped: turn_id=%s provider=%s reason=%s shape=%s",
+                turn_id,
+                self.state.pre_action_provider_id
+                or self.state.independent_motion_provider_id
+                or "<fallback>",
+                exc,
+                candidate_shape or "<none>",
+            )
 
     @staticmethod
     def _envelope(turn_id, request_id, action, *, motion=None, expires_at=None):

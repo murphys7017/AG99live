@@ -16,6 +16,10 @@ from ..motion.motion_intent import (
     resolve_selected_semantic_axis_profile,
 )
 from ..motion.payload_validation import validate_normalized_motion_intent_payload
+from ..motion.provider_contract import (
+    describe_provider_motion_record,
+    normalize_provider_motion_record,
+)
 from ..prompts.passive_behavior import (
     PASSIVE_BEHAVIOR_SYSTEM_PROMPT,
     build_passive_behavior_prompt,
@@ -256,6 +260,21 @@ class PassiveBehaviorRuntime:
             if decision == "none" and set(action) == {"decision"}:
                 logger.debug("NeuroBrain passive behavior decision=none")
                 return False
+            try:
+                action = normalize_provider_motion_record(
+                    action,
+                    default_intent_tag="动作",
+                    infer_emit_decision=True,
+                )
+            except ValueError as exc:
+                logger.warning(
+                    "NeuroBrain passive action line rejected: reason=record_invalid "
+                    "error=%s shape=%s",
+                    exc,
+                    describe_provider_motion_record(action),
+                )
+                return True
+            decision = action.get("decision")
             if decision != "emit":
                 logger.warning(
                     "NeuroBrain passive action line rejected: reason=decision_invalid "
@@ -282,8 +301,11 @@ class PassiveBehaviorRuntime:
                 motion_payload = _normalize_motion_action(action, profile, self.runtime_state)
             except (TypeError, ValueError) as exc:
                 logger.warning(
-                    "NeuroBrain passive action line rejected: reason=motion_invalid error=%s",
+                    "NeuroBrain passive action line rejected: reason=motion_invalid "
+                    "provider=%s error=%s shape=%s",
+                    self.runtime_state.passive_behavior_provider_id or "<unknown>",
                     exc,
+                    describe_provider_motion_record(action),
                 )
                 return True
             if not can_continue():
@@ -455,7 +477,7 @@ def _normalize_motion_action(
         "profile_revision": semantic_profile.get("revision"),
         "model_id": semantic_profile.get("model_id"),
         "mode": "expressive",
-        "intent_tags": action.get("intent_tags"),
+        "intent_tags": action.get("intent_tags") or ["动作"],
         "motion_steps": action.get("motion_steps"),
     }
     contract_payload["duration_hint_ms"] = action.get("duration_hint_ms", 4000)
