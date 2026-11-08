@@ -94,27 +94,25 @@ def normalize_motion_intent_v4_payload(intent: Any) -> dict[str, Any]:
     if not intent_tags:
         raise ValueError("intent_tags_empty")
     has_axis_levels = "axis_levels" in intent
+    has_axis_values = "axis_values" in intent
     has_motion_steps = "motion_steps" in intent
     has_motion_resource = "motion_resource_id" in intent
-    execution_shape_count = sum(
-        (has_axis_levels, has_motion_steps, has_motion_resource)
-    )
+    if has_axis_levels:
+        raise ValueError("axis_levels_removed_use_motion_steps_axis_values")
+    if has_axis_values:
+        raise ValueError("axis_values_root_removed_use_motion_steps")
+    execution_shape_count = sum((has_motion_steps, has_motion_resource))
     if execution_shape_count == 0:
         raise ValueError("motion_execution_shape_missing")
     if execution_shape_count > 1:
         raise ValueError("motion_execution_shape_conflict")
-    normalized_levels = (
-        _normalize_axis_levels(intent.get("axis_levels"))
-        if has_axis_levels
-        else None
-    )
     normalized_steps = (
         _normalize_motion_steps(intent.get("motion_steps"))
         if has_motion_steps
         else None
     )
     if "axes" in intent:
-        raise ValueError("axis_levels_axes_mutually_exclusive")
+        raise ValueError("axes_motion_steps_mutually_exclusive")
     if "resource_id" in intent:
         raise ValueError("resource_id_forbidden_use_typed_resource_fields")
 
@@ -147,7 +145,7 @@ def normalize_motion_intent_v4_payload(intent: Any) -> dict[str, Any]:
     sequence_axis_ids = {
         axis_id
         for step in normalized_steps or []
-        for axis_id in step["axis_levels"]
+        for axis_id in step["axis_values"]
     }
     normalized_intent = {
         "schema_version": MOTION_INTENT_V4_SCHEMA_VERSION,
@@ -158,7 +156,9 @@ def normalize_motion_intent_v4_payload(intent: Any) -> dict[str, Any]:
         "intent_tags": intent_tags,
         "emotion_label": derive_motion_emotion_label(intent_tags),
         "summary": {
-            "axis_count": len(normalized_levels or sequence_axis_ids),
+            "axis_count": len(
+                sequence_axis_ids
+            ),
             "intent_tag_count": len(intent_tags),
             "motion_step_count": len(normalized_steps or []),
         },
@@ -169,8 +169,6 @@ def normalize_motion_intent_v4_payload(intent: Any) -> dict[str, Any]:
         normalized_intent["expression_resource_id"] = expression_resource_id
     if motion_resource_id:
         normalized_intent["motion_resource_id"] = motion_resource_id
-    if normalized_levels:
-        normalized_intent["axis_levels"] = normalized_levels
     if normalized_steps:
         normalized_intent["motion_steps"] = normalized_steps
     if performance_curve_hint is not None:
@@ -178,40 +176,50 @@ def normalize_motion_intent_v4_payload(intent: Any) -> dict[str, Any]:
     return normalized_intent
 
 
-def _normalize_axis_levels(value: Any) -> dict[str, int]:
-    normalized_levels, rejected_levels = normalize_motion_axis_levels(value)
-    if rejected_levels:
-        raise ValueError("rejected_axis_levels:" + ",".join(rejected_levels))
-    if not normalized_levels:
-        raise ValueError("axis_levels_not_object")
-    return normalized_levels
+def _normalize_axis_values(value: Any) -> dict[str, float]:
+    normalized_values, rejected_values = normalize_motion_axis_values(value)
+    if rejected_values:
+        raise ValueError("rejected_axis_values:" + ",".join(rejected_values))
+    if not normalized_values:
+        raise ValueError("axis_values_not_object")
+    return normalized_values
 
 
-def normalize_motion_axis_levels(
+def normalize_motion_axis_values(
     value: Any,
-) -> tuple[dict[str, int] | None, list[str]]:
+) -> tuple[dict[str, float] | None, list[str]]:
+    """Normalize a continuous semantic axis value map.
+
+    Values are expressed in the semantic axis unit space, so this layer only
+    proves the payload is a finite numeric map. Range enforcement needs the
+    axis profile and happens in payload validation.
+    """
     if not isinstance(value, dict) or not value:
         return None, []
-    normalized_levels: dict[str, int] = {}
-    rejected_levels: list[str] = []
-    for axis_id_raw, level in value.items():
-        # Missing/null means this axis was not requested, never a zero pose.
-        if level is None:
+    normalized_values: dict[str, float] = {}
+    rejected_values: list[str] = []
+    for axis_id_raw, raw_value in value.items():
+        # Missing/null means this axis was not requested, never a neutral pose.
+        if raw_value is None:
             continue
         axis_id = str(axis_id_raw or "").strip()
         if not axis_id:
-            rejected_levels.append("empty_axis_id")
+            rejected_values.append("empty_axis_id")
             continue
-        if axis_id in normalized_levels:
-            rejected_levels.append(f"duplicate_axis_id:{axis_id}")
+        if axis_id in normalized_values:
+            rejected_values.append(f"duplicate_axis_id:{axis_id}")
             continue
-        if isinstance(level, bool) or not isinstance(level, int) or level < -4 or level > 4:
-            rejected_levels.append(axis_id)
+        if isinstance(raw_value, bool) or not isinstance(raw_value, (int, float)):
+            rejected_values.append(axis_id)
             continue
-        normalized_levels[axis_id] = level
-    if not normalized_levels:
-        return None, rejected_levels
-    return normalized_levels, rejected_levels
+        number = float(raw_value)
+        if not math.isfinite(number):
+            rejected_values.append(axis_id)
+            continue
+        normalized_values[axis_id] = number
+    if not normalized_values:
+        return None, rejected_values
+    return normalized_values, rejected_values
 
 
 def _normalize_motion_steps(value: Any) -> list[dict[str, Any]]:
@@ -226,26 +234,26 @@ def _normalize_motion_steps(value: Any) -> list[dict[str, Any]]:
 def normalize_motion_steps(
     value: Any,
 ) -> tuple[list[dict[str, Any]] | None, str]:
-    if not isinstance(value, list) or len(value) < 2 or len(value) > 4:
+    if not isinstance(value, list) or len(value) < 1 or len(value) > 4:
         return None, "motion_steps_count_invalid"
     normalized_steps: list[dict[str, Any]] = []
     for index, step in enumerate(value):
         if not isinstance(step, dict):
             return None, f"motion_step_not_object:{index}"
-        unknown_fields = sorted(set(step) - {"axis_levels", "duration_weight"})
+        unknown_fields = sorted(set(step) - {"axis_values", "duration_weight"})
         if unknown_fields:
             return (
                 None,
                 f"motion_step_forbidden_fields:{index}:{','.join(unknown_fields)}",
             )
-        levels, rejected = normalize_motion_axis_levels(step.get("axis_levels"))
+        values, rejected = normalize_motion_axis_values(step.get("axis_values"))
         if rejected:
             return (
                 None,
-                f"motion_step_rejected_axis_levels:{index}:{','.join(rejected)}",
+                f"motion_step_rejected_axis_values:{index}:{','.join(rejected)}",
             )
-        if not levels:
-            return None, f"motion_step_axis_levels_empty:{index}"
+        if not values:
+            return None, f"motion_step_axis_values_empty:{index}"
         duration_weight = step.get("duration_weight")
         # Duration weights saturate at the documented range. Fractional
         # in-range values remain invalid; do not invent a rounding policy.
@@ -269,7 +277,7 @@ def normalize_motion_steps(
             return None, f"motion_step_duration_weight_invalid:{index}"
         normalized_steps.append(
             {
-                "axis_levels": levels,
+                "axis_values": values,
                 "duration_weight": duration_weight,
             }
         )

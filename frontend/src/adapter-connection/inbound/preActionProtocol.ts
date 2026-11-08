@@ -25,12 +25,14 @@ export function parsePreAction(
   const motion = normalize(p.motion);
   if (!motion.ok) throw new Error(`pre_action_motion_invalid:${motion.reason}`);
   const intent = motion.payload.intent;
-  const levels = intent.axis_levels;
+  const steps = intent.motion_steps;
   const tags = intent.intent_tags;
-  if (!levels || Object.keys(levels).length < 1 || Object.keys(levels).length > 2
-    || Object.values(levels).some((v) => !Number.isInteger(v) || Math.abs(v) > 2)
+  const values = steps?.[0]?.axis_values;
+  if (!steps || steps.length !== 1 || !values
+    || Object.keys(values).length < 1 || Object.keys(values).length > 2
+    || Object.values(values).some((v) => !Number.isFinite(v))
     || !tags || tags.length < 1 || tags.length > 2 || tags.some((tag) => tag.length > 16)
-    || intent.motion_steps || intent.motion_resource_id || intent.expression_resource_id) {
+    || intent.motion_resource_id || intent.expression_resource_id) {
     throw new Error("pre_action_execution_shape_invalid");
   }
   return { action: "ready", turnId: envelope.turn_id, requestId,

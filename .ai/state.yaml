@@ -2054,3 +2054,29 @@ live2d_motion_training_input_20261031:
     and explicit repeated or ordered requests produce useful motion_steps.
     Prepare the cumulative dataset after collection and inspect its speech filter
     and motion-shape counts before starting v6 training.
+
+live2d_continuous_motion_protocol_20261108:
+  class: feature
+  risk: high
+  status: source_reviewed_locally_validated_pending_deployment_and_training_run
+  scope: >-
+    Apply the user-approved destructive AG99live protocol update. Runtime parameter
+    actions now require motion_steps of 1-4 steps with concrete axis_values and no
+    root axis_levels or root axis_values compatibility. Training export removes
+    motion_guidance and neurobrain_state from inputs, converts historical level
+    labels offline, and emits only motion_steps plus required duration_hint_ms.
+    Update the frontend, prompts, Motion Lab projections, training scripts and
+    validation docs without editing the generated AstrBot deployment copy.
+  validation: >-
+    Frontend renderer/WebSDK/Node typecheck passed. Python compile checks passed.
+    Focused continuous-motion contract, selector, runtime boundary and scheduling
+    tests passed (207 tests when excluding the three existing RuntimeState provider
+    registry failures). Read-only Motion Lab export was exercised against the
+    deployment database: 530 strict samples were converted and checked for the new
+    output fields, including stripping motion_guidance and neurobrain_state.
+    Git diff whitespace checks passed.
+  evidence_gap: >-
+    The new LoRA has not been trained or deployed. npm test remains blocked by the
+    repository's existing test-build TypeScript errors, and three RuntimeState
+    tests fail because their fixture has no Provider registry. Live AstrBot reload,
+    Provider generation, TTS and Live2D playback still require paired acceptance.

@@ -13,9 +13,9 @@ MODEL_ID = "XHToken/Spark-X2.6-1.7B-Base"
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Merge the production-prompt LoRA for local inference.")
-    parser.add_argument("--adapter-dir", type=Path, default=ROOT / "output/spark-x26-1p7b-lora-production-neurobrain-v5")
-    parser.add_argument("--output-dir", type=Path, default=ROOT / "output/spark-x26-1p7b-production-neurobrain-v5-merged-bf16")
+    parser = argparse.ArgumentParser(description="Merge the continuous-action LoRA for local inference.")
+    parser.add_argument("--adapter-dir", type=Path, default=ROOT / "output/spark-x26-1p7b-lora-continuous")
+    parser.add_argument("--output-dir", type=Path, default=ROOT / "output/spark-x26-1p7b-lora-continuous-merged-bf16")
     args = parser.parse_args()
     if not args.adapter_dir.is_dir():
         raise SystemExit(f"Adapter not found: {args.adapter_dir}")

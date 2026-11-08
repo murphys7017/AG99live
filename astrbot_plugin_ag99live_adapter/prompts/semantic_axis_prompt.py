@@ -28,7 +28,6 @@ def format_profile_axis_prompt_line(
     axis: dict[str, Any],
     *,
     truncate_text: Any,
-    use_axis_levels: bool = False,
 ) -> str:
     axis_id = str(axis.get("id") or "").strip()
     label = str(axis.get("label") or axis_id).strip()
@@ -48,14 +47,6 @@ def format_profile_axis_prompt_line(
     notes = truncate_text(str(axis.get("usage_notes") or "").strip(), 160)
     description = truncate_text(str(axis.get("description") or "").strip(), 160)
     suffix = f" 使用说明={notes}" if notes else ""
-    if use_axis_levels:
-        level_range = _format_available_level_range(axis)
-        return (
-            f"- {axis_id}（{label}，{role_label}）："
-            f"负方向会让角色{negative}；正方向会让角色{positive}。"
-            f"可用等级={level_range}；只能使用列表中的整数等级。"
-            f"本轮没有对应方向的表达需要时省略此轴。{description}{suffix}"
-        ).strip()
     return (
         f"- {axis_id}（{label}，{role_label}，范围 {range_text}）："
         f"向较小值调整会让角色{negative}；"
@@ -72,28 +63,6 @@ def format_axis_semantics(values: Any, *, truncate_text: Any) -> str:
         for item in values
         if str(item).strip()
     )
-
-
-def _format_available_level_range(axis: dict[str, Any]) -> str:
-    effective_levels = resolve_available_axis_levels(axis)
-    return "[" + ", ".join(str(level) for level in effective_levels) + "]"
-
-
-def resolve_available_axis_levels(axis: dict[str, Any]) -> list[int]:
-    anchors = axis.get("level_anchors")
-    neutral = axis.get("neutral")
-    if not isinstance(anchors, dict) or not isinstance(neutral, (int, float)):
-        raise ValueError("semantic_axis_level_anchors_unavailable")
-    effective_levels: list[int] = [0]
-    for raw_level, raw_anchor in anchors.items():
-        try:
-            level = int(raw_level)
-            anchor = float(raw_anchor)
-        except (TypeError, ValueError):
-            continue
-        if -4 <= level <= 4 and abs(anchor - float(neutral)) > 1e-6:
-            effective_levels.append(level)
-    return sorted(set(effective_levels))
 
 
 def format_control_role_label(role: str) -> str:

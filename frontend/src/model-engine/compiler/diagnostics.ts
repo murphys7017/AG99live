@@ -132,8 +132,8 @@ function buildTransformTrace(context: MotionCompileContext): MotionTransformTrac
     profileRevision: profile?.revision ?? 0,
     profileHash: profile?.source_hash ?? "",
     rawAxes: {},
-    rawAxisLevels: context.intent.axis_levels
-      ? { ...context.intent.axis_levels }
+    rawAxisValues: context.intent.axis_values
+      ? { ...context.intent.axis_values }
       : undefined,
     axisSampling: context.state.axisSampling
       ? {

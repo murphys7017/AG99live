@@ -3,7 +3,7 @@ $ErrorActionPreference = "Stop"
 $projectRoot = $PSScriptRoot
 $cli = Join-Path $projectRoot ".venv\Scripts\llamafactory-cli.exe"
 if (-not (Test-Path $cli)) { throw "Run setup.ps1 before training." }
-if (-not (Test-Path (Join-Path $projectRoot "data\weak_sft.jsonl"))) {
+if (-not (Test-Path (Join-Path $projectRoot "data\continuous\continuous_sft.jsonl"))) {
     throw "Run prepare_dataset.py before training."
 }
 

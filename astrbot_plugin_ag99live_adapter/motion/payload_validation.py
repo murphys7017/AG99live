@@ -18,7 +18,6 @@ from .resource_catalog import (
 )
 from ..prompts.semantic_axis_prompt import (
     profile_prompt_axes,
-    resolve_available_axis_levels,
 )
 
 def normalize_motion_arguments_payload(
@@ -55,12 +54,19 @@ def normalize_motion_arguments_payload(
     if "axes" in motion_hint:
         return None, append_resolution_reason(
             base_reason,
-            "axes_forbidden_use_axis_levels",
+            "axes_forbidden_use_motion_steps_axis_values",
+        )
+    forbidden_shape_fields = [
+        key for key in ("axis_levels", "axis_values") if key in motion_hint
+    ]
+    if forbidden_shape_fields:
+        return None, append_resolution_reason(
+            base_reason,
+            "forbidden_shape_fields:" + ",".join(forbidden_shape_fields),
         )
 
     is_motion_resource_only = (
         "motion_resource_id" in motion_hint
-        and "axis_levels" not in motion_hint
         and "motion_steps" not in motion_hint
     )
     if is_motion_resource_only and "performance_curve_hint" in motion_hint:
@@ -76,8 +82,12 @@ def normalize_motion_arguments_payload(
     except Exception as exc:  # noqa: BLE001
         return None, f"semantic_profile_unresolved:{exc}"
 
-    has_axis_levels = "axis_levels" in motion_hint
     has_motion_steps = "motion_steps" in motion_hint
+    if not has_motion_steps and not is_motion_resource_only:
+        return None, append_resolution_reason(
+            base_reason,
+            "motion_steps_required",
+        )
     intent_tags = motion_hint.get("intent_tags")
     tags_defaulted = not normalize_motion_intent_tags(intent_tags)
     contract_payload = {
@@ -98,8 +108,6 @@ def normalize_motion_arguments_payload(
     ):
         if optional_field in motion_hint:
             contract_payload[optional_field] = motion_hint[optional_field]
-    if has_axis_levels:
-        contract_payload["axis_levels"] = motion_hint.get("axis_levels")
     if has_motion_steps:
         contract_payload["motion_steps"] = motion_hint.get("motion_steps")
     try:
@@ -162,7 +170,6 @@ def validate_normalized_motion_intent_payload(
         return None, append_resolution_reason(base_reason, "intent_tags_invalid")
     requested_expression_resource_id = payload.get("expression_resource_id")
     requested_motion_resource_id = payload.get("motion_resource_id")
-    validated_levels = payload.get("axis_levels")
     motion_steps = payload.get("motion_steps")
     reason = base_reason
     resource_candidates = build_motion_resource_candidates(
@@ -211,9 +218,9 @@ def validate_normalized_motion_intent_payload(
             if isinstance(expression_candidate, dict)
             else []
         )
-        used_axis_ids = set(validated_levels or {})
+        used_axis_ids: set[str] = set()
         for step in motion_steps or []:
-            used_axis_ids.update(step["axis_levels"])
+            used_axis_ids.update(step["axis_values"])
         direct_conflicts = sorted(used_axis_ids & conflicting_axis_ids)
         if direct_conflicts:
             return None, append_resolution_reason(
@@ -240,25 +247,24 @@ def validate_normalized_motion_intent_payload(
         if str(axis.get("id") or "").strip()
     }
     allowed_axis_ids = set(axis_by_id)
-    used_axis_ids = set(validated_levels or {})
+    used_axis_ids: set[str] = set()
     if motion_steps:
         for step in motion_steps:
-            used_axis_ids.update(step["axis_levels"])
+            used_axis_ids.update(step["axis_values"])
     unknown_axis_ids = sorted(used_axis_ids - allowed_axis_ids)
     if unknown_axis_ids:
         return None, append_resolution_reason(
             reason,
-            "unknown_axis_levels:" + ",".join(unknown_axis_ids),
+            "unknown_axis_values:" + ",".join(unknown_axis_ids),
         )
-    unavailable_levels = find_unavailable_axis_levels(
-        validated_levels=validated_levels,
+    out_of_range_values = find_out_of_range_axis_values(
         motion_steps=motion_steps,
         axis_by_id=axis_by_id,
     )
-    if unavailable_levels:
+    if out_of_range_values:
         return None, append_resolution_reason(
             reason,
-            "unavailable_axis_levels:" + ",".join(unavailable_levels),
+            "out_of_range_axis_values:" + ",".join(out_of_range_values),
         )
     return payload, reason
 
@@ -278,24 +284,36 @@ def _sanitize_reason_fragment(value: Any) -> str:
     return fragment[:80] or "unknown"
 
 
-def find_unavailable_axis_levels(
+def find_out_of_range_axis_values(
     *,
-    validated_levels: dict[str, int] | None,
     motion_steps: list[dict[str, Any]] | None,
     axis_by_id: dict[str, dict[str, Any]],
 ) -> list[str]:
-    level_maps = [validated_levels] if validated_levels is not None else []
-    if motion_steps:
-        level_maps.extend(step["axis_levels"] for step in motion_steps)
-    unavailable: set[str] = set()
-    for level_map in level_maps:
-        for axis_id, level in level_map.items():
+    """Reject continuous axis values outside the axis `value_range`.
+
+    A small tolerance absorbs float round-trip noise so a value that lands
+    exactly on a range boundary is not rejected.
+    """
+    if not motion_steps:
+        return []
+    out_of_range: set[str] = set()
+    for step in motion_steps:
+        for axis_id, axis_value in step.get("axis_values", {}).items():
             axis = axis_by_id.get(axis_id)
             if axis is None:
                 continue
-            if level not in resolve_available_axis_levels(axis):
-                unavailable.add(f"{axis_id}:{level}")
-    return sorted(unavailable)
+            value_range = axis.get("value_range")
+            if (
+                not isinstance(value_range, list)
+                or len(value_range) != 2
+                or not all(isinstance(bound, (int, float)) for bound in value_range)
+            ):
+                continue
+            low, high = float(value_range[0]), float(value_range[1])
+            tolerance = max(1e-6, abs(high - low) * 1e-6)
+            if axis_value < low - tolerance or axis_value > high + tolerance:
+                out_of_range.add(f"{axis_id}:{axis_value:g}")
+    return sorted(out_of_range)
 
 
 def validate_motion_resource_id_for_payload(

@@ -925,7 +925,6 @@ async def generate_independent_motion(
             set(raw_arguments)
             - {
                 "intent_tags",
-                "axis_levels",
                 "motion_steps",
                 "duration_hint_ms",
                 "expression_resource_id",
@@ -1279,7 +1278,6 @@ async def generate_independent_motion(
             set(raw_arguments)
             - {
                 "intent_tags",
-                "axis_levels",
                 "motion_steps",
                 "duration_hint_ms",
                 "expression_resource_id",
@@ -1504,7 +1502,15 @@ def _build_independent_system_prompt(
 ) -> str:
     capability = dict(capability)
     capability.pop("pose_references", None)
-    axis_keys = {"id", "label", "negative_semantics", "positive_semantics", "available_levels", "usage_notes"}
+    axis_keys = {
+        "id",
+        "label",
+        "negative_semantics",
+        "positive_semantics",
+        "value_range",
+        "neutral",
+        "usage_notes",
+    }
     capability["axes"] = [
         {key: value for key, value in axis.items() if key in axis_keys}
         for axis in capability.get("axes", [])
@@ -1529,15 +1535,23 @@ def _build_independent_system_prompt(
                 for axis in capability.get("axes", [])
                 if isinstance(axis, Mapping)
                 and str(axis.get("id") or "").strip()
-                and axis.get("available_levels")
+                and isinstance(axis.get("value_range"), (list, tuple))
+                and len(axis["value_range"]) == 2
             ),
             None,
         )
         if first_axis is not None:
-            raw_levels = first_axis.get("available_levels")
-            levels = list(raw_levels) if isinstance(raw_levels, (list, tuple)) else []
-            level = 0 if 0 in levels else levels[0]
-            contract["axis_levels"] = {str(first_axis["id"]): level}
+            value_range = first_axis.get("value_range")
+            low, high = float(value_range[0]), float(value_range[1])
+            neutral = first_axis.get("neutral")
+            if not isinstance(neutral, (int, float)):
+                neutral = (low + high) / 2.0
+            contract["motion_steps"] = [
+                {
+                    "axis_values": {str(first_axis["id"]): round(float(neutral), 3)},
+                    "duration_weight": 1,
+                }
+            ]
     return (
         "你负责为 AG99live 的 Live2D 角色生成动作参数。"
         "根据当前用户输入、提供的近期纯文本对话，以及当前 segment 的 speech、actions、tendency，"
@@ -1545,9 +1559,11 @@ def _build_independent_system_prompt(
         "优先落实 actions，以 tendency 调整情绪强度，只描述角色本段应该呈现的动作。"
         "这是长期陪伴中的身体表达，不是独立的舞台表演；动作要自然亲近，并服务于同一人格的语气和关系。"
         "动作幅度跟随当前语气和 tendency：普通确认、轻声安慰或停顿思考保持克制；"
+        "所有动作都必须使用 motion_steps，按播放顺序表达 1 到 4 个关键姿态；"
+        "单一稳定姿态也必须使用只包含一个步骤的 motion_steps。"
         "用户要求或当前 segment 的 speech 明确包含连续、重复、往返或有先后顺序的可见动作时，"
-        "优先用 motion_steps 按播放顺序表达 2 到 4 个关键姿态变化，不要压成一个平均姿态；"
-        "例如连续点头、左右摇摆、先转向再回正。普通确认、单一情绪或只有一个稳定姿态时使用 axis_levels。"
+        "使用 2 到 4 个步骤，不要压成一个平均姿态；"
+        "例如连续点头、左右摇摆、先转向再回正。"
         "只有明确动作意图、强烈情绪或用户明确要求时才提高动作幅度。"
         "若当前内容没有清晰动作信号，可以保持中性或不控制无关轴；不要把每条回复都演成明显动作。"
         "每个动作都要服务于当前语义，不要为了显眼而制造与语义冲突的动作。"
@@ -1556,13 +1572,13 @@ def _build_independent_system_prompt(
         "参考示例的 output 就是输出格式；最近执行动作只用于衔接和避免机械重复，勿照搬。"
         "只输出一个 JSON 对象，不要 Markdown、解释文字、工具调用或额外字段。"
         "intent_tags 是可选的训练/检索元数据；可以省略，若输出则使用 1 到 6 个简短关键词。"
-        "执行形状必须且只能选择一种："
-        "axis_levels（单个姿态）、motion_steps（2 到 4 个动作步骤，每步必须包含 axis_levels 和 1 到 3 的 duration_weight），"
-        "或 motion_resource_id（完整动作资源）。axis_levels 的值必须是能力数据里对应轴可用的等级。"
-        "动作序列采用稀疏语义：每一步只写新开始控制或需要改变的轴，后续步骤可以新增或省略轴；"
-        "不设整段动作的固定轴数量上限，但每个轴 ID 和等级都必须来自能力数据。"
+        "唯一的参数动作形状是 motion_steps；每一步必须包含 axis_values 和 1 到 3 的 duration_weight。"
+        "axis_values 的值必须是具体数值，落在能力数据里对应轴的 value_range 内，"
+        "可以是小数；不要输出 -4 到 4 的分级整数。中性使用该轴的 neutral。"
+        "motion_steps 采用稀疏语义：每一步只写新开始控制或需要改变的轴，后续步骤可以新增或省略轴；"
+        "motion_steps 长度为 1 到 4，每个轴 ID 都必须来自能力数据，数值必须在 value_range 内。"
         "可选字段只有 duration_hint_ms、expression_resource_id、motion_resource_id；"
-        "motion_resource_id 不得和 axis_levels、motion_steps 或 duration_hint_ms 同时使用；"
+        "motion_resource_id 不得和 motion_steps 或 duration_hint_ms 同时使用；"
         "expression_resource_id 不得和 motion_resource_id 同时使用。"
         "不要输出 profile_id、profile_revision、model_id、schema_version，这些由程序补入。"
         f"JSON 形状示例：{json.dumps(contract, ensure_ascii=False, separators=(',', ':'))}\n\n"
@@ -1583,8 +1599,25 @@ def _motion_guidance_for_prompt(
     capability: dict[str, Any], runtime: dict[str, Any],
 ) -> dict[str, Any]:
     """Project examples and executions onto the current legal output shape."""
-    levels = {axis["id"]: set(axis.get("available_levels") or []) for axis in capability.get("axes", [])}
-    output_keys = {"intent_tags", "axis_levels", "motion_steps", "duration_hint_ms", "expression_resource_id", "motion_resource_id"}
+    axis_ids = {
+        str(axis.get("id") or "").strip()
+        for axis in capability.get("axes", [])
+        if isinstance(axis, Mapping) and str(axis.get("id") or "").strip()
+    }
+    value_ranges: dict[str, tuple[float, float]] = {}
+    for axis in capability.get("axes", []):
+        if not isinstance(axis, Mapping):
+            continue
+        axis_id = str(axis.get("id") or "").strip()
+        value_range = axis.get("value_range")
+        if (
+            axis_id
+            and isinstance(value_range, (list, tuple))
+            and len(value_range) == 2
+            and all(isinstance(bound, (int, float)) for bound in value_range)
+        ):
+            value_ranges[axis_id] = (float(value_range[0]), float(value_range[1]))
+    output_keys = {"intent_tags", "motion_steps", "duration_hint_ms", "expression_resource_id", "motion_resource_id"}
 
     def project(items: list[Any], *, executed: bool) -> list[dict[str, Any]]:
         results = []
@@ -1599,17 +1632,15 @@ def _motion_guidance_for_prompt(
             for key in ("expression_resource_id", "motion_resource_id", "duration_hint_ms"):
                 if output.get(key) in (None, ""):
                     output.pop(key, None)
-            if executed and output.get("motion_steps"):
-                output.pop("axis_levels", None)
             if executed and output.get("motion_resource_id"):
-                output.pop("axis_levels", None)
                 output.pop("motion_steps", None)
                 output.pop("duration_hint_ms", None)
             input_text = "最近执行动作" if executed else _dialogue_text(str(item.get("input") or item.get("user_text") or ""))[:240]
             try:
                 projected = _project_reference_examples_for_prompt(
                     [{"input": input_text, "output": output}],
-                    allowed_axis_ids=set(levels), available_levels_by_axis=levels,
+                    allowed_axis_ids=axis_ids,
+                    value_ranges_by_axis=value_ranges,
                     resource_candidates=capability.get("resources", []),
                 )
             except ValueError:
@@ -1631,25 +1662,18 @@ def _motion_output_shape(value: Mapping[str, Any]) -> str:
         return "motion_resource"
     if "motion_steps" in value:
         return "motion_steps"
-    if "axis_levels" in value:
-        return "axis_levels"
     return "missing"
 
 
 def _motion_output_shape_summary(value: Mapping[str, Any]) -> dict[str, Any]:
-    root_axes = value.get("axis_levels")
-    root_axis_ids = {
-        str(axis_id).strip()
-        for axis_id in root_axes
-        if str(axis_id).strip()
-    } if isinstance(root_axes, Mapping) else set()
+    root_axis_ids: set[str] = set()
     raw_steps = value.get("motion_steps")
     step_axis_counts: list[int] = []
     unique_axis_ids = set(root_axis_ids)
     if isinstance(raw_steps, list):
         for raw_step in raw_steps:
             step_axes = (
-                raw_step.get("axis_levels")
+                raw_step.get("axis_values")
                 if isinstance(raw_step, Mapping)
                 else None
             )

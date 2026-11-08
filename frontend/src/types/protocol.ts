@@ -359,8 +359,14 @@ export interface PerformanceCurveHint {
 
 export type MotionAxisLevel = -4 | -3 | -2 | -1 | 0 | 1 | 2 | 3 | 4;
 export type MotionAxisLevelMap = Record<string, MotionAxisLevel>;
+/** Continuous semantic axis values expressed in the axis unit space. */
+export type MotionAxisValueMap = Record<string, number>;
 export interface MotionAxisLevelStep {
   axis_levels: MotionAxisLevelMap;
+  duration_weight: 1 | 2 | 3;
+}
+export interface MotionAxisValueStep {
+  axis_values: MotionAxisValueMap;
   duration_weight: 1 | 2 | 3;
 }
 
@@ -399,19 +405,22 @@ interface NormalizedSemanticMotionIntentV4Base
 export type NormalizedSemanticMotionIntentV4 =
   NormalizedSemanticMotionIntentV4Base & (
     | {
-      axis_levels: MotionAxisLevelMap;
+      axis_levels?: never;
+      axis_values: MotionAxisValueMap;
       motion_steps?: never;
       expression_resource_id?: string;
       motion_resource_id?: never;
     }
     | {
       axis_levels?: never;
-      motion_steps: MotionAxisLevelStep[];
+      axis_values?: never;
+      motion_steps: MotionAxisValueStep[];
       motion_resource_id?: never;
       expression_resource_id?: string;
     }
     | {
       axis_levels?: never;
+      axis_values?: never;
       motion_steps?: never;
       expression_resource_id?: never;
       motion_resource_id: string;
@@ -617,7 +626,7 @@ export interface MotionTuningSampleProtocolPayload {
   tags: string[];
   enabled_for_llm_reference?: boolean;
   original_axes: Record<string, number>;
-  raw_axis_levels?: Record<string, number>;
+  raw_axis_values?: Record<string, number>;
   resolved_axes?: Record<string, number>;
   constrained_axes?: Record<string, number>;
   adjusted_axes?: Record<string, number>;
@@ -643,9 +652,8 @@ export interface SystemMotionTuningSamplesStatePayload {
     output: {
       intent_tags: string[];
       duration_hint_ms?: number | null;
-      axis_levels?: Record<string, number>;
       motion_steps?: Array<{
-        axis_levels: Record<string, number>;
+        axis_values: Record<string, number>;
         duration_weight: number;
       }>;
       expression_resource_id?: string;

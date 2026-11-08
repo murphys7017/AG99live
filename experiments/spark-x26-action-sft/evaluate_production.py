@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import time
 from collections import Counter
 from pathlib import Path
@@ -10,14 +11,10 @@ from typing import Any
 ROOT = Path(__file__).resolve().parent
 MODEL = "XHToken/Spark-X2.6-1.7B-Base"
 FIELDS = {
-    "intent_tags",
-    "axis_levels",
     "motion_steps",
     "duration_hint_ms",
-    "expression_resource_id",
-    "motion_resource_id",
 }
-SHAPES = {"axis_levels", "motion_steps", "motion_resource_id"}
+SHAPES = {"motion_steps"}
 
 
 def _evenly_spaced_indices(candidates: list[int], count: int) -> list[int]:
@@ -37,54 +34,56 @@ def validate(value: Any, capability: dict[str, Any]) -> list[str]:
     if not isinstance(value, dict):
         return ["not_object"]
     errors = []
-    if set(value) - FIELDS:
+    if set(value) != FIELDS:
         errors.append("unknown_fields")
     shapes = SHAPES.intersection(value)
     if len(shapes) != 1:
         errors.append("execution_shape")
-    axes = {a["id"]: a.get("available_levels", []) for a in capability.get("axes", [])}
-    resources = {(r.get("resource_type"), r.get("resource_id")): r for r in capability.get("resources", [])}
-    used_axes: set[str] = set()
+    axes = {
+        a["id"]: a
+        for a in capability.get("axes", [])
+        if isinstance(a, dict) and isinstance(a.get("id"), str)
+    }
 
-    def check_levels(levels: Any) -> None:
-        if not isinstance(levels, dict) or not levels:
-            errors.append("axis_levels_shape")
+    def check_values(values: Any) -> None:
+        if not isinstance(values, dict) or not values:
+            errors.append("axis_values_shape")
             return
-        for axis, level in levels.items():
-            used_axes.add(axis)
-            if axis not in axes:
+        for axis, value in values.items():
+            spec = axes.get(axis)
+            if spec is None:
                 errors.append("unknown_axis")
-            elif type(level) is not int or level not in axes[axis]:
-                errors.append("unavailable_level")
+                continue
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(float(value))
+            ):
+                errors.append("axis_value_number")
+                continue
+            value_range = spec.get("value_range")
+            if (
+                not isinstance(value_range, list)
+                or len(value_range) != 2
+                or value < value_range[0]
+                or value > value_range[1]
+            ):
+                errors.append("axis_value_range")
 
-    if "axis_levels" in value:
-        check_levels(value["axis_levels"])
-    if "motion_steps" in value:
-        steps = value["motion_steps"]
-        if not isinstance(steps, list) or not 2 <= len(steps) <= 4:
-            errors.append("motion_steps_shape")
-        else:
-            for step in steps:
-                if not isinstance(step, dict) or set(step) != {"axis_levels", "duration_weight"}:
-                    errors.append("motion_step_fields")
-                    continue
-                check_levels(step["axis_levels"])
-                if type(step["duration_weight"]) is not int or not 1 <= step["duration_weight"] <= 3:
-                    errors.append("duration_weight")
+    steps = value.get("motion_steps")
+    if not isinstance(steps, list) or not 1 <= len(steps) <= 4:
+        errors.append("motion_steps_shape")
+    else:
+        for step in steps:
+            if not isinstance(step, dict) or set(step) != {"axis_values", "duration_weight"}:
+                errors.append("motion_step_fields")
+                continue
+            check_values(step["axis_values"])
+            if type(step["duration_weight"]) is not int or not 1 <= step["duration_weight"] <= 3:
+                errors.append("duration_weight")
     duration = value.get("duration_hint_ms")
-    if "duration_hint_ms" in value and (type(duration) is not int or not 320 <= duration <= 15000):
+    if type(duration) is not int or not 320 <= duration <= 15000:
         errors.append("duration_hint_ms")
-    for kind in ("motion", "expression"):
-        key = f"{kind}_resource_id"
-        if key in value:
-            resource_id = value[key]
-            resource = resources.get((kind, resource_id)) if isinstance(resource_id, str) else None
-            if resource is None:
-                errors.append(f"{kind}_resource_unknown")
-            elif kind == "expression" and used_axes.intersection(set(resource.get("conflicting_axis_ids") or []) | set(resource.get("conflicting_prompt_axis_ids") or [])):
-                errors.append("expression_axis_conflict")
-    if "motion_resource_id" in value and ("duration_hint_ms" in value or "expression_resource_id" in value):
-        errors.append("motion_resource_conflict")
     return sorted(set(errors))
 
 

@@ -7,7 +7,7 @@ ModelEngine 是前端从 `engine.motion_intent.v4` 到可执行参数计划或�
 ```text
 motion intent
   -> 严格校验
-  -> 语义轴标准化与九级采样
+  -> 语义轴具体值校验与标准化
   -> 关系图、表演时序和说话随动
   -> 参数绑定与响应设置
   -> engine.parameter_plan.v3 / motion resource
@@ -18,7 +18,7 @@ motion intent
 
 | 输入 | 输出 |
 | --- | --- |
-| `axis_levels`、稀疏 `motion_steps` 或 `motion_resource_id` | `engine.parameter_plan.v3` 或预检通过的 motion resource。 |
+| 稀疏 `motion_steps[].axis_values` 或 `motion_resource_id` | `engine.parameter_plan.v3` 或预检通过的 motion resource。 |
 | 当前模型、profile、语音随动资料、音频时钟和文本 | 计划时序、参数轨道、诊断和可观测终态。 |
 | Motion Lab 重放请求 | 复用同一编译和执行路径，不创建实验室专用播放器。 |
 
@@ -26,8 +26,8 @@ ModelEngine 不接收原始 Persona 文本，不修改后端输出，不读取 W
 
 ## 编译职责
 
-1. 验证 schema、模型、profile revision、轴名、等级和执行形态。
-2. 对合法的 `-4..4` 语义等级进行确定性采样，并按 profile 范围映射为模型值。
+1. 验证 schema、模型、profile revision、轴名、具体数值和执行形态。
+2. 对合法的 `value_range` 内语义值进行标准化，并按 profile 映射为模型值。
 3. 应用语义轴关系图，生成派生值和模型约束后的结果。
 4. 根据音频或显式时长编排 pose、sequence、gaze、face、speech cues 和收势时间。
 5. 生成参数轨道、激活时间、keyframe、语音调制和响应策略。

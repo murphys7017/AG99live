@@ -268,7 +268,7 @@ class PassiveBehaviorRuntime:
             allowed_fields = {
                 "decision",
                 "intent_tags",
-                "axis_levels",
+                "motion_steps",
                 "duration_hint_ms",
             }
             unknown_fields = sorted(set(action) - allowed_fields)
@@ -311,7 +311,15 @@ class PassiveBehaviorRuntime:
                 "tags=%s axes=%s latency_ms=%s",
                 message_id,
                 ",".join(motion_payload.get("intent_tags") or []),
-                ",".join(motion_payload.get("axis_levels", {}).keys()),
+                ",".join(
+                    sorted(
+                        {
+                            axis_id
+                            for step in motion_payload.get("motion_steps", [])
+                            for axis_id in (step.get("axis_values") or {})
+                        }
+                    )
+                ),
                 int((time.monotonic() - started) * 1000),
             )
             return emitted_count < _MAX_ACTIONS_PER_STREAM
@@ -448,12 +456,16 @@ def _normalize_motion_action(
         "model_id": semantic_profile.get("model_id"),
         "mode": "expressive",
         "intent_tags": action.get("intent_tags"),
-        "axis_levels": action.get("axis_levels"),
+        "motion_steps": action.get("motion_steps"),
     }
     contract_payload["duration_hint_ms"] = action.get("duration_hint_ms", 4000)
     normalized = normalize_motion_intent_v4_payload(contract_payload)
     normalized["duration_hint_ms"] = max(3000, normalized["duration_hint_ms"])
-    if not any(level != 0 for level in normalized.get("axis_levels", {}).values()):
+    if not any(
+        value != 0
+        for step in normalized.get("motion_steps", [])
+        for value in (step.get("axis_values") or {}).values()
+    ):
         raise ValueError("motion_has_no_non_neutral_axis")
     validated, reason = validate_normalized_motion_intent_payload(
         normalized,

@@ -1338,15 +1338,8 @@ def _log_persona_effect_motion_resolution(
         for segment_payload in payload.values():
             if not isinstance(segment_payload, Mapping):
                 continue
-            axes = segment_payload.get("axis_levels")
             motion_steps = segment_payload.get("motion_steps")
-            if isinstance(axes, Mapping):
-                axis_keys.update(
-                    str(key).strip()
-                    for key in axes
-                    if str(key).strip()
-                )
-            elif isinstance(motion_steps, list):
+            if isinstance(motion_steps, list):
                 axis_keys.update(_collect_motion_step_axis_keys(motion_steps))
             expression_resource_id = str(
                 segment_payload.get("expression_resource_id") or ""
@@ -1519,17 +1512,9 @@ def _summarize_ag99live_motion_effect_arguments(event: Any, view: Any) -> dict[s
             for key in raw_arguments
             if str(key).strip()
         )
-        raw_axes = raw_arguments.get("axis_levels")
-        if isinstance(raw_axes, Mapping):
-            axis_keys.update(
-                str(key).strip()
-                for key in raw_axes
-                if str(key).strip()
-            )
-        else:
-            motion_steps = _thaw_snapshot_value(raw_arguments.get("motion_steps"))
-            if isinstance(motion_steps, list):
-                axis_keys.update(_collect_motion_step_axis_keys(motion_steps))
+        motion_steps = _thaw_snapshot_value(raw_arguments.get("motion_steps"))
+        if isinstance(motion_steps, list):
+            axis_keys.update(_collect_motion_step_axis_keys(motion_steps))
         raw_intent_tags = _thaw_snapshot_value(raw_arguments.get("intent_tags"))
         if isinstance(raw_intent_tags, (list, tuple, set)):
             intent_tags.extend(
@@ -1598,7 +1583,7 @@ def _extract_raw_persona_speech_segments(view: Any) -> list[str]:
 def _collect_motion_step_axis_keys(motion_steps: list[Any]) -> list[str]:
     axis_ids: set[str] = set()
     for step in motion_steps:
-        step_axes = step.get("axis_levels") if isinstance(step, dict) else None
+        step_axes = step.get("axis_values") if isinstance(step, dict) else None
         if not isinstance(step_axes, Mapping):
             continue
         axis_ids.update(

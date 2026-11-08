@@ -459,12 +459,12 @@ def extract_assistant_reply_keywords(text: str, *, limit: int = 8) -> list[str]:
 def summarize_motion_for_curve(payload: Any) -> dict[str, Any]:
     if not isinstance(payload, dict):
         return {}
-    axes = payload.get("axis_levels")
     motion_steps = payload.get("motion_steps")
-    if not isinstance(axes, dict) and isinstance(motion_steps, list):
+    axes: dict[str, float] | None = None
+    if isinstance(motion_steps, list):
         sequence_axis_ids: set[str] = set()
         for step in motion_steps:
-            step_axes = step.get("axis_levels") if isinstance(step, dict) else None
+            step_axes = step.get("axis_values") if isinstance(step, dict) else None
             if not isinstance(step_axes, dict):
                 continue
             sequence_axis_ids.update(
@@ -473,8 +473,6 @@ def summarize_motion_for_curve(payload: Any) -> dict[str, Any]:
                 if str(axis_id).strip()
             )
         axes = {axis_id: 0 for axis_id in sequence_axis_ids}
-    if not isinstance(axes, dict):
-        axes = payload.get("axes")
     return {
         "intent_tags": _normalize_string_list(payload.get("intent_tags"), limit=8),
         "axis_keys": sorted(str(key).strip() for key in (axes or {}).keys() if str(key).strip())

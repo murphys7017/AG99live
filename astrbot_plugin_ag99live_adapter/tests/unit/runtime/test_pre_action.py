@@ -109,7 +109,7 @@ def test_pre_action_emits_before_provider_eof_without_prompt_history():
                     yield SimpleNamespace(
                         role="assistant",
                         is_chunk=True,
-                        completion_text='{"intent_tags":["好奇"],"axis_levels":{"head_yaw":1}}',
+                        completion_text='{"intent_tags":["好奇"],"motion_steps":[{"axis_values":{"head_yaw":65},"duration_weight":1}]}',
                     )
                     await asyncio.Event().wait()
                 finally:
@@ -122,7 +122,9 @@ def test_pre_action_emits_before_provider_eof_without_prompt_history():
         assert message["type"] == "output.pre_action"
         assert message["turn_id"] == "input:test"
         assert message["payload"]["action"] == "ready"
-        assert message["payload"]["motion"]["axis_levels"] == {"head_yaw": 1}
+        assert message["payload"]["motion"]["motion_steps"] == [
+            {"axis_values": {"head_yaw": 65.0}, "duration_weight": 1}
+        ]
         await asyncio.wait_for(closed.wait(), timeout=1)
         await runtime.cancel()
 
@@ -152,7 +154,7 @@ def test_new_capture_keeps_ownership_when_old_asr_returns(tmp_path):
                 yield SimpleNamespace(
                     role="assistant",
                     is_chunk=True,
-                    completion_text='{"intent_tags":["好奇"],"axis_levels":{"head_yaw":1}}',
+                    completion_text='{"intent_tags":["好奇"],"motion_steps":[{"axis_values":{"head_yaw":65},"duration_weight":1}]}',
                 )
 
             async def get_text(self, path):

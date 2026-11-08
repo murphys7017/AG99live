@@ -88,11 +88,17 @@ function validateProfileForIntent(
   }
   if (
     intent.schema_version === SCHEMA_MOTION_INTENT_V4
-    && !("axis_levels" in intent)
+    && !("axis_values" in intent)
+    && !("motion_steps" in intent)
   ) {
     return "motion_sequence_must_compile_at_root";
   }
-  const inputAxisCount = Object.keys(intent.axis_levels ?? {}).length;
+  const inputAxisCount = Object.keys(
+    intent.axis_values ?? {},
+  ).length + (intent.motion_steps?.reduce(
+    (count, step) => count + Object.keys(step.axis_values).length,
+    0,
+  ) ?? 0);
   if (!speechActive && inputAxisCount === 0) {
     return "semantic_intent_axes_empty";
   }

@@ -9,8 +9,8 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 MODEL_ID = "XHToken/Spark-X2.6-1.7B-Base"
-ADAPTER_DIR = PROJECT_ROOT / "output" / "spark-x26-1p7b-lora-schema2"
-MERGED_DIR = PROJECT_ROOT / "output" / "spark-x26-1p7b-lora-merged-bf16"
+ADAPTER_DIR = PROJECT_ROOT / "output" / "spark-x26-1p7b-lora-continuous"
+MERGED_DIR = PROJECT_ROOT / "output" / "spark-x26-1p7b-lora-continuous-merged-bf16"
 
 
 def main() -> int:

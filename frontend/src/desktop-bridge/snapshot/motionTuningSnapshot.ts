@@ -65,9 +65,6 @@ export function cloneMotionTuningEffectiveExample(
         && Number.isFinite(example.output.durationHintMs)
         ? example.output.durationHintMs
         : null,
-      axisLevels: Object.keys(cloneNumericRecord(example.output.axisLevels)).length
-        ? cloneNumericRecord(example.output.axisLevels)
-        : undefined,
       motionSteps: cloneMotionTuningMotionSteps(example.output.motionSteps),
       expressionResourceId: normalizeText(example.output.expressionResourceId) || undefined,
       motionResourceId: normalizeText(example.output.motionResourceId) || undefined,
@@ -80,7 +77,7 @@ export function cloneMotionTuningEffectiveExample(
 function cloneMotionTuningMotionSteps(
   value: unknown,
 ): DesktopMotionTuningEffectiveExample["output"]["motionSteps"] {
-  if (!Array.isArray(value) || value.length < 2 || value.length > 4) {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 4) {
     return undefined;
   }
   const steps = value.map((item) => {
@@ -88,9 +85,9 @@ function cloneMotionTuningMotionSteps(
       return null;
     }
     const durationWeight = item.durationWeight;
-    const axisLevels = cloneNumericRecord(item.axisLevels);
+    const axisValues = cloneNumericRecord(item.axisValues);
     if (
-      !Object.keys(axisLevels).length
+      !Object.keys(axisValues).length
       || typeof durationWeight !== "number"
       || !Number.isInteger(durationWeight)
       || durationWeight < 1
@@ -98,7 +95,7 @@ function cloneMotionTuningMotionSteps(
     ) {
       return null;
     }
-    return { axisLevels, durationWeight };
+    return { axisValues, durationWeight };
   });
   return steps.every((step) => step !== null)
     ? steps as NonNullable<DesktopMotionTuningEffectiveExample["output"]["motionSteps"]>

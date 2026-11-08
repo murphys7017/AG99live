@@ -51,16 +51,13 @@ class MotionObservationRecorder:
             if not isinstance(snapshot, dict):
                 continue
             cloned_snapshot = dict(snapshot)
-            axis_levels = snapshot.get("axis_levels")
             motion_steps = snapshot.get("motion_steps")
             intent_tags = snapshot.get("intent_tags")
-            if isinstance(axis_levels, dict):
-                cloned_snapshot["axis_levels"] = dict(axis_levels)
             if isinstance(motion_steps, list):
                 cloned_snapshot["motion_steps"] = [
                     {
                         **step,
-                        "axis_levels": dict(step.get("axis_levels") or {}),
+                        "axis_values": dict(step.get("axis_values") or {}),
                     }
                     for step in motion_steps
                     if isinstance(step, dict)
@@ -81,9 +78,7 @@ class MotionObservationRecorder:
             != MOTION_INTENT_V4_SCHEMA_VERSION
         ):
             return
-        axis_levels = motion_payload.get("axis_levels")
         motion_steps = motion_payload.get("motion_steps")
-        has_levels = isinstance(axis_levels, dict) and bool(axis_levels)
         has_steps = isinstance(motion_steps, list) and bool(motion_steps)
         expression_resource_id = str(
             motion_payload.get("expression_resource_id") or ""
@@ -92,9 +87,8 @@ class MotionObservationRecorder:
             motion_payload.get("motion_resource_id") or ""
         ).strip()
         has_resource = bool(expression_resource_id or motion_resource_id)
-        if "axes" in motion_payload or (has_levels == has_steps and not has_resource):
+        if "axes" in motion_payload or (not has_steps and not has_resource):
             return
-        normalized_levels = dict(axis_levels) if isinstance(axis_levels, dict) else {}
 
         intent_tags = motion_payload.get("intent_tags")
         normalized_tags = []
@@ -110,12 +104,10 @@ class MotionObservationRecorder:
             "source": str(source or "").strip(),
             "intent_tags": normalized_tags,
         }
-        if normalized_levels:
-            snapshot["axis_levels"] = normalized_levels
         if isinstance(motion_steps, list):
             snapshot["motion_steps"] = [
                 {
-                    "axis_levels": dict(step.get("axis_levels") or {}),
+                    "axis_values": dict(step.get("axis_values") or {}),
                     "duration_weight": step.get("duration_weight"),
                 }
                 for step in motion_steps

@@ -193,9 +193,9 @@ export interface DesktopMotionCompileDiagnostics {
     profileRevision: number;
     profileHash: string;
     rawAxes: Record<string, number>;
-    rawAxisLevels?: Record<string, number>;
+    rawAxisValues?: Record<string, number>;
     rawMotionSteps?: Array<{
-      axis_levels: Record<string, number>;
+      axis_values: Record<string, number>;
       duration_weight: number;
     }>;
     axisSampling?: {
@@ -280,7 +280,7 @@ export interface DesktopMotionTuningSample {
   tags: string[];
   enabledForLlmReference?: boolean;
   originalAxes: Record<string, number>;
-  rawAxisLevels?: Record<string, number>;
+  rawAxisValues?: Record<string, number>;
   resolvedAxes?: Record<string, number>;
   constrainedAxes?: Record<string, number>;
   adjustedAxes?: Record<string, number>;
@@ -293,9 +293,8 @@ export interface DesktopMotionTuningEffectiveExample {
   output: {
     intentTags: readonly string[];
     durationHintMs: number | null;
-    axisLevels?: Record<string, number>;
     motionSteps?: readonly {
-      axisLevels: Record<string, number>;
+      axisValues: Record<string, number>;
       durationWeight: number;
     }[];
     expressionResourceId?: string;

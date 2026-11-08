@@ -59,14 +59,14 @@ def test_shadow_motion_uses_primary_prompt_and_never_replaces_primary_result(
             both_requests_started.set()
         await asyncio.wait_for(both_requests_started.wait(), timeout=1)
         return (
-            '{"intent_tags":["安慰"],"axis_levels":{"head_pitch":1}}',
+            '{"intent_tags":["安慰"],"motion_steps":[{"axis_values":{"head_pitch":65},"duration_weight":1}]}',
             "stream",
         )
 
     async def recover_json(_text, **_kwargs):
         return {
             "intent_tags": ["安慰"],
-            "axis_levels": {"head_pitch": 1},
+            "motion_steps": [{"axis_values": {"head_pitch": 65}, "duration_weight": 1}],
         }
 
     def record_sample(_recorder, **kwargs):
@@ -87,7 +87,7 @@ def test_shadow_motion_uses_primary_prompt_and_never_replaces_primary_result(
         module,
         "normalize_motion_arguments_payload",
         lambda *_args, **_kwargs: (
-            {"schema_version": "engine.motion_intent.v4", "axis_levels": {"head_pitch": 1}},
+            {"schema_version": "engine.motion_intent.v4", "motion_steps": [{"axis_values": {"head_pitch": 65}, "duration_weight": 1}]},
             "ok",
         ),
     )
@@ -126,7 +126,7 @@ def test_shadow_motion_uses_primary_prompt_and_never_replaces_primary_result(
 
         assert result.motion_payload == {
             "schema_version": "engine.motion_intent.v4",
-            "axis_levels": {"head_pitch": 1},
+            "motion_steps": [{"axis_values": {"head_pitch": 65}, "duration_weight": 1}],
         }
         assert len(requests) == 2
         primary_request = next(item for item in requests if item["provider"] is primary)
@@ -228,7 +228,7 @@ def test_motion_dataset_keeps_shadow_output_as_candidate_only() -> None:
                     "candidate_role": "primary",
                     "provider_final": True,
                     "status": "provider_normalized",
-                    "accepted_payload": {"axis_levels": {"head_pitch": 1}},
+                    "accepted_payload": {"motion_steps": [{"axis_values": {"head_pitch": 65}, "duration_weight": 1}]},
                 },
             ),
             event(
@@ -240,7 +240,7 @@ def test_motion_dataset_keeps_shadow_output_as_candidate_only() -> None:
                     "candidate_role": "shadow",
                     "provider_final": False,
                     "status": "shadow_provider_normalized",
-                    "accepted_payload": {"axis_levels": {"head_pitch": -1}},
+                    "accepted_payload": {"motion_steps": [{"axis_values": {"head_pitch": 35}, "duration_weight": 1}]},
                     "raw_output": "shadow raw JSON",
                 },
             ),
@@ -248,7 +248,7 @@ def test_motion_dataset_keeps_shadow_output_as_candidate_only() -> None:
     )
 
     assert merged["collection_status"] == "closed"
-    assert merged["final_payload"] == {"axis_levels": {"head_pitch": 1}}
+    assert merged["final_payload"] == {"motion_steps": [{"axis_values": {"head_pitch": 65}, "duration_weight": 1}]}
     assert merged["input"]["motion_request"]["provider_id"] == "deepseek-provider"
     assert merged["provider_candidates"] == [
         {
@@ -256,7 +256,7 @@ def test_motion_dataset_keeps_shadow_output_as_candidate_only() -> None:
             "provider_id": "spark-v5-provider",
             "candidate_role": "shadow",
             "status": "shadow_provider_normalized",
-            "accepted_payload": {"axis_levels": {"head_pitch": -1}},
+            "accepted_payload": {"motion_steps": [{"axis_values": {"head_pitch": 35}, "duration_weight": 1}]},
             "raw_output": "shadow raw JSON",
             "generation_elapsed_ms": None,
             "provider_elapsed_ms": None,

@@ -34,7 +34,7 @@ Core 的 canonical 输出以 `PersonaExpressionResult` 聚合表达通道与 eff
 
 `speech/actions/tendency` 属于 Persona 表达段；`effect_calls` 是独立的插件 Effect 通道。`actions` 是不带执行参数的自然动作意图，`tendency` 是角色当前的 Plutchik 八维情绪强度。两者语义不同，不能合并成一个标签。
 
-AG99live 的动作生成结果是另一个对象：`engine.motion_intent.v4`。它包含 `intent_tags`，并选择 `axis_levels`、`motion_steps` 或 `motion_resource_id` 之一。当前 Adapter 规范化时从 `intent_tags` 派生 `emotion_label`；因此 `emotion_label` 是派生字段，不能当作独立于意图标签的原始监督标签。`tendency` 则是 Core 提供的八维状态，不能被 `emotion_label` 替代。
+AG99live 的动作生成结果是另一个对象：`engine.motion_intent.v4`。参数动作统一使用 1–4 步的 `motion_steps`，每步包含具体数值 `axis_values` 和 `duration_weight`；完整动作资源仍使用 `motion_resource_id`。运行时不再接受 `axis_levels` 或根级 `axis_values`。当前 Adapter 规范化时从 `intent_tags` 派生 `emotion_label`；因此 `emotion_label` 是派生字段，不能当作独立于意图标签的原始监督标签。`tendency` 则是 Core 提供的八维状态，不能被 `emotion_label` 替代。
 
 一条样本以一个逻辑 Persona 段为单位，并保留动作来源。推荐的归一化形状如下：
 

@@ -72,7 +72,7 @@ function compileSemanticSequence(
     compileSemanticPoseContext(
       {
         ...intent,
-        axis_levels: step.axis_levels,
+        axis_values: step.axis_values,
         motion_steps: undefined,
       } as NormalizedSemanticMotionIntentV4,
       { ...options, allowNeutralAxisPose: true },
@@ -100,7 +100,7 @@ function compileSemanticSequence(
   const signatures = successfulSteps.map((step) =>
     JSON.stringify(step.axes.map((axis) => [axis.axisId, axis.value])),
   );
-  if (signatures.every((signature) => signature === signatures[0])) {
+  if (successfulSteps.length > 1 && signatures.every((signature) => signature === signatures[0])) {
     return failSemanticCompile(
       "semantic_sequence_has_no_transition",
       successfulSteps[0].context,

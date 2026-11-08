@@ -61,6 +61,6 @@ export function buildSpeechOnlyCompilerIntent(
     emotion_label: "speech",
     intent_tags: ["speech"],
     duration_hint_ms: null,
-    axis_levels: {},
+    axis_values: {},
   };
 }

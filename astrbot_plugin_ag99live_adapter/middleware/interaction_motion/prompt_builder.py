@@ -67,10 +67,9 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
         if has_motion_resources
         else ""
     ) + (
-        "用户要求或本段回复明确包含连续、重复、往返或有先后顺序的可见动作时，优先使用 motion_steps；"
-        "例如连续点头、左右摇摆、先转向再回正，按播放顺序用 2 到 4 步表达关键姿态变化，不要压成一个平均姿态。"
-        "只有一个稳定姿态时使用 axis_levels。普通短回复、确认和单一情绪优先 axis_levels；"
-        "不要因为示例出现 sequence 而生成 motion_steps，也不要按词语、停顿或语音节奏拆分 motion_steps。"
+        "所有动作都必须使用 motion_steps；单一稳定姿态使用 1 步，连续、重复、往返或有先后顺序的可见动作使用 2 到 4 步。"
+        "例如连续点头、左右摇摆、先转向再回正，按播放顺序表达关键姿态变化，不要压成一个平均姿态。"
+        "不要按词语、停顿或语音节奏拆分 motion_steps。"
     )
     output_contract_text = (
         "你正在控制一个 Live2D 模型，并为本轮回复生成可见动作。"
@@ -80,17 +79,17 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
     )
 
     axis_instruction = (
-        "等级语义是：-4=夸张负、-3=清晰可见负、-2=克制负、-1=细节负、"
-        "0=明确中性、+1=细节正、+2=克制正、+3=清晰可见正、+4=夸张正；省略表示本轮不控制此轴；"
+        "轴值语义是：每个轴在 value_range 区间内取具体数值，0 或 neutral 表示中性；"
+        "数值越接近区间端点，动作幅度越大。直接用轴自己的数值量纲输出，不要换算成 -4 到 4 的分级；省略表示本轮不控制此轴；"
         "没有明确方向或表演贡献的轴直接省略。"
     )
     axis_shape_text = (
-        "执行形状三选一：单姿态使用 axis_levels，动作序列使用 motion_steps，完整动作资源只使用 motion_resource_id。"
-        "expression_resource_id 是可选的表情叠加层，可以和 axis_levels 或 motion_steps 同时出现，"
+        "参数动作只能使用 motion_steps，完整动作资源只使用 motion_resource_id。"
+        "expression_resource_id 是可选的表情叠加层，可以和 motion_steps 同时出现，"
         "但不能和 motion_resource_id 同时出现。"
-        "motion_steps 的每一步只写新开始控制或需要改变的轴；轴在首次声明前不受本序列控制，首次声明后省略表示保持该轴的上一目标，"
+        "motion_steps 的每一步只写新开始控制或需要改变的 axis_values；轴在首次声明前不受本序列控制，首次声明后省略表示保持该轴的上一目标，"
         "只有显式 0 才表示该轴回到语义中性。最后一步可以保持有意义的非中性姿态。"
-        "axis_levels 只能使用下方列出的轴 id。"
+        "每一步的 axis_values 只能使用下方列出的轴 id。"
     )
     return (
         f"{output_contract_text}"
@@ -102,8 +101,8 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
         "只输出本轮直接需要控制的轴；关系图可派生的跟随轴不要为了凑完整而重复输出。"
         "优先选择能表达姿态方向、视线焦点和身体重心的关键轴，再用少量表情轴补充情绪细节。"
         "优先使用当前 Profile 中 control_role=primary 且 semantic_group 属于 head、body、gaze 的轴表达姿态骨架；"
-        "视线和表情细节使用对应的辅助轴。等级必须从每个轴自己的 available_levels 中选择：优先较强的可用等级，"
-        "克制表达选择较小的可用等级，短时夸张才选择最大可用等级。"
+        "视线和表情细节使用对应的辅助轴。数值必须落在每个轴自己的 value_range 内："
+        "强烈表达取靠近区间端点的值，克制表达取靠近中性附近的值，短时夸张才取到端点。"
         "示例只展示结构和数值，不要照抄示例内容或把示例的动作形状当作本轮必须复用的模板。"
     )
 
@@ -111,22 +110,14 @@ def _build_motion_capability_prompt_payload(
     capability_payload: dict[str, Any],
 ) -> dict[str, Any]:
     result: dict[str, Any] = {
-        "axis_value_format": "axis_levels",
+        "axis_value_format": "axis_values",
+        "axis_value_guidance": (
+            "每个轴输出该轴 value_range 区间内的具体数值（可以是小数），"
+            "0 表示中性；不需要控制的轴直接省略。不要输出 -4 到 4 的分级整数。"
+        ),
         "motion_plan_limits": {
             "max_motion_steps": 4,
             "axis_count_scope": "sparse controlled-axis union; no fixed total axis-count cap",
-        },
-        "axis_level_scale": {
-            "-4": "短时夸张负方向",
-            "-3": "普通 Live2D 清晰可见负方向",
-            "-2": "克制负方向",
-            "-1": "局部细节或缓入负方向",
-            "0": "明确回到中性",
-            "1": "局部细节或缓入正方向",
-            "2": "克制正方向",
-            "3": "普通 Live2D 清晰可见正方向",
-            "4": "短时夸张正方向",
-            "omitted": "本轮不控制该轴",
         },
     }
 
@@ -140,11 +131,12 @@ def _build_motion_capability_prompt_payload(
                 "description",
                 "semantic_group",
                 "control_role",
+                "value_range",
+                "neutral",
                 "negative_semantics",
                 "positive_semantics",
                 "usage_notes",
             ]
-            axis_fields.append("available_levels")
             result["axes"] = [
                 {
                     key: axis.get(key)
@@ -171,7 +163,7 @@ def _build_motion_capability_prompt_payload(
                     "intensity",
                     "recommended_scenarios",
                     "pose_descriptors",
-                    "key_axis_levels",
+                    "key_axis_values",
                 )
                 if item.get(key) not in (None, "", [])
             }

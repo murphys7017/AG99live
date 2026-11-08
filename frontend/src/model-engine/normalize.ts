@@ -1,8 +1,7 @@
 import type {
   PerformanceCurveHint,
-  MotionAxisLevel,
-  MotionAxisLevelMap,
-  MotionAxisLevelStep,
+  MotionAxisValueMap,
+  MotionAxisValueStep,
   SemanticMotionIntent,
 } from "../types/protocol.js";
 import {
@@ -25,43 +24,40 @@ import {
   normalizeText,
 } from "../utils/guards.js";
 
-function normalizeAxisLevelsV4(value: unknown): MotionAxisLevelMap | null {
+function normalizeAxisValuesV4(value: unknown): MotionAxisValueMap | null {
   if (!isObject(value)) {
     return null;
   }
-  const levels: MotionAxisLevelMap = {};
-  for (const [axisId, rawLevel] of Object.entries(value)) {
+  const axisValues: MotionAxisValueMap = {};
+  for (const [axisId, rawValue] of Object.entries(value)) {
     const normalizedAxisId = normalizeText(axisId);
-    if (!normalizedAxisId || typeof rawLevel !== "number" || !Number.isInteger(rawLevel)) {
+    if (!normalizedAxisId || !isFiniteNumber(rawValue)) {
       return null;
     }
-    if (rawLevel < -4 || rawLevel > 4) {
-      return null;
-    }
-    levels[normalizedAxisId] = rawLevel as MotionAxisLevel;
+    axisValues[normalizedAxisId] = rawValue;
   }
-  return Object.keys(levels).length > 0 ? levels : null;
+  return Object.keys(axisValues).length > 0 ? axisValues : null;
 }
 
-function normalizeMotionStepsV4(value: unknown): MotionAxisLevelStep[] | null {
-  if (!Array.isArray(value) || value.length < 2 || value.length > 4) {
+function normalizeMotionStepsV4(value: unknown): MotionAxisValueStep[] | null {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 4) {
     return null;
   }
-  const steps: MotionAxisLevelStep[] = [];
+  const steps: MotionAxisValueStep[] = [];
   for (const rawStep of value) {
     if (!isObject(rawStep)) {
       return null;
     }
     const unknownFields = Object.keys(rawStep).filter(
-      (field) => field !== "axis_levels" && field !== "duration_weight",
+      (field) => field !== "axis_values" && field !== "duration_weight",
     );
     if (unknownFields.length > 0) {
       return null;
     }
-    const axisLevels = normalizeAxisLevelsV4(rawStep.axis_levels);
+    const axisValues = normalizeAxisValuesV4(rawStep.axis_values);
     const durationWeight = rawStep.duration_weight;
     if (
-      !axisLevels
+      !axisValues
       || !isFiniteNumber(durationWeight)
       || !Number.isInteger(durationWeight)
       || durationWeight < 1
@@ -70,7 +66,7 @@ function normalizeMotionStepsV4(value: unknown): MotionAxisLevelStep[] | null {
       return null;
     }
     steps.push({
-      axis_levels: axisLevels,
+      axis_values: axisValues,
       duration_weight: durationWeight as 1 | 2 | 3,
     });
   }
@@ -146,17 +142,16 @@ function parseSemanticMotionIntent(value: unknown): ParseResult<SemanticMotionIn
   }
   const mode: "idle" | "expressive" = modeRaw;
 
-  const hasAxisLevels = Object.prototype.hasOwnProperty.call(value, "axis_levels");
   const hasMotionSteps = Object.prototype.hasOwnProperty.call(value, "motion_steps");
   const hasMotionResource = Object.prototype.hasOwnProperty.call(value, "motion_resource_id");
-  const axisLevels = hasAxisLevels ? normalizeAxisLevelsV4(value.axis_levels) : null;
   const motionSteps = hasMotionSteps ? normalizeMotionStepsV4(value.motion_steps) : null;
   const motionResourceId = normalizeText(value.motion_resource_id) || undefined;
-  if (hasAxisLevels && !hasMotionSteps && !axisLevels) {
-    return { ok: false, reason: "motion_intent_v4.invalid_axis_levels" };
-  }
-  if (hasMotionSteps && !hasAxisLevels && !motionSteps) {
+  if (hasMotionSteps && !motionSteps) {
     return { ok: false, reason: "motion_intent_v4.invalid_motion_steps" };
+  }
+  if (Object.prototype.hasOwnProperty.call(value, "axis_levels")
+    || Object.prototype.hasOwnProperty.call(value, "axis_values")) {
+    return { ok: false, reason: "motion_intent_v4.motion_steps_required" };
   }
   if (Object.prototype.hasOwnProperty.call(value, "axes")) {
     return { ok: false, reason: "motion_intent_v4.invalid_axis_levels" };
@@ -164,7 +159,9 @@ function parseSemanticMotionIntent(value: unknown): ParseResult<SemanticMotionIn
   if (hasMotionResource && !motionResourceId) {
     return { ok: false, reason: "motion_intent_v4.motion_resource_id_empty" };
   }
-  if (Number(hasAxisLevels) + Number(hasMotionSteps) + Number(hasMotionResource) !== 1) {
+  if (
+    Number(hasMotionSteps) + Number(hasMotionResource) !== 1
+  ) {
     return { ok: false, reason: "motion_intent_v4.invalid_motion_shape" };
   }
 
@@ -246,15 +243,7 @@ function parseSemanticMotionIntent(value: unknown): ParseResult<SemanticMotionIn
         },
       };
   }
-  return {
-      ok: true,
-      value: {
-        ...common,
-        schema_version: SCHEMA_MOTION_INTENT_V4,
-        axis_levels: axisLevels!,
-        expression_resource_id: expressionResourceId,
-      },
-  };
+  return { ok: false, reason: "motion_intent_v4.motion_steps_required" };
 }
 
 function normalizePerformanceCurveHint(value: unknown): PerformanceCurveHint | undefined {

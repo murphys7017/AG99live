@@ -190,13 +190,13 @@ def test_motion_effect_schema_limits_axis_names_to_current_profile(
                                 "id": "head_roll",
                                 "control_role": "primary",
                                 "neutral": 0,
-                                "level_anchors": {"-2": -20, "0": 0, "2": 20},
+                                "value_range": [-30, 30],
                             },
                             {
                                 "id": "brow_bias",
                                 "control_role": "hint",
                                 "neutral": 0,
-                                "level_anchors": {"-1": -10, "0": 0, "1": 10},
+                                "value_range": [-20, 20],
                             },
                         ],
                     },
@@ -211,13 +211,15 @@ def test_motion_effect_schema_limits_axis_names_to_current_profile(
     )
 
     schema = module._build_ag99live_motion_effect_parameters(object())
-    axis_levels = schema["properties"]["axis_levels"]
+    motion_steps = schema["properties"]["motion_steps"]
+    axis_values = motion_steps["items"]["properties"]["axis_values"]
 
-    assert axis_levels["additionalProperties"] is False
-    assert set(axis_levels["properties"]) == {"head_roll", "brow_bias"}
-    assert axis_levels["properties"]["head_roll"]["enum"] == [-2, 0, 2]
-    assert "head_tilt" not in axis_levels["properties"]
-    assert "brow_raise" not in axis_levels["properties"]
+    assert axis_values["additionalProperties"] is False
+    assert set(axis_values["properties"]) == {"head_roll", "brow_bias"}
+    assert axis_values["properties"]["head_roll"]["minimum"] == -30
+    assert axis_values["properties"]["head_roll"]["maximum"] == 30
+    assert "head_tilt" not in axis_values["properties"]
+    assert "brow_raise" not in axis_values["properties"]
 
 
 def test_motion_static_prompt_extensions_target_persona(
@@ -1039,7 +1041,7 @@ def test_independent_motion_request_uses_text_memory_and_segment_without_images(
         runtime_state=runtime_state,
         turn_coordinator=SimpleNamespace(motion_observations=SimpleNamespace(
             get_prompt_motion_history=lambda: [{
-                "intent_tags": ["最近点头"], "axis_levels": {"head_roll": 0},
+                "intent_tags": ["最近点头"], "motion_steps": [{"axis_values": {"head_roll": 50}, "duration_weight": 1}],
                 "schema_version": "runtime-only", "message_id": "private-runtime-id",
                 "expression_resource_id": "", "motion_resource_id": "",
             }],
@@ -1051,7 +1053,7 @@ def test_independent_motion_request_uses_text_memory_and_segment_without_images(
         async def text_chat_stream(self, **kwargs):
             calls.append(kwargs)
             completion = (
-                '{"intent_tags":["平和"],"axis_levels":{"head_roll":0}}'
+                '{"intent_tags":["平和"],"motion_steps":[{"axis_values":{"head_roll":50},"duration_weight":1}]}'
             )
             yield types.SimpleNamespace(
                 role="assistant",
@@ -1073,13 +1075,13 @@ def test_independent_motion_request_uses_text_memory_and_segment_without_images(
         module,
         "_build_motion_runtime_payload",
         lambda *args, **kwargs: ({"reference_examples": [{
-            "input": "自然点头", "output": {"intent_tags": ["点头"], "axis_levels": {"head_roll": 0}},
+            "input": "自然点头", "output": {"intent_tags": ["点头"], "motion_steps": [{"axis_values": {"head_roll": 50}, "duration_weight": 1}]},
         }]}, []),
     )
     monkeypatch.setattr(
         module,
         "_build_motion_capability_prompt_payload",
-        lambda _payload: {"axes": [{"id": "head_roll", "available_levels": [-1, 0, 1]}], "resources": []},
+        lambda _payload: {"axes": [{"id": "head_roll", "value_range": [0, 100], "neutral": 50}], "resources": []},
     )
     monkeypatch.setattr(
         module,

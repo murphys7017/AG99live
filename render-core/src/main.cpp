@@ -4270,10 +4270,11 @@ private:
               ReadString(axis, "semantic_group")});
     }
 
-    const auto resolve_axis_levels = [&](const ag99::runtime::Json& levels) {
+    bool invalid_axis_value = false;
+    const auto resolve_axis_values = [&](const ag99::runtime::Json& values) {
       AxisMap resolved;
       std::unordered_set<std::string> explicit_axes;
-      if (!levels.is_object()) {
+      if (!values.is_object()) {
         return resolved;
       }
       for (const auto& axis : *axes) {
@@ -4281,9 +4282,9 @@ private:
           continue;
         }
         const auto id = ReadString(axis, "id");
-        const auto level_it = levels.find(id);
-        if (id.empty() || level_it == levels.end()
-            || !level_it->is_number_integer()) {
+        const auto value_it = values.find(id);
+        if (id.empty() || value_it == values.end()
+            || !value_it->is_number()) {
           continue;
         }
         const auto role = ReadString(axis, "control_role");
@@ -4296,17 +4297,15 @@ private:
         }
         const auto& definition = definition_it->second;
         const double neutral = definition.neutral;
-        double value = neutral;
-        const auto anchors = axis.find("level_anchors");
-        if (anchors != axis.end() && anchors->is_object()) {
-          const auto key = std::to_string(level_it->get<int>());
-          const auto anchor = anchors->find(key);
-          if (anchor != anchors->end() && anchor->is_number()) {
-            value = anchor->get<double>();
-          }
+        const double value = value_it->get<double>();
+        if (!std::isfinite(value)
+            || value < definition.value_min
+            || value > definition.value_max) {
+          invalid_axis_value = true;
+          continue;
         }
-        value = Clamp(value, definition.value_min, definition.value_max);
-        resolved.emplace(id, AxisValue{value, neutral, definition.group});
+        resolved.emplace(
+            id, AxisValue{value, neutral, definition.group});
         explicit_axes.insert(id);
       }
 
@@ -4442,32 +4441,25 @@ private:
 
     std::vector<std::pair<ag99::runtime::Json, int>> input_steps;
     const auto steps = intent.find("motion_steps");
-    if (steps != intent.end()) {
-      if (!steps->is_array() || steps->empty()) {
+    if (steps == intent.end() || !steps->is_array() || steps->empty()
+        || steps->size() > 4) {
+      return std::nullopt;
+    }
+    for (const auto& step : *steps) {
+      if (!step.is_object()) {
         return std::nullopt;
       }
-      for (const auto& step : *steps) {
-        if (!step.is_object()) {
-          return std::nullopt;
-        }
-        const auto levels = step.find("axis_levels");
-        const auto weight = step.find("duration_weight");
-        if (levels == step.end() || !levels->is_object()
-            || weight == step.end() || !weight->is_number_integer()) {
-          return std::nullopt;
-        }
-        const int duration_weight = weight->get<int>();
-        if (duration_weight < 1 || duration_weight > 3) {
-          return std::nullopt;
-        }
-        input_steps.emplace_back(*levels, duration_weight);
-      }
-    } else {
-      const auto axis_levels = intent.find("axis_levels");
-      if (axis_levels == intent.end() || !axis_levels->is_object()) {
+      const auto values = step.find("axis_values");
+      const auto weight = step.find("duration_weight");
+      if (values == step.end() || !values->is_object()
+          || weight == step.end() || !weight->is_number_integer()) {
         return std::nullopt;
       }
-      input_steps.emplace_back(*axis_levels, 1);
+      const int duration_weight = weight->get<int>();
+      if (duration_weight < 1 || duration_weight > 3) {
+        return std::nullopt;
+      }
+      input_steps.emplace_back(*values, duration_weight);
     }
     if (input_steps.empty()) {
       return std::nullopt;
@@ -4485,11 +4477,14 @@ private:
     std::vector<AxisMap> resolved_steps;
     resolved_steps.reserve(input_steps.size());
     int total_weight = 0;
-    for (const auto& [levels, weight] : input_steps) {
-      resolved_steps.push_back(resolve_axis_levels(levels));
+    for (const auto& [values, weight] : input_steps) {
+      resolved_steps.push_back(resolve_axis_values(values));
       total_weight += weight;
     }
     if (total_weight <= 0) {
+      return std::nullopt;
+    }
+    if (invalid_axis_value) {
       return std::nullopt;
     }
 

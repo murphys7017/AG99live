@@ -12,17 +12,17 @@ lora_dropout: 0.05
 lora_target: all
 
 ### Dataset
-dataset: spark_x26_weak
-dataset_dir: data
+dataset: spark_x26_continuous
+dataset_dir: data/continuous
 template: spark
 enable_thinking: false
-cutoff_len: 2048
+mask_history: true
+cutoff_len: 6144
 preprocessing_num_workers: 1
 dataloader_num_workers: 0
-max_samples: 16
 
 ### Output
-output_dir: output/spark-x26-1p7b-lora-schema2
+output_dir: output/spark-x26-1p7b-lora-continuous
 logging_steps: 1
 save_steps: 1000
 save_only_model: true

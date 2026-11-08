@@ -88,7 +88,7 @@ export function serializeMotionTuningSample(
     tags: [...sample.tags],
     enabled_for_llm_reference: Boolean(sample.enabledForLlmReference),
     original_axes: { ...sample.originalAxes },
-    raw_axis_levels: { ...(sample.rawAxisLevels ?? {}) },
+    raw_axis_values: { ...(sample.rawAxisValues ?? {}) },
     resolved_axes: { ...(sample.resolvedAxes ?? {}) },
     constrained_axes: { ...(sample.constrainedAxes ?? {}) },
     adjusted_axes: sample.adjustedAxes ? { ...sample.adjustedAxes } : undefined,
@@ -171,7 +171,7 @@ export function normalizeMotionTuningSamplePayload(
       : [],
     enabledForLlmReference: Boolean(candidate.enabled_for_llm_reference),
     originalAxes: normalizeMotionTuningAxisRecord(candidate.original_axes),
-    rawAxisLevels: normalizeMotionTuningAxisRecord(candidate.raw_axis_levels),
+    rawAxisValues: normalizeMotionTuningAxisRecord(candidate.raw_axis_values),
     resolvedAxes: normalizeMotionTuningAxisRecord(candidate.resolved_axes),
     constrainedAxes: normalizeMotionTuningAxisRecord(candidate.constrained_axes),
     adjustedAxes: candidate.adjusted_axes === undefined
@@ -215,9 +215,8 @@ export function normalizeMotionTuningEffectiveExamplePayload(
     return null;
   }
   const output = value.output;
-  const axisLevels = normalizeMotionTuningAxisRecord(output.axis_levels);
   const motionSteps = normalizeMotionTuningMotionSteps(output.motion_steps);
-  if (!Object.keys(axisLevels).length && !motionSteps?.length) {
+  if (!motionSteps?.length) {
     return null;
   }
   return {
@@ -231,7 +230,6 @@ export function normalizeMotionTuningEffectiveExamplePayload(
         && Number.isFinite(output.duration_hint_ms)
         ? output.duration_hint_ms
         : null,
-      axisLevels: Object.keys(axisLevels).length ? axisLevels : undefined,
       motionSteps,
       expressionResourceId: normalizeText(output.expression_resource_id) || undefined,
       motionResourceId: normalizeText(output.motion_resource_id) || undefined,
@@ -246,17 +244,17 @@ export function normalizeMotionTuningEffectiveExamplePayload(
 function normalizeMotionTuningMotionSteps(
   value: unknown,
 ): DesktopMotionTuningEffectiveExample["output"]["motionSteps"] {
-  if (!Array.isArray(value) || value.length < 2 || value.length > 4) {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 4) {
     return undefined;
   }
   const steps = value.map((item) => {
     if (!isObject(item)) {
       return null;
     }
-    const axisLevels = normalizeMotionTuningAxisRecord(item.axis_levels);
+    const axisValues = normalizeMotionTuningAxisRecord(item.axis_values);
     const durationWeight = item.duration_weight;
     if (
-      !Object.keys(axisLevels).length
+      !Object.keys(axisValues).length
       || typeof durationWeight !== "number"
       || !Number.isInteger(durationWeight)
       || durationWeight < 1
@@ -264,7 +262,7 @@ function normalizeMotionTuningMotionSteps(
     ) {
       return null;
     }
-    return { axisLevels, durationWeight };
+    return { axisValues, durationWeight };
   });
   return steps.every((step) => step !== null)
     ? steps as NonNullable<DesktopMotionTuningEffectiveExample["output"]["motionSteps"]>

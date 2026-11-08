@@ -1,7 +1,7 @@
 import type {
   DirectParameterPlanTiming,
-  MotionAxisLevelMap,
-  MotionAxisLevelStep,
+  MotionAxisValueMap,
+  MotionAxisValueStep,
   PerformanceCurveHint,
 } from "./protocol.js";
 
@@ -120,8 +120,8 @@ export interface MotionTransformTrace {
   profileRevision: number;
   profileHash: string;
   rawAxes: Record<string, number>;
-  rawAxisLevels?: MotionAxisLevelMap;
-  rawMotionSteps?: MotionAxisLevelStep[];
+  rawAxisValues?: MotionAxisValueMap;
+  rawMotionSteps?: MotionAxisValueStep[];
   axisSampling?: MotionAxisSamplingTrace;
   expressionResourceId?: string;
   motionResourceId?: string;

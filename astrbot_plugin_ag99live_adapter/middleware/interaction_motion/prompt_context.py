@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from .prompt_references import (
@@ -25,7 +26,6 @@ from ...prompts.motion_selector import resolve_motion_reference_examples
 from ...prompts.semantic_axis_prompt import (
     format_profile_axis_prompt_line,
     profile_prompt_axes,
-    resolve_available_axis_levels,
 )
 
 def _record_motion_prompt_reference_observation(
@@ -81,10 +81,17 @@ def _build_motion_runtime_reference_examples(
         for axis in prompt_axes
         if isinstance(axis, dict) and str(axis.get("id") or "").strip()
     }
-    available_levels_by_axis = {
-        str(axis.get("id") or "").strip(): set(axis.get("available_levels") or [])
+    value_ranges_by_axis = {
+        str(axis.get("id") or "").strip(): (
+            float(axis["value_range"][0]),
+            float(axis["value_range"][1]),
+        )
         for axis in prompt_axes
-        if isinstance(axis, dict) and str(axis.get("id") or "").strip()
+        if isinstance(axis, dict)
+        and str(axis.get("id") or "").strip()
+        and isinstance(axis.get("value_range"), (list, tuple))
+        and len(axis["value_range"]) == 2
+        and all(isinstance(bound, (int, float)) for bound in axis["value_range"])
     }
     if not allowed_axis_ids:
         raise RuntimeError("semantic_motion_prompt_axes_empty")
@@ -99,7 +106,7 @@ def _build_motion_runtime_reference_examples(
         "examples": _project_reference_examples_for_prompt(
             resolution["examples"],
             allowed_axis_ids=allowed_axis_ids,
-            available_levels_by_axis=available_levels_by_axis,
+            value_ranges_by_axis=value_ranges_by_axis,
             resource_candidates=resource_candidates,
         ),
         "diagnostics": list(resolution["diagnostics"]),
@@ -132,14 +139,12 @@ def _build_motion_variation_payload(
     )
     variation_axis_id_set = set(variation_axis_ids)
 
-    axis_levels = _resolve_snapshot_axis_levels(snapshot)
+    axis_values = _resolve_snapshot_axis_values(snapshot)
     motion_steps = snapshot.get("motion_steps")
-    axes = snapshot.get("axes")
     expression_resource_id = str(snapshot.get("expression_resource_id") or "").strip()
     motion_resource_id = str(snapshot.get("motion_resource_id") or "").strip()
     has_motion_shape = bool(
-        axis_levels
-        or axes
+        axis_values
         or motion_steps
         or expression_resource_id
         or motion_resource_id
@@ -147,22 +152,16 @@ def _build_motion_variation_payload(
     if not has_motion_shape:
         return {}
 
-    axis_by_id = {}
-    if isinstance(axes, dict):
+    try:
         semantic_profile = resolve_selected_semantic_axis_profile(runtime_state=runtime_state)
         axis_by_id = build_prompt_axis_lookup(semantic_profile)
+    except Exception:  # noqa: BLE001
+        axis_by_id = {}
 
     key_axes: list[dict[str, Any]] = []
-    key_axis_levels: dict[str, int] = {}
+    key_axis_values: dict[str, float] = {}
     for axis_id in variation_axis_ids:
-        axis_level = axis_levels.get(axis_id) if isinstance(axis_levels, dict) else None
-        if isinstance(axis_level, int) and not isinstance(axis_level, bool) and -4 <= axis_level <= 4:
-            key_axes.append({"axis_id": axis_id, "level": axis_level})
-            key_axis_levels[axis_id] = axis_level
-            continue
-        if not isinstance(axes, dict):
-            continue
-        axis_value = axes.get(axis_id)
+        axis_value = axis_values.get(axis_id) if isinstance(axis_values, dict) else None
         if not isinstance(axis_value, (int, float)) or isinstance(axis_value, bool):
             continue
         axis = axis_by_id.get(axis_id)
@@ -178,6 +177,7 @@ def _build_motion_variation_payload(
                 "neutral": round(neutral, 2),
             }
         )
+        key_axis_values[axis_id] = round(float(axis_value), 3)
 
     if not key_axes and not (motion_steps or expression_resource_id or motion_resource_id):
         return {}
@@ -185,16 +185,18 @@ def _build_motion_variation_payload(
     repeated_directions: dict[tuple[str, int], int] = {}
     sequence_count = 0
     for history_snapshot in history:
-        history_levels = _resolve_snapshot_axis_levels(history_snapshot)
-        key_levels = {
-            axis_id: level
-            for axis_id, level in history_levels.items()
+        history_values = _resolve_snapshot_axis_values(history_snapshot)
+        key_values = {
+            axis_id: value
+            for axis_id, value in history_values.items()
             if axis_id in variation_axis_id_set
         }
         directions = {
-            axis_id: 1 if level > 0 else -1
-            for axis_id, level in key_levels.items()
-            if level != 0
+            axis_id: 1 if value > resolve_axis_neutral_value(
+                axis_by_id.get(axis_id, {})
+            ) else -1
+            for axis_id, value in key_values.items()
+            if abs(value - resolve_axis_neutral_value(axis_by_id.get(axis_id, {}))) > 1e-6
         }
         for axis_id, direction in directions.items():
             repeated_directions[(axis_id, direction)] = (
@@ -206,15 +208,7 @@ def _build_motion_variation_payload(
         intent_tags = history_snapshot.get("intent_tags")
         recent_motion_history.append(
             {
-                "shape": "sequence" if is_sequence else (
-                    "motion_resource"
-                    if history_snapshot.get("motion_resource_id")
-                    else (
-                        "expression_resource"
-                        if history_snapshot.get("expression_resource_id")
-                        else "pose"
-                    )
-                ),
+                "shape": "sequence" if is_sequence else "motion_resource",
                 "axis_directions": directions,
                 "intent_tags": [
                     str(tag).strip()
@@ -234,8 +228,8 @@ def _build_motion_variation_payload(
         if count >= 2
     ]
     previous_motion = {
-        "key_axis_levels": key_axis_levels,
-        "key_axes": key_axes if not key_axis_levels else [],
+        "key_axis_values": key_axis_values,
+        "key_axes": key_axes,
         "expression_resource_id": expression_resource_id,
         "motion_resource_id": motion_resource_id,
         "was_sequence": bool(motion_steps),
@@ -271,16 +265,17 @@ def _resolve_prompt_variation_axis_ids(
     """Choose variation axes from the active profile, retaining recent custom axes."""
     latest_axis_ids: list[str] = []
     latest = history[-1] if history else {}
-    for source in (
-        latest.get("axis_levels"),
-        latest.get("axes"),
-    ):
-        if not isinstance(source, dict):
-            continue
-        for raw_axis_id in source:
-            axis_id = str(raw_axis_id or "").strip()
-            if axis_id and axis_id not in latest_axis_ids:
-                latest_axis_ids.append(axis_id)
+    motion_steps = latest.get("motion_steps")
+    latest_values = {
+        axis_id: value
+        for step in motion_steps or []
+        if isinstance(step, dict)
+        for axis_id, value in (step.get("axis_values") or {}).items()
+    }
+    for raw_axis_id in latest_values:
+        axis_id = str(raw_axis_id or "").strip()
+        if axis_id and axis_id not in latest_axis_ids:
+            latest_axis_ids.append(axis_id)
 
     profile_axis_ids: list[str] = []
     try:
@@ -326,35 +321,25 @@ def _resolve_prompt_motion_history(turn_coordinator: Any) -> list[dict[str, Any]
     return [snapshot for snapshot in history if isinstance(snapshot, dict)]
 
 
-def _resolve_snapshot_axis_levels(snapshot: dict[str, Any]) -> dict[str, int]:
-    axis_levels = snapshot.get("axis_levels")
+def _resolve_snapshot_axis_values(snapshot: dict[str, Any]) -> dict[str, float]:
     motion_steps = snapshot.get("motion_steps")
     if isinstance(motion_steps, list) and motion_steps:
-        resolved_levels: dict[str, int] = {}
+        resolved_values: dict[str, float] = {}
         for step in motion_steps:
-            step_levels = step.get("axis_levels") if isinstance(step, dict) else None
-            if not isinstance(step_levels, dict):
+            step_values = step.get("axis_values") if isinstance(step, dict) else None
+            if not isinstance(step_values, dict):
                 continue
-            for axis_id, level in step_levels.items():
+            for axis_id, value in step_values.items():
                 normalized_axis_id = str(axis_id).strip()
                 if (
                     normalized_axis_id
-                    and isinstance(level, int)
-                    and not isinstance(level, bool)
-                    and -4 <= level <= 4
+                    and isinstance(value, (int, float))
+                    and not isinstance(value, bool)
+                    and math.isfinite(float(value))
                 ):
-                    resolved_levels[normalized_axis_id] = level
-        return resolved_levels
-    if not isinstance(axis_levels, dict):
-        return {}
-    return {
-        str(axis_id).strip(): level
-        for axis_id, level in axis_levels.items()
-        if str(axis_id).strip()
-        and isinstance(level, int)
-        and not isinstance(level, bool)
-        and -4 <= level <= 4
-    }
+                    resolved_values[normalized_axis_id] = float(value)
+        return resolved_values
+    return {}
 
 def _summarize_semantic_profile(
     runtime_state: Any,
@@ -376,10 +361,10 @@ def _summarize_semantic_profile(
                 ),
                 "control_role": str(axis.get("control_role") or "").strip(),
                 "value_range": _normalize_axis_range(axis.get("value_range"), [0.0, 100.0]),
+                "neutral": _normalize_axis_neutral(axis.get("neutral")),
                 "negative_semantics": _normalize_axis_text_list(axis.get("negative_semantics")),
                 "positive_semantics": _normalize_axis_text_list(axis.get("positive_semantics")),
                 "usage_notes": _truncate_text(str(axis.get("usage_notes") or "").strip(), 160),
-                "available_levels": resolve_available_axis_levels(axis),
             }
             for axis in prompt_axes
             if str(axis.get("id") or "").strip()
@@ -396,7 +381,6 @@ def _build_middleware_axis_prompt(
         format_profile_axis_prompt_line(
             axis,
             truncate_text=_truncate_text,
-            use_axis_levels=True,
         )
         for axis in prompt_axes
     )
@@ -410,3 +394,9 @@ def _normalize_axis_range(value: Any, fallback: list[float] | None) -> list[floa
     ):
         return [float(value[0]), float(value[1])]
     return fallback
+
+
+def _normalize_axis_neutral(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)

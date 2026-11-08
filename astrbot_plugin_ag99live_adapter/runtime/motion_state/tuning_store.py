@@ -336,13 +336,14 @@ class MotionTuningStore:
                 adjusted_axes,
                 allowed_axis_ids=allowed_axis_ids,
             )
-            axis_levels = self._project_axes_to_levels(
-                filtered_axes,
-                axis_by_id=axis_by_id,
-            )
-            if not axis_levels:
-                return None, "pose_axis_levels_missing"
-            output["axis_levels"] = axis_levels
+            if not filtered_axes:
+                return None, "pose_axis_values_missing"
+            output["motion_steps"] = [
+                {
+                    "axis_values": filtered_axes,
+                    "duration_weight": 1,
+                }
+            ]
             return output, ""
 
         if compiled_motion.get("kind") != "sequence":
@@ -363,7 +364,7 @@ class MotionTuningStore:
         allowed_axis_ids: set[str],
     ) -> tuple[list[dict[str, Any]], str]:
         raw_steps = compiled_motion.get("steps")
-        if not isinstance(raw_steps, list) or not 2 <= len(raw_steps) <= 4:
+        if not isinstance(raw_steps, list) or not 1 <= len(raw_steps) <= 4:
             return [], "sequence_steps_invalid"
         projected_steps: list[dict[str, Any]] = []
         for step in raw_steps:
@@ -371,23 +372,19 @@ class MotionTuningStore:
                 return [], "sequence_step_invalid"
             diagnostics = step.get("diagnostics")
             trace = diagnostics.get("transformTrace") if isinstance(diagnostics, dict) else None
-            raw_levels = trace.get("rawAxisLevels") if isinstance(trace, dict) else None
-            if not isinstance(raw_levels, dict):
-                return [], "sequence_step_raw_axis_levels_missing"
-            axis_levels: dict[str, int] = {}
-            for raw_axis_id, raw_level in raw_levels.items():
+            raw_values = trace.get("rawAxisValues") if isinstance(trace, dict) else None
+            if not isinstance(raw_values, dict):
+                return [], "sequence_step_raw_axis_values_missing"
+            axis_values: dict[str, float] = {}
+            for raw_axis_id, raw_value in raw_values.items():
                 axis_id = str(raw_axis_id or "").strip()
                 if axis_id not in allowed_axis_ids:
                     continue
-                if (
-                    isinstance(raw_level, bool)
-                    or not isinstance(raw_level, int)
-                    or not -4 <= raw_level <= 4
-                ):
-                    return [], f"sequence_step_axis_level_invalid:{axis_id}"
-                axis_levels[axis_id] = raw_level
-            if not axis_levels:
-                return [], "sequence_step_axis_levels_empty"
+                if isinstance(raw_value, bool) or not isinstance(raw_value, (int, float)):
+                    return [], f"sequence_step_axis_value_invalid:{axis_id}"
+                axis_values[axis_id] = float(raw_value)
+            if not axis_values:
+                return [], "sequence_step_axis_values_empty"
             duration_weight = step.get("durationWeight")
             if (
                 isinstance(duration_weight, bool)
@@ -398,7 +395,7 @@ class MotionTuningStore:
                 return [], "sequence_step_duration_weight_invalid"
             projected_steps.append(
                 {
-                    "axis_levels": axis_levels,
+                    "axis_values": axis_values,
                     "duration_weight": int(duration_weight),
                 }
             )
@@ -450,28 +447,6 @@ class MotionTuningStore:
             if normalized_value is None:
                 continue
             result[normalized_axis_id] = normalized_value
-        return result
-
-    @staticmethod
-    def _project_axes_to_levels(
-        axes: dict[str, float],
-        *,
-        axis_by_id: dict[str, dict[str, Any]],
-    ) -> dict[str, int]:
-        result: dict[str, int] = {}
-        for axis_id, value in axes.items():
-            axis = axis_by_id.get(axis_id)
-            anchors = axis.get("level_anchors") if isinstance(axis, dict) else None
-            if not isinstance(anchors, dict):
-                continue
-            candidates: list[tuple[float, int]] = []
-            for level in range(-4, 5):
-                anchor = anchors.get(str(level))
-                if isinstance(anchor, (int, float)):
-                    candidates.append((abs(float(value) - float(anchor)), level))
-            if not candidates:
-                continue
-            result[axis_id] = min(candidates, key=lambda item: (item[0], abs(item[1])))[1]
         return result
 
     def normalize_sample(
@@ -528,8 +503,10 @@ class MotionTuningStore:
             field_name="original_axes",
             require_non_empty=False,
         )
-        raw_axis_levels = self._normalize_axis_levels(
-            sample_payload.get("raw_axis_levels")
+        raw_axis_values = self._normalize_axes(
+            sample_payload.get("raw_axis_values", {}),
+            field_name="raw_axis_values",
+            require_non_empty=False,
         )
         resolved_axes = self._normalize_axes(
             sample_payload.get("resolved_axes", {}),
@@ -602,7 +579,7 @@ class MotionTuningStore:
             "transform_version": str(
                 sample_payload.get("transform_version") or ""
             ).strip(),
-            "raw_axis_levels": raw_axis_levels,
+            "raw_axis_values": raw_axis_values,
             "resolved_axes": resolved_axes,
             "constrained_axes": constrained_axes,
         }
@@ -747,23 +724,18 @@ class MotionTuningStore:
     def _validate_sequence_step_trace(step_payload: dict[str, Any]) -> tuple[str, ...]:
         diagnostics = step_payload.get("diagnostics")
         trace = diagnostics.get("transformTrace") if isinstance(diagnostics, dict) else None
-        raw_axis_levels = trace.get("rawAxisLevels") if isinstance(trace, dict) else None
-        if not isinstance(raw_axis_levels, dict) or not raw_axis_levels:
+        raw_axis_values = trace.get("rawAxisValues") if isinstance(trace, dict) else None
+        if not isinstance(raw_axis_values, dict) or not raw_axis_values:
             raise ValueError(
                 "motion_tuning_sample_compiled_semantic_motion_step_trace_missing"
             )
-        for raw_axis_id, raw_level in raw_axis_levels.items():
+        for raw_axis_id, raw_value in raw_axis_values.items():
             axis_id = str(raw_axis_id or "").strip()
-            if (
-                not axis_id
-                or isinstance(raw_level, bool)
-                or not isinstance(raw_level, int)
-                or not -4 <= raw_level <= 4
-            ):
+            if not axis_id or isinstance(raw_value, bool) or not isinstance(raw_value, (int, float)):
                 raise ValueError(
                     "motion_tuning_sample_compiled_semantic_motion_step_trace_invalid"
                 )
-        return tuple(sorted(str(axis_id).strip() for axis_id in raw_axis_levels))
+        return tuple(sorted(str(axis_id).strip() for axis_id in raw_axis_values))
 
     @staticmethod
     def _validate_compiled_motion_timing(timing_payload: Any) -> None:
@@ -825,29 +797,6 @@ class MotionTuningStore:
             result[normalized_axis_id] = normalized_value
         if require_non_empty and not result:
             raise ValueError(f"motion_tuning_sample_{field_name}_empty")
-        return result
-
-    @staticmethod
-    def _normalize_axis_levels(value: Any) -> dict[str, int]:
-        if value is None:
-            return {}
-        if not isinstance(value, dict):
-            raise ValueError("motion_tuning_sample_raw_axis_levels_not_object")
-        result: dict[str, int] = {}
-        for raw_axis_id, raw_level in value.items():
-            axis_id = str(raw_axis_id or "").strip()
-            if not axis_id:
-                raise ValueError("motion_tuning_sample_raw_axis_level_id_empty")
-            if (
-                isinstance(raw_level, bool)
-                or not isinstance(raw_level, int)
-                or raw_level < -4
-                or raw_level > 4
-            ):
-                raise ValueError(
-                    f"motion_tuning_sample_raw_axis_level_invalid:{axis_id}"
-                )
-            result[axis_id] = raw_level
         return result
 
     @staticmethod

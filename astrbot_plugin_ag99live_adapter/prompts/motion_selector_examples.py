@@ -10,19 +10,30 @@ class MotionReferenceExamplesResolution(TypedDict):
     diagnostics: list[str]
 
 
-def build_example_axis_levels(axis_names: list[str], **overrides: int) -> dict[str, int]:
-    levels: dict[str, int] = {}
+def build_example_axis_values(axis_names: list[str], **overrides: int) -> dict[str, float]:
+    level_anchors = {
+        -4: 0.0,
+        -3: 15.0,
+        -2: 25.0,
+        -1: 35.0,
+        0: 50.0,
+        1: 65.0,
+        2: 75.0,
+        3: 85.0,
+        4: 100.0,
+    }
+    values: dict[str, float] = {}
     for key, value in overrides.items():
         if key not in axis_names:
             continue
         if not isinstance(value, int) or isinstance(value, bool) or not -4 <= value <= 4:
-            raise ValueError(f"motion_reference_example_axis_level_invalid:{key}")
-        levels[key] = value
-    return levels
+            raise ValueError(f"motion_reference_example_axis_value_invalid:{key}")
+        values[key] = level_anchors[value]
+    return values
 
 
 def create_default_motion_reference_examples(axis_names: list[str]) -> list[dict[str, Any]]:
-    return [
+    examples = [
         {
             "category": "neutral",
             "input": (
@@ -33,7 +44,7 @@ def create_default_motion_reference_examples(axis_names: list[str]) -> list[dict
             "output": {
                 "intent_tags": ["平和", "简短确认"],
                 "duration_hint_ms": 1100,
-                "axis_levels": build_example_axis_levels(
+                "axis_values": build_example_axis_values(
                     axis_names,
                     head_roll=2,
                     mouth_smile=2,
@@ -52,7 +63,7 @@ def create_default_motion_reference_examples(axis_names: list[str]) -> list[dict
                 "duration_hint_ms": 1800,
                 "motion_steps": [
                     {
-                        "axis_levels": build_example_axis_levels(
+                        "axis_values": build_example_axis_values(
                             axis_names,
                             head_roll=3,
                             body_roll=2,
@@ -60,7 +71,7 @@ def create_default_motion_reference_examples(axis_names: list[str]) -> list[dict
                         "duration_weight": 2,
                     },
                     {
-                        "axis_levels": build_example_axis_levels(
+                        "axis_values": build_example_axis_values(
                             axis_names,
                             head_roll=-3,
                             body_roll=-2,
@@ -69,7 +80,7 @@ def create_default_motion_reference_examples(axis_names: list[str]) -> list[dict
                         "duration_weight": 2,
                     },
                     {
-                        "axis_levels": build_example_axis_levels(
+                        "axis_values": build_example_axis_values(
                             axis_names,
                             head_roll=-1,
                             gaze_x=0,
@@ -89,7 +100,7 @@ def create_default_motion_reference_examples(axis_names: list[str]) -> list[dict
             "output": {
                 "intent_tags": ["安抚", "理解", "柔和"],
                 "duration_hint_ms": 1400,
-                "axis_levels": build_example_axis_levels(
+                "axis_values": build_example_axis_values(
                     axis_names,
                     head_roll=-3,
                     body_roll=-2,
@@ -108,7 +119,7 @@ def create_default_motion_reference_examples(axis_names: list[str]) -> list[dict
             "output": {
                 "intent_tags": ["疑惑", "审视", "追问"],
                 "duration_hint_ms": 1050,
-                "axis_levels": build_example_axis_levels(
+                "axis_values": build_example_axis_values(
                     axis_names,
                     head_roll=3,
                     gaze_x=-3,
@@ -126,7 +137,7 @@ def create_default_motion_reference_examples(axis_names: list[str]) -> list[dict
             "output": {
                 "intent_tags": ["开心", "满意", "轻松调侃"],
                 "duration_hint_ms": 1200,
-                "axis_levels": build_example_axis_levels(
+                "axis_values": build_example_axis_values(
                     axis_names,
                     head_roll=3,
                     body_roll=2,
@@ -148,7 +159,7 @@ def create_default_motion_reference_examples(axis_names: list[str]) -> list[dict
                 "duration_hint_ms": 1500,
                 "motion_steps": [
                     {
-                        "axis_levels": build_example_axis_levels(
+                        "axis_values": build_example_axis_values(
                             axis_names,
                             head_pitch=4,
                             body_pitch=4,
@@ -156,7 +167,7 @@ def create_default_motion_reference_examples(axis_names: list[str]) -> list[dict
                         "duration_weight": 1,
                     },
                     {
-                        "axis_levels": build_example_axis_levels(
+                        "axis_values": build_example_axis_values(
                             axis_names,
                             head_pitch=3,
                             body_pitch=3,
@@ -166,7 +177,7 @@ def create_default_motion_reference_examples(axis_names: list[str]) -> list[dict
                         "duration_weight": 2,
                     },
                     {
-                        "axis_levels": build_example_axis_levels(
+                        "axis_values": build_example_axis_values(
                             axis_names,
                             head_pitch=1,
                             body_pitch=1,
@@ -188,7 +199,7 @@ def create_default_motion_reference_examples(axis_names: list[str]) -> list[dict
                 "duration_hint_ms": 1600,
                 "motion_steps": [
                     {
-                        "axis_levels": build_example_axis_levels(
+                        "axis_values": build_example_axis_values(
                             axis_names,
                             head_roll=0,
                             body_roll=0,
@@ -197,7 +208,7 @@ def create_default_motion_reference_examples(axis_names: list[str]) -> list[dict
                         "duration_weight": 2,
                     },
                     {
-                        "axis_levels": build_example_axis_levels(
+                        "axis_values": build_example_axis_values(
                             axis_names,
                             head_roll=3,
                             body_roll=2,
@@ -206,7 +217,7 @@ def create_default_motion_reference_examples(axis_names: list[str]) -> list[dict
                         "duration_weight": 1,
                     },
                     {
-                        "axis_levels": build_example_axis_levels(
+                        "axis_values": build_example_axis_values(
                             axis_names,
                             gaze_x=0,
                         ),
@@ -216,6 +227,15 @@ def create_default_motion_reference_examples(axis_names: list[str]) -> list[dict
             },
         },
     ]
+    for example in examples:
+        output = example.get("output")
+        if not isinstance(output, dict) or "axis_values" not in output:
+            continue
+        axis_values = output.pop("axis_values")
+        output["motion_steps"] = [
+            {"axis_values": axis_values, "duration_weight": 1}
+        ]
+    return examples
 
 
 CORE_EXAMPLE_CATEGORY_GROUPS: list[tuple[str, ...]] = [
@@ -439,7 +459,8 @@ def select_relevant_default_examples(
 
 def _is_sequence_reference(example: dict[str, Any]) -> bool:
     output = example.get("output")
-    return isinstance(output, dict) and isinstance(output.get("motion_steps"), list)
+    steps = output.get("motion_steps") if isinstance(output, dict) else None
+    return isinstance(steps, list) and len(steps) > 1
 
 
 def _resolve_default_category_priority(category: str) -> int:

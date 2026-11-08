@@ -21,7 +21,7 @@ import { resolveAxisSamplingGroup } from "../semanticGroupTaxonomy.js";
 const ALLOWED_LLM_ROLES = new Set(["primary", "hint"]);
 
 // Reads:
-// - context.intent.axes / context.intent.axis_levels
+// - context.intent.axis_values
 // - context.state.profile
 // - context.state.axisById
 //
@@ -140,15 +140,15 @@ function resolveAllowedLlmAxisValues(
   const warnings: string[] = [];
   const forbiddenAxes: string[] = [];
   const invalidAxes: string[] = [];
-  const isLevelIntent = context.intent.schema_version === SCHEMA_MOTION_INTENT_V4;
-  const sampling = isLevelIntent
-    ? createAxisLevelSamplingTrace(context)
-    : null;
-  context.state.axisSampling = sampling;
-  const inputEntries = Object.entries(context.intent.axis_levels ?? {});
+  // `axis_values` carries continuous values already in axis space, so it skips
+  // the level-to-anchor lookup and is validated against `value_range` below.
+  context.state.axisSampling = null;
+  const inputEntries = Object.entries(
+    context.intent.axis_values ?? {},
+  );
   console.debug("[ModelEngine] received semantic axis payload.", {
     axisIds: inputEntries.map(([axisId]) => axisId),
-    axisLevels: context.intent.axis_levels,
+    axisValues: context.intent.axis_values,
   });
 
   for (const [axisId, rawValue] of inputEntries) {
@@ -165,15 +165,7 @@ function resolveAllowedLlmAxisValues(
       );
       continue;
     }
-    const levelResult = isLevelIntent
-      ? resolveAxisLevelValue(axis, rawValue as MotionAxisLevel, sampling!)
-      : null;
-    if (levelResult && !levelResult.ok) {
-      invalidAxes.push(axisId);
-      warnings.push(levelResult.reason);
-      continue;
-    }
-    const value = levelResult?.value ?? rawValue;
+    const value = rawValue;
     if (typeof value !== "number" || !Number.isFinite(value)) {
       invalidAxes.push(axisId);
       warnings.push(`semantic_axis_rejected_not_number:${axisId}`);
@@ -201,7 +193,7 @@ function resolveAllowedLlmAxisValues(
 }
 
 function resolveInputAxisIds(context: MotionCompileContext): string[] {
-  return Object.keys(context.intent.axis_levels ?? {});
+  return Object.keys(context.intent.axis_values ?? {});
 }
 
 function resolveAxisLevelValue(

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import time
 from pathlib import Path
 from typing import Any
@@ -12,76 +13,70 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 MODEL_ID = "XHToken/Spark-X2.6-1.7B-Base"
-ADAPTER_DIR = PROJECT_ROOT / "output" / "spark-x26-1p7b-lora-schema2"
-DATA_PATH = PROJECT_ROOT / "data" / "weak_sft.jsonl"
-REPORT_PATH = PROJECT_ROOT / "reports" / "generation_smoke.json"
-BASE_REPORT_PATH = PROJECT_ROOT / "reports" / "base_generation_smoke.json"
-REQUIRED_KEYS = {
-    "schema_version",
-    "profile_id",
-    "profile_revision",
-    "model_id",
-    "emotion_label",
-}
-MOTION_SHAPE_KEYS = {"axis_levels", "motion_steps", "motion_resource_id"}
+ADAPTER_DIR = PROJECT_ROOT / "output" / "spark-x26-1p7b-lora-continuous"
+DATA_PATH = PROJECT_ROOT / "data" / "continuous" / "continuous_sft.jsonl"
+REPORT_PATH = PROJECT_ROOT / "reports" / "continuous_generation_smoke.json"
+BASE_REPORT_PATH = PROJECT_ROOT / "reports" / "base_continuous_generation_smoke.json"
+REQUIRED_KEYS = {"motion_steps", "duration_hint_ms"}
 
 
-def _valid_motion_shape(value: dict[str, Any]) -> bool:
-    present = MOTION_SHAPE_KEYS.intersection(value)
-    if len(present) != 1:
-        return False
-    key = next(iter(present))
-    payload = value[key]
-    if key == "axis_levels":
-        return _valid_axis_levels(payload)
-    if key == "motion_steps":
-        if not isinstance(payload, list) or not 2 <= len(payload) <= 4:
-            return False
-        for step in payload:
-            if not isinstance(step, dict) or set(step) - {"axis_levels", "duration_weight"}:
-                return False
-            weight = step.get("duration_weight")
-            if type(weight) is not int or not 1 <= weight <= 3:
-                return False
-            if not _valid_axis_levels(step.get("axis_levels")):
-                return False
-        return True
-    return isinstance(payload, str) and bool(payload.strip())
+def _capability(messages: list[dict[str, str]]) -> dict[str, Any]:
+    content = messages[0]["content"] if messages else ""
+    marker = "Live2D 能力："
+    if marker not in content:
+        return {}
+    try:
+        value, _ = json.JSONDecoder().raw_decode(content.split(marker, 1)[1].lstrip())
+    except json.JSONDecodeError:
+        return {}
+    return value if isinstance(value, dict) else {}
 
 
-def _valid_axis_levels(value: Any) -> bool:
-    return isinstance(value, dict) and bool(value) and all(
-        isinstance(axis, str)
-        and axis.strip()
-        and type(level) is int
-        and -4 <= level <= 4
-        for axis, level in value.items()
-    )
-
-
-def _contract_valid(value: dict[str, Any]) -> bool:
-    if not REQUIRED_KEYS.issubset(value) or not _valid_motion_shape(value):
-        return False
-    if value.get("schema_version") != "engine.motion_intent.v4":
-        return False
-    if (
-        not isinstance(value.get("profile_id"), str)
-        or not value["profile_id"].strip()
-        or not isinstance(value.get("model_id"), str)
-        or not value["model_id"].strip()
-        or type(value.get("profile_revision")) is not int
-        or value["profile_revision"] <= 0
-    ):
-        return False
-    if not isinstance(value.get("emotion_label"), str) or not value["emotion_label"].strip():
-        return False
-    if value.get("mode", "expressive") not in {"expressive", "idle"}:
+def _valid_motion_shape(value: dict[str, Any], capability: dict[str, Any]) -> bool:
+    if set(value) != REQUIRED_KEYS:
         return False
     duration = value.get("duration_hint_ms")
-    return duration is None or (
-        type(duration) in {int, float}
-        and 320 <= duration <= 15000
-    )
+    if type(duration) is not int or not 320 <= duration <= 15000:
+        return False
+    axes = {
+        str(axis.get("id")): axis
+        for axis in capability.get("axes", [])
+        if isinstance(axis, dict) and str(axis.get("id") or "").strip()
+    }
+    steps = value.get("motion_steps")
+    if not isinstance(steps, list) or not 1 <= len(steps) <= 4:
+        return False
+    for step in steps:
+        if not isinstance(step, dict) or set(step) != {"axis_values", "duration_weight"}:
+            return False
+        weight = step.get("duration_weight")
+        if type(weight) is not int or not 1 <= weight <= 3:
+            return False
+        values = step.get("axis_values")
+        if not isinstance(values, dict) or not values:
+            return False
+        for axis_id, raw_value in values.items():
+            axis = axes.get(str(axis_id))
+            if (
+                axis is None
+                or isinstance(raw_value, bool)
+                or not isinstance(raw_value, (int, float))
+                or not math.isfinite(float(raw_value))
+            ):
+                return False
+            value_range = axis.get("value_range")
+            if (
+                not isinstance(value_range, list)
+                or len(value_range) != 2
+                or float(raw_value) < float(value_range[0])
+                or float(raw_value) > float(value_range[1])
+            ):
+                return False
+    return True
+
+
+def _motion_shape(value: Any) -> str | None:
+    return "motion_steps" if isinstance(value, dict) and "motion_steps" in value else None
 
 
 def main() -> int:
@@ -96,6 +91,8 @@ def main() -> int:
     with args.data_path.open("r", encoding="utf-8") as stream:
         record = json.loads(next(stream))
     messages = record["messages"][:-1]
+    capability = _capability(messages)
+    target = json.loads(record["messages"][-1]["content"])
     free_gpu_gib = (
         torch.cuda.mem_get_info(0)[0] / 1024**3
         if torch.cuda.is_available()
@@ -117,7 +114,6 @@ def main() -> int:
     model.generation_config.do_sample = False
     model.generation_config.top_p = None
     model.generation_config.top_k = None
-
     encoded = tokenizer.apply_chat_template(
         messages,
         tokenize=True,
@@ -147,12 +143,18 @@ def main() -> int:
         outputs.append(tokenizer.decode(new_tokens, skip_special_tokens=True).strip())
 
     parsed: list[dict[str, Any] | None] = []
+    errors: list[list[str]] = []
     for text in outputs:
         try:
             value = json.loads(text)
         except json.JSONDecodeError:
             value = None
-        parsed.append(value if isinstance(value, dict) else None)
+        if not isinstance(value, dict):
+            parsed.append(None)
+            errors.append(["invalid_json"])
+        else:
+            parsed.append(value)
+            errors.append([] if _valid_motion_shape(value, capability) else ["contract_invalid"])
 
     report = {
         "model": MODEL_ID,
@@ -161,29 +163,14 @@ def main() -> int:
         "runs": len(outputs),
         "input_scope": "first_training_sample",
         "data_path": str(args.data_path.resolve()),
-        "prompt_projection": "compact_system_plus_provider_user_prompt",
+        "output_protocol": "motion_steps_axis_values_duration_required",
         "model_load_latency_included": False,
         "valid_json_runs": sum(value is not None for value in parsed),
         "output_keys": [sorted(value) if value is not None else [] for value in parsed],
-        "missing_required_keys": [
-            sorted(REQUIRED_KEYS - set(value)) if value is not None else sorted(REQUIRED_KEYS)
-            for value in parsed
-        ],
-        "contract_valid_runs": sum(value is not None and _contract_valid(value) for value in parsed),
-        "valid_motion_shape_runs": sum(value is not None and _valid_motion_shape(value) for value in parsed),
-        "generated_motion_shapes": [
-            next(
-                (
-                    key
-                    for key in ("motion_steps", "axis_levels", "motion_resource_id")
-                    if key in value
-                ),
-                None,
-            )
-            if value is not None
-            else None
-            for value in parsed
-        ],
+        "contract_valid_runs": sum(not error for error in errors),
+        "contract_errors": errors,
+        "target_contract_valid": isinstance(target, dict) and _valid_motion_shape(target, capability),
+        "generated_motion_shapes": [_motion_shape(value) for value in parsed],
         "generated_motion_steps_counts": [
             len(value["motion_steps"])
             if value is not None and isinstance(value.get("motion_steps"), list)
@@ -197,14 +184,9 @@ def main() -> int:
         "free_gpu_gib_before_load": round(free_gpu_gib, 2),
         "thinking_disabled": True,
     }
-    report_path = args.report_path or (
-        BASE_REPORT_PATH if args.base_only else REPORT_PATH
-    )
+    report_path = args.report_path or (BASE_REPORT_PATH if args.base_only else REPORT_PATH)
     report_path.parent.mkdir(parents=True, exist_ok=True)
-    report_path.write_text(
-        json.dumps(report, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(report, ensure_ascii=False))
     if args.base_only:
         return 0

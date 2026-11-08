@@ -224,7 +224,7 @@ def test_finalized_segments_flush_in_logical_message_order(
                     "profile_revision": 1,
                     "model_id": "model-1",
                     "intent_tags": [f"segment_{index}"],
-                    "axis_levels": {"head_yaw": index},
+                    "motion_steps": [{"axis_values": {"head_yaw": 50 + index * 5}, "duration_weight": 1}],
                 },
                 "mode": "preview",
                 "source": "independent_provider",

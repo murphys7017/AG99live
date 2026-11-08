@@ -72,17 +72,17 @@ def generate(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Benchmark Ollama using complete captured production prompts."
+        description="Benchmark Ollama using the continuous-action training prompts."
     )
     parser.add_argument("--model", default="ag99-spark-x26-action-lora:q8_0")
-    parser.add_argument("--adapter-version", default="existing Q8 action adapter")
+    parser.add_argument("--adapter-version", default="continuous-action adapter")
     parser.add_argument("--endpoint", default="http://127.0.0.1:11434")
-    parser.add_argument("--adapter-dir", type=Path, default=ROOT / "output/spark-x26-1p7b-lora-production-neurobrain-v5")
-    parser.add_argument("--data-path", type=Path, default=ROOT / "data/production_neurobrain_v2/weak_sft.jsonl")
+    parser.add_argument("--adapter-dir", type=Path, default=ROOT / "output/spark-x26-1p7b-lora-continuous")
+    parser.add_argument("--data-path", type=Path, default=ROOT / "data/continuous/continuous_sft.jsonl")
     parser.add_argument("--report-path", type=Path, required=True)
     parser.add_argument("--num-ctx", type=int, default=6144)
     parser.add_argument("--num-predict", type=int, default=128)
-    parser.add_argument("--indices", type=int, nargs="+", default=[0, 116, 233])
+    parser.add_argument("--indices", type=int, nargs="+", default=[0, 264, 529])
     args = parser.parse_args()
 
     records = [

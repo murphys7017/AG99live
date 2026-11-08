@@ -12,7 +12,7 @@ def test_profile_revision_requires_positive_integer():
         "profile_revision": 1,
         "model_id": "model-1",
         "intent_tags": ["test"],
-        "axis_levels": {"head_yaw": 1},
+        "motion_steps": [{"axis_values": {"head_yaw": 65}, "duration_weight": 1}],
     }
     assert normalize_motion_intent_payload(payload)["profile_revision"] == 1
     with pytest.raises(ValueError, match="^profile_revision_invalid$"):

@@ -432,8 +432,10 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
   function startIdleMotion(payload: NormalizedMotionPayload, expiresAt: number): boolean {
     if (activePlaybackRun || thinkingSwayTurnId || state.pendingCount > 0
       || Date.now() >= expiresAt || payload.kind !== "semantic_intent") return false;
-    if (!payload.intent.axis_levels || payload.intent.motion_resource_id
-      || payload.intent.expression_resource_id || payload.intent.motion_steps) return false;
+    if (!payload.intent.motion_steps
+      || payload.intent.motion_steps.length !== 1
+      || payload.intent.motion_resource_id
+      || payload.intent.expression_resource_id) return false;
     const model = dependencies.getSelectedModel();
     if (!model) return false;
     const result = compileParameterMotionIntent(payload.intent, {

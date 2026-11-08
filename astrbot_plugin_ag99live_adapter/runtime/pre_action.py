@@ -21,10 +21,7 @@ from ..prompts.pre_action import (
     PRE_ACTION_SYSTEM_PROMPT,
     compact_user_text,
 )
-from ..prompts.semantic_axis_prompt import (
-    profile_prompt_axes,
-    resolve_available_axis_levels,
-)
+from ..prompts.semantic_axis_prompt import profile_prompt_axes
 from ..protocol.parser import build_message_envelope
 
 
@@ -243,7 +240,8 @@ class PreActionRuntime:
                         "id": a["id"],
                         "negative": a.get("negative_semantics", []),
                         "positive": a.get("positive_semantics", []),
-                        "available_levels": resolve_available_axis_levels(a),
+                        "value_range": a.get("value_range", [0.0, 100.0]),
+                        "neutral": a.get("neutral"),
                     }
                     for a in profile_prompt_axes(profile)
                 ]
@@ -279,10 +277,13 @@ class PreActionRuntime:
                 async def accept(value):
                     if value == {"skip": True}:
                         return
-                    if set(value) != {"intent_tags", "axis_levels"}:
+                    if set(value) != {"intent_tags", "motion_steps"}:
                         raise ValueError("pre_action_output_fields_invalid")
-                    levels, tags = value["axis_levels"], value["intent_tags"]
-                    if not isinstance(levels, dict) or not 1 <= len(levels) <= 2:
+                    steps, tags = value["motion_steps"], value["intent_tags"]
+                    if not isinstance(steps, list) or len(steps) != 1:
+                        raise ValueError("pre_action_motion_steps_invalid")
+                    values = steps[0].get("axis_values") if isinstance(steps[0], dict) else None
+                    if not isinstance(values, dict) or not 1 <= len(values) <= 2:
                         raise ValueError("pre_action_axis_count_invalid")
                     if not isinstance(tags, list) or not 1 <= len(tags) <= 2:
                         raise ValueError("pre_action_tags_invalid")
@@ -291,8 +292,12 @@ class PreActionRuntime:
                         for tag in tags
                     ):
                         raise ValueError("pre_action_tag_text_invalid")
-                    if any(type(v) is not int or abs(v) > 2 for v in levels.values()):
-                        raise ValueError("pre_action_level_invalid")
+                    if any(
+                        isinstance(v, bool) or not isinstance(v, (int, float))
+                        or not math.isfinite(float(v))
+                        for v in values.values()
+                    ):
+                        raise ValueError("pre_action_axis_value_invalid")
                     current = resolve_selected_semantic_axis_profile(
                         runtime_state=self.state
                     )

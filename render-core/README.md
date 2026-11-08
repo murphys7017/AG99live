@@ -43,8 +43,9 @@ The current executable, `ag99-render-host`, verifies:
 - configured eye-blink and lip-sync parameter IDs are attached to the loaded
   idle motions, matching the WebSDK motion setup.
 - `system.model_sync` is consumed to cache the selected semantic axis profile;
-- `engine.motion_intent.v4` axis levels are compiled into timed parameter
-  tracks with relation-graph propagation, blend-in, hold, and blend-out;
+- `engine.motion_intent.v4` continuous semantic axis values are compiled into
+  timed parameter tracks with relation-graph propagation, blend-in, hold, and
+  blend-out;
 - `engine.parameter_plan.v3` payloads are accepted directly and execute the
   frontend plan timing, keyframes, speech modulation, response dynamics, and
   optional expression resource;

@@ -7,11 +7,11 @@ from ...core_compatibility import get_interaction_capabilities
 from ...motion.motion_intent import resolve_selected_semantic_axis_profile
 from ...motion.payload_validation import (
     normalize_motion_arguments_payload as _payload_normalize_motion_arguments_payload,
+    resolve_axis_value_range,
 )
 from ...motion.resource_catalog import build_motion_resource_candidates
 from ...prompts.semantic_axis_prompt import (
     profile_prompt_axes,
-    resolve_available_axis_levels,
 )
 from .shared import (
     AG99LIVE_MOTION_EFFECT_NAME,
@@ -53,9 +53,9 @@ def _register_ag99live_motion_persona_effect(
                 "Generate Live2D motion intent for persona expression. This effect "
                 "is mandatory exactly once for every assistant segment, including "
                 "greetings, short acknowledgements, and neutral replies. Describe "
-                "the visible performance with intent_tags and valid semantic axis "
-                "levels; intent_tags alone is invalid. Every call must select exactly "
-                "one execution shape: axis_levels, motion_steps, or a listed "
+                "the visible performance with intent_tags and valid continuous semantic axis "
+                "values; intent_tags alone is invalid. Every call must select exactly "
+                "one execution shape: motion_steps or a listed "
                 "motion_resource_id. "
                 "When the intended performance includes turning, tilting, swaying, "
                 "nodding, or leaning, express the corresponding head and body axes "
@@ -75,9 +75,10 @@ def _register_ag99live_motion_persona_effect(
                         "type": "array",
                         "items": {"type": "string"},
                     },
-                    "axis_levels": {
-                        "type": "object",
-                        "additionalProperties": {"type": "integer"},
+                    "motion_steps": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 4,
                     },
                 },
                 "required": ["intent_tags"],
@@ -100,8 +101,9 @@ def _build_ag99live_motion_effect_parameters(event: Any) -> dict[str, Any]:
     )
     axis_properties = {
         axis_id: {
-            "type": "integer",
-            "enum": resolve_available_axis_levels(axis),
+            "type": "number",
+            "minimum": resolve_axis_value_range(axis)[0],
+            "maximum": resolve_axis_value_range(axis)[1],
         }
         for axis in profile_prompt_axes(semantic_profile)
         if (axis_id := str(axis.get("id") or "").strip())
@@ -109,7 +111,7 @@ def _build_ag99live_motion_effect_parameters(event: Any) -> dict[str, Any]:
     if not axis_properties:
         raise RuntimeError("ag99live_motion_profile_axes_empty")
 
-    axis_levels_schema = {
+    axis_values_schema = {
         "type": "object",
         "properties": axis_properties,
         "additionalProperties": False,
@@ -135,23 +137,22 @@ def _build_ag99live_motion_effect_parameters(event: Any) -> dict[str, Any]:
                 "maxLength": 48,
             },
         },
-        "axis_levels": axis_levels_schema,
         "motion_steps": {
             "type": "array",
-            "minItems": 2,
+            "minItems": 1,
             "maxItems": 4,
             "items": {
                 "type": "object",
                 "additionalProperties": False,
                 "properties": {
-                    "axis_levels": axis_levels_schema,
+                    "axis_values": axis_values_schema,
                     "duration_weight": {
                         "type": "integer",
                         "minimum": 1,
                         "maximum": 3,
                     },
                 },
-                "required": ["axis_levels", "duration_weight"],
+                "required": ["axis_values", "duration_weight"],
             },
         },
         "duration_hint_ms": {
@@ -174,15 +175,7 @@ def _build_ag99live_motion_effect_parameters(event: Any) -> dict[str, Any]:
     execution_shapes: list[dict[str, Any]] = [
         {
             "allOf": [
-                {"required": ["axis_levels"]},
-                {"not": {"required": ["motion_steps"]}},
-                {"not": {"required": ["motion_resource_id"]}},
-            ]
-        },
-        {
-            "allOf": [
                 {"required": ["motion_steps"]},
-                {"not": {"required": ["axis_levels"]}},
                 {"not": {"required": ["motion_resource_id"]}},
             ]
         },
@@ -192,7 +185,6 @@ def _build_ag99live_motion_effect_parameters(event: Any) -> dict[str, Any]:
             {
                 "allOf": [
                     {"required": ["motion_resource_id"]},
-                    {"not": {"required": ["axis_levels"]}},
                     {"not": {"required": ["motion_steps"]}},
                 ]
             }

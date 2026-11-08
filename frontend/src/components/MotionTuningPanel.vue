@@ -79,7 +79,7 @@ type MotionTuningSampleSnapshot = Readonly<{
   tags: readonly string[];
   enabledForLlmReference?: boolean;
   originalAxes: Readonly<Record<string, number>>;
-  rawAxisLevels?: Readonly<Record<string, number>>;
+  rawAxisValues?: Readonly<Record<string, number>>;
   resolvedAxes?: Readonly<Record<string, number>>;
   constrainedAxes?: Readonly<Record<string, number>>;
   adjustedAxes?: Readonly<Record<string, number>>;
@@ -603,8 +603,8 @@ function saveSample(): void {
     tags: parseTags(tagsText.value),
     enabledForLlmReference: enabledForLlmReference.value,
     originalAxes: source.motionKind === "pose" ? { ...source.axes } : {},
-    rawAxisLevels: {
-      ...(source.record?.diagnostics?.transformTrace?.rawAxisLevels ?? {}),
+    rawAxisValues: {
+      ...(source.record?.diagnostics?.transformTrace?.rawAxisValues ?? {}),
     },
     resolvedAxes: {
       ...(source.record?.diagnostics?.transformTrace?.resolvedAxes ?? source.axes),
@@ -630,7 +630,7 @@ function toggleSampleReference(sample: MotionTuningSampleSnapshot, enabled: bool
       ...mutableSample,
       tags: [...mutableSample.tags],
       originalAxes: { ...mutableSample.originalAxes },
-      rawAxisLevels: { ...(mutableSample.rawAxisLevels ?? {}) },
+      rawAxisValues: { ...(mutableSample.rawAxisValues ?? {}) },
       resolvedAxes: { ...(mutableSample.resolvedAxes ?? {}) },
       constrainedAxes: { ...(mutableSample.constrainedAxes ?? {}) },
       adjustedAxes: mutableSample.adjustedAxes
@@ -705,11 +705,8 @@ function formatEffectiveExampleSource(example: DesktopMotionTuningEffectiveExamp
 function extractEffectiveExampleAxes(
   example: DesktopMotionTuningEffectiveExample,
 ): Record<string, number> {
-  if (example.output.axisLevels) {
-    return { ...example.output.axisLevels };
-  }
-  return example.output.motionSteps?.[0]?.axisLevels
-    ? { ...example.output.motionSteps[0].axisLevels }
+  return example.output.motionSteps?.[0]?.axisValues
+    ? { ...example.output.motionSteps[0].axisValues }
     : {};
 }
 

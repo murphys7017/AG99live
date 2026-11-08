@@ -15,9 +15,9 @@ from transformers.generation.streamers import BaseStreamer
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 MODEL_ID = "XHToken/Spark-X2.6-1.7B-Base"
-ADAPTER_DIR = PROJECT_ROOT / "output" / "spark-x26-1p7b-lora-schema2"
-DATA_PATH = PROJECT_ROOT / "data" / "weak_sft.jsonl"
-REPORT_PATH = PROJECT_ROOT / "reports" / "speed_benchmark.json"
+ADAPTER_DIR = PROJECT_ROOT / "output" / "spark-x26-1p7b-lora-continuous"
+DATA_PATH = PROJECT_ROOT / "data" / "continuous" / "continuous_sft.jsonl"
+REPORT_PATH = PROJECT_ROOT / "reports" / "continuous_speed_benchmark.json"
 
 
 class _TokenClockStreamer(BaseStreamer):

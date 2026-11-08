@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Mapping
 from typing import Any
@@ -15,7 +16,7 @@ def _project_reference_examples_for_prompt(
     examples: list[Any],
     *,
     allowed_axis_ids: set[str],
-    available_levels_by_axis: dict[str, set[int]],
+    value_ranges_by_axis: dict[str, tuple[float, float]] | None = None,
     resource_candidates: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
@@ -38,10 +39,12 @@ def _project_reference_examples_for_prompt(
             or any(len(tag) > 48 for tag in intent_tags)
         ):
             raise ValueError("motion_reference_example_intent_tags_invalid")
-        has_axis_levels = "axis_levels" in output
+        has_axis_values = "axis_values" in output
         has_motion_steps = "motion_steps" in output
         has_motion_resource = "motion_resource_id" in output
-        if sum((has_axis_levels, has_motion_steps, has_motion_resource)) != 1:
+        if sum(
+            (has_axis_values, has_motion_steps, has_motion_resource)
+        ) != 1:
             raise ValueError("motion_reference_example_motion_shape_invalid")
         projected_output: dict[str, Any] = {
             "intent_tags": intent_tags,
@@ -102,32 +105,32 @@ def _project_reference_examples_for_prompt(
                 raise ValueError("motion_reference_example_resource_conflict")
             result.append({"input": input_text, "output": projected_output})
             continue
-        axis_levels = (
-            _project_example_axis_levels(
-                output.get("axis_levels"),
+        axis_values = (
+            _project_example_axis_values(
+                output.get("axis_values"),
                 allowed_axis_ids=allowed_axis_ids,
-                available_levels_by_axis=available_levels_by_axis,
                 excluded_axis_ids=expression_conflicting_axis_ids,
+                value_ranges_by_axis=value_ranges_by_axis,
             )
-            if has_axis_levels
+            if has_axis_values
             else {}
         )
-        if axis_levels:
-            projected_output["axis_levels"] = axis_levels
-        else:
+        projected_steps: list[dict[str, Any]] = []
+        if has_axis_values and axis_values:
+            projected_steps = [{"axis_values": axis_values, "duration_weight": 1}]
+        elif has_motion_steps:
             motion_steps = output.get("motion_steps")
-            projected_steps: list[dict[str, Any]] = []
-            if isinstance(motion_steps, list) and 2 <= len(motion_steps) <= 4:
+            if isinstance(motion_steps, list) and 1 <= len(motion_steps) <= 4:
                 for step in motion_steps:
                     if not isinstance(step, dict):
                         raise ValueError("motion_reference_example_step_invalid")
-                    step_levels = _project_example_axis_levels(
-                        step.get("axis_levels"),
+                    step_values = _project_example_axis_values(
+                        step.get("axis_values"),
                         allowed_axis_ids=allowed_axis_ids,
-                        available_levels_by_axis=available_levels_by_axis,
                         excluded_axis_ids=expression_conflicting_axis_ids,
+                        value_ranges_by_axis=value_ranges_by_axis,
                     )
-                    if not step_levels:
+                    if not step_values:
                         projected_steps = []
                         break
                     duration_weight = step.get("duration_weight")
@@ -139,7 +142,7 @@ def _project_reference_examples_for_prompt(
                         raise ValueError("motion_reference_example_step_invalid")
                     projected_steps.append(
                         {
-                            "axis_levels": step_levels,
+                            "axis_values": step_values,
                             "duration_weight": duration_weight,
                         }
                     )
@@ -149,42 +152,45 @@ def _project_reference_examples_for_prompt(
                 projected_output["motion_steps"] = projected_steps
             else:
                 continue
+        if not projected_steps:
+            continue
+        projected_output["motion_steps"] = projected_steps
         result.append({"input": input_text, "output": projected_output})
     return result
 
-def _project_example_axis_levels(
+def _project_example_axis_values(
     value: Any,
     *,
     allowed_axis_ids: set[str],
-    available_levels_by_axis: dict[str, set[int]],
-    excluded_axis_ids: set[str] | None = None,
-) -> dict[str, int]:
-    if not isinstance(value, dict):
-        raise ValueError("motion_reference_example_axis_levels_invalid")
-    result: dict[str, int] = {}
-    excluded_axis_ids = excluded_axis_ids or set()
-    for axis_id, level in value.items():
-        normalized_axis_id = str(axis_id).strip()
-        if (
-            normalized_axis_id not in allowed_axis_ids
-            or normalized_axis_id in excluded_axis_ids
-        ):
+    excluded_axis_ids: set[str],
+    value_ranges_by_axis: dict[str, tuple[float, float]] | None,
+) -> dict[str, float]:
+    """Project continuous example values onto the current axis catalog.
+
+    Values are clamped to the axis `value_range` so an example recorded against
+    an older profile cannot teach an out-of-range magnitude.
+    """
+    if not isinstance(value, Mapping):
+        return {}
+    projected: dict[str, float] = {}
+    for axis_id_raw, raw_value in value.items():
+        axis_id = str(axis_id_raw or "").strip()
+        if not axis_id or axis_id in excluded_axis_ids:
             continue
-        if (
-            not isinstance(level, int)
-            or isinstance(level, bool)
-            or not -4 <= level <= 4
-        ):
+        if axis_id not in allowed_axis_ids:
             continue
-        available_levels = available_levels_by_axis.get(normalized_axis_id, set())
-        projected_level = _nearest_available_example_level(
-            level,
-            available_levels,
-        )
-        if projected_level is None:
+        if isinstance(raw_value, bool) or not isinstance(raw_value, (int, float)):
             continue
-        result[normalized_axis_id] = projected_level
-    return result
+        number = float(raw_value)
+        if not math.isfinite(number):
+            continue
+        if value_ranges_by_axis:
+            bounds = value_ranges_by_axis.get(axis_id)
+            if bounds is not None:
+                low, high = bounds
+                number = min(max(number, low), high)
+        projected[axis_id] = round(number, 3)
+    return projected
 
 
 def _resolve_resource_conflicting_axis_ids(
@@ -211,25 +217,6 @@ def _resolve_resource_conflicting_axis_ids(
             if str(axis_id).strip()
         }
     return set()
-
-
-def _nearest_available_example_level(
-    requested_level: int,
-    available_levels: set[int],
-) -> int | None:
-    if not available_levels:
-        return None
-    if requested_level in available_levels:
-        return requested_level
-    return min(
-        available_levels,
-        key=lambda level: (
-            abs(level - requested_level),
-            0 if level and (level > 0) == (requested_level > 0) else 1,
-            abs(level),
-            level,
-        ),
-    )
 
 
 def _select_prompt_resource_candidates(
@@ -283,7 +270,7 @@ def _build_prompt_pose_reference_candidates(
                     item.get("axes"),
                     axis_by_id=axis_by_id,
                 )[:4],
-                "key_axis_levels": _summarize_key_axis_levels(
+                "key_axis_values": _summarize_key_axis_values(
                     item.get("axes"),
                     axis_by_id=axis_by_id,
                     limit=5,
@@ -469,15 +456,15 @@ def _normalize_axis_text_list(value: Any) -> list[str]:
         result.append(normalized)
     return result
 
-def _summarize_key_axis_levels(
+def _summarize_key_axis_values(
     value: Any,
     *,
     axis_by_id: Mapping[str, dict[str, Any]],
     limit: int,
-) -> dict[str, int]:
+) -> dict[str, float]:
     if not isinstance(value, dict):
         return {}
-    result: dict[str, int] = {}
+    result: dict[str, float] = {}
     for axis_id, axis_value in value.items():
         if len(result) >= limit:
             break
@@ -486,24 +473,14 @@ def _summarize_key_axis_levels(
         normalized_axis_id = str(axis_id or "").strip()
         if not normalized_axis_id:
             continue
-        axis = axis_by_id.get(normalized_axis_id)
-        anchors = axis.get("level_anchors") if isinstance(axis, dict) else None
-        if not isinstance(anchors, dict):
-            continue
-        numeric_anchors: list[tuple[int, float]] = []
-        for raw_level, raw_anchor in anchors.items():
-            try:
-                level = int(raw_level)
-                anchor = float(raw_anchor)
-            except (TypeError, ValueError):
-                continue
-            if -4 <= level <= 4:
-                numeric_anchors.append((level, anchor))
-        if len(numeric_anchors) != 9:
-            continue
-        level, _anchor = min(
-            numeric_anchors,
-            key=lambda item: (abs(item[1] - float(axis_value)), abs(item[0])),
-        )
-        result[normalized_axis_id] = level
+        axis = axis_by_id.get(normalized_axis_id) or {}
+        value_range = axis.get("value_range")
+        number = float(axis_value)
+        if (
+            isinstance(value_range, (list, tuple))
+            and len(value_range) == 2
+            and all(isinstance(bound, (int, float)) for bound in value_range)
+        ):
+            number = min(max(number, float(value_range[0])), float(value_range[1]))
+        result[normalized_axis_id] = round(number, 3)
     return result

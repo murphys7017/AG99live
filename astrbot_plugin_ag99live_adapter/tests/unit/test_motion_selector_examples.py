@@ -113,6 +113,7 @@ def test_ordinary_request_excludes_relevant_user_sequence_reference() -> None:
         not (
             isinstance(example.get("output"), dict)
             and isinstance(example["output"].get("motion_steps"), list)
+            and len(example["output"]["motion_steps"]) > 1
         )
         for example in resolution["examples"]
     )
