@@ -1363,7 +1363,7 @@ class OLVPetPlatformEvent(AstrMessageEvent):
                     continue
                 annotations[capabilities.build_message_annotation_key(index)] = {
                     "semantic_type": "desktop_snapshot",
-                    "explanation": "这是用户当前桌面截图。",
+                    "explanation": "我的桌面",
                     "explanation_source": "platform",
                     "context_role": "supporting",
                 }

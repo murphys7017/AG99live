@@ -20,7 +20,6 @@ import {
 import type { AdapterOutboundClient } from "./outboundClient.js";
 import {
   captureRealtimeDesktopScreenshot,
-  type DesktopCaptureImagePayload,
 } from "./desktopCapture.js";
 
 export interface MotionLabRawEventPayload {
@@ -95,9 +94,8 @@ export async function sendText(ctx: OutboundActionContext, text: string): Promis
     ? await captureRealtimeDesktopScreenshot()
     : null;
   const turnId = ctx.createMessageId();
-  const outboundText = buildDesktopAwareText(message, desktopCapture);
   const sent = ctx.outboundClient.send("input.text", {
-    text: outboundText,
+    text: message,
     images: desktopCapture ? [desktopCapture] : [],
     desktop_snapshot_requested: desktopSnapshotRequested,
   }, turnId);
@@ -132,26 +130,6 @@ function getInterruptibleTurnId(ctx: OutboundActionContext): string | null {
     return openExecutionTurnId;
   }
   return normalizeTurnIdForComparison(ctx.state.currentTurnId);
-}
-
-function buildDesktopAwareText(
-  message: string,
-  desktopCapture: DesktopCaptureImagePayload | null,
-): string {
-  if (!desktopCapture) {
-    return message;
-  }
-
-  return [
-    "[系统上下文]",
-    "以下附件中包含用户发送本条消息时的实时桌面截图。",
-    "截图为本轮发送时抓取的当前桌面画面。",
-    "请结合用户文字与截图中的桌面界面内容理解上下文，再进行回应。",
-    "[/系统上下文]",
-    "",
-    "用户消息：",
-    message,
-  ].join("\n");
 }
 
 /**

@@ -555,6 +555,7 @@ def test_prompt_annotations_mark_screen_image_as_desktop_snapshot(
 
     annotations = event.get_extra("prompt_input_item_annotations")
     assert annotations["message.1"]["semantic_type"] == "desktop_snapshot"
+    assert annotations["message.1"]["explanation"] == "我的桌面"
 
 
 def test_prompt_annotations_mark_cached_desktop_snapshot(
