@@ -2232,6 +2232,7 @@ public:
       std::cerr << "Cubism model creation failed\n";
       return false;
     }
+    CacheParameterIds();
     _model->LoadConfiguredEffects(model_dir, _setting);
 
     if (!_renderer.Initialize(
@@ -2734,7 +2735,7 @@ private:
   };
 
   struct ParameterFrameContribution {
-    std::string parameter_id;
+    std::string_view parameter_id;
     csmInt32 parameter_index = -1;
     ParameterContributionOwner owner = ParameterContributionOwner::DirectPlan;
     std::string_view source;
@@ -2747,7 +2748,7 @@ private:
   };
 
   struct ParameterFrameSnapshot {
-    std::string parameter_id;
+    std::string_view parameter_id;
     float base_value = 0.0f;
     float minimum_value = 0.0f;
     float maximum_value = 0.0f;
@@ -2755,7 +2756,7 @@ private:
 
   struct ParameterFrameGroup {
     csmInt32 parameter_index = -1;
-    std::string parameter_id;
+    std::string_view parameter_id;
     std::vector<ParameterFrameContribution*> contributions;
     ParameterFrameSnapshot snapshot;
   };
@@ -2769,19 +2770,29 @@ private:
     return clamped * clamped * (3.0f - 2.0f * clamped);
   }
 
-  static std::string ParameterIdRaw(
-      CubismModel* model,
-      csmInt32 parameter_index) {
-    if (!model || parameter_index < 0
-        || parameter_index >= model->GetParameterCount()) {
+  void CacheParameterIds() {
+    _parameter_ids.clear();
+    auto* model = _model ? _model->GetModel() : nullptr;
+    if (!model) {
+      return;
+    }
+    _parameter_ids.resize(static_cast<std::size_t>(model->GetParameterCount()));
+    for (csmInt32 index = 0; index < model->GetParameterCount(); ++index) {
+      const auto parameter_id = model->GetParameterId(
+          static_cast<csmUint32>(index));
+      if (parameter_id) {
+        _parameter_ids[static_cast<std::size_t>(index)] =
+            parameter_id->GetString().GetRawString();
+      }
+    }
+  }
+
+  std::string_view ParameterIdAt(csmInt32 parameter_index) const {
+    if (parameter_index < 0
+        || static_cast<std::size_t>(parameter_index) >= _parameter_ids.size()) {
       return {};
     }
-    const auto parameter_id = model->GetParameterId(
-        static_cast<csmUint32>(parameter_index));
-    if (!parameter_id) {
-      return {};
-    }
-    return parameter_id->GetString().GetRawString();
+    return _parameter_ids[static_cast<std::size_t>(parameter_index)];
   }
 
   static double ReadNumber(
@@ -3625,12 +3636,12 @@ private:
             || !std::isfinite(maximum) || minimum > default_value
             || default_value >= maximum) {
           std::cerr << "[parameter_mixer] lip sync parameter range invalid: "
-                    << ParameterIdRaw(cubism_model, parameter_index) << '\n';
+                    << ParameterIdAt(parameter_index) << '\n';
           fail_active_parameter_plan("lip_sync_parameter_range_invalid");
           return false;
         }
         contributions.push_back(ParameterFrameContribution{
-            ParameterIdRaw(cubism_model, parameter_index),
+            ParameterIdAt(parameter_index),
             parameter_index,
             ParameterContributionOwner::LipSync,
             "lip_sync",
@@ -3681,12 +3692,14 @@ private:
       }
       if (contribution.parameter_index < 0
           || contribution.parameter_index >= model->GetParameterCount()) {
-        return reject("parameter_index_invalid:" + contribution.parameter_id);
+        return reject(
+            "parameter_index_invalid:" + std::string(contribution.parameter_id));
       }
       if (contribution.source.empty() || !std::isfinite(contribution.value)
           || !std::isfinite(contribution.weight)
           || contribution.weight < 0.0f || contribution.weight > 1.0f) {
-        return reject("contribution_invalid:" + contribution.parameter_id);
+        return reject(
+            "contribution_invalid:" + std::string(contribution.parameter_id));
       }
 
       const auto [found, inserted] = group_by_index.emplace(
@@ -3700,8 +3713,9 @@ private:
       }
       auto& group = groups[found->second];
       if (group.parameter_id != contribution.parameter_id) {
-        return reject("parameter_identity_conflict:" + group.parameter_id
-            + ":" + contribution.parameter_id);
+        return reject(
+            "parameter_identity_conflict:" + std::string(group.parameter_id)
+            + ":" + std::string(contribution.parameter_id));
       }
       group.contributions.push_back(&contribution);
     }
@@ -3710,11 +3724,11 @@ private:
       return left.parameter_index < right.parameter_index;
     });
     for (auto& group : groups) {
-      const auto actual_parameter_id = ParameterIdRaw(
-          model, group.parameter_index);
+      const auto actual_parameter_id = ParameterIdAt(group.parameter_index);
       if (actual_parameter_id.empty()
           || actual_parameter_id != group.parameter_id) {
-        return reject("parameter_identity_mismatch:" + group.parameter_id);
+        return reject(
+            "parameter_identity_mismatch:" + std::string(group.parameter_id));
       }
       const auto index = static_cast<csmUint32>(group.parameter_index);
       group.snapshot = ParameterFrameSnapshot{
@@ -3726,7 +3740,8 @@ private:
           || !std::isfinite(group.snapshot.minimum_value)
           || !std::isfinite(group.snapshot.maximum_value)
           || group.snapshot.minimum_value > group.snapshot.maximum_value) {
-        return reject("runtime_range_or_base_invalid:" + group.parameter_id);
+        return reject(
+            "runtime_range_or_base_invalid:" + std::string(group.parameter_id));
       }
       std::stable_sort(
           group.contributions.begin(),
@@ -3812,7 +3827,8 @@ private:
       }
 
       if (!std::isfinite(final_value)) {
-        return reject("resolved_value_invalid:" + group.parameter_id);
+        return reject(
+            "resolved_value_invalid:" + std::string(group.parameter_id));
       }
       resolved_values.emplace_back(
           group.parameter_index,
@@ -3826,7 +3842,8 @@ private:
       model->SetParameterValue(parameter_index, value);
       const auto readback = model->GetParameterValue(parameter_index);
       if (!std::isfinite(readback) || std::abs(readback - value) > 0.001f) {
-        return reject("write_mismatch:" + ParameterIdRaw(model, parameter_index));
+        return reject(
+            "write_mismatch:" + std::string(ParameterIdAt(parameter_index)));
       }
     }
     return true;
@@ -4716,6 +4733,7 @@ private:
   NativeCubismModel* _model = nullptr;
   CubismModelSettingJson* _setting = nullptr;
   ag99::live2d::D3D11Renderer _renderer;
+  std::vector<std::string> _parameter_ids;
   UINT _width = 0;
   UINT _height = 0;
   double _last_update_seconds = 0.0;

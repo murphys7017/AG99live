@@ -7,8 +7,9 @@ native_runtime_protocol_and_frame_clock_20261110:
     desktop behavior. Align runtime-core with output.segment.v6, derive Native
     protocol constants from the Adapter schema manifest at CMake configure time,
     and reuse one monotonic timestamp per render frame for audio, parameter
-    mixing, and motion-plan evaluation. Remove transient per-frame source-label
-    string allocations from the parameter mixer without changing priorities.
+    mixing, and motion-plan evaluation. Cache model parameter IDs at load time
+    and remove transient per-frame source-label and parameter-ID allocations
+    from the parameter mixer without changing priorities.
   validation: >-
     CMake Release builds pass for runtime-core and render-core, the protocol
     replay smoke test passes, the manifest check and Ruff pass, and git diff
