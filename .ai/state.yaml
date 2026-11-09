@@ -15,6 +15,9 @@ native_runtime_protocol_and_frame_clock_20261110:
     vectors for active frames to avoid repeated container allocation, including
     the per-parameter contribution lists used by the mixer. Add a repeatable
     PowerShell sampler for Native CPU and memory baselines.
+    Replace the Native WAV temporary-file/PlaySound path with in-memory PCM
+    playback through `waveOut`, while keeping the existing serial, RMS, clock,
+    interruption, and failure boundaries.
   validation: >-
     CMake Release builds pass for runtime-core and render-core, the protocol
     replay smoke test passes, the manifest check and Ruff pass, and git diff

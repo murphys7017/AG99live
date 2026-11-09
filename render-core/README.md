@@ -39,7 +39,8 @@ The current executable, `ag99-render-host`, verifies:
   native frame loop;
 - Physics input/output ownership is read from `physics3.json`, with semantic
   parameters protected from scaled Physics response writes;
-- cached WAV audio from `output.segment` can be downloaded and played;
+- cached PCM WAV audio from `output.segment` can be downloaded and played from
+  memory through the native `waveOut` path, without a temporary audio file;
 - configured eye-blink and lip-sync parameter IDs are attached to the loaded
   idle motions, matching the WebSDK motion setup.
 - `system.model_sync` is consumed to cache the selected semantic axis profile;

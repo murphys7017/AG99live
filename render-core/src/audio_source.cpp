@@ -1,8 +1,6 @@
 #include "ag99/audio/audio_source.hpp"
 
-#include <cstdio>
 #include <iostream>
-#include <iterator>
 #include <string_view>
 
 #include <windows.h>
@@ -130,28 +128,6 @@ bool DownloadAudioWav(
   }
   WinHttpCloseHandle(session);
   return success;
-}
-
-std::optional<std::wstring> WriteTempAudio(
-    const std::vector<std::uint8_t>& bytes) {
-  wchar_t temp_directory[MAX_PATH]{};
-  wchar_t temp_file[MAX_PATH]{};
-  if (!GetTempPathW(std::size(temp_directory), temp_directory) ||
-      !GetTempFileNameW(temp_directory, L"ag9", 0, temp_file)) {
-    return std::nullopt;
-  }
-  FILE* file = nullptr;
-  if (_wfopen_s(&file, temp_file, L"wb") != 0 || !file) {
-    DeleteFileW(temp_file);
-    return std::nullopt;
-  }
-  const bool written = fwrite(bytes.data(), 1, bytes.size(), file) == bytes.size();
-  fclose(file);
-  if (!written) {
-    DeleteFileW(temp_file);
-    return std::nullopt;
-  }
-  return std::wstring(temp_file);
 }
 
 }  // namespace ag99::audio

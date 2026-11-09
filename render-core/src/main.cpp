@@ -96,9 +96,8 @@ ag99::audio::SpeechSignalRuntime g_speech_signal;
 std::atomic<float> g_drag_x{0.0f};
 std::atomic<float> g_drag_y{0.0f};
 std::atomic<std::uint64_t> g_audio_serial{0};
-std::mutex g_audio_file_mutex;
+std::mutex g_audio_output_mutex;
 std::mutex g_audio_signal_mutex;
-std::wstring g_audio_file;
 std::vector<float> g_audio_rms;
 std::function<bool(std::string)> g_send_text;
 std::function<void()> g_toggle_microphone;
@@ -194,18 +193,99 @@ std::string PathToUtf8(const std::filesystem::path& value) {
       reinterpret_cast<const char*>(encoded.data()), encoded.size());
 }
 
+class NativeAudioOutput final {
+public:
+  NativeAudioOutput() = default;
+
+  ~NativeAudioOutput() {
+    Stop();
+  }
+
+  NativeAudioOutput(const NativeAudioOutput&) = delete;
+  NativeAudioOutput& operator=(const NativeAudioOutput&) = delete;
+
+  bool Start(
+      const ag99::audio::PcmWavInfo& info,
+      std::vector<std::uint8_t> bytes) {
+    Stop();
+    if (bytes.empty() || info.data_offset > bytes.size()
+        || info.data_size > bytes.size() - info.data_offset
+        || info.data_size > MAXDWORD || info.channels == 0
+        || info.sample_rate == 0 || info.bits_per_sample == 0
+        || info.block_align == 0 || info.byte_rate == 0) {
+      return false;
+    }
+
+    WAVEFORMATEX format{};
+    format.wFormatTag = WAVE_FORMAT_PCM;
+    format.nChannels = info.channels;
+    format.nSamplesPerSec = info.sample_rate;
+    format.nAvgBytesPerSec = info.byte_rate;
+    format.nBlockAlign = info.block_align;
+    format.wBitsPerSample = info.bits_per_sample;
+    MMRESULT result = waveOutOpen(
+        &_handle,
+        WAVE_MAPPER,
+        &format,
+        0,
+        0,
+        CALLBACK_NULL);
+    if (result != MMSYSERR_NOERROR) {
+      _handle = nullptr;
+      return false;
+    }
+
+    _bytes = std::move(bytes);
+    _header = WAVEHDR{};
+    _header.lpData = reinterpret_cast<LPSTR>(
+        _bytes.data() + info.data_offset);
+    _header.dwBufferLength = static_cast<DWORD>(info.data_size);
+    result = waveOutPrepareHeader(
+        _handle, &_header, sizeof(_header));
+    if (result != MMSYSERR_NOERROR) {
+      Stop();
+      return false;
+    }
+    _prepared = true;
+    result = waveOutWrite(_handle, &_header, sizeof(_header));
+    if (result != MMSYSERR_NOERROR) {
+      Stop();
+      return false;
+    }
+    return true;
+  }
+
+  void Stop() noexcept {
+    if (_handle) {
+      waveOutReset(_handle);
+      if (_prepared) {
+        waveOutUnprepareHeader(_handle, &_header, sizeof(_header));
+      }
+      waveOutClose(_handle);
+      _handle = nullptr;
+    }
+    _prepared = false;
+    _header = WAVEHDR{};
+    _bytes.clear();
+  }
+
+private:
+  HWAVEOUT _handle = nullptr;
+  WAVEHDR _header{};
+  std::vector<std::uint8_t> _bytes;
+  bool _prepared = false;
+};
+
+NativeAudioOutput g_audio_output;
+
 void StopCurrentAudio(
     std::optional<std::uint64_t> expected_serial = std::nullopt) {
-  std::scoped_lock lock(g_audio_file_mutex);
+  std::scoped_lock lock(g_audio_output_mutex);
   if (expected_serial && g_audio_serial.load() != *expected_serial) {
     return;
   }
   g_audio_serial.fetch_add(1);
-  PlaySoundW(nullptr, nullptr, 0);
-  if (!g_audio_file.empty()) {
-    DeleteFileW(g_audio_file.c_str());
-    g_audio_file.clear();
-  }
+  g_audio_output.Stop();
   g_audio_end_seconds.store(0.0);
   g_audio_start_seconds.store(0.0);
   g_audio_level.store(0.0f);
@@ -248,54 +328,40 @@ std::optional<AudioPlayback> PlayAudioUrl(
     std::cerr << "Failed to download audio: " << url << '\n';
     return std::nullopt;
   }
-  const auto duration = ag99::audio::ReadWavDuration(bytes);
-  if (!duration) {
+  const auto info = ag99::audio::ParsePcmWav(bytes);
+  if (!info) {
     failure_reason = "audio_wav_invalid";
-    std::cerr << "Downloaded WAV has no valid playback duration: " << url
+    std::cerr << "Downloaded WAV has no valid PCM playback format: " << url
               << '\n';
     return std::nullopt;
   }
-  const auto path = ag99::audio::WriteTempAudio(bytes);
-  if (!path) {
-    failure_reason = "audio_cache_write_failed";
-    return std::nullopt;
-  }
+  const auto duration = static_cast<double>(info->data_size) / info->byte_rate;
   const auto rms = ag99::audio::ReadWavRms(bytes);
   std::uint64_t serial = 0;
   double started_at_seconds = 0.0;
-  BOOL playback_started = FALSE;
+  bool playback_started = false;
   {
-    std::scoped_lock lock(g_audio_file_mutex);
+    std::scoped_lock lock(g_audio_output_mutex);
     serial = g_audio_serial.fetch_add(1) + 1;
-    PlaySoundW(nullptr, nullptr, 0);
-    if (!g_audio_file.empty()) {
-      DeleteFileW(g_audio_file.c_str());
-    }
-    g_audio_file = *path;
-    playback_started = PlaySoundW(
-        g_audio_file.c_str(), nullptr,
-        SND_FILENAME | SND_ASYNC | SND_NODEFAULT);
-    if (!playback_started) {
-      DeleteFileW(g_audio_file.c_str());
-      g_audio_file.clear();
-    } else {
+    playback_started = g_audio_output.Start(*info, std::move(bytes));
+    if (playback_started) {
       started_at_seconds = NowSeconds();
       {
         std::scoped_lock signal_lock(g_audio_signal_mutex);
         g_audio_rms = rms;
       }
       g_audio_start_seconds.store(started_at_seconds);
-      g_audio_end_seconds.store(started_at_seconds + *duration);
+      g_audio_end_seconds.store(started_at_seconds + duration);
     }
   }
   if (!playback_started) {
     failure_reason = "audio_playback_failed";
-    std::cerr << "PlaySoundW failed to start downloaded WAV: " << url << '\n';
+    std::cerr << "waveOut failed to start downloaded WAV: " << url << '\n';
     StopCurrentAudio(serial);
     return std::nullopt;
   }
   failure_reason.clear();
-  return AudioPlayback{*duration, serial, started_at_seconds};
+  return AudioPlayback{duration, serial, started_at_seconds};
 }
 
 class Allocator final : public ICubismAllocator {
