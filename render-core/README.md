@@ -74,6 +74,20 @@ host. `开始麦克风` and `停止麦克风` exercise the native capture path. 
 first voice slice is deliberately manual: VAD, device selection, and input
 settings remain outside the native core for now.
 
+## Native performance sample
+
+After building the Release host, collect a repeatable local baseline with:
+
+```powershell
+.\render-core\scripts\measure-native.ps1
+```
+
+The script warms the host before sampling and reports elapsed time, process CPU
+time as a percentage of one logical core, working set, private memory, and thread
+count. It only stops the process that it started. Compare the same model,
+window size, warmup, and sample duration across Native commits; these numbers
+are local diagnostics, not a substitute for acceptance on the target machine.
+
 The current demo uses a fixed-size D3D11 composition swap chain with
 premultiplied alpha, so the model window background is transparent while the
 Live2D textures remain visible. Window resizing and device-loss recovery are

@@ -13,11 +13,13 @@ native_runtime_protocol_and_frame_clock_20261110:
     after pending Physics settings are applied, so empty frames skip
     contribution collection and mixing. Reuse the render-thread frame scratch
     vectors for active frames to avoid repeated container allocation, including
-    the per-parameter contribution lists used by the mixer.
+    the per-parameter contribution lists used by the mixer. Add a repeatable
+    PowerShell sampler for Native CPU and memory baselines.
   validation: >-
     CMake Release builds pass for runtime-core and render-core, the protocol
     replay smoke test passes, the manifest check and Ruff pass, and git diff
-    whitespace checks pass. Changes are confined to the AG99live source repo;
+    whitespace checks pass. The Native sampler was smoke-tested with a short
+    Mk6 run. Changes are confined to the AG99live source repo;
     the generated AstrBot deployment copy was not edited or deployed.
   limitations: >-
     Native rendering, audio timing, GPU occupancy, and protocol behavior still
