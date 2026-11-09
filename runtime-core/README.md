@@ -12,6 +12,11 @@
 - Windows 原生 WinHTTP WebSocket 客户端
 - 协议回放 CLI 与 CTest smoke test
 
+协议版本和各子 Schema 的唯一来源是
+`astrbot_plugin_ag99live_adapter/protocol/schema_manifest.json`。CMake 配置阶段
+会从该 manifest 生成 Native 头文件，`protocol.hpp` 不再手工复制版本号；如果
+manifest 变更，重新配置构建目录即可同步 C++ 侧。
+
 ## 构建
 
 需要 CMake 3.25+。配置时会通过 CMake `FetchContent` 获取

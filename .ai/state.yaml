@@ -1,3 +1,24 @@
+native_runtime_protocol_and_frame_clock_20261110:
+  class: refactor
+  risk: high
+  status: source_updated_locally_validated_pending_native_runtime_acceptance
+  scope: >-
+    Continue the C++ native runtime migration without changing the stable TS
+    desktop behavior. Align runtime-core with output.segment.v6, derive Native
+    protocol constants from the Adapter schema manifest at CMake configure time,
+    and reuse one monotonic timestamp per render frame for audio, parameter
+    mixing, and motion-plan evaluation. Remove transient per-frame source-label
+    string allocations from the parameter mixer without changing priorities.
+  validation: >-
+    CMake Release builds pass for runtime-core and render-core, the protocol
+    replay smoke test passes, the manifest check and Ruff pass, and git diff
+    whitespace checks pass. Changes are confined to the AG99live source repo;
+    the generated AstrBot deployment copy was not edited or deployed.
+  limitations: >-
+    Native rendering, audio timing, GPU occupancy, and protocol behavior still
+    require paired live acceptance against the Adapter and a real model. No
+    performance percentage is claimed without a before/after native benchmark.
+
 dual_conversation_platform_dsh_execution_20261102:
   class: feature
   risk: high

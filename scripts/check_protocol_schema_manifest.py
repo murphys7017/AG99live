@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-import re
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -16,6 +15,15 @@ TYPESCRIPT_PATH = ROOT / "frontend" / "src" / "types" / "protocolSchema.generate
 CPP_PROTOCOL_PATH = (
     ROOT / "runtime-core" / "include" / "ag99" / "runtime" / "protocol.hpp"
 )
+CPP_PROTOCOL_TEMPLATE_PATH = (
+    ROOT
+    / "runtime-core"
+    / "include"
+    / "ag99"
+    / "runtime"
+    / "protocol_manifest.hpp.in"
+)
+CPP_CMAKE_PATH = ROOT / "runtime-core" / "CMakeLists.txt"
 
 EXPORT_NAMES = {
     "pre_action": "PRE_ACTION_SCHEMA_VERSION",
@@ -43,30 +51,48 @@ def main() -> None:
         raise SystemExit(
             "Generated TypeScript protocol manifest does not match schema_manifest.json."
         )
-    verify_cpp_constants(manifest)
+    verify_cpp_generation(manifest)
 
 
-def verify_cpp_constants(manifest: dict) -> None:
-    """Keep the native runtime's hand-written boundary tied to the manifest."""
-    actual = CPP_PROTOCOL_PATH.read_text(encoding="utf-8")
-    expected_values = {
-        "kProtocolVersion": manifest["protocol_version"],
-        "kOutputSegmentSchema": manifest["schemas"]["output_segment"],
-        "kMotionIntentSchema": manifest["schemas"]["motion_intent"],
-        "kParameterPlanSchema": manifest["schemas"]["parameter_plan"],
-        "kModelInfoSchema": manifest["schemas"]["model_info"],
+def verify_cpp_generation(manifest: dict) -> None:
+    """Ensure CMake derives the Native protocol header from this manifest."""
+    template = CPP_PROTOCOL_TEMPLATE_PATH.read_text(encoding="utf-8")
+    cmake = CPP_CMAKE_PATH.read_text(encoding="utf-8")
+    placeholders = {
+        "AG99_PROTOCOL_VERSION",
+        *(f"AG99_SCHEMA_{key.upper()}" for key in manifest["schemas"]),
     }
-    for constant, expected in expected_values.items():
-        pattern = rf'{re.escape(constant)}\s*=\s*"([^"]+)"'
-        match = re.search(pattern, actual)
-        if match is None:
+    for placeholder in placeholders:
+        if f"@{placeholder}@" not in template:
             raise SystemExit(
-                f"C++ protocol constant {constant} is missing from {CPP_PROTOCOL_PATH}."
+                f"C++ protocol template is missing @{placeholder}@ in "
+                f"{CPP_PROTOCOL_TEMPLATE_PATH}."
             )
-        if match.group(1) != expected:
+    required_cmake_fragments = (
+        "schema_manifest.json",
+        "string(JSON AG99_PROTOCOL_VERSION",
+        "configure_file(",
+        "protocol_manifest.hpp.in",
+    )
+    for fragment in required_cmake_fragments:
+        if fragment not in cmake:
             raise SystemExit(
-                f"C++ protocol constant {constant}={match.group(1)!r} does not "
-                f"match schema_manifest.json value {expected!r}."
+                f"CMake protocol generation is missing {fragment!r} in "
+                f"{CPP_CMAKE_PATH}."
+            )
+    aliases = {
+        "kProtocolVersion": "protocol_manifest::kProtocolVersion",
+        "kOutputSegmentSchema": "protocol_manifest::kOutputSegmentSchema",
+        "kMotionIntentSchema": "protocol_manifest::kMotionIntentSchema",
+        "kParameterPlanSchema": "protocol_manifest::kParameterPlanSchema",
+        "kModelInfoSchema": "protocol_manifest::kModelInfoSchema",
+    }
+    protocol_header = CPP_PROTOCOL_PATH.read_text(encoding="utf-8")
+    for constant, alias in aliases.items():
+        if f"{constant} =" not in protocol_header or alias not in protocol_header:
+            raise SystemExit(
+                f"C++ protocol header does not expose generated {constant} "
+                f"from {CPP_PROTOCOL_TEMPLATE_PATH}."
             )
 
 

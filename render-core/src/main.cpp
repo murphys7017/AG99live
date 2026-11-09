@@ -136,8 +136,7 @@ std::string TrimAsciiText(std::string value) {
   return std::string(first, last);
 }
 
-void UpdateAudioLevel(float delta_seconds) {
-  const double now = NowSeconds();
+void UpdateAudioLevel(float delta_seconds, double now) {
   const double remaining = g_audio_end_seconds.load() - now;
   float level = 0.0f;
   if (remaining <= 0.0) {
@@ -2271,13 +2270,14 @@ public:
         : 1.0f / 60.0f;
     _last_update_seconds = now;
     _model->UpdateMotion(delta_seconds);
-    ApplyQueuedMotion();
+    ApplyQueuedMotion(now);
     _model->ApplyDrag(g_drag_x.load(), g_drag_y.load());
-    UpdateAudioLevel(delta_seconds);
+    UpdateAudioLevel(delta_seconds, now);
     ApplyParameterFrame(
         g_speech_signal.LipSyncIntensity(),
-        g_audio_end_seconds.load() > NowSeconds(),
-        delta_seconds);
+        g_audio_end_seconds.load() > now,
+        delta_seconds,
+        now);
     _model->UpdatePhysicsAndPose(delta_seconds);
     cubism_model->Update();
 
@@ -2737,7 +2737,7 @@ private:
     std::string parameter_id;
     csmInt32 parameter_index = -1;
     ParameterContributionOwner owner = ParameterContributionOwner::DirectPlan;
-    std::string source;
+    std::string_view source;
     float value = 0.0f;
     float weight = 1.0f;
     int priority = 0;
@@ -3438,7 +3438,7 @@ private:
               binding.parameter_id,
               binding.parameter_index,
               ParameterContributionOwner::InteractionSway,
-              "interaction_sway:" + binding.axis_id,
+              binding.axis_id,
               target,
               binding.weight * attack_weight * release_weight,
               50,
@@ -3464,7 +3464,7 @@ private:
             binding.parameter_id,
             binding.parameter_index,
             ParameterContributionOwner::InteractionGaze,
-            "interaction_gaze:" + binding.axis_id,
+            binding.axis_id,
             target,
             binding.weight,
             60,
@@ -3478,7 +3478,8 @@ private:
   bool ApplyParameterFrame(
       float lip_sync_intensity,
       bool lip_sync_active,
-      float delta_seconds) {
+      float delta_seconds,
+      double now) {
     std::scoped_lock lock(_motion_mutex);
     if (!_model || !_model->GetModel()) {
       return false;
@@ -3499,7 +3500,7 @@ private:
               .turn_id = _pending_parameter_plan->envelope.turn_id.value_or(""),
               .message_id = _pending_parameter_plan->envelope.message_id,
               .sequence = _pending_parameter_plan->sequence,
-              .started_at_seconds = NowSeconds(),
+              .started_at_seconds = now,
               .generation = _connection_generation});
       const auto parsed = ParseParameterPlan(
           *_pending_parameter_plan, clock);
@@ -3545,7 +3546,7 @@ private:
 
     if (_active_parameter_plan) {
       auto& plan = *_active_parameter_plan;
-      elapsed_ms = (NowSeconds() - plan.started_at) * 1000.0;
+      elapsed_ms = (now - plan.started_at) * 1000.0;
       bool all_activated = true;
       for (const auto& binding : plan.bindings) {
         all_activated &= elapsed_ms >= binding.activation_at_ms;
@@ -3588,7 +3589,7 @@ private:
             binding.parameter_id,
             binding.parameter_index,
             ParameterContributionOwner::DirectPlan,
-            "direct_plan:" + binding.axis_id,
+            binding.axis_id,
             frame_target,
             binding.weight * ownership,
             100,
@@ -4592,7 +4593,7 @@ private:
     return plan;
   }
 
-  void ApplyQueuedMotion() {
+  void ApplyQueuedMotion(double now) {
     std::scoped_lock lock(_motion_mutex);
     if (!_model || !_model->GetModel()) {
       return;
@@ -4603,7 +4604,7 @@ private:
               .turn_id = _pending_motion_segment->envelope.turn_id.value_or(""),
               .message_id = _pending_motion_segment->envelope.message_id,
               .sequence = _pending_motion_segment->sequence,
-              .started_at_seconds = NowSeconds(),
+              .started_at_seconds = now,
               .generation = _connection_generation});
       std::optional<MotionPlan> plan;
       try {
@@ -4631,8 +4632,7 @@ private:
     if (!_active_motion) {
       return;
     }
-    const double elapsed_ms =
-        (NowSeconds() - _active_motion->started_at) * 1000.0;
+    const double elapsed_ms = (now - _active_motion->started_at) * 1000.0;
     for (const auto& track : _active_motion->tracks) {
       if (track.keyframes.empty()) {
         continue;

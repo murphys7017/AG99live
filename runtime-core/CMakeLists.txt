@@ -11,6 +11,52 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 option(AG99_RUNTIME_BUILD_REPLAY "Build the protocol replay executable" ON)
 option(AG99_RUNTIME_BUILD_TESTS "Build protocol smoke tests" ON)
 
+set(AG99_PROTOCOL_MANIFEST
+  "${CMAKE_CURRENT_SOURCE_DIR}/../astrbot_plugin_ag99live_adapter/protocol/schema_manifest.json")
+if(NOT EXISTS "${AG99_PROTOCOL_MANIFEST}")
+  message(FATAL_ERROR
+    "AG99 protocol manifest was not found at ${AG99_PROTOCOL_MANIFEST}")
+endif()
+
+file(READ "${AG99_PROTOCOL_MANIFEST}" AG99_PROTOCOL_MANIFEST_JSON)
+string(JSON AG99_PROTOCOL_VERSION
+  GET "${AG99_PROTOCOL_MANIFEST_JSON}" protocol_version)
+string(JSON AG99_SCHEMA_PRE_ACTION
+  GET "${AG99_PROTOCOL_MANIFEST_JSON}" schemas pre_action)
+string(JSON AG99_SCHEMA_AUDIO_INPUT
+  GET "${AG99_PROTOCOL_MANIFEST_JSON}" schemas audio_input)
+string(JSON AG99_SCHEMA_AUDIO_CREDIT
+  GET "${AG99_PROTOCOL_MANIFEST_JSON}" schemas audio_credit)
+string(JSON AG99_SCHEMA_MODEL_INFO
+  GET "${AG99_PROTOCOL_MANIFEST_JSON}" schemas model_info)
+string(JSON AG99_SCHEMA_MOTION_INTENT
+  GET "${AG99_PROTOCOL_MANIFEST_JSON}" schemas motion_intent)
+string(JSON AG99_SCHEMA_MOTION_TUNING_SAMPLE
+  GET "${AG99_PROTOCOL_MANIFEST_JSON}" schemas motion_tuning_sample)
+string(JSON AG99_SCHEMA_OUTPUT_SEGMENT
+  GET "${AG99_PROTOCOL_MANIFEST_JSON}" schemas output_segment)
+string(JSON AG99_SCHEMA_PARAMETER_ACTION_LIBRARY
+  GET "${AG99_PROTOCOL_MANIFEST_JSON}" schemas parameter_action_library)
+string(JSON AG99_SCHEMA_PARAMETER_PLAN
+  GET "${AG99_PROTOCOL_MANIFEST_JSON}" schemas parameter_plan)
+string(JSON AG99_SCHEMA_PERFORMANCE_CURVE_HINT
+  GET "${AG99_PROTOCOL_MANIFEST_JSON}" schemas performance_curve_hint)
+string(JSON AG99_SCHEMA_SEMANTIC_AXIS_PROFILE
+  GET "${AG99_PROTOCOL_MANIFEST_JSON}" schemas semantic_axis_profile)
+string(JSON AG99_SCHEMA_SEMANTIC_AXIS_RELATION_GRAPH
+  GET "${AG99_PROTOCOL_MANIFEST_JSON}" schemas semantic_axis_relation_graph)
+string(JSON AG99_SCHEMA_VOICE_FOLLOWING_PROFILE
+  GET "${AG99_PROTOCOL_MANIFEST_JSON}" schemas voice_following_profile)
+
+set(AG99_RUNTIME_GENERATED_INCLUDE_DIR
+  "${CMAKE_CURRENT_BINARY_DIR}/generated/include")
+file(MAKE_DIRECTORY
+  "${AG99_RUNTIME_GENERATED_INCLUDE_DIR}/ag99/runtime")
+configure_file(
+  "${CMAKE_CURRENT_SOURCE_DIR}/include/ag99/runtime/protocol_manifest.hpp.in"
+  "${AG99_RUNTIME_GENERATED_INCLUDE_DIR}/ag99/runtime/protocol_manifest.hpp"
+  @ONLY)
+
 FetchContent_Declare(
   nlohmann_json
   URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz
@@ -25,6 +71,7 @@ add_library(ag99_runtime_core
 
 target_include_directories(ag99_runtime_core
   PUBLIC
+    ${AG99_RUNTIME_GENERATED_INCLUDE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 

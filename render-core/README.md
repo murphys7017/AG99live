@@ -86,6 +86,12 @@ The current Adapter still emits `engine.motion_intent.v4`. The native host also
 accepts `engine.parameter_plan.v3` segments directly; translating the remaining
 TypeScript compiler and runtime behavior remains separate migration work.
 
+The native frame path samples its monotonic clock once per frame and reuses that
+timestamp for audio, parameter mixing, and motion timing. Parameter contribution
+source labels are non-owning views, so the high-frequency mixer does not build
+temporary prefixed strings for every frame. These are local implementation
+optimizations; benchmark numbers still need to come from paired native runs.
+
 ## Web desktop settings
 
 The host handles `system.desktop_settings_query` from the existing AG99 Web

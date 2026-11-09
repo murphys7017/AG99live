@@ -1,0 +1,36 @@
+#pragma once
+
+#include <string_view>
+
+namespace ag99::runtime::protocol_manifest {
+
+inline constexpr std::string_view kProtocolVersion =
+    "@AG99_PROTOCOL_VERSION@";
+inline constexpr std::string_view kPreActionSchema =
+    "@AG99_SCHEMA_PRE_ACTION@";
+inline constexpr std::string_view kAudioInputSchema =
+    "@AG99_SCHEMA_AUDIO_INPUT@";
+inline constexpr std::string_view kAudioCreditSchema =
+    "@AG99_SCHEMA_AUDIO_CREDIT@";
+inline constexpr std::string_view kModelInfoSchema =
+    "@AG99_SCHEMA_MODEL_INFO@";
+inline constexpr std::string_view kMotionIntentSchema =
+    "@AG99_SCHEMA_MOTION_INTENT@";
+inline constexpr std::string_view kMotionTuningSampleSchema =
+    "@AG99_SCHEMA_MOTION_TUNING_SAMPLE@";
+inline constexpr std::string_view kOutputSegmentSchema =
+    "@AG99_SCHEMA_OUTPUT_SEGMENT@";
+inline constexpr std::string_view kParameterActionLibrarySchema =
+    "@AG99_SCHEMA_PARAMETER_ACTION_LIBRARY@";
+inline constexpr std::string_view kParameterPlanSchema =
+    "@AG99_SCHEMA_PARAMETER_PLAN@";
+inline constexpr std::string_view kPerformanceCurveHintSchema =
+    "@AG99_SCHEMA_PERFORMANCE_CURVE_HINT@";
+inline constexpr std::string_view kSemanticAxisProfileSchema =
+    "@AG99_SCHEMA_SEMANTIC_AXIS_PROFILE@";
+inline constexpr std::string_view kSemanticAxisRelationGraphSchema =
+    "@AG99_SCHEMA_SEMANTIC_AXIS_RELATION_GRAPH@";
+inline constexpr std::string_view kVoiceFollowingProfileSchema =
+    "@AG99_SCHEMA_VOICE_FOLLOWING_PROFILE@";
+
+}  // namespace ag99::runtime::protocol_manifest
