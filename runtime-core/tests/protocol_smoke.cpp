@@ -26,7 +26,7 @@ ag99::runtime::Json make_segment(
       {"source", std::move(source)},
       {"payload",
        {
-           {"schema_version", "output.segment.v5"},
+           {"schema_version", "output.segment.v6"},
            {"sequence", sequence},
            {"text", {{"state", "present"}, {"content", "hello"}}},
            {"audio", {{"state", "absent"}}},

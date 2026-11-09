@@ -33,6 +33,14 @@ Core通用Sensor submit增加可选 cancel_event（asyncio.Event），不进入�
 修改模块Ruff、编译与配置结构检查通过。公开比较函数的合成图片检查：小局部变化1.39%，大面积变化68.75%，相同布局整体变亮32色阶为0%；相同图片为0%。本机包含JPEG编码的单次检查约3～4毫秒，这不是实际采样或主动语音延迟。
 这些是边界证据，不代表真实桌面准确率或完整链路验收。本轮不改前端，无需为本轮重新构建；基础截图协议与超时恢复仍需使用之前配套前端。
 待加载后验证：首帧无事件、小变化安静、大变化入队、断连清理、对话不受影响，读取 method=block_ssim 的面积/阈值/结果/耗时和 Personal Policy 日志。
+
+## 配置命中与性能排查
+
+桌面变化观察的“检测”和“表达”是两段独立链路。适配器配置的 `desktop_observation.enabled`、桌面端能力声明和 `personal_runtime_observation_targets` 只保证截图及 `desktop_changed` 事实能够进入 Runtime；实际命中的 AstrBot 配置档还必须启用 `personal_policy_enabled`，否则 Observation 会在策略入口前正常结束，不会生成 Persona、TTS 或 Live2D 表达。排查时应以事件实际命中的配置档为准，不要只看命令行配置副本。
+
+日志阶段应连续出现：`desktop_observation.baseline`、`desktop_observation.area`、`desktop_observation.changed`、`Personal Runtime observation admitted`、`observation gate resolved` 和 `Personal Policy evaluation`。前两步确认采样与比较，Gate 确认事实准入，最后一步才确认策略模型实际参与；缺少最后一步通常是 Policy 未启用、Provider 不可用或调用被撤销。
+
+性能边界：每个连接只保留一张基准图并串行比较，SSIM/颜色差在工作线程执行，不创建聊天 Turn，也不调用视觉模型。调低采样间隔会线性增加截图 IPC；调低面积阈值会增加 Observation 和 Policy 次数。优化时应先保持阈值不变，使用 `changed_percent`、`threshold_percent`、`elapsed_ms` 和 Policy 调用日志判断瓶颈，再调整采样频率或阈值。
 已确认本次03:58～04:00三次旧算法事件均成功入队，但在Gate以 quiet_hours 暂停；用户自行调整安静时段，本轮不修改，也不将检测到变化视为必须说话。
 
 本轮对话优先验证：修改模块Ruff/编译、插件结构检查通过；公开活动窗口检查覆盖忙碌/等待拒绝、播放完成刷新基准以及新输入撤销；公开Sensor→Inbox边界确认旧桌面事实被拒绝/取批移除，同时保留其他任务事实；Action→Event确认信号与期限传递。边界检查未调用真实策略模型，不代表真实语音打断、播放及异步Provider取消已验收；须重启后读取 paused/baseline/area 和 observation withdrawn 日志。

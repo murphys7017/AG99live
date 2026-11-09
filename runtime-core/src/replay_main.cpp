@@ -17,7 +17,7 @@ ag99::runtime::Json sample_segment() {
       {"source", "adapter"},
       {"payload",
        {
-           {"schema_version", "output.segment.v5"},
+           {"schema_version", "output.segment.v6"},
            {"sequence", 0},
            {"text", {{"state", "present"}, {"content", "协议回放正常。"}}},
            {"audio", {{"state", "absent"}}},

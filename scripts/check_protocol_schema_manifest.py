@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import re
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -12,6 +13,9 @@ MANIFEST_PATH = (
     / "schema_manifest.json"
 )
 TYPESCRIPT_PATH = ROOT / "frontend" / "src" / "types" / "protocolSchema.generated.ts"
+CPP_PROTOCOL_PATH = (
+    ROOT / "runtime-core" / "include" / "ag99" / "runtime" / "protocol.hpp"
+)
 
 EXPORT_NAMES = {
     "pre_action": "PRE_ACTION_SCHEMA_VERSION",
@@ -39,6 +43,31 @@ def main() -> None:
         raise SystemExit(
             "Generated TypeScript protocol manifest does not match schema_manifest.json."
         )
+    verify_cpp_constants(manifest)
+
+
+def verify_cpp_constants(manifest: dict) -> None:
+    """Keep the native runtime's hand-written boundary tied to the manifest."""
+    actual = CPP_PROTOCOL_PATH.read_text(encoding="utf-8")
+    expected_values = {
+        "kProtocolVersion": manifest["protocol_version"],
+        "kOutputSegmentSchema": manifest["schemas"]["output_segment"],
+        "kMotionIntentSchema": manifest["schemas"]["motion_intent"],
+        "kParameterPlanSchema": manifest["schemas"]["parameter_plan"],
+        "kModelInfoSchema": manifest["schemas"]["model_info"],
+    }
+    for constant, expected in expected_values.items():
+        pattern = rf'{re.escape(constant)}\s*=\s*"([^"]+)"'
+        match = re.search(pattern, actual)
+        if match is None:
+            raise SystemExit(
+                f"C++ protocol constant {constant} is missing from {CPP_PROTOCOL_PATH}."
+            )
+        if match.group(1) != expected:
+            raise SystemExit(
+                f"C++ protocol constant {constant}={match.group(1)!r} does not "
+                f"match schema_manifest.json value {expected!r}."
+            )
 
 
 def render_typescript(manifest: dict) -> str:

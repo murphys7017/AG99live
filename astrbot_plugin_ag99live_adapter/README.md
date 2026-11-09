@@ -170,4 +170,12 @@ python -m pip install -r astrbot_plugin_ag99live_adapter/requirements.txt
 
 变化事实通过已有 RuntimeObservationSensor 接入 Personal Policy；是否说话由本体决定，策略模型仍在本体设置（可选择 MiniMax 3.1）。安静时段、冷却及预算继续生效，检测到变化不保证立即说话。真实识别准确率及主动语音/Live2D效果须配套加载后验收。
 
+### 排查与性能
+
+这条链路必须同时满足四个条件：适配器配置中的 `desktop_observation.enabled` 为 true、桌面端声明 `ag99live.desktop_observation.v1` 截图能力、当前会话在 `platform_settings.personal_runtime_observation_targets` 中、实际命中的 AstrBot 配置启用了 `personal_policy_enabled`。前两个条件只决定能否采样和提交 `desktop_changed`；Personal Policy 关闭时，事实仍会被检测并进入 Gate，但不会形成 Persona 主动表达。配置按 AstrBot 配置档命中，不要只检查 `data/cmd_config.json`。
+
+建议按顺序查看日志：`desktop_observation.baseline` → `desktop_observation.area` → `desktop_observation.changed` → `Personal Runtime observation admitted` → `observation gate resolved` → `Personal Policy evaluation`。如果停在前两步，检查桌面端截图能力或对话安静窗口；如果 Gate 已 `evaluate` 但没有 Policy 日志，检查实际配置档的 `personal_policy_enabled` 和策略 Provider。
+
+比较过程不调用模型，也不把截图发送给模型。每个连接串行保留一张基准图，分块比较在线程中执行；本机一次数学比较通常只需毫秒级时间。主要成本来自截图 IPC、配置/连接轮询和 Personal Policy 的模型调用，而不是 SSIM 计算。降低 `interval_seconds` 会增加截图 IPC 次数，降低 `changed_area_threshold_percent` 会增加事件和后续策略调用，应先用日志校准再调整。
+
 设计与验收见仓库 `docs/desktop-observation-plan.md`。

@@ -398,7 +398,7 @@ OutputSegment parse_output_segment(const ProtocolEnvelope& envelope) {
   const auto schema_version = require_string(
       envelope.payload, "schema_version", "payload");
   if (schema_version != kOutputSegmentSchema) {
-    throw ProtocolError("payload.schema_version must be output.segment.v5");
+    throw ProtocolError("payload.schema_version must be output.segment.v6");
   }
   const auto sequence =
       require_non_negative_integer(envelope.payload, "sequence", "payload");

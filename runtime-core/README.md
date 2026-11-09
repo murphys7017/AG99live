@@ -4,7 +4,7 @@
 
 - `v2` JSON 信封解析与构造
 - `input.text`、音频流 start/end 和 `control.playback_finished` 出站消息构造
-- `output.segment.v5` 严格解析
+- `output.segment.v6` 严格解析
 - `engine.motion_intent.v4` 基本协议边界校验
 - `AG99` 二进制 PCM16LE 音频帧解析与构造
 - `output.segment` 按 `turn_id + sequence` 重排、去重和冲突拒绝
