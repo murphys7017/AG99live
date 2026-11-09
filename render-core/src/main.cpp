@@ -3691,11 +3691,13 @@ private:
       std::cerr << "[parameter_mixer] " << reason << '\n';
       return false;
     };
-    _frame_groups.clear();
+    for (std::size_t index = 0; index < _frame_group_count; ++index) {
+      _frame_groups[index].contributions.clear();
+    }
+    _frame_group_count = 0;
     _frame_group_by_index.clear();
     _frame_resolved_values.clear();
     auto& groups = _frame_groups;
-    groups.reserve(contributions.size());
     auto& group_by_index = _frame_group_by_index;
     for (auto& contribution : contributions) {
       if (contribution.parameter_id.empty()) {
@@ -3714,13 +3716,16 @@ private:
       }
 
       const auto [found, inserted] = group_by_index.emplace(
-          contribution.parameter_index, groups.size());
+          contribution.parameter_index, _frame_group_count);
       if (inserted) {
-        groups.push_back(ParameterFrameGroup{
-            contribution.parameter_index,
-            contribution.parameter_id,
-            {},
-            {}});
+        if (_frame_group_count == groups.size()) {
+          groups.emplace_back();
+        }
+        auto& new_group = groups[_frame_group_count++];
+        new_group.parameter_index = contribution.parameter_index;
+        new_group.parameter_id = contribution.parameter_id;
+        new_group.contributions.clear();
+        new_group.snapshot = {};
       }
       auto& group = groups[found->second];
       if (group.parameter_id != contribution.parameter_id) {
@@ -3731,10 +3736,15 @@ private:
       group.contributions.push_back(&contribution);
     }
 
-    std::sort(groups.begin(), groups.end(), [](const auto& left, const auto& right) {
+    std::sort(
+        groups.begin(), groups.begin() + _frame_group_count,
+        [](const auto& left, const auto& right) {
       return left.parameter_index < right.parameter_index;
     });
-    for (auto& group : groups) {
+    for (std::size_t group_index = 0;
+         group_index < _frame_group_count;
+         ++group_index) {
+      auto& group = groups[group_index];
       const auto actual_parameter_id = ParameterIdAt(group.parameter_index);
       if (actual_parameter_id.empty()
           || actual_parameter_id != group.parameter_id) {
@@ -3766,8 +3776,11 @@ private:
     }
 
     auto& resolved_values = _frame_resolved_values;
-    resolved_values.reserve(groups.size());
-    for (auto& group : groups) {
+    resolved_values.reserve(_frame_group_count);
+    for (std::size_t group_index = 0;
+         group_index < _frame_group_count;
+         ++group_index) {
+      auto& group = groups[group_index];
       const auto base_value = group.snapshot.base_value;
       auto mixed_target = base_value;
       auto direct_only_target = base_value;
@@ -4747,6 +4760,7 @@ private:
   std::vector<std::string> _parameter_ids;
   std::vector<ParameterFrameContribution> _frame_contributions;
   std::vector<ParameterFrameGroup> _frame_groups;
+  std::size_t _frame_group_count = 0;
   std::unordered_map<csmInt32, std::size_t> _frame_group_by_index;
   std::vector<std::pair<csmInt32, float>> _frame_resolved_values;
   UINT _width = 0;
