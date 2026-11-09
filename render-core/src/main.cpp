@@ -3505,6 +3505,14 @@ private:
           static_cast<csmFloat32>(*_pending_physics_response_scale));
       _pending_physics_response_scale.reset();
     }
+    if (!_pending_parameter_plan
+        && !_active_parameter_plan
+        && !_pending_thinking_turn_id
+        && !_interaction_sway
+        && !_interaction_gaze
+        && !lip_sync_active) {
+      return true;
+    }
     if (_pending_parameter_plan) {
       const auto clock = _pending_parameter_clock.value_or(
           NativeSegmentClock{
