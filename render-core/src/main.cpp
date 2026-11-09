@@ -1671,7 +1671,8 @@ private:
             terminal.reason,
             "motion_playback_failed:" + terminal.clock.message_id);
       }
-      if (terminal.success && latest_assistant_segment_
+      if (terminal.success && terminal.reason != "deferred_motion_absent"
+          && latest_assistant_segment_
           && latest_assistant_segment_->message_id == terminal.clock.message_id) {
         g_input_state.SetFeedbackAvailable(true);
         g_input_state.SetStatusText(L"待命");
