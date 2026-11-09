@@ -11,7 +11,8 @@ native_runtime_protocol_and_frame_clock_20261110:
     and remove transient per-frame source-label and parameter-ID allocations
     from the parameter mixer without changing priorities. Add an idle fast path
     after pending Physics settings are applied, so empty frames skip
-    contribution collection and mixing.
+    contribution collection and mixing. Reuse the render-thread frame scratch
+    vectors for active frames to avoid repeated container allocation.
   validation: >-
     CMake Release builds pass for runtime-core and render-core, the protocol
     replay smoke test passes, the manifest check and Ruff pass, and git diff

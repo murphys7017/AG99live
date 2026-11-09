@@ -3513,6 +3513,7 @@ private:
         && !lip_sync_active) {
       return true;
     }
+    _frame_contributions.clear();
     if (_pending_parameter_plan) {
       const auto clock = _pending_parameter_clock.value_or(
           NativeSegmentClock{
@@ -3558,8 +3559,7 @@ private:
       }
     };
     auto* cubism_model = _model->GetModel();
-    std::vector<ParameterFrameContribution> contributions;
-    CollectInteractionContributions(delta_seconds, contributions);
+    CollectInteractionContributions(delta_seconds, _frame_contributions);
     double elapsed_ms = 0.0;
     bool clear_active_plan = false;
 
@@ -3604,7 +3604,7 @@ private:
               * static_cast<float>(binding.modulation_direction)
               * GetSpeechAudioGain(binding.axis_id);
         }
-        contributions.push_back(ParameterFrameContribution{
+        _frame_contributions.push_back(ParameterFrameContribution{
             binding.parameter_id,
             binding.parameter_index,
             ParameterContributionOwner::DirectPlan,
@@ -3648,7 +3648,7 @@ private:
           fail_active_parameter_plan("lip_sync_parameter_range_invalid");
           return false;
         }
-        contributions.push_back(ParameterFrameContribution{
+        _frame_contributions.push_back(ParameterFrameContribution{
             ParameterIdAt(parameter_index),
             parameter_index,
             ParameterContributionOwner::LipSync,
@@ -3664,7 +3664,7 @@ private:
 
     bool direct_presentation_settled = true;
     if (!ResolveAndWriteParameterFrame(
-            contributions, direct_presentation_settled)) {
+            _frame_contributions, direct_presentation_settled)) {
       fail_active_parameter_plan("parameter_frame_rejected");
       return false;
     }
@@ -3691,9 +3691,12 @@ private:
       std::cerr << "[parameter_mixer] " << reason << '\n';
       return false;
     };
-    std::vector<ParameterFrameGroup> groups;
+    _frame_groups.clear();
+    _frame_group_by_index.clear();
+    _frame_resolved_values.clear();
+    auto& groups = _frame_groups;
     groups.reserve(contributions.size());
-    std::unordered_map<csmInt32, std::size_t> group_by_index;
+    auto& group_by_index = _frame_group_by_index;
     for (auto& contribution : contributions) {
       if (contribution.parameter_id.empty()) {
         return reject("parameter_id_missing");
@@ -3762,7 +3765,7 @@ private:
           });
     }
 
-    std::vector<std::pair<csmInt32, float>> resolved_values;
+    auto& resolved_values = _frame_resolved_values;
     resolved_values.reserve(groups.size());
     for (auto& group : groups) {
       const auto base_value = group.snapshot.base_value;
@@ -4742,6 +4745,10 @@ private:
   CubismModelSettingJson* _setting = nullptr;
   ag99::live2d::D3D11Renderer _renderer;
   std::vector<std::string> _parameter_ids;
+  std::vector<ParameterFrameContribution> _frame_contributions;
+  std::vector<ParameterFrameGroup> _frame_groups;
+  std::unordered_map<csmInt32, std::size_t> _frame_group_by_index;
+  std::vector<std::pair<csmInt32, float>> _frame_resolved_values;
   UINT _width = 0;
   UINT _height = 0;
   double _last_update_seconds = 0.0;
