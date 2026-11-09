@@ -58,7 +58,7 @@ struct AudioSlot {
 };
 
 struct MotionSlot {
-  enum class State { Present, Absent, Failed };
+  enum class State { Present, Pending, Absent, Failed };
   State state = State::Absent;
   std::string message_type;
   std::string mode;
@@ -90,6 +90,12 @@ struct OutputSegment {
   std::vector<std::string> images;
   std::string speaker_name;
   std::string avatar;
+};
+
+struct SegmentMotionUpdate {
+  ProtocolEnvelope envelope;
+  std::string schema_version;
+  MotionSlot motion;
 };
 
 struct ModelSync {
@@ -143,6 +149,8 @@ struct BinaryAudioChunkFrame {
 ProtocolEnvelope parse_envelope(const Json& raw);
 ProtocolEnvelope parse_envelope_json(std::string_view raw);
 OutputSegment parse_output_segment(const ProtocolEnvelope& envelope);
+SegmentMotionUpdate parse_segment_motion_update(
+    const ProtocolEnvelope& envelope);
 ModelSync parse_model_sync(const ProtocolEnvelope& envelope);
 DesktopSettingsQuery parse_desktop_settings_query(
     const ProtocolEnvelope& envelope);

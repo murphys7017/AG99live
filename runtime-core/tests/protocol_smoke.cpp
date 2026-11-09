@@ -136,6 +136,56 @@ void test_parameter_plan_motion_slot() {
   assert(segment.motion.message_type == "engine.parameter_plan");
 }
 
+void test_pending_and_deferred_motion_slots() {
+  auto pending = make_segment("m-pending", 0);
+  pending["payload"]["audio"] = {
+      {"state", "present"},
+      {"url", "http://127.0.0.1:12396/audio.wav"},
+  };
+  pending["payload"]["motion"] = {{"state", "pending"}};
+  const auto pending_segment = ag99::runtime::parse_output_segment(
+      ag99::runtime::parse_envelope(pending));
+  assert(pending_segment.motion.state
+      == ag99::runtime::MotionSlot::State::Pending);
+
+  const ag99::runtime::Json update = {
+      {"type", "output.segment_motion"},
+      {"version", "v2"},
+      {"message_id", "m-pending"},
+      {"timestamp", "2026-10-01T00:00:00.000Z"},
+      {"turn_id", "turn-1"},
+      {"source", "adapter"},
+      {"payload",
+       {
+           {"schema_version", "output.segment.v6"},
+           {"motion",
+            {
+                {"state", "present"},
+                {"message_type", "engine.motion_intent"},
+                {"mode", "expressive"},
+                {"source", "adapter"},
+                {"payload", {{"schema_version", "engine.motion_intent.v4"}}},
+            }},
+       }},
+  };
+  const auto parsed_update = ag99::runtime::parse_segment_motion_update(
+      ag99::runtime::parse_envelope(update));
+  assert(parsed_update.envelope.message_id == "m-pending");
+  assert(parsed_update.motion.state
+      == ag99::runtime::MotionSlot::State::Present);
+
+  auto invalid = update;
+  invalid["payload"]["motion"] = {{"state", "pending"}};
+  bool rejected = false;
+  try {
+    (void)ag99::runtime::parse_segment_motion_update(
+        ag99::runtime::parse_envelope(invalid));
+  } catch (const ag99::runtime::ProtocolError&) {
+    rejected = true;
+  }
+  assert(rejected);
+}
+
 void test_binary_audio_round_trip() {
   const ag99::runtime::AudioChunkMetadata metadata{
       "mic:1", "turn-1", 7, "pcm16le", 16000, 1, "ptt"};
@@ -509,6 +559,7 @@ int main() {
   test_envelope_and_segment();
   test_segment_rejection_boundaries();
   test_parameter_plan_motion_slot();
+  test_pending_and_deferred_motion_slots();
   test_binary_audio_round_trip();
   test_segment_reorder_and_duplicate_rejection();
   test_input_text_builder();

@@ -17,7 +17,9 @@ native_runtime_protocol_and_frame_clock_20261110:
     PowerShell sampler for Native CPU and memory baselines.
     Replace the Native WAV temporary-file/PlaySound path with in-memory PCM
     playback through `waveOut`, while keeping the existing serial, RMS, clock,
-    interruption, and failure boundaries.
+    interruption, and failure boundaries. Accept v6 pending motion and
+    same-identity `output.segment_motion`, attaching late motion to the active
+    audio clock and rejecting expired motion windows.
   validation: >-
     CMake Release builds pass for runtime-core and render-core, the protocol
     replay smoke test passes, the manifest check and Ruff pass, and git diff

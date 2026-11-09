@@ -117,6 +117,13 @@ void RuntimeProtocolSession::ingest_text(std::string_view text_frame) {
       }
       return;
     }
+    if (envelope.type == "output.segment_motion") {
+      auto update = parse_segment_motion_update(envelope);
+      if (callbacks_.on_segment_motion_ready) {
+        callbacks_.on_segment_motion_ready(std::move(update));
+      }
+      return;
+    }
     if (envelope.type != "output.segment") {
       if (callbacks_.on_ignored_type) {
         callbacks_.on_ignored_type(envelope.type);

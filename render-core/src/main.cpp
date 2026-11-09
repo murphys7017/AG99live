@@ -1230,6 +1230,9 @@ public:
                           << query.key << '\n';
               }
             },
+            [this](ag99::runtime::SegmentMotionUpdate update) {
+              OnSegmentMotion(std::move(update));
+            },
         }) {
     callback_lifetime_->owner = this;
     audio_worker_ = std::thread([this] {
@@ -1398,6 +1401,40 @@ public:
     CompleteMotionSegment(std::move(terminal));
   }
 
+  void OnSegmentMotion(ag99::runtime::SegmentMotionUpdate update) {
+    const auto turn_id = update.envelope.turn_id.value_or("");
+    const auto message_id = update.envelope.message_id;
+    NativeSegmentClock clock;
+    {
+      std::scoped_lock lock(playback_mutex_);
+      const auto turn = playback_turns_.find(turn_id);
+      if (turn == playback_turns_.end()) {
+        std::cerr << "[runtime] deferred motion has no playback turn: "
+                  << turn_id << '\n';
+        return;
+      }
+      const auto segment = turn->second.segments.find(message_id);
+      if (segment == turn->second.segments.end()
+          || !segment->second.motion_pending
+          || segment->second.motion_terminal) {
+        std::cerr << "[runtime] deferred motion has no pending segment: "
+                  << message_id << '\n';
+        return;
+      }
+      if (segment->second.clock.audio_serial == 0) {
+        if (update.motion.state == ag99::runtime::MotionSlot::State::Present) {
+          segment->second.deferred_motion = std::move(update.motion);
+          return;
+        }
+        segment->second.motion_pending = false;
+      } else {
+        segment->second.motion_pending = false;
+      }
+      clock = segment->second.clock;
+    }
+    ApplyMotionUpdate(turn_id, message_id, clock, std::move(update.motion));
+  }
+
   void Close() {
     std::unique_lock transport_lock(transport_mutex_);
     const bool was_closing = closing_.exchange(true);
@@ -1445,6 +1482,9 @@ private:
     std::int64_t sequence = 0;
     bool audio_terminal = true;
     bool motion_terminal = true;
+    bool motion_pending = false;
+    NativeSegmentClock clock;
+    std::optional<ag99::runtime::MotionSlot> deferred_motion;
     std::string text_failure_reason;
     std::string audio_failure_reason;
     std::string motion_failure_reason;
@@ -1525,7 +1565,8 @@ private:
 
   bool RegisterSegment(
       const ag99::runtime::OutputSegment& output,
-      std::uint64_t generation) {
+      std::uint64_t generation,
+      const NativeSegmentClock& clock) {
     const auto turn_id = output.envelope.turn_id.value_or("");
     std::scoped_lock lock(playback_mutex_);
     const auto turn = playback_turns_.find(turn_id);
@@ -1538,10 +1579,14 @@ private:
     }
     SegmentPlaybackState segment;
     segment.sequence = output.sequence;
+    segment.clock = clock;
     segment.audio_terminal =
         output.audio.state != ag99::runtime::AudioSlot::State::Present;
     segment.motion_terminal =
-        output.motion.state != ag99::runtime::MotionSlot::State::Present;
+        output.motion.state != ag99::runtime::MotionSlot::State::Present
+        && output.motion.state != ag99::runtime::MotionSlot::State::Pending;
+    segment.motion_pending =
+        output.motion.state == ag99::runtime::MotionSlot::State::Pending;
     if (output.text.state == ag99::runtime::TextSlot::State::Failed) {
       segment.text_failure_reason = ResolveFailureReason(
           output.text.reason,
@@ -1634,6 +1679,77 @@ private:
       }
     }
     QueuePlaybackAcknowledgement(terminal.clock.turn_id);
+  }
+
+  void DispatchMotionUpdate(
+      const std::string& turn_id,
+      const std::string& message_id,
+      const NativeSegmentClock& clock,
+      ag99::runtime::MotionSlot motion) {
+    ag99::runtime::OutputSegment segment;
+    segment.envelope.turn_id = turn_id;
+    segment.envelope.message_id = message_id;
+    segment.schema_version = std::string(ag99::runtime::kOutputSegmentSchema);
+    segment.sequence = clock.sequence;
+    segment.motion = std::move(motion);
+    if (on_output_segment_) {
+      on_output_segment_(std::move(segment), clock);
+    } else {
+      CompleteMotionSegment(NativeSegmentTerminal{
+          clock, false, "motion_sink_unavailable"});
+    }
+  }
+
+  void ApplyMotionUpdate(
+      const std::string& turn_id,
+      const std::string& message_id,
+      const NativeSegmentClock& clock,
+      ag99::runtime::MotionSlot motion) {
+    if (motion.state == ag99::runtime::MotionSlot::State::Absent) {
+      CompleteMotionSegment(NativeSegmentTerminal{
+          clock, true, "deferred_motion_absent"});
+      return;
+    }
+    if (motion.state == ag99::runtime::MotionSlot::State::Failed) {
+      CompleteMotionSegment(NativeSegmentTerminal{
+          clock,
+          false,
+          motion.reason.empty()
+              ? "deferred_motion_failed"
+              : motion.reason});
+      return;
+    }
+    if (clock.audio_serial == 0
+        || g_audio_serial.load() != clock.audio_serial
+        || NowSeconds() >= clock.started_at_seconds + clock.duration_seconds) {
+      CompleteMotionSegment(NativeSegmentTerminal{
+          clock, false, "deferred_motion_audio_window_unavailable"});
+      return;
+    }
+    DispatchMotionUpdate(turn_id, message_id, clock, std::move(motion));
+  }
+
+  std::optional<ag99::runtime::MotionSlot> ActivateAudioSegment(
+      const AudioQueueItem& item,
+      const NativeSegmentClock& clock) {
+    std::scoped_lock lock(playback_mutex_);
+    const auto turn = playback_turns_.find(item.turn_id);
+    if (turn == playback_turns_.end()
+        || turn->second.generation != item.generation) {
+      return std::nullopt;
+    }
+    const auto segment = turn->second.segments.find(item.message_id);
+    if (segment == turn->second.segments.end()) {
+      return std::nullopt;
+    }
+    segment->second.clock = clock;
+    if (!segment->second.deferred_motion) {
+      return std::nullopt;
+    }
+    segment->second.motion_pending = false;
+    auto deferred = std::move(segment->second.deferred_motion);
+    segment->second.deferred_motion.reset();
+    return deferred;
   }
 
   void RetireTurn(const std::string& turn_id, bool cancel_playback) {
@@ -1889,7 +2005,7 @@ private:
     clock.sequence = segment.sequence;
     clock.started_at_seconds = NowSeconds();
     clock.generation = generation;
-    if (!RegisterSegment(segment, generation)) {
+    if (!RegisterSegment(segment, generation, clock)) {
       return;
     }
 
@@ -2003,6 +2119,23 @@ private:
         StopCurrentAudio(playback->serial);
         ClearCurrentAudio(item, playback->serial);
         continue;
+      }
+
+      NativeSegmentClock playback_clock{
+          item.turn_id,
+          item.message_id,
+          item.sequence,
+          playback->started_at_seconds,
+          playback->duration_seconds,
+          playback->serial,
+          item.generation};
+      const auto deferred_motion = ActivateAudioSegment(item, playback_clock);
+      if (deferred_motion) {
+        ApplyMotionUpdate(
+            item.turn_id,
+            item.message_id,
+            playback_clock,
+            std::move(*deferred_motion));
       }
 
       bool motion_dispatch_failed = false;

@@ -205,6 +205,10 @@ AudioSlot parse_audio_slot(const Json& value) {
 MotionSlot parse_motion_slot(const Json& value) {
   require_object(value, "payload.motion");
   const auto state = require_string(value, "state", "payload.motion");
+  if (state == "pending") {
+    require_exact_keys(value, "payload.motion", {"state"});
+    return MotionSlot{MotionSlot::State::Pending, {}, {}, {}, Json::object(), {}};
+  }
   if (state == "absent") {
     require_exact_keys(value, "payload.motion", {"state"});
     return {};
@@ -412,6 +416,11 @@ OutputSegment parse_output_segment(const ProtocolEnvelope& envelope) {
   }
   const auto motion = parse_motion_slot(
       require_member(envelope.payload, "motion", "payload"));
+  if (motion.state == MotionSlot::State::Pending
+      && audio.state != AudioSlot::State::Present) {
+    throw ProtocolError(
+        "payload.motion pending requires payload.audio present");
+  }
   const auto speech = parse_speech_slot(
       require_member(envelope.payload, "speech", "payload"));
 
@@ -454,6 +463,34 @@ OutputSegment parse_output_segment(const ProtocolEnvelope& envelope) {
       images,
       speaker_name,
       avatar};
+}
+
+SegmentMotionUpdate parse_segment_motion_update(
+    const ProtocolEnvelope& envelope) {
+  if (envelope.type != "output.segment_motion") {
+    throw ProtocolError("expected output.segment_motion envelope");
+  }
+  if (envelope.source != "adapter") {
+    throw ProtocolError("output.segment_motion.source must be adapter");
+  }
+  if (!envelope.turn_id.has_value()) {
+    throw ProtocolError("output.segment_motion requires turn_id");
+  }
+  require_exact_keys(
+      envelope.payload, "payload", {"schema_version", "motion"});
+  const auto schema_version = require_string(
+      envelope.payload, "schema_version", "payload");
+  if (schema_version != kOutputSegmentSchema) {
+    throw ProtocolError(
+        "payload.schema_version must be output.segment.v6");
+  }
+  auto motion = parse_motion_slot(
+      require_member(envelope.payload, "motion", "payload"));
+  if (motion.state == MotionSlot::State::Pending) {
+    throw ProtocolError(
+        "output.segment_motion.motion cannot remain pending");
+  }
+  return SegmentMotionUpdate{envelope, schema_version, std::move(motion)};
 }
 
 ModelSync parse_model_sync(const ProtocolEnvelope& envelope) {
