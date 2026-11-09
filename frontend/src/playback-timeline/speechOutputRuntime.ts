@@ -5,6 +5,7 @@ import { createPcmOutputSession, type PcmOutputSession } from "./pcmOutputSessio
 const SPEECH_OUTPUT_FADE_INITIAL_GAIN = 0;
 const SPEECH_OUTPUT_FADE_DURATION_SECONDS = 0.02;
 const SPEECH_OUTPUT_PRIMER_DURATION_SECONDS = 0.35;
+const SPEECH_OUTPUT_PRIMER_READY_DELAY_MS = 10;
 const SPEECH_OUTPUT_REPRIME_IDLE_MS = 30_000;
 const SPEECH_OUTPUT_KEEPALIVE_GAIN = 1 / 1_000_000;
 const SPEECH_OUTPUT_KEEPALIVE_FREQUENCY_HZ = 20;
@@ -71,23 +72,49 @@ export function createSpeechOutputRuntime(): SpeechOutputRuntime {
     source.connect(context.destination);
 
     return new Promise<void>((resolve, reject) => {
+      let settled = false;
+      let readyTimer: ReturnType<typeof setTimeout> | null = null;
+      const resolveReady = () => {
+        if (settled) return;
+        settled = true;
+        resolve();
+      };
       const cancel = () => {
-        source.stop();
+        if (readyTimer !== null) clearTimeout(readyTimer);
+        try {
+          source.stop();
+        } catch (_error) {
+          // The primer may already have ended while preparation is disposed.
+        }
         source.disconnect();
         cancelPrimer = null;
-        reject(new DOMException("Output preparation disposed.", "AbortError"));
+        if (!settled) {
+          settled = true;
+          reject(new DOMException("Output preparation disposed.", "AbortError"));
+        }
       };
       cancelPrimer = cancel;
       source.addEventListener(
         "ended",
         () => {
+          if (readyTimer !== null) clearTimeout(readyTimer);
           source.disconnect();
           if (cancelPrimer === cancel) cancelPrimer = null;
-          resolve();
+          resolveReady();
         },
         { once: true },
       );
-      source.start();
+      try {
+        source.start();
+        // Keep the longer near-silent primer running in the background, but do
+        // not make the first PCM wait for its full duration.
+        readyTimer = setTimeout(resolveReady, SPEECH_OUTPUT_PRIMER_READY_DELAY_MS);
+      } catch (error) {
+        cancelPrimer = null;
+        source.disconnect();
+        settled = true;
+        reject(error);
+      }
     });
   }
 
@@ -132,7 +159,8 @@ export function createSpeechOutputRuntime(): SpeechOutputRuntime {
       audioContextState: context.state,
       sampleRate: context.sampleRate,
       resumed,
-      primerMs: needsPrimer ? SPEECH_OUTPUT_PRIMER_DURATION_SECONDS * 1000 : 0,
+      primerDurationMs: needsPrimer ? SPEECH_OUTPUT_PRIMER_DURATION_SECONDS * 1000 : 0,
+      primerReadyMs: needsPrimer ? SPEECH_OUTPUT_PRIMER_READY_DELAY_MS : 0,
     });
   }
 
