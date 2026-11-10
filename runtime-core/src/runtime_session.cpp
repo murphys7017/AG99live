@@ -25,6 +25,10 @@ void RuntimeProtocolSession::ingest_text(std::string_view text_frame) {
       if (!assembler_.start_turn(*envelope.turn_id)) {
         throw ProtocolError("control.turn_started duplicate or retired turn");
       }
+      if (!incremental_assembler_.start_turn(*envelope.turn_id)) {
+        throw ProtocolError(
+            "control.turn_started duplicate or retired incremental turn");
+      }
       if (callbacks_.on_turn_started) {
         callbacks_.on_turn_started(*envelope.turn_id);
       }
@@ -40,7 +44,16 @@ void RuntimeProtocolSession::ingest_text(std::string_view text_frame) {
       if (!envelope.payload.empty()) {
         throw ProtocolError("control.synth_finished payload must be empty");
       }
-      if (!assembler_.mark_synthesis_finished(*envelope.turn_id)) {
+      const auto has_incremental_output =
+          incremental_assembler_.has_output(*envelope.turn_id);
+      if (has_incremental_output
+          && !incremental_assembler_.mark_synthesis_finished(
+              *envelope.turn_id)) {
+        throw ProtocolError(
+            "control.synth_finished has pending incremental output");
+      }
+      if (!assembler_.mark_synthesis_finished(
+              *envelope.turn_id, has_incremental_output)) {
         throw ProtocolError(
             "control.synth_finished unknown, duplicate, or has pending output");
       }
@@ -76,6 +89,10 @@ void RuntimeProtocolSession::ingest_text(std::string_view text_frame) {
       if (!assembler_.clear_turn(*envelope.turn_id)) {
         throw ProtocolError("control.turn_finished unknown or retired turn");
       }
+      if (!incremental_assembler_.clear_turn(*envelope.turn_id)) {
+        throw ProtocolError(
+            "control.turn_finished unknown or retired incremental turn");
+      }
       if (callbacks_.on_turn_finished) {
         callbacks_.on_turn_finished(
             *envelope.turn_id,
@@ -97,6 +114,10 @@ void RuntimeProtocolSession::ingest_text(std::string_view text_frame) {
       }
       if (!assembler_.interrupt_turn(*envelope.turn_id)) {
         throw ProtocolError("control.interrupt unknown, duplicate, or retired turn");
+      }
+      if (!incremental_assembler_.interrupt_turn(*envelope.turn_id)) {
+        throw ProtocolError(
+            "control.interrupt unknown, duplicate, or retired incremental turn");
       }
       if (callbacks_.on_turn_interrupted) {
         callbacks_.on_turn_interrupted(*envelope.turn_id);
@@ -126,6 +147,11 @@ void RuntimeProtocolSession::ingest_text(std::string_view text_frame) {
     }
     if (auto event = parse_incremental_output_event(envelope);
         event.has_value()) {
+      const auto result = incremental_assembler_.ingest(*event);
+      if (!result.accepted) {
+        report_error("incremental output rejected: " + result.reason);
+        return;
+      }
       if (callbacks_.on_incremental_output_event) {
         callbacks_.on_incremental_output_event(std::move(*event));
       }
@@ -165,6 +191,11 @@ void RuntimeProtocolSession::ingest_binary(
         && binary_frame[5] == 2;
     if (is_incremental_audio) {
       auto audio = parse_output_audio_frame(binary_frame);
+      const auto result = incremental_assembler_.ingest_audio(audio);
+      if (!result.accepted) {
+        report_error("incremental audio rejected: " + result.reason);
+        return;
+      }
       if (callbacks_.on_incremental_audio_frame) {
         callbacks_.on_incremental_audio_frame(std::move(audio));
       }
@@ -181,6 +212,7 @@ void RuntimeProtocolSession::ingest_binary(
 
 void RuntimeProtocolSession::reset() {
   assembler_.clear_all();
+  incremental_assembler_.clear_all();
 }
 
 void RuntimeProtocolSession::report_error(std::string message) {

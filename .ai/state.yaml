@@ -7,19 +7,20 @@ native_olv_protocol_boundary_20261110:
     changing the existing output.segment.v6 or microphone type=1 paths. Parse
     incremental text/audio/motion stream events, shared identity and sequence
     constraints, end status/length fields, and type=2 PCM frame metadata,
-    sample offsets, and bounded payloads. Dispatch parsed OLV events through
-    new optional RuntimeProtocolSession callbacks; do not attach them to a
-    playback worker in this slice.
+    sample offsets, and bounded payloads. Track turn/segment/resource stream
+    lifecycles, text and audio capacities, and cross-segment audio order before
+    dispatching accepted OLV events through new optional callbacks; do not
+    attach them to a playback worker in this slice.
   validation: >-
     runtime-core Release build and CTest protocol smoke test pass, including
-    direct event parsing, type=2 frame parsing, and RuntimeProtocolSession
-    dispatch. Git whitespace checks pass. Live Adapter/Core/WebSocket and
-    real audio/Live2D playback acceptance remain outstanding.
+    direct event parsing, type=2 frame parsing, lifecycle rejection, OLV-only
+    synth_finished handling, and RuntimeProtocolSession dispatch. Git whitespace
+    checks pass. Live Adapter/Core/WebSocket and real audio/Live2D playback
+    acceptance remain outstanding.
   limitations: >-
-    This is a receive/validation boundary only. It does not yet enforce
-    per-stream lifecycle ordering, cross-segment audio ordering, audio credit
-    or backpressure, bounded playback queues, PCM sink timing, or Live2D
-    motion execution. The next slice must connect these callbacks to the
+    This is still a receive/validation boundary only. It does not yet enforce
+    audio credit or backpressure, bounded playback queues, PCM sink timing, or
+    Live2D motion execution. The next slice must connect these callbacks to the
     existing runtime ownership without creating a parallel player.
 
 native_runtime_protocol_and_frame_clock_20261110:

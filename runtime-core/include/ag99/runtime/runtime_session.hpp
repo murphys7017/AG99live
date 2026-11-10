@@ -7,6 +7,7 @@
 #include <string_view>
 #include <vector>
 
+#include "ag99/runtime/incremental_output_assembler.hpp"
 #include "ag99/runtime/protocol.hpp"
 #include "ag99/runtime/segment_assembler.hpp"
 
@@ -44,6 +45,7 @@ class RuntimeProtocolSession final {
 
   RuntimeSessionCallbacks callbacks_;
   SegmentAssembler assembler_;
+  IncrementalOutputAssembler incremental_assembler_;
 };
 
 }  // namespace ag99::runtime

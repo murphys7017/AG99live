@@ -64,6 +64,7 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(nlohmann_json)
 
 add_library(ag99_runtime_core
+  src/incremental_output_assembler.cpp
   src/protocol.cpp
   src/runtime_session.cpp
   src/segment_assembler.cpp

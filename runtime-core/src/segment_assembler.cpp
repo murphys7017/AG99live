@@ -94,13 +94,16 @@ SegmentAssembler::IngestResult SegmentAssembler::ingest(OutputSegment segment) {
   return {true, {}, std::move(ready)};
 }
 
-bool SegmentAssembler::mark_synthesis_finished(std::string_view turn_id) {
+bool SegmentAssembler::mark_synthesis_finished(
+    std::string_view turn_id,
+    bool allow_empty_output) {
   const auto turn_it = turns_.find(std::string(turn_id));
   if (turn_it == turns_.end()) {
     return false;
   }
   auto& turn = turn_it->second;
-  if (turn.interrupted || turn.synthesis_finished || turn.next_sequence == 0
+  if (turn.interrupted || turn.synthesis_finished
+      || (!allow_empty_output && turn.next_sequence == 0)
       || !turn.pending.empty()) {
     return false;
   }

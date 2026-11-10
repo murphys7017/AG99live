@@ -344,12 +344,27 @@ void test_incremental_runtime_dispatch() {
         audio_frames.push_back(std::move(frame));
       },
   });
+  session.ingest_text(ag99::runtime::Json{
+      {"type", "control.turn_started"},
+      {"version", "v2"},
+      {"message_id", "turn-start-incremental"},
+      {"timestamp", "2026-10-01T00:00:00.000Z"},
+      {"turn_id", "turn-1"},
+      {"source", "adapter"},
+      {"payload", ag99::runtime::Json::object()},
+  }.dump());
   auto start = make_incremental_identity("text-1", 0);
   session.ingest_text(make_incremental_event(
       "output.text_stream_start", start).dump());
   assert(events.size() == 1);
 
   auto metadata = make_incremental_identity("audio-1", 1);
+  auto audio_start = make_incremental_identity("audio-1", 0);
+  audio_start["encoding"] = "pcm16le";
+  audio_start["sample_rate"] = 32000;
+  audio_start["channels"] = 1;
+  session.ingest_text(make_incremental_event(
+      "output.audio_stream_start", audio_start).dump());
   metadata["sample_offset"] = 0;
   metadata["encoding"] = "pcm16le";
   metadata["sample_rate"] = 32000;
@@ -367,6 +382,59 @@ void test_incremental_runtime_dispatch() {
   frame.insert(frame.end(), {0x00, 0x00});
   session.ingest_binary(frame);
   assert(audio_frames.size() == 1);
+  assert(errors.empty());
+}
+
+void test_incremental_synthesis_boundary() {
+  std::vector<std::string> synthesized;
+  std::vector<std::string> errors;
+  ag99::runtime::RuntimeProtocolSession session({
+      .on_protocol_error = [&](std::string error) {
+        errors.push_back(std::move(error));
+      },
+      .on_synth_finished = [&](std::string turn_id) {
+        synthesized.push_back(std::move(turn_id));
+      },
+  });
+  session.ingest_text(ag99::runtime::Json{
+      {"type", "control.turn_started"},
+      {"version", "v2"},
+      {"message_id", "turn-start-synth"},
+      {"timestamp", "2026-10-01T00:00:00.000Z"},
+      {"turn_id", "turn-synth"},
+      {"source", "adapter"},
+      {"payload", ag99::runtime::Json::object()},
+  }.dump());
+  const auto emit = [&](std::string type, std::string stream_id,
+                        std::uint64_t seq, ag99::runtime::Json extra = {}) {
+    auto payload = make_incremental_identity(std::move(stream_id), seq);
+    payload["turn_id"] = "turn-synth";
+    for (const auto& [key, value] : extra.items()) {
+      payload[key] = value;
+    }
+    session.ingest_text(make_incremental_event(
+        std::move(type), std::move(payload), "turn-synth").dump());
+  };
+  emit("output.text_stream_start", "text-synth", 0);
+  emit("output.audio_stream_start", "audio-synth", 0,
+       {{"encoding", "pcm16le"}, {"sample_rate", 32000}, {"channels", 1}});
+  emit("output.motion_stream_start", "motion-synth", 0);
+  emit("output.text_stream_end", "text-synth", 1,
+       {{"status", "completed"}, {"text_length", 0}});
+  emit("output.audio_stream_end", "audio-synth", 1,
+       {{"status", "completed"}, {"total_samples", 0}});
+  emit("output.motion_stream_end", "motion-synth", 1,
+       {{"status", "completed"}});
+  session.ingest_text(ag99::runtime::Json{
+      {"type", "control.synth_finished"},
+      {"version", "v2"},
+      {"message_id", "synth-finish"},
+      {"timestamp", "2026-10-01T00:00:00.000Z"},
+      {"turn_id", "turn-synth"},
+      {"source", "adapter"},
+      {"payload", ag99::runtime::Json::object()},
+  }.dump());
+  assert((synthesized == std::vector<std::string>{"turn-synth"}));
   assert(errors.empty());
 }
 
@@ -727,6 +795,7 @@ int main() {
   test_incremental_output_protocol();
   test_incremental_output_audio_frame();
   test_incremental_runtime_dispatch();
+  test_incremental_synthesis_boundary();
   test_segment_reorder_and_duplicate_rejection();
   test_input_text_builder();
   test_runtime_session_dispatch();

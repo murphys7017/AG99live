@@ -23,7 +23,9 @@ class SegmentAssembler final {
 
   bool start_turn(std::string_view turn_id);
   IngestResult ingest(OutputSegment segment);
-  bool mark_synthesis_finished(std::string_view turn_id);
+  bool mark_synthesis_finished(
+      std::string_view turn_id,
+      bool allow_empty_output = false);
   // Cancels output while retaining the turn for the backend terminal signal.
   bool interrupt_turn(std::string_view turn_id);
   // Retires the turn and rejects late output during the bounded completion window.
