@@ -48,6 +48,7 @@ interface PlaybackTimelineEntry {
 }
 
 interface PlaybackTimelineSinkStartOptions {
+  scheduledWaitMs?: number;
   start?: () => boolean | void;
   onInterrupt?: (reason: string) => void;
   deferredText?: PlaybackTimelineDeferredTextRelease;
@@ -373,7 +374,7 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     if (!timeline) {
       throw new Error("Playback timeline missing after audio sink preparation.");
     }
-    armAudioStartTimeout(timeline);
+    armAudioStartTimeout(timeline, options.scheduledWaitMs);
     let accepted: boolean | void;
     try {
       accepted = startTimelineSink(
@@ -1332,7 +1333,10 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     notifyExecutionStateChanged();
   }
 
-  function armAudioStartTimeout(timeline: PlaybackTimelineEntry): void {
+  function armAudioStartTimeout(timeline: PlaybackTimelineEntry, scheduledWaitMs = 0): void {
+    if (!Number.isFinite(scheduledWaitMs) || scheduledWaitMs < 0) {
+      throw new Error("audio_scheduled_wait_invalid");
+    }
     clearAudioStartTimeout(timeline);
     const timeoutHandle = globalThis.setTimeout(() => {
       const activeTimeline = getTimeline(timeline.turnId, timeline.messageId);
@@ -1346,7 +1350,7 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
       });
       failDeferredText(timeline, "subtitle_audio_start_timeout");
       failTimelineSegment(timeline, "audio_start_timeout");
-    }, AUDIO_TIMELINE_START_TIMEOUT_MS);
+    }, AUDIO_TIMELINE_START_TIMEOUT_MS + scheduledWaitMs);
     // Node-based tests must not remain alive solely for a browser playback deadline.
     const nodeTimeoutHandle = timeoutHandle as unknown as { unref?: () => void };
     nodeTimeoutHandle.unref?.();

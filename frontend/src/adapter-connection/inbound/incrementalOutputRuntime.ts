@@ -5,6 +5,7 @@ import type { IncrementalOutputEvent } from "./incrementalOutputProtocol.js";
 import { identityFromAudioFrame } from "./incrementalOutputProtocol.js";
 import { parseOutputAudioFrame } from "./outputAudioFrame.js";
 import { reportLatencyStage } from "../runtime/latency.js";
+import { decodePcmSamples } from "../../playback-timeline/pcmSamples.js";
 
 const WINDOW_BYTES = 128 * 1024;
 const WINDOW_FRAMES = 64;
@@ -22,7 +23,7 @@ async function waitWithAbort<T>(work: Promise<T>, signal: AbortSignal): Promise<
 }
 
 type AudioJob = { id: IncrementalIdentity } & (
-  | { kind: "chunk"; offset: number; pcm: Uint8Array }
+  | { kind: "chunk"; offset: number; samples: Float32Array; wireBytes: number }
   | { kind: "end"; length: number; status: "completed" | "failed"; reason: string }
 );
 
@@ -91,12 +92,12 @@ export function createIncrementalOutputRuntime(options: {
           if (active.turnId !== job.id.turnId || active.messageId !== job.id.messageId) {
             throw new Error("incremental_audio_crossed_open_segment");
           }
-          await waitWithAbort(active.handle.append(job.offset, job.pcm), signal);
+          await waitWithAbort(active.handle.append(job.offset, job.samples), signal);
           signal.throwIfAborted();
-          releasedBytes += job.pcm.byteLength;
+          releasedBytes += job.wireBytes;
           releasedFrames += 1;
           const credit = resultCredits.get(job.id.personaResultId) ?? { bytes: 0, frames: 0 };
-          credit.bytes += job.pcm.byteLength;
+          credit.bytes += job.wireBytes;
           credit.frames += 1;
           resultCredits.set(job.id.personaResultId, credit);
           options.sendAudioCredit(job.id, credit.bytes, credit.frames);
@@ -106,7 +107,8 @@ export function createIncrementalOutputRuntime(options: {
           }
           const handle = active.handle;
           handle.finish(job.length, job.status, job.reason);
-          draining = handle.completed.then(() => undefined, () => undefined);
+          draining = handle.readyForNext;
+          void draining.catch(() => undefined);
           active = null;
         }
       }
@@ -139,7 +141,10 @@ export function createIncrementalOutputRuntime(options: {
     if (receivedFrames === 0) reportLatencyStage("incremental_pcm_first", id.turnId, id.streamId, id.messageId);
     receivedBytes += pcm.byteLength;
     receivedFrames += 1;
-    enqueue({ kind: "chunk", id, offset: metadata.sample_offset, pcm });
+    // Decode on admission, including the next segment while the current one
+    // drains. Credits remain in wire bytes; decoded storage is bounded to 2x.
+    enqueue({ kind: "chunk", id, offset: metadata.sample_offset,
+      samples: decodePcmSamples(pcm), wireBytes: pcm.byteLength });
   }
 
   function handleEvent(event: IncrementalOutputEvent): void {

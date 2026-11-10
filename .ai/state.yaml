@@ -1,3 +1,32 @@
+audio_segment_sync_20261111:
+  class: bugfix
+  risk: high
+  status: source_updated_pending_live_audio_acceptance
+  scope: >-
+    Preserve first samples by finishing PCM gain ramp before scheduled audio;
+    keep media gain open before the playing callback; analyse post-gain audio.
+    Decode queued PCM on bounded wire admission. Schedule at most one segment
+    ahead against the preceding finished output's AudioContext tail; transfer
+    presentation and lip-sync ownership after the preceding segment settles.
+    Account for scheduled wait in start deadlines and cancel queued output on
+    interruption. Apply a 1 ms onset ramp and appended 1 ms return-to-zero guard
+    without dropping or overlapping received samples.
+  validation: >-
+    Renderer typecheck and PCM decode boundary smoke passed. A minimal PCM public
+    boundary smoke with a simulated audio scheduler confirmed adjacent segment
+    times, retained sample count, boundary ramps and rejection after finish.
+    Review corrections reject scheduling after failed production and suppress
+    late end guards; minimal public-boundary smoke checks pass for both.
+    This is not output-device or end-to-end evidence. No real TTS and recording
+    comparison yet. Source commit authorized; deployment remains out of scope.
+  limitations: >-
+    Continuous scheduling depends on next-segment data arriving before the
+    previous scheduled tail; network/TTS starvation still creates real gaps.
+    Live recording comparison, interruption and subtitle/lip handoff acceptance
+    remain required. AudioContext clock is not yet compensated to device output.
+    Mk6 declares mouth form, funnel and width controls but LipSync only uses
+    ParamMouthOpenY. Phoneme-driven mouth shapes remain outside this first slice.
+
 native_olv_native_playback_20261110:
   class: feature
   risk: high

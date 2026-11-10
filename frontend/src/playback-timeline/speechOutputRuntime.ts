@@ -1,9 +1,8 @@
 import { createPcmOutputSession, type PcmOutputSession } from "./pcmOutputSession.js";
 
-// Start from silence so the first non-zero PCM sample cannot form a step
-// against the output device's previous state.
+// PCM ramps during its silent scheduling lead, never through spoken samples.
 const SPEECH_OUTPUT_FADE_INITIAL_GAIN = 0;
-const SPEECH_OUTPUT_FADE_DURATION_SECONDS = 0.02;
+const SPEECH_OUTPUT_FADE_DURATION_SECONDS = 0.003;
 const SPEECH_OUTPUT_PRIMER_DURATION_SECONDS = 0.35;
 const SPEECH_OUTPUT_PRIMER_READY_DELAY_MS = 10;
 const SPEECH_OUTPUT_REPRIME_IDLE_MS = 30_000;
@@ -14,20 +13,22 @@ export interface SpeechOutputSession {
   readonly analyser: AnalyserNode;
   readonly sampleRate: number;
   prepare(): Promise<void>;
-  start(): void;
+  start(atTimeSeconds?: number): void;
   dispose(): void;
 }
 
 export interface SpeechOutputRuntime {
   prepare(): Promise<void>;
   attach(audio: HTMLAudioElement): SpeechOutputSession;
-  attachPcm(identity: { turnId: string; messageId: string }): PcmOutputSession;
+  attachPcm(identity: { turnId: string; messageId: string }, notBefore?: number): PcmOutputSession;
   dispose(): Promise<void>;
 }
 
 export function createSpeechOutputRuntime(): SpeechOutputRuntime {
   let audioContext: AudioContext | null = null;
   let activeSession: SpeechOutputSession | null = null;
+  const pcmSessions = new Set<SpeechOutputSession>();
+  const startedSessions = new Set<SpeechOutputSession>();
   let outputWarmed = false;
   let outputActive = false;
   let lastOutputActivityAtMs: number | null = null;
@@ -173,17 +174,19 @@ export function createSpeechOutputRuntime(): SpeechOutputRuntime {
     return pending;
   }
 
-  function attachSource(context: AudioContext, source: AudioNode): SpeechOutputSession {
-    activeSession?.dispose();
+  function attachSource(context: AudioContext, source: AudioNode, replace = true): SpeechOutputSession {
+    if (replace) activeSession?.dispose();
 
     const analyser = context.createAnalyser();
     analyser.fftSize = 1024;
     analyser.smoothingTimeConstant = 0.28;
     const outputGain = context.createGain();
-    outputGain.gain.value = SPEECH_OUTPUT_FADE_INITIAL_GAIN;
-    source.connect(analyser);
-    analyser.connect(outputGain);
-    outputGain.connect(context.destination);
+    // Media can consume samples before its JS "playing" event arrives.
+    // Keep it audible from attachment; PCM supplies a scheduled start below.
+    outputGain.gain.value = 1;
+    source.connect(outputGain);
+    outputGain.connect(analyser);
+    analyser.connect(context.destination);
 
     let sessionDisposed = false;
     let outputStarted = false;
@@ -191,22 +194,25 @@ export function createSpeechOutputRuntime(): SpeechOutputRuntime {
       analyser,
       sampleRate: context.sampleRate,
       prepare,
-      start() {
+      start(atTimeSeconds) {
         if (sessionDisposed || outputStarted) {
           return;
         }
         outputStarted = true;
+        startedSessions.add(session);
         outputActive = true;
         const now = context.currentTime;
-        outputGain.gain.cancelScheduledValues(now);
-        outputGain.gain.setValueAtTime(SPEECH_OUTPUT_FADE_INITIAL_GAIN, now);
-        outputGain.gain.linearRampToValueAtTime(
-          1,
-          now + SPEECH_OUTPUT_FADE_DURATION_SECONDS,
-        );
-        console.info("[SpeechOutput] segment output fade started.", {
-          initialGain: SPEECH_OUTPUT_FADE_INITIAL_GAIN,
-          fadeMs: SPEECH_OUTPUT_FADE_DURATION_SECONDS * 1000,
+        if (atTimeSeconds !== undefined) {
+          outputGain.gain.cancelScheduledValues(now);
+          outputGain.gain.setValueAtTime(SPEECH_OUTPUT_FADE_INITIAL_GAIN, now);
+          outputGain.gain.linearRampToValueAtTime(
+            1,
+            Math.max(now, Math.min(now + SPEECH_OUTPUT_FADE_DURATION_SECONDS, atTimeSeconds)),
+          );
+        }
+        console.info("[SpeechOutput] segment output started.", {
+          scheduledStartTime: atTimeSeconds ?? null,
+          fadeMs: atTimeSeconds === undefined ? 0 : SPEECH_OUTPUT_FADE_DURATION_SECONDS * 1000,
         });
       },
       dispose() {
@@ -217,7 +223,8 @@ export function createSpeechOutputRuntime(): SpeechOutputRuntime {
         if (activeSession === session) {
           activeSession = null;
         }
-        if (outputStarted) outputActive = false;
+        startedSessions.delete(session);
+        outputActive = startedSessions.size > 0;
         lastOutputActivityAtMs = performance.now();
         try {
           source.disconnect();
@@ -246,11 +253,14 @@ export function createSpeechOutputRuntime(): SpeechOutputRuntime {
       const context = requireAudioContext();
       return attachSource(context, context.createMediaElementSource(audio));
     },
-    attachPcm(identity) {
+    attachPcm(identity, notBefore) {
       const context = requireAudioContext();
       const input = context.createGain();
-      const output = attachSource(context, input);
-      const session = createPcmOutputSession(context, input, output, identity);
+      const output = attachSource(context, input, false);
+      const session = createPcmOutputSession(context, input, output, identity, notBefore);
+      const dispose = session.dispose.bind(session);
+      session.dispose = () => { pcmSessions.delete(session); dispose(); };
+      pcmSessions.add(session);
       activeSession = session;
       return session;
     },
@@ -260,6 +270,7 @@ export function createSpeechOutputRuntime(): SpeechOutputRuntime {
       }
       disposed = true;
       cancelPrimer?.();
+      for (const session of pcmSessions) session.dispose();
       activeSession?.dispose();
       activeSession = null;
       const context = audioContext;
