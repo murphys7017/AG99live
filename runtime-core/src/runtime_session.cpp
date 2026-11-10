@@ -124,6 +124,13 @@ void RuntimeProtocolSession::ingest_text(std::string_view text_frame) {
       }
       return;
     }
+    if (auto event = parse_incremental_output_event(envelope);
+        event.has_value()) {
+      if (callbacks_.on_incremental_output_event) {
+        callbacks_.on_incremental_output_event(std::move(*event));
+      }
+      return;
+    }
     if (envelope.type != "output.segment") {
       if (callbacks_.on_ignored_type) {
         callbacks_.on_ignored_type(envelope.type);
@@ -150,6 +157,19 @@ void RuntimeProtocolSession::ingest_text(std::string_view text_frame) {
 void RuntimeProtocolSession::ingest_binary(
     std::span<const std::uint8_t> binary_frame) {
   try {
+    const bool is_incremental_audio = binary_frame.size() >= 6
+        && binary_frame[0] == static_cast<std::uint8_t>('A')
+        && binary_frame[1] == static_cast<std::uint8_t>('G')
+        && binary_frame[2] == static_cast<std::uint8_t>('9')
+        && binary_frame[3] == static_cast<std::uint8_t>('9')
+        && binary_frame[5] == 2;
+    if (is_incremental_audio) {
+      auto audio = parse_output_audio_frame(binary_frame);
+      if (callbacks_.on_incremental_audio_frame) {
+        callbacks_.on_incremental_audio_frame(std::move(audio));
+      }
+      return;
+    }
     auto audio = parse_binary_audio_frame(binary_frame);
     if (callbacks_.on_audio_chunk) {
       callbacks_.on_audio_chunk(std::move(audio));

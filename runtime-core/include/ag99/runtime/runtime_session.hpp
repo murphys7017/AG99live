@@ -24,6 +24,8 @@ struct RuntimeSessionCallbacks {
   std::function<void(std::string)> on_turn_interrupted;
   std::function<void(DesktopSettingsQuery)> on_desktop_settings_query;
   std::function<void(SegmentMotionUpdate)> on_segment_motion_ready;
+  std::function<void(IncrementalOutputEvent)> on_incremental_output_event;
+  std::function<void(OutputAudioFrame)> on_incremental_audio_frame;
 };
 
 class RuntimeProtocolSession final {

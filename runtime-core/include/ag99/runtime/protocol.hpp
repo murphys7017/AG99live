@@ -146,6 +146,42 @@ struct BinaryAudioChunkFrame {
   std::vector<std::uint8_t> payload;
 };
 
+struct IncrementalIdentity {
+  std::string turn_id;
+  std::string core_turn_id;
+  std::string persona_result_id;
+  std::string segment_message_id;
+  std::string stream_id;
+  std::uint64_t segment_index = 0;
+  std::uint64_t seq = 0;
+};
+
+enum class IncrementalOutputResource { Text, Audio, Motion };
+
+enum class IncrementalOutputEventKind { Start, TextDelta, MotionUpdate, End };
+
+enum class IncrementalOutputStatus { Completed, Failed, Cancelled };
+
+struct IncrementalOutputEvent {
+  ProtocolEnvelope envelope;
+  IncrementalOutputResource resource = IncrementalOutputResource::Text;
+  IncrementalOutputEventKind kind = IncrementalOutputEventKind::Start;
+  IncrementalIdentity identity;
+  std::string text;
+  Json motion_payload = Json::object();
+  IncrementalOutputStatus status = IncrementalOutputStatus::Completed;
+  std::string reason;
+  std::optional<std::uint64_t> length;
+};
+
+struct OutputAudioFrame {
+  IncrementalIdentity identity;
+  std::uint64_t sample_offset = 0;
+  std::uint32_t sample_rate = 32000;
+  std::uint32_t channels = 1;
+  std::vector<std::uint8_t> pcm;
+};
+
 ProtocolEnvelope parse_envelope(const Json& raw);
 ProtocolEnvelope parse_envelope_json(std::string_view raw);
 OutputSegment parse_output_segment(const ProtocolEnvelope& envelope);
@@ -156,6 +192,10 @@ DesktopSettingsQuery parse_desktop_settings_query(
     const ProtocolEnvelope& envelope);
 
 BinaryAudioChunkFrame parse_binary_audio_frame(std::span<const std::uint8_t> frame);
+std::optional<IncrementalOutputEvent> parse_incremental_output_event(
+    const ProtocolEnvelope& envelope);
+OutputAudioFrame parse_output_audio_frame(
+    std::span<const std::uint8_t> frame);
 std::vector<std::uint8_t> build_binary_audio_frame(
     const AudioChunkMetadata& metadata,
     std::span<const std::uint8_t> payload);

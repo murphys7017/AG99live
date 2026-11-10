@@ -207,6 +207,169 @@ void test_binary_audio_round_trip() {
   assert(rejected);
 }
 
+ag99::runtime::Json make_incremental_event(
+    std::string type,
+    ag99::runtime::Json payload,
+    std::string turn_id = "turn-1") {
+  return ag99::runtime::build_envelope(
+      type, payload, turn_id, "adapter", "event-1",
+      "2026-10-01T00:00:00.000Z");
+}
+
+ag99::runtime::Json make_incremental_identity(
+    std::string stream_id,
+    std::uint64_t seq) {
+  return {
+      {"schema_version", "olv.incremental_output.v1"},
+      {"turn_id", "turn-1"},
+      {"core_turn_id", "core-1"},
+      {"persona_result_id", "persona-1"},
+      {"segment_message_id", "segment-1"},
+      {"stream_id", std::move(stream_id)},
+      {"segment_index", 0},
+      {"seq", seq},
+  };
+}
+
+void test_incremental_output_protocol() {
+  auto start_payload = make_incremental_identity("text-1", 0);
+  const auto start = ag99::runtime::parse_incremental_output_event(
+      ag99::runtime::parse_envelope(make_incremental_event(
+          "output.text_stream_start", start_payload)));
+  assert(start.has_value());
+  assert(start->kind == ag99::runtime::IncrementalOutputEventKind::Start);
+  assert(start->resource == ag99::runtime::IncrementalOutputResource::Text);
+  assert(start->identity.stream_id == "text-1");
+
+  auto delta_payload = make_incremental_identity("text-1", 1);
+  delta_payload["text"] = "你好";
+  const auto delta = ag99::runtime::parse_incremental_output_event(
+      ag99::runtime::parse_envelope(make_incremental_event(
+          "output.text_stream_delta", delta_payload)));
+  assert(delta.has_value());
+  assert(delta->kind == ag99::runtime::IncrementalOutputEventKind::TextDelta);
+  assert(delta->text == "你好");
+
+  auto audio_start_payload = make_incremental_identity("audio-1", 0);
+  audio_start_payload["encoding"] = "pcm16le";
+  audio_start_payload["sample_rate"] = 32000;
+  audio_start_payload["channels"] = 1;
+  const auto audio_start = ag99::runtime::parse_incremental_output_event(
+      ag99::runtime::parse_envelope(make_incremental_event(
+          "output.audio_stream_start", audio_start_payload)));
+  assert(audio_start.has_value());
+  assert(audio_start->resource == ag99::runtime::IncrementalOutputResource::Audio);
+
+  auto motion_payload = make_incremental_identity("motion-1", 1);
+  motion_payload["motion_payload"] = {
+      {"schema_version", "engine.motion_intent.v4"},
+      {"actions", nlohmann::json::array()},
+  };
+  const auto motion = ag99::runtime::parse_incremental_output_event(
+      ag99::runtime::parse_envelope(make_incremental_event(
+          "output.motion_stream_update", motion_payload)));
+  assert(motion.has_value());
+  assert(motion->kind == ag99::runtime::IncrementalOutputEventKind::MotionUpdate);
+  assert(motion->motion_payload.is_object());
+
+  auto end_payload = make_incremental_identity("text-1", 2);
+  end_payload["status"] = "completed";
+  end_payload["text_length"] = 2;
+  const auto end = ag99::runtime::parse_incremental_output_event(
+      ag99::runtime::parse_envelope(make_incremental_event(
+          "output.text_stream_end", end_payload)));
+  assert(end.has_value());
+  assert(end->status == ag99::runtime::IncrementalOutputStatus::Completed);
+  assert(end->length == std::optional<std::uint64_t>(2));
+
+  auto invalid_delta = make_incremental_identity("text-1", 1);
+  bool rejected = false;
+  try {
+    (void)ag99::runtime::parse_incremental_output_event(
+        ag99::runtime::parse_envelope(make_incremental_event(
+            "output.text_stream_delta", invalid_delta)));
+  } catch (const ag99::runtime::ProtocolError&) {
+    rejected = true;
+  }
+  assert(rejected);
+}
+
+void test_incremental_output_audio_frame() {
+  auto metadata = make_incremental_identity("audio-1", 1);
+  metadata["sample_offset"] = 0;
+  metadata["encoding"] = "pcm16le";
+  metadata["sample_rate"] = 32000;
+  metadata["channels"] = 1;
+  const auto metadata_text = metadata.dump();
+  std::vector<std::uint8_t> frame = {'A', 'G', '9', '9', 1, 2, 0, 0};
+  const auto metadata_size = static_cast<std::uint32_t>(metadata_text.size());
+  frame.push_back(static_cast<std::uint8_t>(metadata_size & 0xff));
+  frame.push_back(static_cast<std::uint8_t>((metadata_size >> 8) & 0xff));
+  frame.push_back(static_cast<std::uint8_t>((metadata_size >> 16) & 0xff));
+  frame.push_back(static_cast<std::uint8_t>((metadata_size >> 24) & 0xff));
+  frame.insert(frame.end(), metadata_text.begin(), metadata_text.end());
+  frame.insert(frame.end(), {0x00, 0x00, 0x01, 0x00});
+
+  const auto parsed = ag99::runtime::parse_output_audio_frame(frame);
+  assert(parsed.identity.stream_id == "audio-1");
+  assert(parsed.identity.seq == 1);
+  assert(parsed.sample_offset == 0);
+  assert(parsed.sample_rate == 32000);
+  assert(parsed.channels == 1);
+  assert(parsed.pcm.size() == 4);
+
+  frame[5] = 1;
+  bool rejected = false;
+  try {
+    (void)ag99::runtime::parse_output_audio_frame(frame);
+  } catch (const ag99::runtime::ProtocolError&) {
+    rejected = true;
+  }
+  assert(rejected);
+}
+
+void test_incremental_runtime_dispatch() {
+  std::vector<ag99::runtime::IncrementalOutputEvent> events;
+  std::vector<ag99::runtime::OutputAudioFrame> audio_frames;
+  std::vector<std::string> errors;
+  ag99::runtime::RuntimeProtocolSession session({
+      .on_protocol_error = [&](std::string error) {
+        errors.push_back(std::move(error));
+      },
+      .on_incremental_output_event =
+          [&](ag99::runtime::IncrementalOutputEvent event) {
+            events.push_back(std::move(event));
+          },
+      .on_incremental_audio_frame = [&](ag99::runtime::OutputAudioFrame frame) {
+        audio_frames.push_back(std::move(frame));
+      },
+  });
+  auto start = make_incremental_identity("text-1", 0);
+  session.ingest_text(make_incremental_event(
+      "output.text_stream_start", start).dump());
+  assert(events.size() == 1);
+
+  auto metadata = make_incremental_identity("audio-1", 1);
+  metadata["sample_offset"] = 0;
+  metadata["encoding"] = "pcm16le";
+  metadata["sample_rate"] = 32000;
+  metadata["channels"] = 1;
+  const auto metadata_text = metadata.dump();
+  std::vector<std::uint8_t> frame = {'A', 'G', '9', '9', 1, 2, 0, 0};
+  const auto metadata_size = static_cast<std::uint32_t>(metadata_text.size());
+  frame.insert(frame.end(), {
+      static_cast<std::uint8_t>(metadata_size & 0xff),
+      static_cast<std::uint8_t>((metadata_size >> 8) & 0xff),
+      static_cast<std::uint8_t>((metadata_size >> 16) & 0xff),
+      static_cast<std::uint8_t>((metadata_size >> 24) & 0xff),
+  });
+  frame.insert(frame.end(), metadata_text.begin(), metadata_text.end());
+  frame.insert(frame.end(), {0x00, 0x00});
+  session.ingest_binary(frame);
+  assert(audio_frames.size() == 1);
+  assert(errors.empty());
+}
+
 void test_segment_reorder_and_duplicate_rejection() {
   ag99::runtime::SegmentAssembler assembler;
   assert(assembler.start_turn("turn-1"));
@@ -561,6 +724,9 @@ int main() {
   test_parameter_plan_motion_slot();
   test_pending_and_deferred_motion_slots();
   test_binary_audio_round_trip();
+  test_incremental_output_protocol();
+  test_incremental_output_audio_frame();
+  test_incremental_runtime_dispatch();
   test_segment_reorder_and_duplicate_rejection();
   test_input_text_builder();
   test_runtime_session_dispatch();

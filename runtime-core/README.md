@@ -6,6 +6,8 @@
 - `input.text`、音频流 start/end 和 `control.playback_finished` 出站消息构造
 - `output.segment.v6` 严格解析
 - `output.segment_motion` 同身份后到动作解析
+- OLV `output.*_stream_*` 文本/音频/动作事件的身份、序号和格式解析
+- OLV type=2 下行 PCM 帧的 metadata、采样偏移和容量边界解析
 - `engine.motion_intent.v4` 基本协议边界校验
 - `AG99` 二进制 PCM16LE 音频帧解析与构造
 - `output.segment` 按 `turn_id + sequence` 重排、去重和冲突拒绝
@@ -43,4 +45,6 @@ runtime-core/build/Release/ag99-runtime-replay.exe
 runtime-core/build/Release/ag99-runtime-replay.exe .\fixtures\segments.jsonl
 ```
 
-当前阶段不包含音频设备、TTS 下载、Timeline 播放和 Live2D 渲染。
+当前阶段的 OLV 支持先停留在协议接收边界：事件和 type=2 PCM 帧会通过
+独立回调交给上层，但还没有接入有界播放 worker、audio credit/backpressure、
+Timeline 播放或 Live2D 渲染。旧的完整段和麦克风 type=1 路径不受影响。

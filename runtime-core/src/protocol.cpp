@@ -16,8 +16,11 @@ namespace {
 
 constexpr std::size_t kAudioHeaderBytes = 12;
 constexpr std::size_t kMaxMetadataBytes = 64 * 1024;
+constexpr std::size_t kMaxIncrementalPcmBytes = 64 * 1024;
+constexpr std::uint64_t kMaxJavaScriptSafeInteger = 9007199254740991ULL;
 constexpr std::uint8_t kAudioFrameVersion = 1;
 constexpr std::uint8_t kAudioFrameTypeChunk = 1;
+constexpr std::uint8_t kAudioFrameTypeIncrementalOutput = 2;
 constexpr std::array<char, 4> kAudioMagic = {'A', 'G', '9', '9'};
 
 const Json& require_object(const Json& value, std::string_view path) {
@@ -105,6 +108,161 @@ std::int64_t require_non_negative_integer(
                         " must be a non-negative integer");
   }
   return value;
+}
+
+std::uint64_t require_safe_non_negative_integer(
+    const Json& object,
+    std::string_view key,
+    std::string_view path) {
+  const auto it = object.find(std::string(key));
+  if (it == object.end()
+      || (!it->is_number_unsigned() && !it->is_number_integer())) {
+    throw ProtocolError(std::string(path) + "." + std::string(key)
+                        + " must be a non-negative safe integer");
+  }
+  std::uint64_t value = 0;
+  if (it->is_number_unsigned()) {
+    value = it->get<std::uint64_t>();
+  } else {
+    const auto signed_value = it->get<std::int64_t>();
+    if (signed_value < 0) {
+      throw ProtocolError(std::string(path) + "." + std::string(key)
+                          + " must be a non-negative safe integer");
+    }
+    value = static_cast<std::uint64_t>(signed_value);
+  }
+  if (value > kMaxJavaScriptSafeInteger) {
+    throw ProtocolError(std::string(path) + "." + std::string(key)
+                        + " must be a non-negative safe integer");
+  }
+  return value;
+}
+
+std::uint32_t decode_utf8(
+    std::string_view value,
+    std::size_t& offset,
+    std::string_view path) {
+  if (offset >= value.size()) {
+    throw ProtocolError(std::string(path) + " contains invalid UTF-8");
+  }
+  const auto byte = static_cast<unsigned char>(value[offset++]);
+  if (byte <= 0x7f) {
+    return byte;
+  }
+  std::uint32_t code_point = 0;
+  std::size_t continuation_count = 0;
+  if (byte >= 0xc2 && byte <= 0xdf) {
+    code_point = byte & 0x1f;
+    continuation_count = 1;
+  } else if (byte >= 0xe0 && byte <= 0xef) {
+    code_point = byte & 0x0f;
+    continuation_count = 2;
+  } else if (byte >= 0xf0 && byte <= 0xf4) {
+    code_point = byte & 0x07;
+    continuation_count = 3;
+  } else {
+    throw ProtocolError(std::string(path) + " contains invalid UTF-8");
+  }
+  for (std::size_t index = 0; index < continuation_count; ++index) {
+    if (offset >= value.size()) {
+      throw ProtocolError(std::string(path) + " contains invalid UTF-8");
+    }
+    const auto continuation = static_cast<unsigned char>(value[offset++]);
+    if ((continuation & 0xc0) != 0x80) {
+      throw ProtocolError(std::string(path) + " contains invalid UTF-8");
+    }
+    code_point = (code_point << 6) | (continuation & 0x3f);
+  }
+  if ((continuation_count == 2 && code_point < 0x800)
+      || (continuation_count == 3 && code_point < 0x10000)
+      || code_point > 0x10ffff
+      || (code_point >= 0xd800 && code_point <= 0xdfff)) {
+    throw ProtocolError(std::string(path) + " contains invalid UTF-8");
+  }
+  return code_point;
+}
+
+std::size_t utf16_length(std::string_view value, std::string_view path) {
+  std::size_t length = 0;
+  for (std::size_t offset = 0; offset < value.size();) {
+    const auto code_point = decode_utf8(value, offset, path);
+    length += code_point > 0xffff ? 2 : 1;
+  }
+  return length;
+}
+
+std::size_t utf8_codepoint_length(std::string_view value, std::string_view path) {
+  std::size_t length = 0;
+  for (std::size_t offset = 0; offset < value.size();) {
+    (void)decode_utf8(value, offset, path);
+    ++length;
+  }
+  return length;
+}
+
+void validate_incremental_identity_string(
+    std::string_view value,
+    std::string_view path) {
+  if (trim_protocol_identifier(value).empty()) {
+    throw ProtocolError(std::string(path) + " must be a non-empty string");
+  }
+  if (utf8_codepoint_length(value, path) > 256) {
+    throw ProtocolError(std::string(path) + " exceeds 256 characters");
+  }
+}
+
+std::string require_incremental_identity_string(
+    const Json& object,
+    std::string_view key,
+    std::string_view path) {
+  const auto value = require_string(object, key, path);
+  validate_incremental_identity_string(value, std::string(path) + "."
+      + std::string(key));
+  return value;
+}
+
+IncrementalIdentity parse_incremental_identity(
+    const Json& payload,
+    std::optional<std::string_view> envelope_turn_id) {
+  require_object(payload, "payload");
+  std::string turn_id;
+  const auto turn_it = payload.find("turn_id");
+  if (envelope_turn_id.has_value()) {
+    turn_id = std::string(*envelope_turn_id);
+    validate_incremental_identity_string(turn_id, "turn_id");
+    if (turn_it != payload.end()) {
+      if (!turn_it->is_string() || turn_it->get<std::string>() != turn_id) {
+        throw ProtocolError("incremental output turn_id does not match envelope");
+      }
+    }
+  } else {
+    if (turn_it == payload.end() || !turn_it->is_string()) {
+      throw ProtocolError("payload.turn_id must be a non-empty string");
+    }
+    turn_id = require_incremental_identity_string(payload, "turn_id", "payload");
+  }
+  const auto schema_version = require_string(payload, "schema_version", "payload");
+  if (schema_version != "olv.incremental_output.v1") {
+    throw ProtocolError("payload.schema_version must be olv.incremental_output.v1");
+  }
+  return IncrementalIdentity{
+      std::move(turn_id),
+      require_incremental_identity_string(payload, "core_turn_id", "payload"),
+      require_incremental_identity_string(
+          payload, "persona_result_id", "payload"),
+      require_incremental_identity_string(
+          payload, "segment_message_id", "payload"),
+      require_incremental_identity_string(payload, "stream_id", "payload"),
+      require_safe_non_negative_integer(payload, "segment_index", "payload"),
+      require_safe_non_negative_integer(payload, "seq", "payload")};
+}
+
+IncrementalOutputStatus parse_incremental_status(const Json& payload) {
+  const auto status = require_string(payload, "status", "payload");
+  if (status == "completed") return IncrementalOutputStatus::Completed;
+  if (status == "failed") return IncrementalOutputStatus::Failed;
+  if (status == "cancelled") return IncrementalOutputStatus::Cancelled;
+  throw ProtocolError("incremental_output_end_status_invalid");
 }
 
 std::uint32_t require_positive_u32(
@@ -569,6 +727,188 @@ DesktopSettingsQuery parse_desktop_settings_query(
     value = value_it->get<std::string>();
   }
   return DesktopSettingsQuery{envelope, request_id, key, action, std::move(value)};
+}
+
+std::optional<IncrementalOutputEvent> parse_incremental_output_event(
+    const ProtocolEnvelope& envelope) {
+  struct EventType {
+    std::string_view type;
+    IncrementalOutputResource resource;
+    IncrementalOutputEventKind kind;
+  };
+  constexpr std::array<EventType, 8> event_types = {{
+      {"output.text_stream_start", IncrementalOutputResource::Text,
+       IncrementalOutputEventKind::Start},
+      {"output.text_stream_delta", IncrementalOutputResource::Text,
+       IncrementalOutputEventKind::TextDelta},
+      {"output.text_stream_end", IncrementalOutputResource::Text,
+       IncrementalOutputEventKind::End},
+      {"output.audio_stream_start", IncrementalOutputResource::Audio,
+       IncrementalOutputEventKind::Start},
+      {"output.audio_stream_delta", IncrementalOutputResource::Audio,
+       IncrementalOutputEventKind::TextDelta},
+      {"output.audio_stream_end", IncrementalOutputResource::Audio,
+       IncrementalOutputEventKind::End},
+      {"output.motion_stream_start", IncrementalOutputResource::Motion,
+       IncrementalOutputEventKind::Start},
+      {"output.motion_stream_update", IncrementalOutputResource::Motion,
+       IncrementalOutputEventKind::MotionUpdate},
+  }};
+  constexpr std::array<EventType, 1> motion_end_types = {{
+      {"output.motion_stream_end", IncrementalOutputResource::Motion,
+       IncrementalOutputEventKind::End},
+  }};
+
+  EventType matched{};
+  bool found = false;
+  for (const auto& candidate : event_types) {
+    if (envelope.type == candidate.type) {
+      matched = candidate;
+      found = true;
+      break;
+    }
+  }
+  if (!found) {
+    for (const auto& candidate : motion_end_types) {
+      if (envelope.type == candidate.type) {
+        matched = candidate;
+        found = true;
+        break;
+      }
+    }
+  }
+  if (!found) {
+    return std::nullopt;
+  }
+  require_object(envelope.payload, "payload");
+  if (!envelope.turn_id.has_value()) {
+    throw ProtocolError("incremental output requires turn_id");
+  }
+  auto identity = parse_incremental_identity(envelope.payload, *envelope.turn_id);
+  if (matched.kind == IncrementalOutputEventKind::Start && identity.seq != 0) {
+    throw ProtocolError("incremental_output_start_sequence_invalid");
+  }
+
+  IncrementalOutputEvent event{
+      envelope, matched.resource, matched.kind, std::move(identity)};
+  if (matched.kind == IncrementalOutputEventKind::Start) {
+    if (matched.resource == IncrementalOutputResource::Audio) {
+      const auto encoding = require_string(envelope.payload, "encoding", "payload");
+      const auto sample_rate = require_safe_non_negative_integer(
+          envelope.payload, "sample_rate", "payload");
+      const auto channels = require_safe_non_negative_integer(
+          envelope.payload, "channels", "payload");
+      if (encoding != "pcm16le" || sample_rate != 32000 || channels != 1) {
+        throw ProtocolError("incremental_output_audio_format_invalid");
+      }
+    }
+    return event;
+  }
+  if (matched.kind == IncrementalOutputEventKind::TextDelta) {
+    if (matched.resource != IncrementalOutputResource::Text) {
+      throw ProtocolError("incremental_output_event_invalid");
+    }
+    event.text = require_string(envelope.payload, "text", "payload");
+    if (utf16_length(event.text, "payload.text") > 65536) {
+      throw ProtocolError("incremental_output_text_delta_invalid");
+    }
+    return event;
+  }
+  if (matched.kind == IncrementalOutputEventKind::MotionUpdate) {
+    if (matched.resource != IncrementalOutputResource::Motion
+        || event.identity.seq < 1) {
+      throw ProtocolError("incremental_output_motion_update_invalid");
+    }
+    const auto motion_it = envelope.payload.find("motion_payload");
+    if (motion_it == envelope.payload.end() || !motion_it->is_object()) {
+      throw ProtocolError("incremental_output_motion_update_invalid");
+    }
+    const auto encoded = motion_it->dump();
+    if (utf16_length(encoded, "payload.motion_payload") > 65536) {
+      throw ProtocolError("incremental_output_motion_update_too_large");
+    }
+    event.motion_payload = *motion_it;
+    return event;
+  }
+
+  event.status = parse_incremental_status(envelope.payload);
+  const auto reason_it = envelope.payload.find("reason");
+  if (reason_it != envelope.payload.end()) {
+    if (!reason_it->is_string()) {
+      throw ProtocolError("incremental_output_end_reason_invalid");
+    }
+    event.reason = reason_it->get<std::string>();
+  }
+  if (utf16_length(event.reason, "payload.reason") > 4096
+      || (event.status != IncrementalOutputStatus::Completed
+          && trim_protocol_identifier(event.reason).empty())) {
+    throw ProtocolError("incremental_output_end_reason_invalid");
+  }
+  if (matched.resource != IncrementalOutputResource::Motion) {
+    const auto length_key = matched.resource == IncrementalOutputResource::Text
+        ? "text_length"
+        : "total_samples";
+    event.length = require_safe_non_negative_integer(
+        envelope.payload, length_key, "payload");
+  }
+  return event;
+}
+
+OutputAudioFrame parse_output_audio_frame(
+    std::span<const std::uint8_t> frame) {
+  if (frame.size() < kAudioHeaderBytes
+      || frame.size() > kAudioHeaderBytes + kMaxMetadataBytes
+          + kMaxIncrementalPcmBytes) {
+    throw ProtocolError("output audio frame size is invalid");
+  }
+  if (!std::equal(kAudioMagic.begin(), kAudioMagic.end(), frame.begin())
+      || frame[4] != kAudioFrameVersion
+      || frame[5] != kAudioFrameTypeIncrementalOutput
+      || read_u16(frame, 6) != 0) {
+    throw ProtocolError("output audio frame header is invalid");
+  }
+  const auto metadata_size = read_u32(frame, 8);
+  if (metadata_size == 0 || metadata_size > kMaxMetadataBytes
+      || kAudioHeaderBytes + metadata_size >= frame.size()) {
+    throw ProtocolError("output audio metadata size is invalid");
+  }
+  Json metadata;
+  try {
+    metadata = Json::parse(
+        frame.subspan(kAudioHeaderBytes, metadata_size).begin(),
+        frame.subspan(kAudioHeaderBytes, metadata_size).end());
+  } catch (const Json::exception& error) {
+    throw ProtocolError(
+        std::string("invalid output audio metadata: ") + error.what());
+  }
+  require_object(metadata, "output audio metadata");
+  const auto identity = parse_incremental_identity(metadata, std::nullopt);
+  if (identity.seq == 0) {
+    throw ProtocolError("output_audio_sequence_invalid:seq");
+  }
+  const auto encoding = require_string(
+      metadata, "encoding", "output audio metadata");
+  const auto sample_rate = require_safe_non_negative_integer(
+      metadata, "sample_rate", "output audio metadata");
+  const auto channels = require_safe_non_negative_integer(
+      metadata, "channels", "output audio metadata");
+  if (encoding != "pcm16le" || sample_rate != 32000 || channels != 1) {
+    throw ProtocolError("output_audio_format_invalid");
+  }
+  const auto sample_offset = require_safe_non_negative_integer(
+      metadata, "sample_offset", "output audio metadata");
+  const auto payload_start = kAudioHeaderBytes + metadata_size;
+  const auto pcm_size = frame.size() - payload_start;
+  if (pcm_size == 0 || pcm_size > kMaxIncrementalPcmBytes || pcm_size % 2 != 0
+      || sample_offset > kMaxJavaScriptSafeInteger - pcm_size / 2) {
+    throw ProtocolError("output_audio_sample_range_invalid");
+  }
+  return OutputAudioFrame{
+      identity,
+      sample_offset,
+      static_cast<std::uint32_t>(sample_rate),
+      static_cast<std::uint32_t>(channels),
+      std::vector<std::uint8_t>(frame.begin() + payload_start, frame.end())};
 }
 
 BinaryAudioChunkFrame parse_binary_audio_frame(
