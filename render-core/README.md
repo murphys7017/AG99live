@@ -116,9 +116,12 @@ after text, PCM, and motion have reached terminal state. Sink, queue, and
 credit-send failures interrupt the affected Turn and clear the pending
 incremental jobs instead of leaving an accepted protocol stream hanging. Audio
 end status, reason, and total sample count are checked before the worker closes
-a stream. The capability is advertised by default; paired Adapter/Core/TTS,
-real audio-device, and visible Live2D acceptance is still required before
-claiming production parity.
+a stream. The capability is opt-in through `AG99_NATIVE_OLV=1`; it remains off
+by default until paired Adapter/Core/TTS, real audio-device, and visible Live2D
+acceptance are complete. Motion arriving more than 1.8 seconds after the PCM
+tail is rejected with a terminal reason matching the frontend runtime. When a
+later segment replaces an earlier Native motion plan, that replacement is
+treated as a normal terminal handoff instead of failing the OLV turn.
 
 The native frame path samples its monotonic clock once per frame and reuses that
 timestamp for audio, parameter mixing, and motion timing. Parameter contribution

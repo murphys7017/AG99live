@@ -13,15 +13,18 @@ native_olv_native_playback_20261110:
     because the Native host has no separate history store.
   validation: >-
     Render-core Release host build, runtime-core Release protocol smoke test,
-    CTest, and git diff whitespace checks pass. The capability is now
-    advertised by default. Source review confirms OLV text, PCM, motion and
+    CTest, and git diff whitespace checks pass. The capability is opt-in
+    through AG99_NATIVE_OLV=1 and remains off by default. Source review
+    confirms OLV text, PCM, motion and
     terminal acknowledgement share one turn/segment lifecycle. No real
     Adapter/Core/TTS/audio-device/Live2D joint run has been completed in this
     slice.
   limitations: >-
     Native motion is released as a motion-only plan after the corresponding
     PCM stream drains and only the latest OLV motion update is retained. A
-    paired runtime acceptance is still required to verify provider timing,
+    motion tail beyond the frontend 1.8-second limit is rejected, and motion
+    plan replacement is treated as a normal handoff. A paired runtime
+    acceptance is still required to verify provider timing,
     waveOut device admission, interruption/reconnect cleanup, and visible
     model output. Existing Native history UI is preview-only by design; the
     Adapter/TS path remains responsible for desktop history recording.

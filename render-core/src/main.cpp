@@ -85,7 +85,7 @@ constexpr UINT kTrayClickThrough = 1007;
 constexpr UINT kTrayOpenLog = 1008;
 constexpr UINT kInputConnectionChanged = WM_APP + 2;
 constexpr UINT kInputRuntimeStateChanged = WM_APP + 3;
-constexpr bool kNativeIncrementalOutputEnabled = true;
+constexpr double kMaxIncrementalMotionLateTailSeconds = 1.8;
 
 ag99::platform::TrayController g_tray_controller;
 bool g_dragging = false;
@@ -112,6 +112,20 @@ std::mutex g_input_window_mutex;
 HWND g_input_window = nullptr;
 ag99::platform::InputOverlayState g_input_state;
 bool g_click_through = false;
+
+bool NativeIncrementalOutputEnabled() {
+  static const bool enabled = [] {
+    const auto* value = std::getenv("AG99_NATIVE_OLV");
+    if (!value) {
+      return false;
+    }
+    const std::string_view normalized(value);
+    return normalized == "1" || normalized == "true"
+        || normalized == "TRUE" || normalized == "on"
+        || normalized == "ON";
+  }();
+  return enabled;
+}
 
 void NotifyInputConnectionChanged();
 void NotifyInputRuntimeStateChanged();
@@ -1488,7 +1502,7 @@ public:
         });
     if (connected) {
       const auto settings = ag99::runtime::build_system_desktop_runtime_settings(
-          kNativeIncrementalOutputEnabled);
+          NativeIncrementalOutputEnabled());
       if (!websocket_.send_text(settings.dump())) {
         websocket_.close();
         connected = false;
@@ -1744,6 +1758,7 @@ private:
     bool motion_dispatched = false;
     NativeSegmentClock clock;
     ag99::runtime::MotionSlot latest_motion;
+    double motion_received_at_seconds = 0.0;
     std::string text_failure_reason;
     std::string audio_failure_reason;
     std::string motion_failure_reason;
@@ -1988,7 +2003,7 @@ private:
           return;
         }
         incremental_segment->second.motion_terminal = true;
-        if (!terminal.success) {
+        if (!terminal.success && terminal.reason != "motion_plan_replaced") {
           incremental_segment->second.motion_failure_reason =
               ResolveFailureReason(
                   terminal.reason,
@@ -2104,20 +2119,38 @@ private:
         incremental_segment->motion_terminal = true;
         settled_without_motion = true;
       } else {
-        incremental_segment->motion_dispatched = true;
-        clock = incremental_segment->clock;
-        // OLV motion is released after PCM has reached its terminal state. It
-        // therefore owns a fresh motion-only clock instead of reusing an
-        // expired audio window.
-        clock.started_at_seconds = NowSeconds();
-        clock.duration_seconds = 0.0;
-        clock.audio_serial = 0;
-        segment.envelope.turn_id = identity.turn_id;
-        segment.envelope.message_id = identity.segment_message_id;
-        segment.schema_version = std::string(ag99::runtime::kOutputSegmentSchema);
-        segment.sequence = incremental_segment->sequence;
-        segment.motion = incremental_segment->latest_motion;
-        dispatch = true;
+        const auto audio_end_seconds = incremental_segment->clock
+            .started_at_seconds + incremental_segment->clock.duration_seconds;
+        const auto late_seconds = incremental_segment->motion_received_at_seconds
+            > 0.0
+            ? std::max(
+                0.0,
+                incremental_segment->motion_received_at_seconds
+                    - audio_end_seconds)
+            : 0.0;
+        if (late_seconds > kMaxIncrementalMotionLateTailSeconds) {
+          incremental_segment->motion_terminal = true;
+          incremental_segment->motion_failure_reason =
+              "incremental_motion_late_tail_expired:" +
+              std::to_string(static_cast<long long>(std::lround(
+                  late_seconds * 1000.0)));
+          settled_without_motion = true;
+        } else {
+          incremental_segment->motion_dispatched = true;
+          clock = incremental_segment->clock;
+          // OLV motion is released after PCM has reached its terminal state. It
+          // therefore owns a fresh motion-only clock instead of reusing an
+          // expired audio window.
+          clock.started_at_seconds = NowSeconds();
+          clock.duration_seconds = 0.0;
+          clock.audio_serial = 0;
+          segment.envelope.turn_id = identity.turn_id;
+          segment.envelope.message_id = identity.segment_message_id;
+          segment.schema_version = std::string(ag99::runtime::kOutputSegmentSchema);
+          segment.sequence = incremental_segment->sequence;
+          segment.motion = incremental_segment->latest_motion;
+          dispatch = true;
+        }
       }
     }
     if (settled_without_motion) {
@@ -2324,12 +2357,12 @@ private:
           break;
         }
       }
-      if (success) {
-        for (const auto& [_, segment] : turn->second.incremental_segments) {
-          if (!segment.text_terminal || !segment.audio_terminal
-              || !segment.motion_terminal) {
-            return;
-          }
+      for (const auto& [_, segment] : turn->second.incremental_segments) {
+        if (!segment.text_terminal || !segment.audio_terminal
+            || !segment.motion_terminal) {
+          return;
+        }
+        if (success) {
           const auto segment_failure_reason =
               IncrementalSegmentFailureReason(segment);
           if (!segment_failure_reason.empty()) {
@@ -2366,7 +2399,7 @@ private:
   }
 
   void OnIncrementalOutputEvent(ag99::runtime::IncrementalOutputEvent event) {
-    if (!kNativeIncrementalOutputEnabled) {
+    if (!NativeIncrementalOutputEnabled()) {
       return;
     }
     const auto& identity = event.identity;
@@ -2468,6 +2501,7 @@ private:
         segment->latest_motion.mode = "stream";
         segment->latest_motion.source = "incremental_stream";
         segment->latest_motion.payload = std::move(event.motion_payload);
+        segment->motion_received_at_seconds = NowSeconds();
         segment->motion_terminal = false;
         segment->motion_dispatched = false;
       } else if (event.kind
@@ -2544,7 +2578,7 @@ private:
   }
 
   void OnIncrementalAudioFrame(ag99::runtime::OutputAudioFrame frame) {
-    if (!kNativeIncrementalOutputEnabled) {
+    if (!NativeIncrementalOutputEnabled()) {
       return;
     }
     {
