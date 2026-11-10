@@ -2547,6 +2547,11 @@ private:
             state.active = true;
             state.identity = identity;
             state.samples = 0;
+            state.sample_rate = 0;
+            state.audio_clock_started = false;
+            state.audio_start_seconds = 0.0;
+            state.rms_sum = 0.0;
+            state.rms_samples = 0;
           }
         }
         if (!output_open_failed) {
@@ -2637,6 +2642,11 @@ private:
     state.active = false;
     state.identity = {};
     state.samples = 0;
+    state.sample_rate = 0;
+    state.audio_clock_started = false;
+    state.audio_start_seconds = 0.0;
+    state.rms_sum = 0.0;
+    state.rms_samples = 0;
   }
 
   void AudioWorkerLoop() {
