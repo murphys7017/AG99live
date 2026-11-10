@@ -720,6 +720,18 @@ void test_audio_control_builders() {
       "audio_playback_interrupted");
   assert(finished.at("type") == "control.playback_finished");
   assert(finished.at("payload").at("success") == false);
+
+  const auto credit = ag99::runtime::build_control_audio_credit(
+      "turn-1",
+      {.core_turn_id = "core-1",
+       .persona_result_id = "persona-1",
+       .released_bytes = 4096,
+       .released_frames = 2});
+  assert(credit.at("type") == "control.audio_credit");
+  assert(credit.at("source") == "frontend");
+  assert(credit.at("payload").at("schema_version").get<std::string>()
+      == ag99::runtime::kAudioCreditSchema);
+  assert(credit.at("payload").at("released_bytes") == 4096);
 }
 
 void test_desktop_settings_boundary() {

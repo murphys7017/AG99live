@@ -1223,6 +1223,34 @@ Json build_control_playback_finished(
       timestamp);
 }
 
+Json build_control_audio_credit(
+    std::string_view turn_id,
+    const AudioCredit& credit,
+    std::optional<std::string_view> message_id,
+    std::optional<std::string_view> timestamp) {
+  if (turn_id.empty() || credit.core_turn_id.empty()
+      || credit.persona_result_id.empty()
+      || credit.released_bytes % 2 != 0
+      || credit.released_bytes > kMaxJavaScriptSafeInteger
+      || credit.released_frames > kMaxJavaScriptSafeInteger) {
+    throw ProtocolError("invalid control.audio_credit input");
+  }
+  const Json payload = {
+      {"schema_version", kAudioCreditSchema},
+      {"core_turn_id", credit.core_turn_id},
+      {"persona_result_id", credit.persona_result_id},
+      {"released_bytes", credit.released_bytes},
+      {"released_frames", credit.released_frames},
+  };
+  return build_envelope(
+      "control.audio_credit",
+      payload,
+      turn_id,
+      "frontend",
+      message_id,
+      timestamp);
+}
+
 std::string describe_segment(const OutputSegment& segment) {
   std::ostringstream stream;
   stream << "turn=" << *segment.envelope.turn_id

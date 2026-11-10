@@ -3,7 +3,8 @@
 阶段一的 C++ 协议核心。当前包含：
 
 - `v2` JSON 信封解析与构造
-- `input.text`、音频流 start/end 和 `control.playback_finished` 出站消息构造
+- `input.text`、音频流 start/end、`control.playback_finished` 和
+  `control.audio_credit` 出站消息构造
 - `output.segment.v6` 严格解析
 - `output.segment_motion` 同身份后到动作解析
 - OLV `output.*_stream_*` 文本/音频/动作事件的身份、序号和格式解析

@@ -23,6 +23,8 @@ inline constexpr std::string_view kOutputSegmentSchema =
     protocol_manifest::kOutputSegmentSchema;
 inline constexpr std::string_view kMotionIntentSchema =
     protocol_manifest::kMotionIntentSchema;
+inline constexpr std::string_view kAudioCreditSchema =
+    protocol_manifest::kAudioCreditSchema;
 inline constexpr std::string_view kParameterPlanSchema =
     protocol_manifest::kParameterPlanSchema;
 inline constexpr std::string_view kModelInfoSchema =
@@ -129,6 +131,13 @@ struct DesktopSettingsResult {
   std::string key;
   std::optional<DesktopSettingsEntry> entry;
   std::string error;
+};
+
+struct AudioCredit {
+  std::string core_turn_id;
+  std::string persona_result_id;
+  std::uint64_t released_bytes = 0;
+  std::uint64_t released_frames = 0;
 };
 
 struct AudioChunkMetadata {
@@ -247,6 +256,12 @@ Json build_control_playback_finished(
     std::string_view turn_id,
     bool success = true,
     std::optional<std::string_view> reason = std::nullopt,
+    std::optional<std::string_view> message_id = std::nullopt,
+    std::optional<std::string_view> timestamp = std::nullopt);
+
+Json build_control_audio_credit(
+    std::string_view turn_id,
+    const AudioCredit& credit,
     std::optional<std::string_view> message_id = std::nullopt,
     std::optional<std::string_view> timestamp = std::nullopt);
 
