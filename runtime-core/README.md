@@ -5,6 +5,7 @@
 - `v2` JSON 信封解析与构造
 - `input.text`、音频流 start/end、`control.playback_finished` 和
   `control.audio_credit` 出站消息构造
+- Native 连接的 `system.desktop_runtime_settings` 能力声明构造
 - `output.segment.v6` 严格解析
 - `output.segment_motion` 同身份后到动作解析
 - OLV `output.*_stream_*` 文本/音频/动作事件的身份、序号和格式解析
@@ -50,4 +51,5 @@ runtime-core/build/Release/ag99-runtime-replay.exe .\fixtures\segments.jsonl
 当前阶段的 OLV 支持已经包含协议接收和增量流状态校验：通过校验的事件和
 type=2 PCM 帧会经独立回调交给上层，但还没有接入有界播放 worker、audio
 credit/backpressure、Timeline 播放或 Live2D 渲染。旧的完整段和麦克风 type=1
-路径不受影响。
+路径不受影响。Native 连接会明确声明 `audio_credit_schema`，同时将
+`persona_segment_stream_enabled` 保持为 `false`，直到播放 worker 完成。

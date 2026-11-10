@@ -84,6 +84,7 @@ constexpr UINT kTrayClickThrough = 1007;
 constexpr UINT kTrayOpenLog = 1008;
 constexpr UINT kInputConnectionChanged = WM_APP + 2;
 constexpr UINT kInputRuntimeStateChanged = WM_APP + 3;
+constexpr bool kNativeIncrementalOutputEnabled = false;
 
 ag99::platform::TrayController g_tray_controller;
 bool g_dragging = false;
@@ -1233,6 +1234,14 @@ public:
             [this](ag99::runtime::SegmentMotionUpdate update) {
               OnSegmentMotion(std::move(update));
             },
+            [](ag99::runtime::IncrementalOutputEvent event) {
+              std::cerr << "[runtime] incremental output is not enabled in the native player: "
+                        << event.envelope.type << '\n';
+            },
+            [](ag99::runtime::OutputAudioFrame frame) {
+              std::cerr << "[runtime] incremental PCM is not enabled in the native player: "
+                        << frame.identity.stream_id << '\n';
+            },
         }) {
     callback_lifetime_->owner = this;
     audio_worker_ = std::thread([this] {
@@ -1259,7 +1268,7 @@ public:
     ResetDisconnectedState();
 
     const std::weak_ptr<CallbackLifetime> weak_lifetime = callback_lifetime_;
-    const bool connected = websocket_.connect(
+    bool connected = websocket_.connect(
         url,
         {
             [weak_lifetime, generation](std::string text) {
@@ -1282,6 +1291,14 @@ public:
             },
         });
     g_runtime_connected.store(connected);
+    if (connected) {
+      const auto settings = ag99::runtime::build_system_desktop_runtime_settings(
+          kNativeIncrementalOutputEnabled);
+      if (!websocket_.send_text(settings.dump())) {
+        websocket_.close();
+        connected = false;
+      }
+    }
     NotifyInputConnectionChanged();
     return connected;
   }

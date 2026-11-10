@@ -229,6 +229,11 @@ Json build_system_desktop_settings_result(
     std::optional<std::string_view> message_id = std::nullopt,
     std::optional<std::string_view> timestamp = std::nullopt);
 
+Json build_system_desktop_runtime_settings(
+    bool persona_segment_stream_enabled,
+    std::optional<std::string_view> message_id = std::nullopt,
+    std::optional<std::string_view> timestamp = std::nullopt);
+
 Json build_input_audio_stream_start(
     std::string_view stream_id,
     std::string_view stream_source,

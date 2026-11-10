@@ -1114,6 +1114,23 @@ Json build_system_desktop_settings_result(
       timestamp);
 }
 
+Json build_system_desktop_runtime_settings(
+    bool persona_segment_stream_enabled,
+    std::optional<std::string_view> message_id,
+    std::optional<std::string_view> timestamp) {
+  const Json payload = {
+      {"audio_credit_schema", kAudioCreditSchema},
+      {"persona_segment_stream_enabled", persona_segment_stream_enabled},
+  };
+  return build_envelope(
+      "system.desktop_runtime_settings",
+      payload,
+      std::nullopt,
+      "frontend",
+      message_id,
+      timestamp);
+}
+
 Json build_input_audio_stream_start(
     std::string_view stream_id,
     std::string_view stream_source,

@@ -10,14 +10,17 @@ native_olv_protocol_boundary_20261110:
     sample offsets, and bounded payloads. Track turn/segment/resource stream
     lifecycles, text and audio capacities, and cross-segment audio order before
     dispatching accepted OLV events through new optional callbacks. Add the
-    frontend `control.audio_credit` builder for the later PCM worker; do not
-    attach it to a playback worker in this slice.
+    frontend `control.audio_credit` builder and Native
+    `system.desktop_runtime_settings` capability declaration for the later
+    PCM worker; keep `persona_segment_stream_enabled=false` until playback is
+    actually wired, and do not attach it to a worker in this slice.
   validation: >-
     runtime-core Release build and CTest protocol smoke test pass, including
     direct event parsing, type=2 frame parsing, lifecycle rejection, OLV-only
-    synth_finished handling, audio credit construction, and RuntimeProtocolSession dispatch. Git whitespace
-    checks pass. Live Adapter/Core/WebSocket and real audio/Live2D playback
-    acceptance remain outstanding.
+    synth_finished handling, audio credit construction, capability declaration,
+    and RuntimeProtocolSession dispatch. Both runtime-core and render-core
+    Release builds pass, and Git whitespace checks pass. Live Adapter/Core/
+    WebSocket and real audio/Live2D playback acceptance remain outstanding.
   limitations: >-
     This is still a receive/validation boundary only. It does not yet enforce
     audio credit or backpressure, bounded playback queues, PCM sink timing, or

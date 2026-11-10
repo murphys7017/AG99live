@@ -687,6 +687,16 @@ void test_runtime_session_dispatch() {
 }
 
 void test_audio_control_builders() {
+  const auto runtime_settings =
+      ag99::runtime::build_system_desktop_runtime_settings(false);
+  assert(runtime_settings.at("type") == "system.desktop_runtime_settings");
+  assert(runtime_settings.at("source") == "frontend");
+  assert(runtime_settings.at("turn_id").is_null());
+  assert(runtime_settings.at("payload").at("audio_credit_schema")
+      == "olv.audio_credit.v1");
+  assert(runtime_settings.at("payload").at("persona_segment_stream_enabled")
+      == false);
+
   const auto start = ag99::runtime::build_input_audio_stream_start(
       "stream-1",
       "microphone",
