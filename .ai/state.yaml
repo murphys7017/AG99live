@@ -12,8 +12,10 @@ native_olv_protocol_boundary_20261110:
     dispatching accepted OLV events through new optional callbacks. Add the
     frontend `control.audio_credit` builder and Native
     `system.desktop_runtime_settings` capability declaration for the later
-    PCM worker; keep `persona_segment_stream_enabled=false` until playback is
-    actually wired, and do not attach it to a worker in this slice.
+    PCM worker; add a bounded single Native PCM worker and waveOut block sink
+    that sends cumulative credit after device admission, while keeping
+    `persona_segment_stream_enabled=false` until timeline/lip-sync/text/motion
+    presentation is wired.
   validation: >-
     runtime-core Release build and CTest protocol smoke test pass, including
     direct event parsing, type=2 frame parsing, lifecycle rejection, OLV-only
@@ -21,6 +23,8 @@ native_olv_protocol_boundary_20261110:
     and RuntimeProtocolSession dispatch. Both runtime-core and render-core
     Release builds pass, and Git whitespace checks pass. Live Adapter/Core/
     WebSocket and real audio/Live2D playback acceptance remain outstanding.
+    The worker sink is compile- and lifecycle-validated but not enabled in
+    capability negotiation.
     The review pass additionally corrected Unicode codepoint end lengths,
     adapter-source validation, cumulative audio-credit consistency, and the
     Native connection-state update after capability-send failure.

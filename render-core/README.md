@@ -41,6 +41,9 @@ The current executable, `ag99-render-host`, verifies:
   parameters protected from scaled Physics response writes;
 - cached PCM WAV audio from `output.segment` can be downloaded and played from
   memory through the native `waveOut` path, without a temporary audio file;
+- OLV type=2 PCM frames can be admitted through a bounded single audio worker,
+  written to bounded `waveOut` blocks, and acknowledged with cumulative
+  `control.audio_credit` messages; this path remains capability-gated off;
 - configured eye-blink and lip-sync parameter IDs are attached to the loaded
   idle motions, matching the WebSDK motion setup.
 - `system.model_sync` is consumed to cache the selected semantic axis profile;
@@ -102,6 +105,12 @@ of configuration, while this host consumes the resulting runtime inputs.
 The current Adapter still emits `engine.motion_intent.v4`. The native host also
 accepts `engine.parameter_plan.v3` segments directly; translating the remaining
 TypeScript compiler and runtime behavior remains separate migration work.
+
+The OLV PCM worker currently owns bounded audio admission and device sink
+teardown, but it does not yet attach the stream to the Native lip-sync clock,
+PlaybackTimeline, or incremental text/motion presentation. Keep
+`persona_segment_stream_enabled=false` until those three paths and live device
+acceptance are complete.
 
 The native frame path samples its monotonic clock once per frame and reuses that
 timestamp for audio, parameter mixing, and motion timing. Parameter contribution

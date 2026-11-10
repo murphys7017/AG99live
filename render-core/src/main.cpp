@@ -27,6 +27,7 @@
 #include <functional>
 #include <iostream>
 #include <malloc.h>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <random>
@@ -277,7 +278,188 @@ private:
   bool _prepared = false;
 };
 
+// OLV PCM is admitted in bounded blocks. The worker owns this sink, while
+// the waveOut callback only marks completed blocks so teardown never frees a
+// buffer that the device still references.
+class NativePcmStreamOutput final {
+  struct Buffer {
+    std::vector<std::uint8_t> bytes;
+    WAVEHDR header{};
+    bool prepared = false;
+    bool completed = false;
+  };
+
+public:
+  NativePcmStreamOutput() = default;
+
+  ~NativePcmStreamOutput() {
+    Stop();
+  }
+
+  NativePcmStreamOutput(const NativePcmStreamOutput&) = delete;
+  NativePcmStreamOutput& operator=(const NativePcmStreamOutput&) = delete;
+
+  bool Start(std::uint32_t sample_rate, std::uint16_t channels = 1) {
+    Stop();
+    if (sample_rate == 0 || channels == 0) {
+      return false;
+    }
+    WAVEFORMATEX format{};
+    format.wFormatTag = WAVE_FORMAT_PCM;
+    format.nChannels = channels;
+    format.nSamplesPerSec = sample_rate;
+    format.wBitsPerSample = 16;
+    format.nBlockAlign = static_cast<WORD>(channels * sizeof(std::int16_t));
+    format.nAvgBytesPerSec = format.nSamplesPerSec * format.nBlockAlign;
+    const auto result = waveOutOpen(
+        &_handle,
+        WAVE_MAPPER,
+        &format,
+        reinterpret_cast<DWORD_PTR>(&WaveOutProc),
+        reinterpret_cast<DWORD_PTR>(this),
+        CALLBACK_FUNCTION);
+    if (result != MMSYSERR_NOERROR) {
+      _handle = nullptr;
+      return false;
+    }
+    _block_align = format.nBlockAlign;
+    _stopping = false;
+    return true;
+  }
+
+  bool Append(std::span<const std::uint8_t> pcm) {
+    if (pcm.empty() || pcm.size() > 64 * 1024) {
+      return false;
+    }
+    std::unique_lock lock(_mutex);
+    ReapCompletedLocked();
+    if (!_handle || _stopping || _block_align == 0
+        || pcm.size() % _block_align != 0) {
+      return false;
+    }
+    const auto deadline = std::chrono::steady_clock::now()
+        + std::chrono::seconds(5);
+    while (_buffers.size() >= kMaxBuffers && !_stopping) {
+      if (_condition.wait_until(lock, deadline) == std::cv_status::timeout) {
+        ReapCompletedLocked();
+        return false;
+      }
+      ReapCompletedLocked();
+    }
+    if (!_handle || _stopping) {
+      return false;
+    }
+    auto buffer = std::make_shared<Buffer>();
+    buffer->bytes.assign(pcm.begin(), pcm.end());
+    buffer->header.lpData = reinterpret_cast<LPSTR>(buffer->bytes.data());
+    buffer->header.dwBufferLength = static_cast<DWORD>(buffer->bytes.size());
+    auto result = waveOutPrepareHeader(
+        _handle, &buffer->header, sizeof(buffer->header));
+    if (result != MMSYSERR_NOERROR) {
+      return false;
+    }
+    buffer->prepared = true;
+    _buffers.push_back(buffer);
+    result = waveOutWrite(_handle, &buffer->header, sizeof(buffer->header));
+    if (result != MMSYSERR_NOERROR) {
+      waveOutUnprepareHeader(_handle, &buffer->header, sizeof(buffer->header));
+      _buffers.pop_back();
+      return false;
+    }
+    return true;
+  }
+
+  bool WaitForDrain(
+      std::chrono::milliseconds timeout = std::chrono::seconds(5)) {
+    std::unique_lock lock(_mutex);
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    while (_handle && !_stopping && !_buffers.empty()) {
+      if (_condition.wait_until(lock, deadline) == std::cv_status::timeout) {
+        return false;
+      }
+      ReapCompletedLocked();
+    }
+    return !_handle || _buffers.empty();
+  }
+
+  void Stop() noexcept {
+    HWAVEOUT handle = nullptr;
+    {
+      std::scoped_lock lock(_mutex);
+      handle = _handle;
+      _stopping = true;
+    }
+    if (handle) {
+      waveOutReset(handle);
+      std::scoped_lock lock(_mutex);
+      ReapCompletedLocked();
+      for (const auto& buffer : _buffers) {
+        if (buffer->prepared) {
+          waveOutUnprepareHeader(handle, &buffer->header, sizeof(buffer->header));
+          buffer->prepared = false;
+        }
+      }
+      _buffers.clear();
+      waveOutClose(handle);
+      _handle = nullptr;
+    }
+    std::scoped_lock lock(_mutex);
+    _block_align = 2;
+    _stopping = false;
+  }
+
+private:
+  static constexpr std::size_t kMaxBuffers = 64;
+
+  static void CALLBACK WaveOutProc(
+      HWAVEOUT,
+      UINT message,
+      DWORD_PTR instance,
+      DWORD_PTR parameter,
+      DWORD_PTR) {
+    if (message != WOM_DONE || instance == 0 || parameter == 0) {
+      return;
+    }
+    auto* self = reinterpret_cast<NativePcmStreamOutput*>(instance);
+    self->OnBufferDone(reinterpret_cast<WAVEHDR*>(parameter));
+  }
+
+  void OnBufferDone(WAVEHDR* header) {
+    std::scoped_lock lock(_mutex);
+    for (const auto& buffer : _buffers) {
+      if (&buffer->header == header) {
+        buffer->completed = true;
+        break;
+      }
+    }
+    _condition.notify_all();
+  }
+
+  void ReapCompletedLocked() {
+    for (auto it = _buffers.begin(); it != _buffers.end();) {
+      if (!(*it)->completed) {
+        ++it;
+        continue;
+      }
+      if ((*it)->prepared && _handle) {
+        waveOutUnprepareHeader(
+            _handle, &(*it)->header, sizeof((*it)->header));
+      }
+      it = _buffers.erase(it);
+    }
+  }
+
+  HWAVEOUT _handle = nullptr;
+  std::uint16_t _block_align = 2;
+  bool _stopping = false;
+  std::mutex _mutex;
+  std::condition_variable _condition;
+  std::deque<std::shared_ptr<Buffer>> _buffers;
+};
+
 NativeAudioOutput g_audio_output;
+NativePcmStreamOutput g_incremental_audio_output;
+std::mutex g_incremental_audio_output_mutex;
 
 void StopCurrentAudio(
     std::optional<std::uint64_t> expected_serial = std::nullopt) {
@@ -295,6 +477,11 @@ void StopCurrentAudio(
     std::scoped_lock signal_lock(g_audio_signal_mutex);
     g_audio_rms.clear();
   }
+}
+
+void StopIncrementalAudio() {
+  std::scoped_lock lock(g_incremental_audio_output_mutex);
+  g_incremental_audio_output.Stop();
 }
 
 struct AudioPlayback {
@@ -1153,6 +1340,8 @@ class RuntimeBridge final {
     std::string text;
     bool approved = false;
   };
+  struct IncrementalAudioJob;
+  struct IncrementalWorkerState;
 
 public:
   RuntimeBridge(
@@ -1234,13 +1423,11 @@ public:
             [this](ag99::runtime::SegmentMotionUpdate update) {
               OnSegmentMotion(std::move(update));
             },
-            [](ag99::runtime::IncrementalOutputEvent event) {
-              std::cerr << "[runtime] incremental output is not enabled in the native player: "
-                        << event.envelope.type << '\n';
+            [this](ag99::runtime::IncrementalOutputEvent event) {
+              OnIncrementalOutputEvent(std::move(event));
             },
-            [](ag99::runtime::OutputAudioFrame frame) {
-              std::cerr << "[runtime] incremental PCM is not enabled in the native player: "
-                        << frame.identity.stream_id << '\n';
+            [this](ag99::runtime::OutputAudioFrame frame) {
+              OnIncrementalAudioFrame(std::move(frame));
             },
         }) {
     callback_lifetime_->owner = this;
@@ -1478,10 +1665,35 @@ public:
     }
     if (!was_closing) {
       StopCurrentAudio();
+      StopIncrementalAudio();
     }
   }
 
 private:
+  static constexpr std::size_t kIncrementalAudioWindowBytes = 128 * 1024;
+  static constexpr std::size_t kIncrementalAudioWindowFrames = 64;
+  static constexpr std::size_t kMaxIncrementalAudioJobs = 64 + 256;
+
+  struct IncrementalAudioJob {
+    enum class Kind { Frame, End };
+    Kind kind = Kind::Frame;
+    ag99::runtime::OutputAudioFrame frame;
+    ag99::runtime::IncrementalIdentity identity;
+    std::uint64_t total_samples = 0;
+    ag99::runtime::IncrementalOutputStatus status =
+        ag99::runtime::IncrementalOutputStatus::Completed;
+    std::string reason;
+    std::uint64_t generation = 0;
+  };
+
+  struct IncrementalWorkerState {
+    bool active = false;
+    ag99::runtime::IncrementalIdentity identity;
+    std::uint64_t generation = 0;
+    std::unordered_map<std::string, std::pair<std::uint64_t, std::uint64_t>>
+        credits;
+  };
+
   struct AudioQueueItem {
     ag99::runtime::OutputSegment segment;
     std::string turn_id;
@@ -1932,6 +2144,61 @@ private:
     }
   }
 
+  void OnIncrementalOutputEvent(ag99::runtime::IncrementalOutputEvent event) {
+    if (!kNativeIncrementalOutputEnabled) {
+      return;
+    }
+    if (event.resource != ag99::runtime::IncrementalOutputResource::Audio
+        || event.kind != ag99::runtime::IncrementalOutputEventKind::End
+        || !event.length.has_value()) {
+      return;
+    }
+    IncrementalAudioJob job;
+    job.kind = IncrementalAudioJob::Kind::End;
+    job.identity = event.identity;
+    job.total_samples = *event.length;
+    job.status = event.status;
+    job.reason = std::move(event.reason);
+    job.generation = connection_generation_.load();
+    {
+      std::scoped_lock lock(audio_queue_mutex_);
+      if (closing_.load()
+          || incremental_audio_queue_.size() >= kMaxIncrementalAudioJobs) {
+        std::cerr << "[runtime] incremental audio job capacity exceeded\n";
+        return;
+      }
+      incremental_audio_queue_.push_back(std::move(job));
+    }
+    audio_queue_condition_.notify_one();
+  }
+
+  void OnIncrementalAudioFrame(ag99::runtime::OutputAudioFrame frame) {
+    if (!kNativeIncrementalOutputEnabled) {
+      return;
+    }
+    IncrementalAudioJob job;
+    job.kind = IncrementalAudioJob::Kind::Frame;
+    job.identity = frame.identity;
+    job.frame = std::move(frame);
+    job.generation = connection_generation_.load();
+    {
+      std::scoped_lock lock(audio_queue_mutex_);
+      const auto next_bytes = incremental_audio_queued_bytes_
+          + job.frame.pcm.size();
+      const auto next_frames = incremental_audio_queued_frames_ + 1;
+      if (closing_.load() || next_bytes > kIncrementalAudioWindowBytes
+          || next_frames > kIncrementalAudioWindowFrames
+          || incremental_audio_queue_.size() >= kMaxIncrementalAudioJobs) {
+        std::cerr << "[runtime] incremental audio admission window exceeded\n";
+        return;
+      }
+      incremental_audio_queued_bytes_ = next_bytes;
+      incremental_audio_queued_frames_ = next_frames;
+      incremental_audio_queue_.push_back(std::move(job));
+    }
+    audio_queue_condition_.notify_one();
+  }
+
   std::uint64_t InvalidateConnection() {
     std::scoped_lock lock(session_mutex_);
     const auto generation = connection_generation_.fetch_add(1) + 1;
@@ -1954,6 +2221,9 @@ private:
     {
       std::scoped_lock lock(audio_queue_mutex_);
       audio_queue_.clear();
+      incremental_audio_queue_.clear();
+      incremental_audio_queued_bytes_ = 0;
+      incremental_audio_queued_frames_ = 0;
       playback_ack_queue_.clear();
       current_audio_turn_id_.clear();
       current_audio_message_id_.clear();
@@ -1961,6 +2231,7 @@ private:
       current_audio_serial_ = 0;
     }
     StopCurrentAudio();
+    StopIncrementalAudio();
     if (on_output_segment_reset_) {
       on_output_segment_reset_(connection_generation_.load());
     }
@@ -1977,6 +2248,7 @@ private:
     NotifyInputConnectionChanged();
     pending_closed_generation_.store(generation);
     StopCurrentAudio();
+    StopIncrementalAudio();
     audio_queue_condition_.notify_all();
   }
 
@@ -2066,17 +2338,122 @@ private:
     }
   }
 
+  bool SendIncrementalAudioCredit(
+      const ag99::runtime::OutputAudioFrame& frame,
+      std::uint64_t released_bytes,
+      std::uint64_t released_frames) {
+    std::scoped_lock transport_lock(transport_mutex_);
+    if (closing_.load() || frame.identity.turn_id.empty()
+        || connection_generation_.load() == 0) {
+      return false;
+    }
+    const auto credit = ag99::runtime::build_control_audio_credit(
+        frame.identity.turn_id,
+        {.core_turn_id = frame.identity.core_turn_id,
+         .persona_result_id = frame.identity.persona_result_id,
+         .released_bytes = released_bytes,
+         .released_frames = released_frames});
+    return websocket_.send_text(credit.dump());
+  }
+
+  void ProcessIncrementalAudioJob(
+      IncrementalAudioJob job,
+      IncrementalWorkerState& state) {
+    if (job.generation != connection_generation_.load()
+        || pending_closed_generation_.load() == job.generation) {
+      if (state.generation == job.generation) {
+        StopIncrementalAudio();
+        state = IncrementalWorkerState{};
+      }
+      return;
+    }
+    if (state.generation != job.generation) {
+      StopIncrementalAudio();
+      state = IncrementalWorkerState{};
+      state.generation = job.generation;
+    }
+    if (job.kind == IncrementalAudioJob::Kind::Frame) {
+      const auto& identity = job.frame.identity;
+      if (state.active
+          && (state.identity.turn_id != identity.turn_id
+              || state.identity.segment_message_id != identity.segment_message_id
+              || state.identity.stream_id != identity.stream_id)) {
+        std::cerr << "[runtime] incremental audio crossed an open segment\n";
+        StopIncrementalAudio();
+        state = IncrementalWorkerState{};
+        state.generation = job.generation;
+        return;
+      }
+      bool accepted = false;
+      {
+        std::scoped_lock sink_lock(g_incremental_audio_output_mutex);
+        if (!state.active) {
+          if (!g_incremental_audio_output.Start(
+                  job.frame.sample_rate,
+                  static_cast<std::uint16_t>(job.frame.channels))) {
+            std::cerr << "[runtime] failed to open incremental PCM output\n";
+            return;
+          }
+          state.active = true;
+          state.identity = identity;
+        }
+        accepted = g_incremental_audio_output.Append(job.frame.pcm);
+      }
+      if (!accepted) {
+        std::cerr << "[runtime] failed to accept incremental PCM frame\n";
+        StopIncrementalAudio();
+        state = IncrementalWorkerState{};
+        state.generation = job.generation;
+        return;
+      }
+      auto& credit = state.credits[identity.persona_result_id];
+      credit.first += job.frame.pcm.size();
+      credit.second += 1;
+      if (!SendIncrementalAudioCredit(
+              job.frame, credit.first, credit.second)) {
+        std::cerr << "[runtime] failed to send incremental audio credit\n";
+      }
+      return;
+    }
+
+    if (!state.active) {
+      return;
+    }
+    if (state.identity.turn_id != job.identity.turn_id
+        || state.identity.segment_message_id != job.identity.segment_message_id
+        || state.identity.stream_id != job.identity.stream_id) {
+      std::cerr << "[runtime] incremental audio end identity mismatch\n";
+      StopIncrementalAudio();
+      state = IncrementalWorkerState{};
+      state.generation = job.generation;
+      return;
+    }
+    {
+      std::scoped_lock sink_lock(g_incremental_audio_output_mutex);
+      if (!g_incremental_audio_output.WaitForDrain()) {
+        std::cerr << "[runtime] incremental PCM drain timed out\n";
+      }
+      g_incremental_audio_output.Stop();
+    }
+    state.active = false;
+    state.identity = {};
+  }
+
   void AudioWorkerLoop() {
+    IncrementalWorkerState incremental_state;
     while (true) {
       AudioQueueItem item;
+      IncrementalAudioJob incremental_job;
       std::string acknowledgement_turn_id;
       std::uint64_t acknowledgement_generation = 0;
       bool send_acknowledgement = false;
+      bool process_incremental_audio = false;
       {
         std::unique_lock lock(audio_queue_mutex_);
         audio_queue_condition_.wait(lock, [this] {
           return closing_.load() || pending_closed_generation_.load() != 0
-              || !playback_ack_queue_.empty() || !audio_queue_.empty();
+              || !playback_ack_queue_.empty() || !audio_queue_.empty()
+              || !incremental_audio_queue_.empty();
         });
         if (closing_.load()) {
           return;
@@ -2092,6 +2469,14 @@ private:
           acknowledgement_turn_id = std::move(acknowledgement.turn_id);
           acknowledgement_generation = acknowledgement.generation;
           send_acknowledgement = true;
+        } else if (!incremental_audio_queue_.empty()) {
+          incremental_job = std::move(incremental_audio_queue_.front());
+          incremental_audio_queue_.pop_front();
+          if (incremental_job.kind == IncrementalAudioJob::Kind::Frame) {
+            incremental_audio_queued_bytes_ -= incremental_job.frame.pcm.size();
+            incremental_audio_queued_frames_ -= 1;
+          }
+          process_incremental_audio = true;
         } else {
           item = std::move(audio_queue_.front());
           audio_queue_.pop_front();
@@ -2100,6 +2485,11 @@ private:
       if (send_acknowledgement) {
         TrySendPlaybackAcknowledgement(
             acknowledgement_turn_id, acknowledgement_generation);
+        continue;
+      }
+
+      if (process_incremental_audio) {
+        ProcessIncrementalAudioJob(std::move(incremental_job), incremental_state);
         continue;
       }
 
@@ -2278,6 +2668,9 @@ private:
   std::mutex audio_join_mutex_;
   std::condition_variable audio_queue_condition_;
   std::deque<AudioQueueItem> audio_queue_;
+  std::deque<IncrementalAudioJob> incremental_audio_queue_;
+  std::size_t incremental_audio_queued_bytes_ = 0;
+  std::size_t incremental_audio_queued_frames_ = 0;
   std::deque<PlaybackAcknowledgementItem> playback_ack_queue_;
   std::string current_audio_turn_id_;
   std::string current_audio_message_id_;
