@@ -1,3 +1,31 @@
+native_olv_native_playback_20261110:
+  class: feature
+  risk: high
+  status: source_updated_locally_validated_pending_live_runtime_acceptance
+  scope: >-
+    Complete the Native OLV presentation path behind the existing desktop
+    capability flag. Track incremental text/audio/motion terminal state per
+    segment, feed accepted PCM into the existing lip-sync/RMS clock, coalesce
+    the latest validated motion payload and release it through NativeModel's
+    existing motion queue after audio drain, and include OLV segments in the
+    existing playback_finished gate. Keep the TS timeline and Core/Adapter
+    wire contracts unchanged; Native text remains preview/feedback state
+    because the Native host has no separate history store.
+  validation: >-
+    Render-core Release host build, runtime-core Release protocol smoke test,
+    CTest, and git diff whitespace checks pass. The capability is now
+    advertised by default. Source review confirms OLV text, PCM, motion and
+    terminal acknowledgement share one turn/segment lifecycle. No real
+    Adapter/Core/TTS/audio-device/Live2D joint run has been completed in this
+    slice.
+  limitations: >-
+    Native motion is released as a motion-only plan after the corresponding
+    PCM stream drains and only the latest OLV motion update is retained. A
+    paired runtime acceptance is still required to verify provider timing,
+    waveOut device admission, interruption/reconnect cleanup, and visible
+    model output. Existing Native history UI is preview-only by design; the
+    Adapter/TS path remains responsible for desktop history recording.
+
 native_olv_protocol_boundary_20261110:
   class: feature
   risk: high

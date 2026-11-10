@@ -85,7 +85,7 @@ constexpr UINT kTrayClickThrough = 1007;
 constexpr UINT kTrayOpenLog = 1008;
 constexpr UINT kInputConnectionChanged = WM_APP + 2;
 constexpr UINT kInputRuntimeStateChanged = WM_APP + 3;
-constexpr bool kNativeIncrementalOutputEnabled = false;
+constexpr bool kNativeIncrementalOutputEnabled = true;
 
 ag99::platform::TrayController g_tray_controller;
 bool g_dragging = false;
@@ -1701,6 +1701,7 @@ private:
     std::uint64_t generation = 0;
     std::uint64_t samples = 0;
     std::uint32_t sample_rate = 0;
+    std::uint64_t audio_serial = 0;
     bool audio_clock_started = false;
     double audio_start_seconds = 0.0;
     double rms_sum = 0.0;
@@ -1734,12 +1735,28 @@ private:
     std::string motion_failure_reason;
   };
 
+  struct IncrementalSegmentPlaybackState {
+    std::int64_t sequence = 0;
+    bool text_terminal = false;
+    bool audio_terminal = false;
+    bool motion_stream_terminal = false;
+    bool motion_terminal = false;
+    bool motion_dispatched = false;
+    NativeSegmentClock clock;
+    ag99::runtime::MotionSlot latest_motion;
+    std::string text_failure_reason;
+    std::string audio_failure_reason;
+    std::string motion_failure_reason;
+  };
+
   struct TurnPlaybackState {
     std::uint64_t generation = 0;
     bool synth_finished = false;
     bool acknowledgement_queued = false;
     bool acknowledgement_claimed = false;
     std::unordered_map<std::string, SegmentPlaybackState> segments;
+    std::unordered_map<std::string, IncrementalSegmentPlaybackState>
+        incremental_segments;
     std::unordered_map<std::string, std::string> incremental_text;
   };
 
@@ -1789,6 +1806,44 @@ private:
       return;
     }
     it->second.synth_finished = true;
+  }
+
+  IncrementalSegmentPlaybackState* FindIncrementalSegmentLocked(
+      const ag99::runtime::IncrementalIdentity& identity,
+      TurnPlaybackState& turn) {
+    const auto segment = turn.incremental_segments.find(
+        identity.segment_message_id);
+    if (segment == turn.incremental_segments.end()) {
+      return nullptr;
+    }
+    return &segment->second;
+  }
+
+  IncrementalSegmentPlaybackState* EnsureIncrementalSegmentLocked(
+      const ag99::runtime::IncrementalIdentity& identity,
+      TurnPlaybackState& turn) {
+    auto [segment, inserted] = turn.incremental_segments.try_emplace(
+        identity.segment_message_id);
+    if (inserted) {
+      segment->second.sequence = static_cast<std::int64_t>(
+          identity.segment_index);
+      segment->second.clock.turn_id = identity.turn_id;
+      segment->second.clock.message_id = identity.segment_message_id;
+      segment->second.clock.sequence = segment->second.sequence;
+      segment->second.clock.generation = turn.generation;
+    }
+    return &segment->second;
+  }
+
+  static std::string IncrementalSegmentFailureReason(
+      const IncrementalSegmentPlaybackState& segment) {
+    if (!segment.text_failure_reason.empty()) {
+      return segment.text_failure_reason;
+    }
+    if (!segment.audio_failure_reason.empty()) {
+      return segment.audio_failure_reason;
+    }
+    return segment.motion_failure_reason;
   }
 
   static std::string ResolveFailureReason(
@@ -1906,22 +1961,46 @@ private:
       }
       const auto segment = turn->second.segments.find(
           terminal.clock.message_id);
-      if (segment == turn->second.segments.end()
-          || segment->second.motion_terminal) {
-        return;
-      }
-      segment->second.motion_terminal = true;
-      if (!terminal.success) {
-        segment->second.motion_failure_reason = ResolveFailureReason(
-            terminal.reason,
-            "motion_playback_failed:" + terminal.clock.message_id);
-      }
-      if (terminal.success && terminal.reason != "deferred_motion_absent"
-          && latest_assistant_segment_
-          && latest_assistant_segment_->message_id == terminal.clock.message_id) {
-        g_input_state.SetFeedbackAvailable(true);
-        g_input_state.SetStatusText(L"待命");
-        NotifyInputRuntimeStateChanged();
+      if (segment != turn->second.segments.end()) {
+        if (segment->second.motion_terminal) {
+          return;
+        }
+        segment->second.motion_terminal = true;
+        if (!terminal.success) {
+          segment->second.motion_failure_reason = ResolveFailureReason(
+              terminal.reason,
+              "motion_playback_failed:" + terminal.clock.message_id);
+        }
+        if (terminal.success && terminal.reason != "deferred_motion_absent"
+            && latest_assistant_segment_
+            && latest_assistant_segment_->message_id
+                == terminal.clock.message_id) {
+          g_input_state.SetFeedbackAvailable(true);
+          g_input_state.SetStatusText(L"待命");
+          NotifyInputRuntimeStateChanged();
+        }
+      } else {
+        const auto incremental_segment = turn->second.incremental_segments.find(
+            terminal.clock.message_id);
+        if (incremental_segment == turn->second.incremental_segments.end()
+            || incremental_segment->second.motion_terminal
+            || !incremental_segment->second.motion_dispatched) {
+          return;
+        }
+        incremental_segment->second.motion_terminal = true;
+        if (!terminal.success) {
+          incremental_segment->second.motion_failure_reason =
+              ResolveFailureReason(
+                  terminal.reason,
+                  "incremental_motion_playback_failed:" +
+                      terminal.clock.message_id);
+        } else if (latest_assistant_segment_
+            && latest_assistant_segment_->message_id
+                == terminal.clock.message_id) {
+          g_input_state.SetFeedbackAvailable(true);
+          g_input_state.SetStatusText(L"待命");
+          NotifyInputRuntimeStateChanged();
+        }
       }
     }
     QueuePlaybackAcknowledgement(terminal.clock.turn_id);
@@ -1996,6 +2075,103 @@ private:
     auto deferred = std::move(segment->second.deferred_motion);
     segment->second.deferred_motion.reset();
     return deferred;
+  }
+
+  void MaybeDispatchIncrementalMotion(
+      const ag99::runtime::IncrementalIdentity& identity) {
+    ag99::runtime::OutputSegment segment;
+    NativeSegmentClock clock;
+    bool dispatch = false;
+    bool settled_without_motion = false;
+    {
+      std::scoped_lock lock(playback_mutex_);
+      const auto turn = playback_turns_.find(identity.turn_id);
+      if (turn == playback_turns_.end()) {
+        return;
+      }
+      auto* incremental_segment = FindIncrementalSegmentLocked(
+          identity, turn->second);
+      if (!incremental_segment
+          || turn->second.generation != connection_generation_.load()
+          || !incremental_segment->audio_terminal
+          || !incremental_segment->motion_stream_terminal
+          || incremental_segment->motion_terminal
+          || incremental_segment->motion_dispatched) {
+        return;
+      }
+      if (incremental_segment->latest_motion.state
+          != ag99::runtime::MotionSlot::State::Present) {
+        incremental_segment->motion_terminal = true;
+        settled_without_motion = true;
+      } else {
+        incremental_segment->motion_dispatched = true;
+        clock = incremental_segment->clock;
+        // OLV motion is released after PCM has reached its terminal state. It
+        // therefore owns a fresh motion-only clock instead of reusing an
+        // expired audio window.
+        clock.started_at_seconds = NowSeconds();
+        clock.duration_seconds = 0.0;
+        clock.audio_serial = 0;
+        segment.envelope.turn_id = identity.turn_id;
+        segment.envelope.message_id = identity.segment_message_id;
+        segment.schema_version = std::string(ag99::runtime::kOutputSegmentSchema);
+        segment.sequence = incremental_segment->sequence;
+        segment.motion = incremental_segment->latest_motion;
+        dispatch = true;
+      }
+    }
+    if (settled_without_motion) {
+      QueuePlaybackAcknowledgement(identity.turn_id);
+      return;
+    }
+    if (!dispatch) {
+      return;
+    }
+    if (on_output_segment_) {
+      on_output_segment_(std::move(segment), std::move(clock));
+    } else {
+      CompleteMotionSegment(NativeSegmentTerminal{
+          std::move(clock), false, "motion_sink_unavailable"});
+    }
+  }
+
+  void CompleteIncrementalAudio(
+      const ag99::runtime::IncrementalIdentity& identity,
+      NativeSegmentClock clock,
+      bool success,
+      std::string_view reason = {}) {
+    bool dispatch_motion = false;
+    {
+      std::scoped_lock lock(playback_mutex_);
+      const auto turn = playback_turns_.find(identity.turn_id);
+      if (turn == playback_turns_.end()
+          || turn->second.generation != connection_generation_.load()) {
+        return;
+      }
+      auto* incremental_segment = FindIncrementalSegmentLocked(
+          identity, turn->second);
+      if (!incremental_segment || incremental_segment->audio_terminal) {
+        return;
+      }
+      incremental_segment->audio_terminal = true;
+      incremental_segment->clock = clock;
+      if (!success) {
+        incremental_segment->audio_failure_reason = ResolveFailureReason(
+            reason,
+            "incremental_audio_playback_failed");
+        if (!incremental_segment->motion_terminal) {
+          incremental_segment->motion_terminal = true;
+          incremental_segment->motion_failure_reason =
+              "incremental_motion_not_started_after_audio_failure";
+        }
+      } else {
+        dispatch_motion = true;
+      }
+    }
+    if (dispatch_motion) {
+      MaybeDispatchIncrementalMotion(identity);
+    }
+    QueuePlaybackAcknowledgement(identity.turn_id);
   }
 
   void RetireTurn(const std::string& turn_id, bool cancel_playback) {
@@ -2123,7 +2299,8 @@ private:
           || turn->second.generation != queued_generation
           || !turn->second.synth_finished
           || turn->second.acknowledgement_claimed
-          || turn->second.segments.empty()) {
+          || (turn->second.segments.empty()
+              && turn->second.incremental_segments.empty())) {
         return;
       }
       std::vector<const SegmentPlaybackState*> ordered_segments;
@@ -2145,6 +2322,21 @@ private:
           success = false;
           failure_reason = segment_failure_reason;
           break;
+        }
+      }
+      if (success) {
+        for (const auto& [_, segment] : turn->second.incremental_segments) {
+          if (!segment.text_terminal || !segment.audio_terminal
+              || !segment.motion_terminal) {
+            return;
+          }
+          const auto segment_failure_reason =
+              IncrementalSegmentFailureReason(segment);
+          if (!segment_failure_reason.empty()) {
+            success = false;
+            failure_reason = segment_failure_reason;
+            break;
+          }
         }
       }
       generation = turn->second.generation;
@@ -2177,13 +2369,17 @@ private:
     if (!kNativeIncrementalOutputEnabled) {
       return;
     }
+    const auto& identity = event.identity;
     if (event.resource == ag99::runtime::IncrementalOutputResource::Text) {
-      const auto& identity = event.identity;
       if (event.kind == ag99::runtime::IncrementalOutputEventKind::Start) {
         std::scoped_lock lock(playback_mutex_);
         const auto turn = playback_turns_.find(identity.turn_id);
         if (turn != playback_turns_.end() && !turn->second.synth_finished) {
           turn->second.incremental_text[identity.segment_message_id].clear();
+          if (auto* segment = EnsureIncrementalSegmentLocked(
+                  identity, turn->second)) {
+            segment->text_terminal = false;
+          }
         }
       } else if (event.kind
           == ag99::runtime::IncrementalOutputEventKind::TextDelta) {
@@ -2198,6 +2394,12 @@ private:
               identity.segment_message_id];
           accumulated += event.text;
           text = accumulated;
+          auto* segment = EnsureIncrementalSegmentLocked(
+              identity, turn->second);
+          if (!segment) {
+            return;
+          }
+          segment->text_terminal = false;
           latest_assistant_segment_ = AssistantSegment{
               identity.turn_id,
               identity.segment_message_id,
@@ -2210,12 +2412,110 @@ private:
         g_input_state.SetFeedbackApproved(false);
         g_input_state.SetStatusText(L"播放中");
         NotifyInputRuntimeStateChanged();
+      } else if (event.kind
+          == ag99::runtime::IncrementalOutputEventKind::End) {
+        {
+          std::scoped_lock lock(playback_mutex_);
+          const auto turn = playback_turns_.find(identity.turn_id);
+          if (turn == playback_turns_.end() || turn->second.synth_finished) {
+            return;
+          }
+          auto* segment = EnsureIncrementalSegmentLocked(
+              identity, turn->second);
+          if (!segment) {
+            return;
+          }
+          segment->text_terminal = true;
+          if (event.status != ag99::runtime::IncrementalOutputStatus::Completed) {
+            segment->text_failure_reason = ResolveFailureReason(
+                event.reason,
+                "incremental_text_stream_failed");
+          }
+        }
+        QueuePlaybackAcknowledgement(identity.turn_id);
       }
       return;
     }
+
+    if (event.resource == ag99::runtime::IncrementalOutputResource::Motion) {
+      if (event.kind == ag99::runtime::IncrementalOutputEventKind::Start) {
+        std::scoped_lock lock(playback_mutex_);
+        const auto turn = playback_turns_.find(identity.turn_id);
+        if (turn != playback_turns_.end() && !turn->second.synth_finished) {
+          auto* segment = EnsureIncrementalSegmentLocked(
+              identity, turn->second);
+          if (segment) {
+            segment->motion_stream_terminal = false;
+            segment->motion_terminal = false;
+            segment->motion_dispatched = false;
+            segment->latest_motion = {};
+          }
+        }
+      } else if (event.kind
+          == ag99::runtime::IncrementalOutputEventKind::MotionUpdate) {
+        std::scoped_lock lock(playback_mutex_);
+        const auto turn = playback_turns_.find(identity.turn_id);
+        if (turn == playback_turns_.end() || turn->second.synth_finished) {
+          return;
+        }
+        auto* segment = EnsureIncrementalSegmentLocked(
+            identity, turn->second);
+        if (!segment) {
+          return;
+        }
+        segment->latest_motion.state = ag99::runtime::MotionSlot::State::Present;
+        segment->latest_motion.message_type = "output.motion_stream_update";
+        segment->latest_motion.mode = "stream";
+        segment->latest_motion.source = "incremental_stream";
+        segment->latest_motion.payload = std::move(event.motion_payload);
+        segment->motion_terminal = false;
+        segment->motion_dispatched = false;
+      } else if (event.kind
+          == ag99::runtime::IncrementalOutputEventKind::End) {
+        {
+          std::scoped_lock lock(playback_mutex_);
+          const auto turn = playback_turns_.find(identity.turn_id);
+          if (turn == playback_turns_.end() || turn->second.synth_finished) {
+            return;
+          }
+          auto* segment = EnsureIncrementalSegmentLocked(
+              identity, turn->second);
+          if (!segment) {
+            return;
+          }
+          segment->motion_stream_terminal = true;
+          if (event.status != ag99::runtime::IncrementalOutputStatus::Completed) {
+            segment->motion_terminal = true;
+            segment->motion_failure_reason = ResolveFailureReason(
+                event.reason,
+                "incremental_motion_stream_failed");
+          }
+        }
+        if (event.status
+            == ag99::runtime::IncrementalOutputStatus::Completed) {
+          MaybeDispatchIncrementalMotion(identity);
+        }
+        QueuePlaybackAcknowledgement(identity.turn_id);
+      }
+      return;
+    }
+
     if (event.resource != ag99::runtime::IncrementalOutputResource::Audio
-        || event.kind != ag99::runtime::IncrementalOutputEventKind::End
-        || !event.length.has_value()) {
+        || (event.kind != ag99::runtime::IncrementalOutputEventKind::Start
+            && event.kind != ag99::runtime::IncrementalOutputEventKind::End)
+        || (event.kind == ag99::runtime::IncrementalOutputEventKind::End
+            && !event.length.has_value())) {
+      return;
+    }
+    if (event.kind == ag99::runtime::IncrementalOutputEventKind::Start) {
+      std::scoped_lock lock(playback_mutex_);
+      const auto turn = playback_turns_.find(identity.turn_id);
+      if (turn != playback_turns_.end() && !turn->second.synth_finished) {
+        if (auto* segment = EnsureIncrementalSegmentLocked(
+                identity, turn->second)) {
+          segment->audio_terminal = false;
+        }
+      }
       return;
     }
     IncrementalAudioJob job;
@@ -2246,6 +2546,16 @@ private:
   void OnIncrementalAudioFrame(ag99::runtime::OutputAudioFrame frame) {
     if (!kNativeIncrementalOutputEnabled) {
       return;
+    }
+    {
+      std::scoped_lock lock(playback_mutex_);
+      const auto turn = playback_turns_.find(frame.identity.turn_id);
+      if (turn == playback_turns_.end() || turn->second.synth_finished) {
+        return;
+      }
+      if (!EnsureIncrementalSegmentLocked(frame.identity, turn->second)) {
+        return;
+      }
     }
     IncrementalAudioJob job;
     job.kind = IncrementalAudioJob::Kind::Frame;
@@ -2474,7 +2784,7 @@ private:
       state.audio_clock_started = true;
       state.sample_rate = sample_rate;
       state.audio_start_seconds = NowSeconds();
-      g_audio_serial.fetch_add(1);
+      state.audio_serial = g_audio_serial.fetch_add(1) + 1;
       g_audio_start_seconds.store(state.audio_start_seconds);
       g_audio_end_seconds.store(state.audio_start_seconds);
       {
@@ -2548,6 +2858,7 @@ private:
             state.identity = identity;
             state.samples = 0;
             state.sample_rate = 0;
+            state.audio_serial = 0;
             state.audio_clock_started = false;
             state.audio_start_seconds = 0.0;
             state.rms_sum = 0.0;
@@ -2577,6 +2888,25 @@ private:
           job.frame.sample_rate,
           job.frame.channels,
           state);
+      if (state.audio_clock_started) {
+        std::scoped_lock lock(playback_mutex_);
+        const auto turn = playback_turns_.find(identity.turn_id);
+        if (turn != playback_turns_.end()
+            && turn->second.generation == job.generation) {
+          if (auto* segment = FindIncrementalSegmentLocked(
+                  identity, turn->second)) {
+            segment->clock.turn_id = identity.turn_id;
+            segment->clock.message_id = identity.segment_message_id;
+            segment->clock.sequence = segment->sequence;
+            segment->clock.started_at_seconds = state.audio_start_seconds;
+            segment->clock.duration_seconds =
+                static_cast<double>(state.samples)
+                / std::max<std::uint32_t>(1, state.sample_rate);
+            segment->clock.audio_serial = state.audio_serial;
+            segment->clock.generation = job.generation;
+          }
+        }
+      }
       auto& credit = state.credits[identity.persona_result_id];
       credit.first += job.frame.pcm.size();
       credit.second += 1;
@@ -2584,11 +2914,40 @@ private:
               job.frame, credit.first, credit.second)) {
         std::cerr << "[runtime] failed to send incremental audio credit\n";
         FailIncrementalAudio(identity, "incremental_audio_credit_send_failed");
+        state = IncrementalWorkerState{};
+        state.generation = job.generation;
       }
       return;
     }
 
     if (!state.active) {
+      if (job.status == ag99::runtime::IncrementalOutputStatus::Completed
+          && job.total_samples == 0) {
+        NativeSegmentClock clock;
+        clock.turn_id = job.identity.turn_id;
+        clock.message_id = job.identity.segment_message_id;
+        clock.sequence = static_cast<std::int64_t>(
+            job.identity.segment_index);
+        clock.generation = job.generation;
+        const auto now = NowSeconds();
+        clock.audio_serial = g_audio_serial.fetch_add(1) + 1;
+        g_audio_start_seconds.store(now);
+        g_audio_end_seconds.store(now);
+        g_audio_level.store(0.0f);
+        ResetSpeechSignal();
+        {
+          std::scoped_lock signal_lock(g_audio_signal_mutex);
+          g_audio_rms.clear();
+        }
+        CompleteIncrementalAudio(job.identity, clock, true);
+      } else if (job.status
+          != ag99::runtime::IncrementalOutputStatus::Completed) {
+        FailIncrementalAudio(
+            job.identity,
+            job.reason.empty()
+                ? "incremental_audio_stream_failed"
+                : job.reason);
+      }
       return;
     }
     if (state.identity.turn_id != job.identity.turn_id
@@ -2624,13 +2983,28 @@ private:
       state.generation = job.generation;
       return;
     }
+    bool drained = false;
     {
       std::scoped_lock sink_lock(g_incremental_audio_output_mutex);
-      if (!g_incremental_audio_output.WaitForDrain()) {
-        std::cerr << "[runtime] incremental PCM drain timed out\n";
-      }
+      drained = g_incremental_audio_output.WaitForDrain();
       g_incremental_audio_output.Stop();
     }
+    if (!drained) {
+      std::cerr << "[runtime] incremental PCM drain timed out\n";
+      FailIncrementalAudio(job.identity, "incremental_audio_drain_timeout");
+      state = IncrementalWorkerState{};
+      state.generation = job.generation;
+      return;
+    }
+    NativeSegmentClock clock;
+    clock.turn_id = job.identity.turn_id;
+    clock.message_id = job.identity.segment_message_id;
+    clock.sequence = static_cast<std::int64_t>(job.identity.segment_index);
+    clock.started_at_seconds = state.audio_start_seconds;
+    clock.duration_seconds = static_cast<double>(job.total_samples)
+        / std::max<std::uint32_t>(1, state.sample_rate);
+    clock.audio_serial = state.audio_serial;
+    clock.generation = job.generation;
     g_audio_end_seconds.store(
         state.audio_start_seconds
         + static_cast<double>(job.total_samples)
@@ -2639,10 +3013,12 @@ private:
       std::scoped_lock signal_lock(g_audio_signal_mutex);
       g_audio_rms.clear();
     }
+    CompleteIncrementalAudio(job.identity, clock, true);
     state.active = false;
     state.identity = {};
     state.samples = 0;
     state.sample_rate = 0;
+    state.audio_serial = 0;
     state.audio_clock_started = false;
     state.audio_start_seconds = 0.0;
     state.rms_sum = 0.0;

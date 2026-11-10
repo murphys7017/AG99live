@@ -43,7 +43,7 @@ The current executable, `ag99-render-host`, verifies:
   memory through the native `waveOut` path, without a temporary audio file;
 - OLV type=2 PCM frames can be admitted through a bounded single audio worker,
   written to bounded `waveOut` blocks, and acknowledged with cumulative
-  `control.audio_credit` messages; this path remains capability-gated off;
+  `control.audio_credit` messages;
 - configured eye-blink and lip-sync parameter IDs are attached to the loaded
   idle motions, matching the WebSDK motion setup.
 - `system.model_sync` is consumed to cache the selected semantic axis profile;
@@ -106,17 +106,19 @@ The current Adapter still emits `engine.motion_intent.v4`. The native host also
 accepts `engine.parameter_plan.v3` segments directly; translating the remaining
 TypeScript compiler and runtime behavior remains separate migration work.
 
-The OLV PCM worker currently owns bounded audio admission and device sink
-teardown, but it does not yet attach the stream to the Native lip-sync clock,
-PlaybackTimeline, or incremental text/motion presentation. Keep
-`persona_segment_stream_enabled=false` until those three paths and live device
-acceptance are complete. Sink, queue, and credit-send failures now interrupt
-the affected Turn and clear the pending incremental jobs instead of leaving an
-accepted protocol stream hanging. Audio end status, reason, and total sample
-count are also checked before the worker closes a stream. When enabled, text
-deltas update the Native preview and accepted PCM updates the existing 50 Hz
-audio RMS signal; Timeline ownership and incremental motion execution remain
-separate pending work.
+The Native OLV path owns bounded audio admission, device sink teardown, the
+existing 50 Hz RMS/lip-sync signal, incremental text preview, and final motion
+release through the same Native ModelEngine queue used by complete segments.
+Motion updates are coalesced to the latest validated payload and released after
+the corresponding audio stream drains, matching the frontend's incremental
+timeline contract. A completed OLV turn sends `control.playback_finished` only
+after text, PCM, and motion have reached terminal state. Sink, queue, and
+credit-send failures interrupt the affected Turn and clear the pending
+incremental jobs instead of leaving an accepted protocol stream hanging. Audio
+end status, reason, and total sample count are checked before the worker closes
+a stream. The capability is advertised by default; paired Adapter/Core/TTS,
+real audio-device, and visible Live2D acceptance is still required before
+claiming production parity.
 
 The native frame path samples its monotonic clock once per frame and reuses that
 timestamp for audio, parameter mixing, and motion timing. Parameter contribution
