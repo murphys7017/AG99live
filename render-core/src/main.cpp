@@ -1690,6 +1690,7 @@ private:
     bool active = false;
     ag99::runtime::IncrementalIdentity identity;
     std::uint64_t generation = 0;
+    std::uint64_t samples = 0;
     std::unordered_map<std::string, std::pair<std::uint64_t, std::uint64_t>>
         credits;
   };
@@ -2452,6 +2453,7 @@ private:
           } else {
             state.active = true;
             state.identity = identity;
+            state.samples = 0;
           }
         }
         if (!output_open_failed) {
@@ -2475,6 +2477,7 @@ private:
       auto& credit = state.credits[identity.persona_result_id];
       credit.first += job.frame.pcm.size();
       credit.second += 1;
+      state.samples += job.frame.pcm.size() / 2;
       if (!SendIncrementalAudioCredit(
               job.frame, credit.first, credit.second)) {
         std::cerr << "[runtime] failed to send incremental audio credit\n";
@@ -2497,6 +2500,28 @@ private:
       state.generation = job.generation;
       return;
     }
+    if (job.status != ag99::runtime::IncrementalOutputStatus::Completed) {
+      {
+        std::scoped_lock sink_lock(g_incremental_audio_output_mutex);
+        g_incremental_audio_output.WaitForDrain();
+        g_incremental_audio_output.Stop();
+      }
+      FailIncrementalAudio(
+          job.identity,
+          job.reason.empty()
+              ? "incremental_audio_stream_failed"
+              : job.reason);
+      state = IncrementalWorkerState{};
+      state.generation = job.generation;
+      return;
+    }
+    if (job.total_samples != state.samples) {
+      FailIncrementalAudio(job.identity, "incremental_audio_total_samples_mismatch");
+      StopIncrementalAudio();
+      state = IncrementalWorkerState{};
+      state.generation = job.generation;
+      return;
+    }
     {
       std::scoped_lock sink_lock(g_incremental_audio_output_mutex);
       if (!g_incremental_audio_output.WaitForDrain()) {
@@ -2506,6 +2531,7 @@ private:
     }
     state.active = false;
     state.identity = {};
+    state.samples = 0;
   }
 
   void AudioWorkerLoop() {

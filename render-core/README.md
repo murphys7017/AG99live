@@ -112,7 +112,8 @@ PlaybackTimeline, or incremental text/motion presentation. Keep
 `persona_segment_stream_enabled=false` until those three paths and live device
 acceptance are complete. Sink, queue, and credit-send failures now interrupt
 the affected Turn and clear the pending incremental jobs instead of leaving an
-accepted protocol stream hanging.
+accepted protocol stream hanging. Audio end status, reason, and total sample
+count are also checked before the worker closes a stream.
 
 The native frame path samples its monotonic clock once per frame and reuses that
 timestamp for audio, parameter mixing, and motion timing. Parameter contribution
