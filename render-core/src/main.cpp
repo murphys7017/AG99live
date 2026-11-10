@@ -482,6 +482,15 @@ void StopCurrentAudio(
 void StopIncrementalAudio() {
   std::scoped_lock lock(g_incremental_audio_output_mutex);
   g_incremental_audio_output.Stop();
+  g_audio_serial.fetch_add(1);
+  g_audio_end_seconds.store(0.0);
+  g_audio_start_seconds.store(0.0);
+  g_audio_level.store(0.0f);
+  ResetSpeechSignal();
+  {
+    std::scoped_lock signal_lock(g_audio_signal_mutex);
+    g_audio_rms.clear();
+  }
 }
 
 struct AudioPlayback {
@@ -1691,6 +1700,11 @@ private:
     ag99::runtime::IncrementalIdentity identity;
     std::uint64_t generation = 0;
     std::uint64_t samples = 0;
+    std::uint32_t sample_rate = 0;
+    bool audio_clock_started = false;
+    double audio_start_seconds = 0.0;
+    double rms_sum = 0.0;
+    std::size_t rms_samples = 0;
     std::unordered_map<std::string, std::pair<std::uint64_t, std::uint64_t>>
         credits;
   };
@@ -1726,6 +1740,7 @@ private:
     bool acknowledgement_queued = false;
     bool acknowledgement_claimed = false;
     std::unordered_map<std::string, SegmentPlaybackState> segments;
+    std::unordered_map<std::string, std::string> incremental_text;
   };
 
   enum class PlaybackAckSendResult {
@@ -2162,6 +2177,42 @@ private:
     if (!kNativeIncrementalOutputEnabled) {
       return;
     }
+    if (event.resource == ag99::runtime::IncrementalOutputResource::Text) {
+      const auto& identity = event.identity;
+      if (event.kind == ag99::runtime::IncrementalOutputEventKind::Start) {
+        std::scoped_lock lock(playback_mutex_);
+        const auto turn = playback_turns_.find(identity.turn_id);
+        if (turn != playback_turns_.end() && !turn->second.synth_finished) {
+          turn->second.incremental_text[identity.segment_message_id].clear();
+        }
+      } else if (event.kind
+          == ag99::runtime::IncrementalOutputEventKind::TextDelta) {
+        std::string text;
+        {
+          std::scoped_lock lock(playback_mutex_);
+          const auto turn = playback_turns_.find(identity.turn_id);
+          if (turn == playback_turns_.end() || turn->second.synth_finished) {
+            return;
+          }
+          auto& accumulated = turn->second.incremental_text[
+              identity.segment_message_id];
+          accumulated += event.text;
+          text = accumulated;
+          latest_assistant_segment_ = AssistantSegment{
+              identity.turn_id,
+              identity.segment_message_id,
+              text,
+              false};
+        }
+        std::cout << "[assistant] " << text << '\n';
+        g_input_state.SetPreviewText(WidenUtf8(text));
+        g_input_state.SetFeedbackAvailable(false);
+        g_input_state.SetFeedbackApproved(false);
+        g_input_state.SetStatusText(L"播放中");
+        NotifyInputRuntimeStateChanged();
+      }
+      return;
+    }
     if (event.resource != ag99::runtime::IncrementalOutputResource::Audio
         || event.kind != ag99::runtime::IncrementalOutputEventKind::End
         || !event.length.has_value()) {
@@ -2411,6 +2462,48 @@ private:
     return websocket_.send_text(credit.dump());
   }
 
+  void UpdateIncrementalAudioSignal(
+      std::span<const std::uint8_t> pcm,
+      std::uint32_t sample_rate,
+      std::uint32_t channels,
+      IncrementalWorkerState& state) {
+    if (channels != 1 || sample_rate == 0 || pcm.size() % 2 != 0) {
+      return;
+    }
+    if (!state.audio_clock_started) {
+      state.audio_clock_started = true;
+      state.sample_rate = sample_rate;
+      state.audio_start_seconds = NowSeconds();
+      g_audio_serial.fetch_add(1);
+      g_audio_start_seconds.store(state.audio_start_seconds);
+      g_audio_end_seconds.store(state.audio_start_seconds);
+      {
+        std::scoped_lock signal_lock(g_audio_signal_mutex);
+        g_audio_rms.clear();
+      }
+    }
+    const auto* samples = reinterpret_cast<const std::int16_t*>(pcm.data());
+    const auto sample_count = pcm.size() / sizeof(std::int16_t);
+    const auto samples_per_bucket = std::max<std::size_t>(1, sample_rate / 50);
+    for (std::size_t index = 0; index < sample_count; ++index) {
+      const auto normalized = static_cast<double>(samples[index]) / 32768.0;
+      state.rms_sum += normalized * normalized;
+      ++state.rms_samples;
+      if (state.rms_samples >= samples_per_bucket) {
+        const auto rms = static_cast<float>(std::sqrt(
+            state.rms_sum / static_cast<double>(state.rms_samples)));
+        std::scoped_lock signal_lock(g_audio_signal_mutex);
+        g_audio_rms.push_back(rms);
+        state.rms_sum = 0.0;
+        state.rms_samples = 0;
+      }
+    }
+    state.samples += sample_count;
+    g_audio_end_seconds.store(
+        state.audio_start_seconds
+        + static_cast<double>(state.samples) / sample_rate);
+  }
+
   void ProcessIncrementalAudioJob(
       IncrementalAudioJob job,
       IncrementalWorkerState& state) {
@@ -2474,10 +2567,14 @@ private:
         state.generation = job.generation;
         return;
       }
+      UpdateIncrementalAudioSignal(
+          job.frame.pcm,
+          job.frame.sample_rate,
+          job.frame.channels,
+          state);
       auto& credit = state.credits[identity.persona_result_id];
       credit.first += job.frame.pcm.size();
       credit.second += 1;
-      state.samples += job.frame.pcm.size() / 2;
       if (!SendIncrementalAudioCredit(
               job.frame, credit.first, credit.second)) {
         std::cerr << "[runtime] failed to send incremental audio credit\n";
@@ -2528,6 +2625,14 @@ private:
         std::cerr << "[runtime] incremental PCM drain timed out\n";
       }
       g_incremental_audio_output.Stop();
+    }
+    g_audio_end_seconds.store(
+        state.audio_start_seconds
+        + static_cast<double>(job.total_samples)
+            / std::max<std::uint32_t>(1, state.sample_rate));
+    {
+      std::scoped_lock signal_lock(g_audio_signal_mutex);
+      g_audio_rms.clear();
     }
     state.active = false;
     state.identity = {};
