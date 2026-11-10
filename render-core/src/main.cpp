@@ -2001,6 +2001,18 @@ private:
             ++it;
           }
         }
+        for (auto it = incremental_audio_queue_.begin();
+             it != incremental_audio_queue_.end();) {
+          if (it->identity.turn_id == turn_id) {
+            if (it->kind == IncrementalAudioJob::Kind::Frame) {
+              incremental_audio_queued_bytes_ -= it->frame.pcm.size();
+              incremental_audio_queued_frames_ -= 1;
+            }
+            it = incremental_audio_queue_.erase(it);
+          } else {
+            ++it;
+          }
+        }
         playback_ack_queue_.erase(
             std::remove_if(
                 playback_ack_queue_.begin(),
@@ -2020,6 +2032,7 @@ private:
       if (audio_serial_to_stop) {
         StopCurrentAudio(*audio_serial_to_stop);
       }
+      StopIncrementalAudio();
       audio_queue_condition_.notify_one();
     }
   }
@@ -2160,14 +2173,20 @@ private:
     job.status = event.status;
     job.reason = std::move(event.reason);
     job.generation = connection_generation_.load();
+    bool rejected = false;
     {
       std::scoped_lock lock(audio_queue_mutex_);
       if (closing_.load()
           || incremental_audio_queue_.size() >= kMaxIncrementalAudioJobs) {
         std::cerr << "[runtime] incremental audio job capacity exceeded\n";
-        return;
+        rejected = true;
+      } else {
+        incremental_audio_queue_.push_back(std::move(job));
       }
-      incremental_audio_queue_.push_back(std::move(job));
+    }
+    if (rejected) {
+      FailIncrementalAudio(event.identity, "incremental_audio_job_capacity_exceeded");
+      return;
     }
     audio_queue_condition_.notify_one();
   }
@@ -2181,6 +2200,7 @@ private:
     job.identity = frame.identity;
     job.frame = std::move(frame);
     job.generation = connection_generation_.load();
+    bool rejected = false;
     {
       std::scoped_lock lock(audio_queue_mutex_);
       const auto next_bytes = incremental_audio_queued_bytes_
@@ -2190,13 +2210,47 @@ private:
           || next_frames > kIncrementalAudioWindowFrames
           || incremental_audio_queue_.size() >= kMaxIncrementalAudioJobs) {
         std::cerr << "[runtime] incremental audio admission window exceeded\n";
-        return;
+        rejected = true;
+      } else {
+        incremental_audio_queued_bytes_ = next_bytes;
+        incremental_audio_queued_frames_ = next_frames;
+        incremental_audio_queue_.push_back(std::move(job));
       }
-      incremental_audio_queued_bytes_ = next_bytes;
-      incremental_audio_queued_frames_ = next_frames;
-      incremental_audio_queue_.push_back(std::move(job));
+    }
+    if (rejected) {
+      FailIncrementalAudio(
+          job.identity, "incremental_audio_credit_window_exceeded");
+      return;
     }
     audio_queue_condition_.notify_one();
+  }
+
+  void FailIncrementalAudio(
+      const ag99::runtime::IncrementalIdentity& identity,
+      std::string_view reason) {
+    {
+      std::scoped_lock lock(playback_mutex_);
+      if (!playback_turns_.contains(identity.turn_id)) {
+        return;
+      }
+    }
+    const auto interrupt = ag99::runtime::build_envelope(
+        "control.interrupt",
+        ag99::runtime::Json::object(),
+        identity.turn_id,
+        "frontend");
+    {
+      std::scoped_lock transport_lock(transport_mutex_);
+      if (!closing_.load() && !websocket_.send_text(interrupt.dump())) {
+        std::cerr << "[runtime] failed to interrupt incremental audio turn: "
+                  << identity.turn_id << '\n';
+      }
+    }
+    std::cerr << "[runtime] incremental audio failed: " << reason << '\n';
+    RetireTurn(identity.turn_id, true);
+    if (on_turn_interrupted_) {
+      on_turn_interrupted_(identity.turn_id);
+    }
   }
 
   std::uint64_t InvalidateConnection() {
@@ -2379,12 +2433,14 @@ private:
               || state.identity.segment_message_id != identity.segment_message_id
               || state.identity.stream_id != identity.stream_id)) {
         std::cerr << "[runtime] incremental audio crossed an open segment\n";
+        FailIncrementalAudio(identity, "incremental_audio_crossed_open_segment");
         StopIncrementalAudio();
         state = IncrementalWorkerState{};
         state.generation = job.generation;
         return;
       }
       bool accepted = false;
+      bool output_open_failed = false;
       {
         std::scoped_lock sink_lock(g_incremental_audio_output_mutex);
         if (!state.active) {
@@ -2392,15 +2448,25 @@ private:
                   job.frame.sample_rate,
                   static_cast<std::uint16_t>(job.frame.channels))) {
             std::cerr << "[runtime] failed to open incremental PCM output\n";
-            return;
+            output_open_failed = true;
+          } else {
+            state.active = true;
+            state.identity = identity;
           }
-          state.active = true;
-          state.identity = identity;
         }
-        accepted = g_incremental_audio_output.Append(job.frame.pcm);
+        if (!output_open_failed) {
+          accepted = g_incremental_audio_output.Append(job.frame.pcm);
+        }
+      }
+      if (output_open_failed) {
+        FailIncrementalAudio(identity, "incremental_audio_output_open_failed");
+        state = IncrementalWorkerState{};
+        state.generation = job.generation;
+        return;
       }
       if (!accepted) {
         std::cerr << "[runtime] failed to accept incremental PCM frame\n";
+        FailIncrementalAudio(identity, "incremental_audio_output_append_failed");
         StopIncrementalAudio();
         state = IncrementalWorkerState{};
         state.generation = job.generation;
@@ -2412,6 +2478,7 @@ private:
       if (!SendIncrementalAudioCredit(
               job.frame, credit.first, credit.second)) {
         std::cerr << "[runtime] failed to send incremental audio credit\n";
+        FailIncrementalAudio(identity, "incremental_audio_credit_send_failed");
       }
       return;
     }
@@ -2423,6 +2490,8 @@ private:
         || state.identity.segment_message_id != job.identity.segment_message_id
         || state.identity.stream_id != job.identity.stream_id) {
       std::cerr << "[runtime] incremental audio end identity mismatch\n";
+      FailIncrementalAudio(
+          job.identity, "incremental_audio_end_identity_mismatch");
       StopIncrementalAudio();
       state = IncrementalWorkerState{};
       state.generation = job.generation;

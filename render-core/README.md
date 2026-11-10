@@ -110,7 +110,9 @@ The OLV PCM worker currently owns bounded audio admission and device sink
 teardown, but it does not yet attach the stream to the Native lip-sync clock,
 PlaybackTimeline, or incremental text/motion presentation. Keep
 `persona_segment_stream_enabled=false` until those three paths and live device
-acceptance are complete.
+acceptance are complete. Sink, queue, and credit-send failures now interrupt
+the affected Turn and clear the pending incremental jobs instead of leaving an
+accepted protocol stream hanging.
 
 The native frame path samples its monotonic clock once per frame and reuses that
 timestamp for audio, parameter mixing, and motion timing. Parameter contribution
