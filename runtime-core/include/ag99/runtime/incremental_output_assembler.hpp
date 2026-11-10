@@ -43,6 +43,7 @@ class IncrementalOutputAssembler final {
     std::string persona_result_id;
     std::uint64_t segment_index = 0;
     std::size_t text_units = 0;
+    std::size_t text_codepoints = 0;
     std::vector<std::optional<StreamState>> streams =
         std::vector<std::optional<StreamState>>(3);
   };
@@ -58,6 +59,7 @@ class IncrementalOutputAssembler final {
   static bool is_terminal(StreamStatus status);
   static StreamStatus status_for(IncrementalOutputStatus status);
   static std::size_t utf16_length(std::string_view value);
+  static std::size_t utf8_codepoint_length(std::string_view value);
 
   IngestResult validate_event_identity(
       const IncrementalIdentity& identity,

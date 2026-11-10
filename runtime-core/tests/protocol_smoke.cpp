@@ -292,6 +292,18 @@ void test_incremental_output_protocol() {
     rejected = true;
   }
   assert(rejected);
+
+  auto wrong_source = make_incremental_event(
+      "output.text_stream_start", make_incremental_identity("text-2", 0));
+  wrong_source["source"] = "frontend";
+  rejected = false;
+  try {
+    (void)ag99::runtime::parse_incremental_output_event(
+        ag99::runtime::parse_envelope(wrong_source));
+  } catch (const ag99::runtime::ProtocolError&) {
+    rejected = true;
+  }
+  assert(rejected);
 }
 
 void test_incremental_output_audio_frame() {
@@ -419,8 +431,9 @@ void test_incremental_synthesis_boundary() {
   emit("output.audio_stream_start", "audio-synth", 0,
        {{"encoding", "pcm16le"}, {"sample_rate", 32000}, {"channels", 1}});
   emit("output.motion_stream_start", "motion-synth", 0);
-  emit("output.text_stream_end", "text-synth", 1,
-       {{"status", "completed"}, {"text_length", 0}});
+  emit("output.text_stream_delta", "text-synth", 1, {{"text", "😀"}});
+  emit("output.text_stream_end", "text-synth", 2,
+       {{"status", "completed"}, {"text_length", 1}});
   emit("output.audio_stream_end", "audio-synth", 1,
        {{"status", "completed"}, {"total_samples", 0}});
   emit("output.motion_stream_end", "motion-synth", 1,
@@ -742,6 +755,19 @@ void test_audio_control_builders() {
   assert(credit.at("payload").at("schema_version").get<std::string>()
       == ag99::runtime::kAudioCreditSchema);
   assert(credit.at("payload").at("released_bytes") == 4096);
+
+  bool credit_rejected = false;
+  try {
+    (void)ag99::runtime::build_control_audio_credit(
+        "turn-1",
+        {.core_turn_id = "core-1",
+         .persona_result_id = "persona-1",
+         .released_bytes = 2,
+         .released_frames = 2});
+  } catch (const ag99::runtime::ProtocolError&) {
+    credit_rejected = true;
+  }
+  assert(credit_rejected);
 }
 
 void test_desktop_settings_boundary() {

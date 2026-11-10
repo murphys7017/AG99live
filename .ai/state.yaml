@@ -21,6 +21,9 @@ native_olv_protocol_boundary_20261110:
     and RuntimeProtocolSession dispatch. Both runtime-core and render-core
     Release builds pass, and Git whitespace checks pass. Live Adapter/Core/
     WebSocket and real audio/Live2D playback acceptance remain outstanding.
+    The review pass additionally corrected Unicode codepoint end lengths,
+    adapter-source validation, cumulative audio-credit consistency, and the
+    Native connection-state update after capability-send failure.
   limitations: >-
     This is still a receive/validation boundary only. It does not yet enforce
     audio credit or backpressure, bounded playback queues, PCM sink timing, or

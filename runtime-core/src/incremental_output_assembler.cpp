@@ -87,6 +87,47 @@ std::size_t IncrementalOutputAssembler::utf16_length(std::string_view value) {
   return length;
 }
 
+std::size_t IncrementalOutputAssembler::utf8_codepoint_length(
+    std::string_view value) {
+  std::size_t length = 0;
+  for (std::size_t offset = 0; offset < value.size();) {
+    const auto byte = static_cast<unsigned char>(value[offset++]);
+    if (byte < 0x80) {
+      ++length;
+      continue;
+    }
+    std::size_t continuation_count = 0;
+    if (byte >= 0xc2 && byte <= 0xdf) {
+      continuation_count = 1;
+    } else if (byte >= 0xe0 && byte <= 0xef) {
+      continuation_count = 2;
+    } else if (byte >= 0xf0 && byte <= 0xf4) {
+      continuation_count = 3;
+    } else {
+      return std::numeric_limits<std::size_t>::max();
+    }
+    if (offset + continuation_count > value.size()) {
+      return std::numeric_limits<std::size_t>::max();
+    }
+    std::uint32_t code_point = byte & ((1U << (6 - continuation_count)) - 1U);
+    for (std::size_t index = 0; index < continuation_count; ++index) {
+      const auto continuation = static_cast<unsigned char>(value[offset++]);
+      if ((continuation & 0xc0) != 0x80) {
+        return std::numeric_limits<std::size_t>::max();
+      }
+      code_point = (code_point << 6) | (continuation & 0x3f);
+    }
+    if ((continuation_count == 2 && code_point < 0x800)
+        || (continuation_count == 3 && code_point < 0x10000)
+        || code_point > 0x10ffff
+        || (code_point >= 0xd800 && code_point <= 0xdfff)) {
+      return std::numeric_limits<std::size_t>::max();
+    }
+    ++length;
+  }
+  return length;
+}
+
 bool IncrementalOutputAssembler::start_turn(std::string_view turn_id) {
   const std::string id(turn_id);
   if (id.empty() || completed_turn_ids_.contains(id)
@@ -244,7 +285,9 @@ IncrementalOutputAssembler::ingest(IncrementalOutputEvent event) {
   }
   if (event.kind == IncrementalOutputEventKind::TextDelta) {
     const auto delta_units = utf16_length(event.text);
+    const auto delta_codepoints = utf8_codepoint_length(event.text);
     if (delta_units == std::numeric_limits<std::size_t>::max()
+        || delta_codepoints == std::numeric_limits<std::size_t>::max()
         || segment->text_units > kMaxSegmentTextUnits - delta_units) {
       return {false, "incremental_output_text_capacity_or_delta_invalid"};
     }
@@ -256,6 +299,7 @@ IncrementalOutputAssembler::ingest(IncrementalOutputEvent event) {
       return {false, "incremental_output_text_capacity_or_delta_invalid"};
     }
     segment->text_units += delta_units;
+    segment->text_codepoints += delta_codepoints;
     ++stream->next_seq;
     return {true, {}};
   }
@@ -269,7 +313,7 @@ IncrementalOutputAssembler::ingest(IncrementalOutputEvent event) {
     return {false, "incremental_output_end_status_invalid"};
   }
   if (event.resource == IncrementalOutputResource::Text) {
-    if (!event.length.has_value() || *event.length != segment->text_units) {
+    if (!event.length.has_value() || *event.length != segment->text_codepoints) {
       return {false, "incremental_output_end_length_mismatch"};
     }
   } else if (event.resource == IncrementalOutputResource::Audio) {

@@ -780,6 +780,9 @@ std::optional<IncrementalOutputEvent> parse_incremental_output_event(
   if (!found) {
     return std::nullopt;
   }
+  if (envelope.source != "adapter") {
+    throw ProtocolError("incremental output source must be adapter");
+  }
   require_object(envelope.payload, "payload");
   if (!envelope.turn_id.has_value()) {
     throw ProtocolError("incremental output requires turn_id");
@@ -1245,9 +1248,12 @@ Json build_control_audio_credit(
     const AudioCredit& credit,
     std::optional<std::string_view> message_id,
     std::optional<std::string_view> timestamp) {
-  if (turn_id.empty() || credit.core_turn_id.empty()
-      || credit.persona_result_id.empty()
-      || credit.released_bytes % 2 != 0
+  validate_incremental_identity_string(turn_id, "turn_id");
+  validate_incremental_identity_string(credit.core_turn_id, "core_turn_id");
+  validate_incremental_identity_string(
+      credit.persona_result_id, "persona_result_id");
+  if (credit.released_bytes % 2 != 0
+      || credit.released_bytes < credit.released_frames * 2
       || credit.released_bytes > kMaxJavaScriptSafeInteger
       || credit.released_frames > kMaxJavaScriptSafeInteger) {
     throw ProtocolError("invalid control.audio_credit input");

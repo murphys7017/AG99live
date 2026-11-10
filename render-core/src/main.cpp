@@ -1290,7 +1290,6 @@ public:
               });
             },
         });
-    g_runtime_connected.store(connected);
     if (connected) {
       const auto settings = ag99::runtime::build_system_desktop_runtime_settings(
           kNativeIncrementalOutputEnabled);
@@ -1299,6 +1298,7 @@ public:
         connected = false;
       }
     }
+    g_runtime_connected.store(connected);
     NotifyInputConnectionChanged();
     return connected;
   }
