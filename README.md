@@ -6,7 +6,7 @@ AG99live 是 AG99 的桌面表现端：加载 Live2D 模型，播放语音，并
 
 Windows · Electron · Live2D Cubism · Spout2
 
-[下载桌面版](https://github.com/murphys7017/AG99live/releases) · [快速开始](#快速开始) · [功能介绍](#体验亮点) · [OBS 设置](#在-obs-中使用) · [开发文档](docs/README.md)
+[下载桌面版](https://github.com/murphys7017/AG99live/releases) · [快速开始](#快速开始) · [功能介绍](#体验亮点) · [实机演示视频](https://space.bilibili.com/41761329/lists?sid=8438550) · [OBS 设置](#在-obs-中使用) · [开发文档](docs/README.md)
 
 ![AG99live 桌面陪伴场景插画](docs/assets/readme/readme-cover.jpg)
 

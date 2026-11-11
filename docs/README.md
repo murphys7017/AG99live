@@ -25,6 +25,7 @@ AG99 是以桌面体验为中心的智能体主应用；AG99live 是 AG99 的身
 | 当前动作表现链路、资源边界和优化优先级 | [当前实现与交互表现基线](01-架构与结构/10-当前实现与交互表现基线.md) |
 | 动作由哪条路径生成，Persona 分段如何绑定动作与 TTS | [动作生成与 Persona 分段关联](01-架构与结构/07-动作生成与Persona分段关联.md) |
 | 已公开的动作生成模型、基础模型和版本标签 | [Hugging Face 动作生成模型](https://huggingface.co/AkiPolaris777/ag99live-live2d-expression-model) |
+| 实机演示视频 | [Bilibili 演示播放列表](https://space.bilibili.com/41761329/lists?sid=8438550) |
 | Persona 动作生命周期重构目标与阶段 0 基线 | [统一重构计划](01-架构与结构/08-Persona动作生命周期统一重构计划.md)、[阶段 0 基线](01-架构与结构/09-Persona动作生命周期阶段0基线.md) |
 | 连续存在感、注意力表现层目标与实施阶段 | [连续存在感与注意力表现层方案](01-架构与结构/09-连续存在感与注意力表现层方案.md) |
 | ModelEngine 的职责和执行边界 | [ModelEngine 边界与分层设计](02-设计文档/01-ModelEngine边界与分层设计.md) |
