@@ -8,6 +8,7 @@ export const INBOUND_MESSAGE_TYPES = {
   SYSTEM_MOTION_TUNING_SAMPLES_STATE: "system.motion_tuning_samples_state",
   SYSTEM_MOTION_LAB_RAW_EVENT_RECORDED: "system.motion_lab_raw_event_recorded",
   SYSTEM_DESKTOP_SETTINGS_QUERY: "system.desktop_settings_query",
+  SYSTEM_DESKTOP_SETTINGS_SYNC_COMPLETE: "system.desktop_settings_sync_complete",
   SYSTEM_HISTORY_LIST: "system.history_list",
   SYSTEM_HISTORY_CREATED: "system.history_created",
   SYSTEM_HISTORY_DATA: "system.history_data",

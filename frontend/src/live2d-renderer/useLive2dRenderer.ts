@@ -13,6 +13,7 @@ import {
   selectLive2dRuntimeEffectsSettings,
   type Live2dPresentationSettings,
 } from "./settings";
+import { createWindowLive2dRuntimePort } from "../live2d/runtimePort.js";
 
 type RenderStatus = "idle" | "loading" | "ready" | "error";
 
@@ -107,6 +108,7 @@ export function useLive2dRenderer(
   selectedModel: Ref<ModelSummary | null>,
   settings: Ref<Live2dPresentationSettings>,
 ) {
+  const runtime = createWindowLive2dRuntimePort();
   const containerRef = ref<HTMLDivElement | null>(null);
   const canvasRef = ref<HTMLCanvasElement | null>(null);
   const renderStatus = ref<RenderStatus>("idle");
@@ -259,12 +261,9 @@ export function useLive2dRenderer(
       if (!isCurrentModelRequest(requestVersion, model.model_url)) {
         return;
       }
-      const adapter = window.getLAppAdapter?.();
-      if (adapter?.applyRuntimeEffectsSettings) {
-        adapter.applyRuntimeEffectsSettings(
-          selectLive2dRuntimeEffectsSettings(settings.value, model),
-        );
-      }
+      runtime.applyRuntimeEffectsSettings(
+        selectLive2dRuntimeEffectsSettings(settings.value, model),
+      );
       const didResizeCanvas = syncCanvasSize();
       resizeLive2D.value = () => LAppDelegate.getInstance().onResize();
       if (didResizeCanvas) {
@@ -376,21 +375,7 @@ export function useLive2dRenderer(
       if (renderStatus.value !== "ready") {
         return;
       }
-      const adapter = window.getLAppAdapter?.();
-      if (!adapter?.applyRuntimeEffectsSettings) {
-        const error = "live2d_runtime_effects_adapter_unavailable";
-        console.error(`[AG99live] ${error}`);
-        renderError.value = error;
-        renderStatus.value = "error";
-        clearMountedRendererState();
-        modelLoadQueue = modelLoadQueue
-          .then(() => releaseRenderer(error))
-          .catch((releaseError) => {
-            console.error("[AG99live] Failed to terminate Live2D renderer", releaseError);
-          });
-        return;
-      }
-      adapter.applyRuntimeEffectsSettings(
+      runtime.applyRuntimeEffectsSettings(
         selectLive2dRuntimeEffectsSettings(nextSettings, selectedModel.value),
       );
     },

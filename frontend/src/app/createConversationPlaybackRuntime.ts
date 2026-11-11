@@ -13,6 +13,7 @@ import type {
   NormalizedMotionPayload,
 } from "../types/motion.js";
 import type { useTurnPlaybackSessionStore } from "../turn-playback/useTurnPlaybackSessionStore.js";
+import type { Live2dRuntimePort } from "../live2d/runtimePort.js";
 import {
   createAppPlaybackTimelineRuntime,
   type configurePlaybackTimelineMotionRuntime,
@@ -38,6 +39,7 @@ export function createConversationPlaybackRuntime(options: {
   modelSync: ModelSyncInstance;
   normalizeMotionPayload: MotionPayloadNormalizer;
   desktopRuntimeSettings: DesktopRuntimeSettingsAccess;
+  live2dRuntime: Live2dRuntimePort;
 }): ConversationPlaybackRuntime {
   let motionRuntime: PlaybackTimelineMotionRuntime | null = null;
   function requireMotionRuntime(): PlaybackTimelineMotionRuntime {
@@ -69,6 +71,7 @@ export function createConversationPlaybackRuntime(options: {
     motionSink: requiredMotionTimelineSink,
     audioSink,
     speechOutputRuntime,
+    live2dRuntime: options.live2dRuntime,
     onAudioTimelineStarted: (turnId, messageId, timeline) => {
       requireMotionRuntime().handleAudioTimelineStarted(turnId, messageId, timeline);
     },

@@ -12,6 +12,7 @@ import type {
 import { isObject, normalizeText } from "../utils/guards.js";
 import { parseSemanticParameterPlan } from "../model-engine/planParser.js";
 import type { MotionPlaybackClockReader } from "../model-engine/contracts.js";
+import type { Live2dRuntimePort } from "../live2d/runtimePort.js";
 
 type PreviewPlayerStatus = "idle" | "preparing" | "playing" | "finished" | "failed";
 
@@ -34,7 +35,7 @@ interface PlayMotionResourceOptions {
   onFinished?: (event: DirectParameterPlanTerminalEvent) => void;
 }
 
-export function usePreviewMotionPlayer() {
+export function usePreviewMotionPlayer(runtime: Live2dRuntimePort) {
   const state = reactive({
     status: "idle" as PreviewPlayerStatus,
     message: "等待播放动作计划。",
@@ -93,15 +94,11 @@ export function usePreviewMotionPlayer() {
   }
 
   function stopPlan(reason = "stopped"): void {
-    const adapter = window.getLAppAdapter?.();
     const stopErrors: unknown[] = [];
     const directPlanRunId = activeDirectPlanRunId;
     if (directPlanRunId) {
       try {
-        if (!adapter || typeof adapter.stopDirectParameterPlan !== "function") {
-          throw new Error("direct_parameter_plan_stop_api_unavailable");
-        }
-        adapter.stopDirectParameterPlan(reason, "stopped");
+        runtime.stopDirectParameterPlan(reason, "stopped");
         if (activeDirectPlanRunId === directPlanRunId) {
           throw new Error("direct_parameter_plan_stop_not_settled");
         }
@@ -196,18 +193,6 @@ export function usePreviewMotionPlayer() {
       profileRevision: playbackPlan.plan.profile_revision,
     });
 
-    const adapter = window.getLAppAdapter?.();
-    if (!adapter || typeof adapter.startDirectParameterPlan !== "function") {
-      const reason = "动作计划无法执行：Live2D 运行时未提供 Direct Parameter 接口。";
-      console.warn("[MotionPlayer]", reason);
-      if (!hadActivePlayback) {
-        state.status = "failed";
-        state.message = reason;
-        state.finishedAt = new Date().toISOString();
-      }
-      return { status: "rejected", reason: "direct_parameter_plan_api_unavailable" };
-    }
-
     if (activeMotionResourceRunId) {
       try {
         stopActiveMotionResource("direct_parameter_plan_replaced");
@@ -228,7 +213,7 @@ export function usePreviewMotionPlayer() {
       durationMs: playbackPlan.totalDurationMs,
       requiresPlaybackClock: options.requiresPlaybackClock === true,
     });
-    const started = adapter.startDirectParameterPlan(playbackPlan.plan, {
+    const started = runtime.startDirectParameterPlan(playbackPlan.plan, {
       runId: playbackRunId,
       playbackClockReader,
       onTerminal: (event: DirectParameterPlanTerminalEvent) => {
@@ -256,17 +241,13 @@ export function usePreviewMotionPlayer() {
     console.info("[MotionPlayer] startDirectParameterPlan returned.", {
       runId: playbackRunId,
       started,
-      runtimeError: typeof adapter.getDirectParameterPlanError === "function"
-        ? normalizeText(adapter.getDirectParameterPlanError())
-        : "",
+      runtimeError: normalizeText(runtime.getDirectParameterPlanError()),
     });
     if (!started) {
       if (activeDirectPlanRunId === playbackRunId) {
         activeDirectPlanRunId = previousDirectPlanRunId;
       }
-      const runtimeReason = typeof adapter.getDirectParameterPlanError === "function"
-        ? normalizeText(adapter.getDirectParameterPlanError())
-        : "";
+      const runtimeReason = normalizeText(runtime.getDirectParameterPlanError());
       const reason = runtimeReason
         ? `动作计划执行失败：${runtimeReason}`
         : "动作计划执行失败：Direct Parameter 计划被运行时拒绝。";
@@ -345,22 +326,6 @@ export function usePreviewMotionPlayer() {
       }
       return { status: "rejected", reason };
     }
-    const adapter = window.getLAppAdapter?.();
-    if (
-      !adapter
-      || typeof adapter.startMotion !== "function"
-      || typeof adapter.stopMotion !== "function"
-    ) {
-      const reason = "完整动作资源无法执行：Live2D 运行时缺少 startMotion 或 stopMotion 接口。";
-      console.warn("[MotionPlayer]", reason);
-      if (!hadActivePlayback) {
-        state.status = "failed";
-        state.message = reason;
-        state.finishedAt = new Date().toISOString();
-      }
-      return { status: "rejected", reason };
-    }
-
     if (hadActivePlayback) {
       try {
         stopPlan("motion_resource_replaced");
@@ -372,11 +337,7 @@ export function usePreviewMotionPlayer() {
 
     const playbackRunId = `motion-resource-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
-    const getMotionStartError = (): string => (
-      typeof adapter.getMotionStartError === "function"
-        ? adapter.getMotionStartError().trim()
-        : ""
-    );
+    const getMotionStartError = (): string => runtime.getMotionStartError();
 
     const failMotionResource = (reason: string) => {
       if (activeMotionResourceRunId !== playbackRunId) {
@@ -403,7 +364,7 @@ export function usePreviewMotionPlayer() {
 
     let lifecycleStarted = false;
 
-    const handle = adapter.startMotion(
+    const handle = runtime.startMotion(
       motion.group,
       motion.index,
       motion.priority || 3,
@@ -422,7 +383,7 @@ export function usePreviewMotionPlayer() {
           state.status = "playing";
           state.message = `正在执行完整动作资源（${motion.label || motion.motion_id}）...`;
           state.startedAt = new Date().toISOString();
-          activeMotionStop = (reason) => adapter.stopMotion?.(reason);
+          activeMotionStop = (reason) => runtime.stopMotion(reason);
           options.onStarted?.(motion, playbackRunId);
         },
         onFinished: completeMotionResource,
@@ -461,7 +422,7 @@ export function usePreviewMotionPlayer() {
     }
     if (!lifecycleStarted || activeMotionResourceRunId !== playbackRunId) {
       const reason = "motion_resource_started_without_lifecycle_callback";
-      adapter.stopMotion(reason);
+      runtime.stopMotion(reason);
       state.status = "failed";
       state.message = `完整动作资源执行失败：${motion.motion_id}（${reason}）。`;
       state.finishedAt = new Date().toISOString();

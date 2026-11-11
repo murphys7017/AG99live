@@ -15,6 +15,7 @@ import type {
   SystemMotionTuningSamplesStatePayload,
   SystemMotionLabRawEventRecordedPayload,
   SystemDesktopSettingsQueryPayload,
+  SystemDesktopSettingsSyncCompletePayload,
   SystemDesktopObservationRequestPayload,
   SystemServerInfoPayload,
 } from "../../types/protocol.js";
@@ -456,6 +457,17 @@ export function parseSystemDesktopSettingsQueryPayload(
     payload.value = value.payload;
   }
   return { ok: true, payload };
+}
+
+export function parseSystemDesktopSettingsSyncCompletePayload(
+  envelope: ProtocolEnvelope<unknown>,
+): PayloadParseResult<SystemDesktopSettingsSyncCompletePayload> {
+  const record = parseObjectPayload(envelope);
+  if (!record.ok) return record;
+  if (Object.keys(record.payload).length > 0) {
+    return invalidPayload(envelope.type, "payload", "empty object");
+  }
+  return { ok: true, payload: {} };
 }
 
 export function parseSystemServerInfoPayload(

@@ -23,6 +23,12 @@ import {
   type PlaybackTimelineMotionSessionPort,
   type PlaybackTimelineTerminal,
 } from "./sessionProjection.js";
+import {
+  createSegmentIdentity,
+  normalizeIdentityPart,
+  segmentIdentityKey,
+} from "../turn-playback/identity.js";
+import { isSinkTerminal } from "../turn-playback/terminals.js";
 
 export type {
   PlaybackTimelineAudioSessionPort,
@@ -241,15 +247,11 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     turnId: string | null,
     messageId: string,
   ): string {
-    const normalizedTurnId = normalizeTurnId(turnId);
-    const normalizedMessageId = messageId.trim();
-    if (!normalizedTurnId) {
-      throw new Error("Playback timeline requires a non-empty turnId.");
+    const identity = createSegmentIdentity(turnId, messageId);
+    if (!identity) {
+      throw new Error("Playback timeline requires non-empty turnId and messageId.");
     }
-    if (!normalizedMessageId) {
-      throw new Error("Playback timeline requires a non-empty messageId.");
-    }
-    return `${normalizedTurnId.length}:${normalizedTurnId}:${normalizedMessageId}`;
+    return segmentIdentityKey(identity);
   }
 
   function getTimeline(
@@ -1555,13 +1557,8 @@ function rememberBoundedKey(keys: Set<string>, key: string): void {
   }
 }
 
-function normalizeTurnId(value: string | null): string {
-  return typeof value === "string" ? value.trim() : "";
-}
-
-function isTerminalSinkValue(value: string): boolean {
-  return value !== "idle" && value !== "started";
-}
+const normalizeTurnId = normalizeIdentityPart;
+const isTerminalSinkValue = isSinkTerminal;
 
 function warnMissingTimeline(
   event: string,

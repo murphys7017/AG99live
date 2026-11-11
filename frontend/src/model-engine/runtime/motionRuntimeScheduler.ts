@@ -4,7 +4,11 @@ import type {
 } from "./contracts.js";
 import type { MotionPlaybackClockReader } from "../contracts.js";
 import type { MotionPlaybackClockContext } from "./playbackClock.js";
-import { normalizeTurnId } from "../normalize.js";
+import {
+  createSegmentIdentity,
+  normalizeIdentityPart,
+  segmentIdentityKey,
+} from "../../turn-playback/identity.js";
 import type { ModelEnginePlaybackOrigin } from "./contracts.js";
 
 const MAX_PENDING_INBOUND_MOTION_PAYLOADS = 64;
@@ -62,7 +66,7 @@ function matchesPlaybackTimeline(
 ): boolean {
   return (
     entry.messageId === snapshot.messageId
-    && normalizeTurnId(entry.turnId) === normalizeTurnId(snapshot.turnId)
+    && normalizeIdentityPart(entry.turnId) === normalizeIdentityPart(snapshot.turnId)
   );
 }
 
@@ -112,15 +116,11 @@ export function createMotionRuntimeScheduler(
     turnId: string | null,
     messageId: string,
   ): string {
-    const normalizedTurnId = normalizeTurnId(turnId);
-    if (!normalizedTurnId) {
-      throw new Error("Pending motion payload requires a non-empty turnId.");
+    const identity = createSegmentIdentity(turnId, messageId);
+    if (!identity) {
+      throw new Error("Pending motion payload requires non-empty turnId and messageId.");
     }
-    const normalizedMessageId = typeof messageId === "string" ? messageId.trim() : "";
-    if (!normalizedMessageId) {
-      throw new Error("Pending motion payload requires a non-empty messageId.");
-    }
-    return `${normalizedTurnId.length}:${normalizedTurnId}:${normalizedMessageId}`;
+    return segmentIdentityKey(identity);
   }
 
   function syncPendingState(): void {
@@ -366,9 +366,9 @@ export function createMotionRuntimeScheduler(
       playbackClock: summarizePlaybackClock(context.playbackClock),
       speechCueCount: context.speechCues.length,
     });
-    const normalizedTurnId = normalizeTurnId(context.turnId);
+    const normalizedTurnId = normalizeIdentityPart(context.turnId);
     const normalizedPlaybackTurnId =
-      normalizeTurnId(context.playbackTurnId ?? null) ?? normalizedTurnId;
+      normalizeIdentityPart(context.playbackTurnId ?? null) || normalizedTurnId;
     pruneExpiredPendingPayloads();
     if (!normalizedTurnId) {
       hooks.onStartFailed?.({

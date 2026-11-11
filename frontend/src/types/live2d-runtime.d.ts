@@ -5,6 +5,8 @@ import type {
 } from "./direct-parameter-plan";
 
 export type {
+  DirectParameterPlanInput,
+  DirectParameterPlanStartOptions,
   DirectParameterPlanTerminalEvent,
   DirectParameterPlanTerminalStatus,
 } from "./direct-parameter-plan";

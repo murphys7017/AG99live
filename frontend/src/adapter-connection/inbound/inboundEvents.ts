@@ -28,6 +28,7 @@ import type {
   SystemMotionTuningSamplesStatePayload,
   SystemMotionLabRawEventRecordedPayload,
   SystemDesktopSettingsQueryPayload,
+  SystemDesktopSettingsSyncCompletePayload,
   SystemDesktopObservationRequestPayload,
   SystemSemanticAxisProfileSavedPayload,
   SystemSemanticAxisProfileSaveFailedPayload,
@@ -45,6 +46,7 @@ import {
   parseMotionTuningSamplesStatePayload,
   parseSystemMotionLabRawEventRecordedPayload,
   parseSystemDesktopSettingsQueryPayload,
+  parseSystemDesktopSettingsSyncCompletePayload,
   parseSystemDesktopObservationRequestPayload,
   parseSystemDesktopPresenceRequestPayload,
   parseOutputSegmentPayload,
@@ -125,6 +127,10 @@ type InboundPassthroughEvent =
   | {
     kind: "desktop_settings_query";
     envelope: ProtocolEnvelope<SystemDesktopSettingsQueryPayload>;
+  }
+  | {
+    kind: "desktop_settings_sync_complete";
+    envelope: ProtocolEnvelope<SystemDesktopSettingsSyncCompletePayload>;
   }
   | { kind: "desktop_observation_request"; envelope: ProtocolEnvelope<SystemDesktopObservationRequestPayload> }
   | { kind: "desktop_presence_request"; envelope: ProtocolEnvelope<import("../../types/desktopPresence.js").DesktopPresenceRequest> }
@@ -267,6 +273,16 @@ export function mapInboundEnvelopeToEvent(
       }
       return {
         kind: "desktop_settings_query",
+        envelope: withPayload(envelope, parsed.payload),
+      };
+    }
+    case INBOUND_MESSAGE_TYPES.SYSTEM_DESKTOP_SETTINGS_SYNC_COMPLETE: {
+      const parsed = parseSystemDesktopSettingsSyncCompletePayload(envelope);
+      if (!parsed.ok) {
+        return protocolPayloadError(envelope, parsed.error);
+      }
+      return {
+        kind: "desktop_settings_sync_complete",
         envelope: withPayload(envelope, parsed.payload),
       };
     }

@@ -2,6 +2,7 @@ import type {
   PlaybackTimelineLipSyncSink,
 } from "../playback-timeline/lipSyncSink.js";
 import type { SpeechOutputSession } from "../playback-timeline/speechOutputRuntime.js";
+import type { Live2dRuntimePort } from "./runtimePort.js";
 
 const SPEECH_ANALYSIS_BAND_MIN_HZ = 160;
 const SPEECH_ANALYSIS_BAND_MAX_HZ = 4200;
@@ -18,7 +19,9 @@ interface LiveLipSyncStartResult {
   failureReason: string | null;
 }
 
-export function createLive2DLipSyncTimelineSink(): PlaybackTimelineLipSyncSink {
+export function createLive2DLipSyncTimelineSink(
+  runtime: Live2dRuntimePort,
+): PlaybackTimelineLipSyncSink {
   let liveRuntime: LiveLipSyncRuntime | null = null;
   let attachmentSerial = 0;
   let markActiveStarted: (() => void) | null = null;
@@ -64,6 +67,7 @@ export function createLive2DLipSyncTimelineSink(): PlaybackTimelineLipSyncSink {
       markActiveStarted = markStarted;
       markActiveUnavailable = markUnavailable;
       const result = startLiveLipSync(
+        runtime,
         options.speechOutput,
         options.isCurrentAudio,
         sourceId,
@@ -89,27 +93,19 @@ export function createLive2DLipSyncTimelineSink(): PlaybackTimelineLipSyncSink {
 }
 
 function startLiveLipSync(
+  runtime: Live2dRuntimePort,
   speechOutput: SpeechOutputSession | null,
   isCurrentAudio: () => boolean,
   sourceId: string,
   onRuntimeFailure: (reason: string, degraded: boolean) => void,
 ): LiveLipSyncStartResult {
-  const adapter = window.getLAppAdapter?.();
-  if (
-    !adapter
-    || typeof adapter.beginExternalAudioSignalSource !== "function"
-    || typeof adapter.writeExternalAudioSignalSource !== "function"
-    || typeof adapter.endExternalAudioSignalSource !== "function"
-  ) {
-    return reportLipSyncFailure("speech_audio_adapter_unavailable");
-  }
-  const beginAudioSignalSource = adapter.beginExternalAudioSignalSource.bind(adapter);
-  const writeAudioSignalSource = adapter.writeExternalAudioSignalSource.bind(adapter);
-  const endAudioSignalSource = adapter.endExternalAudioSignalSource.bind(adapter);
+  const beginAudioSignalSource = runtime.beginExternalAudioSignalSource.bind(runtime);
+  const writeAudioSignalSource = runtime.writeExternalAudioSignalSource.bind(runtime);
+  const endAudioSignalSource = runtime.endExternalAudioSignalSource.bind(runtime);
   let sourceRuntime: LiveLipSyncRuntime | null = null;
   let hasLipSyncParameters = false;
   try {
-    hasLipSyncParameters = adapter.hasConfiguredLipSyncParameters?.() === true;
+    hasLipSyncParameters = runtime.hasConfiguredLipSyncParameters();
   } catch (error) {
     return reportLipSyncFailure("lip_sync_model_unavailable", error);
   }

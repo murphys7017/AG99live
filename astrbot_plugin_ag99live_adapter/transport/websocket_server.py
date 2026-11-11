@@ -14,6 +14,7 @@ from astrbot.api import logger
 from ..protocol.builder import (
     build_control_error,
     build_control_start_mic,
+    build_system_desktop_settings_sync_complete,
     build_system_server_info,
 )
 
@@ -464,7 +465,8 @@ class WebSocketTransport:
     async def _send_initial_messages(self) -> None:
         """新客户端连上后立刻广播的初始化快照。
 
-        顺序固定：refresh runtime → server_info → current_model_and_conf(force=True)
+        顺序固定：refresh runtime → server_info → canonical desktop settings replay
+        → desktop_settings_sync_complete → current_model_and_conf(force=True)
         → motion_tuning_samples_state，最后如果 auto_start_mic=True 再发
         control.start_mic。
         """
@@ -481,6 +483,8 @@ class WebSocketTransport:
         if not server_info_sent:
             raise RuntimeError("initial_server_info_send_failed")
         await self._synchronize_desktop_settings()
+        if not await self.send_json(build_system_desktop_settings_sync_complete()):
+            raise RuntimeError("desktop_settings_sync_complete_send_failed")
         if not await self._send_current_model_and_conf(force=True):
             raise RuntimeError("initial_model_sync_send_failed")
         if not await self._send_motion_tuning_samples_state():

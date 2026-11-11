@@ -10,6 +10,7 @@ import type {
 } from "../types/desktop";
 import type {
   ProtocolEnvelope,
+  SystemDesktopSettingsSyncCompletePayload,
   SystemDesktopRuntimeSettingsPayload,
   SystemSemanticAxisProfileSavePayload,
 } from "../types/protocol";
@@ -114,6 +115,7 @@ export interface AdapterConnectionInstance {
   setMicrophoneDevices: (devices: Parameters<ReturnType<typeof createAdapterMicrophoneRuntime>["setMicrophoneDevices"]>[0]) => void;
   refreshMicrophoneDevices: () => Promise<void>;
   connect: () => Promise<void>;
+  waitUntilDesktopSettingsReady: () => Promise<void>;
   disconnect: () => Promise<void>;
   sendText: (text: string) => Promise<boolean>;
   interruptCurrentTurn: () => boolean;
@@ -198,6 +200,8 @@ export function createAdapterConnection(
   let disposed = false;
   let disposePromise: Promise<void> | null = null;
   let lifecyclePromise: Promise<void> = Promise.resolve();
+  let desktopSettingsReadyPromise: Promise<void> | null = null;
+  let resolveDesktopSettingsReady: (() => void) | null = null;
   const assistantHistoryKeys: string[] = [];
   const assistantHistoryKeySet = new Set<string>();
 
@@ -219,6 +223,40 @@ export function createAdapterConnection(
   const preActionReceived = new Set<string>();
   let detachPttHookStatusListener: (() => void) | null = null;
   let playbackAudioControl: PlaybackTimelineAudioControl | null = null;
+
+  function resetDesktopSettingsReadiness(): void {
+    resolveDesktopSettingsReady?.();
+    state.desktopSettingsSyncReady = false;
+    desktopSettingsReadyPromise = new Promise<void>((resolve) => {
+      resolveDesktopSettingsReady = resolve;
+    });
+  }
+
+  function markDesktopSettingsSyncComplete(
+    _envelope: ProtocolEnvelope<SystemDesktopSettingsSyncCompletePayload>,
+  ): void {
+    state.desktopSettingsSyncReady = true;
+    resolveDesktopSettingsReady?.();
+    resolveDesktopSettingsReady = null;
+  }
+
+  async function waitUntilDesktopSettingsReady(): Promise<void> {
+    if (!desktopSettingsReadyPromise) {
+      resetDesktopSettingsReadiness();
+    }
+    await Promise.race([
+      desktopSettingsReadyPromise,
+      new Promise<never>((_, reject) => {
+        window.setTimeout(
+          () => reject(new Error("desktop_settings_sync_timeout")),
+          25_000,
+        );
+      }),
+    ]);
+    if (!state.desktopSettingsSyncReady) {
+      throw new Error("desktop_settings_sync_not_ready");
+    }
+  }
 
   function buildMessageEnvelope<TPayload>(
     type: string,
@@ -550,6 +588,7 @@ export function createAdapterConnection(
     handleDesktopSettingsQuery: (envelope) => {
       void desktopSettingsResponder(envelope);
     },
+    markDesktopSettingsSyncComplete,
   });
 
   const outboundCtx = {
@@ -667,6 +706,7 @@ export function createAdapterConnection(
       pushHistory("system", `开始连接 ${candidates[0]}`);
 
       const attemptSerial = ++connectAttemptSerial;
+      resetDesktopSettingsReadiness();
       openConnectionCandidate(candidates, 0, attemptSerial);
     });
   }
@@ -872,6 +912,9 @@ export function createAdapterConnection(
         }
 
         socket = null;
+        state.desktopSettingsSyncReady = false;
+        resolveDesktopSettingsReady?.();
+        resolveDesktopSettingsReady = null;
         void enqueueLifecycleOperation(async () => {
           let cleanupError: unknown = null;
           try {
@@ -1145,6 +1188,7 @@ export function createAdapterConnection(
     setMicrophoneDevices,
     refreshMicrophoneDevices,
     connect,
+    waitUntilDesktopSettingsReady,
     disconnect,
     sendText,
     setTurnLifecycleObserver,

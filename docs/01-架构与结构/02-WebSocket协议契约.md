@@ -36,6 +36,8 @@ Adapter 在 `desktop_runtime_settings` 中保存该选项的 canonical 值，默
 
 桌面端主动保存其他本机设置时使用独立的 `system.desktop_settings_update`，payload 为 `update_id`、`key` 和字符串 `value`。它不是 `system.desktop_settings_result` 的无请求变体；后者只用于响应 Adapter 发出的查询。Adapter 收到 update 后才更新 canonical snapshot，并按平台实例持久化。
 
+Adapter 完成连接初始化期间的 canonical settings 回放后发送一次 `system.desktop_settings_sync_complete`，payload 为空对象。TS 客户端只有收到该事件后才将 `desktopSettingsSyncReady` 置为 true，并启动依赖本机配置的 Push-to-Talk、Bilibili Live 等功能；断线或重连会清除该状态。
+
 ## 原子输出段
 
 `output.segment` 是完整回复的主交付单元，其 Payload Schema 为 `output.segment.v6`。它携带段归属和顺序，以及文本、音频状态、动作意图、speech cues 和需要的展示资料。Adapter 只在逻辑消息已满足可发送条件后提交该段；前端先严格解析全部 slot，再写入 SessionStore 并启动段任务。`motion.state=pending` 表示音频/文本可先播放，Adapter 后续可用同一 `turn_id` 和 `message_id` 发送一次 `output.segment_motion`，补交动作终态。该消息不创建第二个播放段、不重播音频；动作到达时原音频仍播放才可挂入其时间线，已结束段的迟到动作按过期失败结算。

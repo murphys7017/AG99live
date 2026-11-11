@@ -1,6 +1,7 @@
 import { onBeforeUnmount, onMounted, watch, type Ref } from "vue";
 import { buildCursorGazeInput } from "../model-engine/runtime/interactionSway";
 import type { ModelSummary } from "../types/protocol";
+import type { Live2dRuntimePort } from "../live2d/runtimePort.js";
 import { useCursorGazeSettings } from "./cursorGazeSettings";
 
 interface CursorTarget {
@@ -11,6 +12,7 @@ interface CursorTarget {
 
 export function useCursorGaze(
   selectedModel: Ref<ModelSummary | null>,
+  runtime: Live2dRuntimePort,
   onAttentionChanged?: (active: boolean) => void,
 ): void {
   const settings = useCursorGazeSettings();
@@ -47,7 +49,7 @@ export function useCursorGaze(
     candidate = null;
     candidateSinceMs = 0;
     if (active) {
-      window.getLAppAdapter?.().stopInteractionGaze?.();
+      runtime.stopInteractionGaze();
       active = false;
       reportAttentionChanged(false);
     }
@@ -85,7 +87,7 @@ export function useCursorGaze(
         candidate = target;
         candidateSinceMs = now;
         // Do not keep staring at a departed cursor while the next dwell is undecided.
-        window.getLAppAdapter?.().updateInteractionGaze?.(0);
+        runtime.updateInteractionGaze(0);
         return;
       }
       candidate = target;
@@ -97,7 +99,7 @@ export function useCursorGaze(
         if (!input) {
           return;
         }
-        const started = window.getLAppAdapter?.().startInteractionGaze?.(input) === true;
+        const started = runtime.startInteractionGaze(input);
         if (started !== active) {
           active = started;
           reportAttentionChanged(active);
@@ -111,7 +113,7 @@ export function useCursorGaze(
         }
         return;
       }
-      window.getLAppAdapter?.().updateInteractionGaze?.(target.horizontalRatio);
+      runtime.updateInteractionGaze(target.horizontalRatio);
     } catch {
       return;
     } finally {

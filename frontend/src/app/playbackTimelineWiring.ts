@@ -16,6 +16,7 @@ import {
 import type { PlaybackTimelineSegmentMotionSink } from "../playback-timeline/segmentJob.js";
 import type { PlaybackTimelineMotionSink } from "../playback-timeline/motionTypes.js";
 import type { useTurnPlaybackSessionStore } from "../turn-playback/useTurnPlaybackSessionStore.js";
+import type { Live2dRuntimePort } from "../live2d/runtimePort.js";
 import {
   createModelEngineMotionTimelineSink,
   createMotionTimelineRunTracker,
@@ -56,6 +57,7 @@ export function createAppPlaybackTimelineRuntime(options: {
   >;
   audioSink: PlaybackTimelineAudioSink;
   speechOutputRuntime: SpeechOutputRuntime;
+  live2dRuntime: Live2dRuntimePort;
   onAudioTimelineStarted: (
     turnId: string | null,
     messageId: string,
@@ -111,6 +113,7 @@ export function createAppPlaybackTimelineRuntime(options: {
     playbackTimelineRuntime: runtime,
     audioSink: options.audioSink,
     speechOutputRuntime: options.speechOutputRuntime,
+    live2dRuntime: options.live2dRuntime,
     presentation: {
       reportAudioPlaybackPreparing: adapterPlayback.reportAudioPlaybackPreparing,
       reportAudioPlaybackStarted: adapterPlayback.reportAudioPlaybackStarted,

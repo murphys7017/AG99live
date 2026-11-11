@@ -26,6 +26,7 @@ import type { NormalizedMotionPayload } from "../types/motion.js";
 import type { SpeechOutputRuntime } from "../playback-timeline/speechOutputRuntime.js";
 import { createPcmTimelinePlayback } from "../playback-timeline/pcmTimelinePlayback.js";
 import { reportLatencyStage } from "../adapter-connection/runtime/latency.js";
+import type { Live2dRuntimePort } from "../live2d/runtimePort.js";
 
 export interface ConversationPlaybackAudioPresentation {
   reportAudioPlaybackPreparing(): void;
@@ -47,13 +48,14 @@ export function createConversationPlaybackAudioRuntime(options: {
   playbackTimelineRuntime: PlaybackTimelineRuntime<NormalizedMotionPayload>;
   audioSink: PlaybackTimelineAudioSink;
   speechOutputRuntime: SpeechOutputRuntime;
+  live2dRuntime: Live2dRuntimePort;
   presentation: ConversationPlaybackAudioPresentation;
   createLipSyncRuntime?: (
     callbacks: PlaybackTimelineLipSyncRuntimeCallbacks,
   ) => PlaybackTimelineLipSyncRuntime;
 }): ConversationPlaybackAudioRuntime {
   const { playbackTimelineRuntime, presentation } = options;
-  const live2dLipSyncSink = createLive2DLipSyncTimelineSink();
+  const live2dLipSyncSink = createLive2DLipSyncTimelineSink(options.live2dRuntime);
   let activeLipSyncRuntime: PlaybackTimelineLipSyncRuntime | null = null;
 
   function createLipSyncRuntime(

@@ -40,6 +40,7 @@ export function createAdapterConnectionState() {
     microphoneDevices: [] as MicrophoneDeviceInfo[],
     status: "disconnected" as ConnectionStatus,
     statusMessage: "尚未连接适配器。",
+    desktopSettingsSyncReady: false,
     serverInfo: null as SystemServerInfoPayload | null,
     activeWsAddress: "",
     lastError: "",

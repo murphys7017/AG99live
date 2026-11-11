@@ -15,6 +15,7 @@ import type {
   PlaybackTimelineMotionContext,
   PlaybackTimelineMotionSink,
 } from "../playback-timeline/motionTypes.js";
+import { normalizeIdentityPart } from "../turn-playback/identity.js";
 
 export interface ModelEnginePlaybackTimelineMotionEngine {
   ingestNormalizedPayload(
@@ -40,18 +41,13 @@ export interface MotionTimelineRunTracker {
   clear(): void;
 }
 
-function normalizeTurnId(turnId: string | null): string | null {
-  const normalized = typeof turnId === "string" ? turnId.trim() : "";
-  return normalized || null;
-}
-
 function matchesMotionContext(
   snapshot: PlaybackTimelineSnapshot,
   context: PlaybackTimelineMotionContext,
 ): boolean {
   return (
     snapshot.messageId === context.messageId
-    && normalizeTurnId(snapshot.turnId) === normalizeTurnId(context.turnId)
+    && normalizeIdentityPart(snapshot.turnId) === normalizeIdentityPart(context.turnId)
   );
 }
 

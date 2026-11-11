@@ -178,6 +178,8 @@ export interface SystemDesktopSettingsResultPayload {
   error?: string;
 }
 
+export interface SystemDesktopSettingsSyncCompletePayload {}
+
 export interface SystemSemanticAxisProfileSavedPayload {
   request_id: string;
   model_name: string;

@@ -32,6 +32,7 @@ from .constants import (
     TYPE_OUTPUT_TRANSCRIPTION,
     TYPE_SYSTEM_BACKGROUND_LIST,
     TYPE_SYSTEM_DESKTOP_SETTINGS_QUERY,
+    TYPE_SYSTEM_DESKTOP_SETTINGS_SYNC_COMPLETE,
     TYPE_SYSTEM_HEARTBEAT_ACK,
     TYPE_SYSTEM_HISTORY_CREATED,
     TYPE_SYSTEM_HISTORY_DATA,
@@ -426,4 +427,12 @@ def build_system_desktop_settings_query(
         TYPE_SYSTEM_DESKTOP_SETTINGS_QUERY,
         source=SOURCE_ADAPTER,
         payload=payload,
+    )
+
+
+def build_system_desktop_settings_sync_complete() -> dict[str, Any]:
+    return build_message_envelope(
+        TYPE_SYSTEM_DESKTOP_SETTINGS_SYNC_COMPLETE,
+        source=SOURCE_ADAPTER,
+        payload={},
     )

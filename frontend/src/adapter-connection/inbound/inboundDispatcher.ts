@@ -23,6 +23,7 @@ import type {
   SystemModelSyncPayload,
   SystemMotionTuningSamplesStatePayload,
   SystemDesktopSettingsQueryPayload,
+  SystemDesktopSettingsSyncCompletePayload,
   SystemDesktopObservationRequestPayload,
   SystemServerInfoPayload,
 } from "../../types/protocol.js";
@@ -96,6 +97,9 @@ export interface InboundDispatchDeps {
   handleDesktopObservationRequest: (envelope: ProtocolEnvelope<SystemDesktopObservationRequestPayload>) => void;
   handleDesktopPresenceRequest: (envelope: ProtocolEnvelope<import("../../types/desktopPresence.js").DesktopPresenceRequest>) => void;
   handleDesktopSettingsQuery: (envelope: ProtocolEnvelope<SystemDesktopSettingsQueryPayload>) => void;
+  markDesktopSettingsSyncComplete: (
+    envelope: ProtocolEnvelope<SystemDesktopSettingsSyncCompletePayload>,
+  ) => void;
   // url rewriting
   rewriteModelSyncEnvelope: (envelope: ProtocolEnvelope<SystemModelSyncPayload>) => ProtocolEnvelope<SystemModelSyncPayload>;
   rewriteSocketUrl: (rawUrl: string) => string;
@@ -158,6 +162,9 @@ export async function dispatchInboundEvent(
       return;
     case "desktop_settings_query":
       deps.handleDesktopSettingsQuery(event.envelope);
+      return;
+    case "desktop_settings_sync_complete":
+      deps.markDesktopSettingsSyncComplete(event.envelope);
       return;
     case "output_segment":
     case "output_transcription":

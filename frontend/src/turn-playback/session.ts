@@ -23,6 +23,7 @@ import type { NormalizedMotionPayload } from "../types/motion.js";
 import type { OutputSegmentSpeechCue } from "../types/protocol.js";
 import type { DeepReadonly } from "vue";
 import type { IncrementalSegmentState } from "./incrementalSegments.js";
+import { normalizeIdentityPart } from "./identity.js";
 
 // ── Phase ──────────────────────────────────────────────────────────
 
@@ -231,7 +232,7 @@ export interface TurnPlaybackSession {
 // ── ID resolution ──────────────────────────────────────────────────
 
 function normalizeId(value: unknown): string {
-  return typeof value === "string" ? value.trim() : "";
+  return normalizeIdentityPart(typeof value === "string" ? value : null);
 }
 
 /**

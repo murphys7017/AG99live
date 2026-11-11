@@ -8,6 +8,7 @@ import type {
   TimelinePhase,
 } from "./contracts.js";
 import { createTimelineClock, type TimelineClock } from "./timelineClock.js";
+import { isSinkTerminal } from "../turn-playback/terminals.js";
 
 interface PlaybackTimelineEngineOptions {
   now?: () => number;
@@ -58,7 +59,7 @@ function createSinkState(
 }
 
 function isTerminal(terminal: SinkTerminal): boolean {
-  return terminal !== "idle" && terminal !== "started";
+  return isSinkTerminal(terminal);
 }
 
 function isTerminalPhase(phase: TimelinePhase): boolean {

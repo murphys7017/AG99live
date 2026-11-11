@@ -1,3 +1,5 @@
+import { normalizeIdentityPart } from "../../turn-playback/identity.js";
+
 export function normalizeTurnIdForComparison(turnId: string | null | undefined): string {
-  return typeof turnId === "string" ? turnId.trim() : "";
+  return normalizeIdentityPart(turnId);
 }

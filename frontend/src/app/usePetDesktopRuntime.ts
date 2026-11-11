@@ -16,6 +16,7 @@ import { createModelSync } from "../adapter-connection/model-sync/useModelSync";
 import { useDesktopBridge } from "../desktop-bridge/useDesktopBridge";
 import { createPetRuntimeSnapshotPublisher } from "../desktop-bridge/usePetRuntimeSnapshotPublisher";
 import { usePreviewMotionPlayer } from "../live2d-renderer/usePreviewMotionPlayer";
+import { createWindowLive2dRuntimePort } from "../live2d/runtimePort.js";
 import {
   applyLive2dPresentationSettingsSnapshot,
   cloneLive2dPresentationSettings,
@@ -84,6 +85,7 @@ function isSameConversationTurn(left: string, right: string): boolean {
 export function providePetDesktopRuntime(): PetDesktopRuntime {
   const sessionStore = useTurnPlaybackSessionStore({ normalizeMotionPayload });
   const modelSync = createModelSync();
+  const live2dRuntime = createWindowLive2dRuntimePort();
   const { state, selectedModel, selectedSemanticAxisProfile } = modelSync;
   const presenceStateStore = createPresenceStateStore({
     onSnapshot: (snapshot) => {
@@ -127,7 +129,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     });
     activePresencePreparation = null;
   }
-  useCursorGaze(selectedModel, (active) => {
+  useCursorGaze(selectedModel, live2dRuntime, (active) => {
     presenceStateStore.dispatch({
       source: "cursor_gaze",
       type: "attention.changed",
@@ -178,6 +180,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     modelSync,
     normalizeMotionPayload,
     desktopRuntimeSettings,
+    live2dRuntime,
   });
   const { adapter, playbackTimeline } = conversationPlayback;
   watch(
@@ -275,7 +278,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       status,
     });
   }
-  const motionPlayer = usePreviewMotionPlayer();
+  const motionPlayer = usePreviewMotionPlayer(live2dRuntime);
   const manualPreviewText = ref("");
   let manualPreviewRequestId = "";
   const approvedAssistantSegmentKeys = reactive(new Set<string>());
@@ -461,8 +464,8 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     }
   }
   const modelEngine = useModelEngine({
-    startIdlePlan: (plan) => window.getLAppAdapter?.()?.startIdleParameterPlan?.(plan) ?? false,
-    stopIdlePlan: () => window.getLAppAdapter?.()?.stopIdleParameterPlan?.(),
+    startIdlePlan: (plan) => live2dRuntime.startIdleParameterPlan(plan),
+    stopIdlePlan: () => live2dRuntime.stopIdleParameterPlan(),
     getSelectedModel: () => selectedModel.value,
     getSettings: () => cloneModelEngineSettings(motionEngineSettings),
     playPlan: (plan, model, options) => motionPlayer.playPlan(plan, model, {
@@ -478,12 +481,8 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       },
     }),
     stopPlan: (reason) => motionPlayer.stopPlan(reason),
-    startInteractionSway: (input) => (
-      window.getLAppAdapter?.().startInteractionSway?.(input) ?? false
-    ),
-    stopInteractionSway: () => {
-      window.getLAppAdapter?.().stopInteractionSway?.();
-    },
+    startInteractionSway: (input) => live2dRuntime.startInteractionSway(input),
+    stopInteractionSway: () => live2dRuntime.stopInteractionSway(),
     onMotionRejected: ({ turnId, messageId, reason }) =>
       playbackTimeline.rejectMotionBeforeStart(turnId, messageId, reason),
     canStartSpeechOnlyMotion: (turnId, messageId) => {
@@ -834,6 +833,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
   onMounted(async () => {
     await adapter.initialize();
     await adapter.connect();
+    await adapter.waitUntilDesktopSettingsReady();
     pushToTalk.install();
     bilibiliLive.start();
   });

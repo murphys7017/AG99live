@@ -1,4 +1,4 @@
-import type { ProtocolEnvelope, SystemModelSyncPayload, SystemDesktopSettingsQueryPayload, SystemDesktopObservationRequestPayload } from "../../types/protocol.js";
+import type { ProtocolEnvelope, SystemModelSyncPayload, SystemDesktopSettingsQueryPayload, SystemDesktopSettingsSyncCompletePayload, SystemDesktopObservationRequestPayload } from "../../types/protocol.js";
 import type { MotionPayloadNormalizer } from "../../types/motion.js";
 import type { AdapterConnectionState } from "../state/adapterConnectionState.js";
 import { parseInboundEnvelope } from "./inboundProtocol.js";
@@ -48,6 +48,9 @@ export interface AdapterInboundRuntimeDeps {
   handleDesktopObservationRequest: (envelope: ProtocolEnvelope<SystemDesktopObservationRequestPayload>) => void;
   handleDesktopPresenceRequest: (envelope: ProtocolEnvelope<import("../../types/desktopPresence.js").DesktopPresenceRequest>) => void;
   handleDesktopSettingsQuery: (envelope: ProtocolEnvelope<SystemDesktopSettingsQueryPayload>) => void;
+  markDesktopSettingsSyncComplete: (
+    envelope: ProtocolEnvelope<SystemDesktopSettingsSyncCompletePayload>,
+  ) => void;
   startMicrophoneCapture: (origin?: "manual" | "ptt" | "auto") => Promise<boolean>;
   stopMicrophoneCapture: (reason?: string) => Promise<boolean>;
   normalizeMotionPayload: MotionPayloadNormalizer;
@@ -216,6 +219,8 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
       handleDesktopPresenceRequest: (envelope) => deps.handleDesktopPresenceRequest(envelope),
       handleDesktopSettingsQuery: (envelope) =>
         deps.handleDesktopSettingsQuery(envelope),
+      markDesktopSettingsSyncComplete: (envelope) =>
+        deps.markDesktopSettingsSyncComplete(envelope),
       rewriteModelSyncEnvelope: (env) => rewriteModelSyncEnvelope(env),
       rewriteSocketUrl: (url) => rewriteSocketUrl(url),
       rewriteHttpUrl: (url) => rewriteHttpUrl(url),
