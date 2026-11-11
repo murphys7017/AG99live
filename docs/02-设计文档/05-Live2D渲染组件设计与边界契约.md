@@ -1,9 +1,9 @@
 # Live2D 渲染组件设计与边界契约
 
-状态:设计草案(D3D11 图形后端首片已实现,待视觉验收) · 编写日期:2026-10-01 · 范围:原生侧 Live2D 运行时组件化 + 动作编译器归属
+状态:V1 代码基线设计与后续演进边界 · 编写日期:2026-10-01 · 范围:原生侧 Live2D 运行时组件化 + TypeScript/C++ 双实现关系
 性质:**边界契约与迁移方案;目前仅 D3D11 透明合成 surface 与 Cubism 绘制器已实现,其余运行时迁移仍属设计。**
 
-当前 Adapter 的 `output.segment.payload.speech` slot 固定为 `absent`；本文对 Native speech cues 的解析与渲染讨论属于协议能力/Native 设计边界，不表示当前 AG99 Persona `segments[].speech` 会作为该 slot 发送。Persona 分段与逐段动作/TTS 关联见[动作生成与 Persona 分段关联](../01-架构与结构/07-动作生成与Persona分段关联.md)。
+当前 Adapter 的 `output.segment.payload.speech` slot 固定为 `absent`；本文对 Native speech cues 的解析与渲染讨论属于协议能力/Native 设计边界，不表示当前 AG99 Persona `segments[].speech` 会作为该 slot 发送。Persona 分段与逐段动作/TTS 关联见[动作生成与 Persona 分段关联](../01-架构与结构/07-动作生成与Persona分段关联.md)。TypeScript 是持续开发实现，C++ 是冻结大版本后的高性能稳定实现。
 
 ---
 
@@ -16,7 +16,7 @@
 
 本文**不做**以下决定,留给维护者裁定(见 §10):
 
-- 最终由哪一侧运行时(Tauri/Electron 前端 vs 原生 C++)持有权威编译器。
+- 下一大版本的表现规则和新增能力范围。
 - 迁移是否立即启动,还是先只做组件化不做替换。
 
 本文**遵循**仓库已有记录的方向性意图,不新增也不推翻:`render-core/README.md:83-96` 已声明
@@ -469,14 +469,13 @@ Python 与 TS 侧静默通过,C++ 在真实桌面运行才抛 `ProtocolError`。
 
 | # | 决策 | 选项 | 影响 |
 |---|---|---|---|
-| D-1 | 权威编译器归属 | (a) C++ 为准,TS 退化为参考实现或删除;(b) TS 为准,C++ 通过 IPC 消费其产出 | 决定 R-9。`render-core/README.md:83-96` 已记录方向为原生运行时平面,但未涉及编译器 |
-| D-2 | Motion Lab / Action Lab 依赖 TS 编译器的程度 | 若删除 TS 编译器,`BaseActionPreviewPanel.vue:140-388`(内联 plan 编译器)与 `usePreviewMotionPlayer` 需重写 | 这是 D-1 的主要成本项,也是 `codebase-audit.md` P1-8 已记录的问题 |
+| D-1 | TypeScript/C++ 运行时关系 | TypeScript 作为持续开发和表现迭代实现；C++ 作为冻结大版本后的高性能稳定实现；两者共享协议、Profile、编译规则和黄金样本 | V1 采用双轨实现，一次运行只选择一个实现，不要求 C++ 跟随每次 TypeScript 提交同步 |
+| D-2 | Motion Lab / Action Lab 的编译器依赖 | 开发工具继续使用 TypeScript 编译器；C++ 在稳定大版本冻结时按同一契约移植并通过黄金样本验证 | 工具链保持快速迭代，稳定身体运行时保持高性能和版本边界 |
 | D-3 | 是否立即启动 R-3~R-8,还是先只做组件化 | — | 当前 7 个文件已 modified 未提交;`state.yaml` 连续记录 native 侧 `evidence_gap` 未闭合 |
 | D-4 | `performanceSchedule.ts` 六个 helper 的契约补齐由谁承担 | — | 阻塞 §4.3 中 stage 7 / 9 的完整 reason 集合 |
 | D-5 | 频谱重音分析在原生侧的实现或显式降级 | (a) 实现 FFT 重音;(b) 声明降级并记 `evidence_gap` | 决定 F-1 修复的完整度 |
 
-**建议**:D-1 采 (a),与 `render-core/README.md:83-96` 已记录的方向一致,且它是唯一能真正消除
-`codebase-audit.md` P0-1 / P0-2 的路径。D-2 需在 D-1 裁定后单独排期。
+**V1 结论**:TypeScript 与 C++ 采用双轨版本关系。TypeScript 负责下一版本的持续迭代，C++ 负责已冻结大版本的稳定运行。两者通过协议、编译规则、能力清单和黄金样本保持可验证的一致性；不在同一次运行中并行写入同一身体。
 
 ---
 

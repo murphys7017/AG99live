@@ -4,6 +4,22 @@ AG99 是以桌面体验为中心的智能体主应用；AG99live 是 AG99 的身
 
 本文档集描述当前源码和运行边界；主文不堆叠被替代方案与逐批日志，历史变更通过 Git 查阅。文档索引最近复核：**2026 年 11 月 11 日**；各专项计划和当前状态页仍以页面内标明的代码状态和验收证据为准。
 
+## 当前代码基线
+
+当前项目以 **V1 代码基线**整理文档。V1 是项目阶段标签，仓库暂时没有一个统一的 AG99live 软件 semver。源码中可直接确认的版本组合如下：
+
+| 组成 | 代码来源 | 当前版本 |
+| --- | --- | --- |
+| Desktop 前端 | `package.json` | `0.1.0` |
+| AG99live Adapter | `astrbot_plugin_ag99live_adapter/metadata.yaml` | `1.1.0` |
+| WebSocket 协议封套 | `astrbot_plugin_ag99live_adapter/protocol/schema_manifest.json` | `v2` |
+| 完整输出段 | Schema manifest | `output.segment.v6` |
+| 动作意图 | Schema manifest | `engine.motion_intent.v4` |
+| 参数计划 | Schema manifest | `engine.parameter_plan.v3` |
+| 动作模型基线 | Hugging Face 模型标签 | `v7-20261102` |
+
+TypeScript 是持续开发和表现迭代实现。C++ 是冻结大版本后的高性能稳定实现。两者共享协议、Profile、编译规则和验证样本，一次运行只选择一个实现。
+
 ## 从这里开始
 
 如果第一次接触仓库，先读根目录 [README](../README.md)，再按下面的路径进入对应深度：
