@@ -66,7 +66,7 @@ AG99 负责对话与语音生成，Adapter 把回复交给桌面端。AG99live �
 
 ## 动作生成模型成果与训练计划
 
-当前已有一版可供 AG99live 运行时实验使用的公开动作生成 LoRA 模型：[AkiPolaris777/ag99live-live2d-expression-model](https://huggingface.co/AkiPolaris777/ag99live-live2d-expression-model)。模型基于 `XHToken/Spark-X2.6-1.7B-Base`，当前推荐版本为 `v7-20261102`。它生成 `engine.motion_intent.v4` 所需的语义轴或 `motion_steps`，不直接生成模型相关的底层参数；具体参数映射、校验、限幅和播放仍由 AG99live 的 Adapter、Semantic Axis Profile 和 ModelEngine 完成。
+当前已有一版可供 AG99live 运行时实验使用的公开动作生成 LoRA 模型：[AkiPolaris777/ag99live-live2d-expression-model](https://huggingface.co/AkiPolaris777/ag99live-live2d-expression-model)。模型基于 `XHToken/Spark-X2.6-1.7B-Base`，当前推荐版本为 `v7-20261102`。按照当前运行时契约，模型输出必须使用 `motion_steps[].axis_values` 表达动作步骤，不直接生成模型相关的底层参数；具体参数映射、校验、限幅和播放仍由 AG99live 的 Adapter、Semantic Axis Profile 和 ModelEngine 完成。
 
 模型卡和版本标签记录了输入 Prompt、输出 JSON、训练继承关系与加载方式。当前成果已经进入 AG99live 动作 Provider 的可选实验路径，真实不同模型、语音段、打断和动作质量仍需在完整桌面链路中持续验收。
 
