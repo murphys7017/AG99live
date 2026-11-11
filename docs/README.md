@@ -71,7 +71,7 @@ TypeScript 是持续开发和表现迭代实现。C++ 是冻结大版本后的�
 | 事实 | 唯一来源 | 文档应做什么 |
 | --- | --- | --- |
 | 协议版本 | `astrbot_plugin_ag99live_adapter/protocol/schema_manifest.json` | 以 manifest 和生成类型为准；协议文档只解释 Schema 职责和使用边界。 |
-| 产品版本 | 根目录 `VERSION` | 由版本一致性检查同步到 Desktop、Adapter 和 C++ 构建入口。 |
+| 产品版本 | 根目录 `VERSION` | `scripts/sync_version.py` 同步 Desktop 和 Adapter，CMake 直接读取，`scripts/check_version_consistency.py` 校验。 |
 | 前端协议类型 | `frontend/src/types/protocol.ts` 与生成文件 | 描述解析和使用边界。 |
 | Adapter 生命周期 | `astrbot_plugin_ag99live_adapter/` | 描述 AG99 输入、段聚合、服务和清理。 |
 | 前端播放和动作执行 | `frontend/src/` | 描述组合根、所有权与终态。 |

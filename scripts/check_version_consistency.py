@@ -12,12 +12,14 @@ VERSION_PATH = ROOT / "VERSION"
 SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+$")
 
 
-def read_cmake_project_version(path: Path) -> str:
+def verify_cmake_version_source(path: Path) -> None:
     text = path.read_text(encoding="utf-8")
-    match = re.search(r"project\([^\n]*?VERSION\s+([^\s)]+)", text)
-    if match is None:
+    if "VERSION" not in text or "project(" not in text:
         raise SystemExit(f"CMake project version is missing in {path}.")
-    return match.group(1)
+    if "../VERSION" not in text or "AG99_PRODUCT_VERSION" not in text:
+        raise SystemExit(
+            f"CMake project version does not read the root VERSION in {path}."
+        )
 
 
 def main() -> None:
@@ -44,10 +46,12 @@ def main() -> None:
     if metadata_match is None or metadata_match.group(1) != version:
         raise SystemExit("Version mismatch in Adapter metadata.yaml.")
 
-    for path in (ROOT / "runtime-core" / "CMakeLists.txt", ROOT / "render-core" / "CMakeLists.txt"):
-        actual = read_cmake_project_version(path)
-        if actual != version:
-            raise SystemExit(f"Version mismatch in {path}: {actual!r} != {version!r}.")
+    cmake_paths = (
+        ROOT / "runtime-core" / "CMakeLists.txt",
+        ROOT / "render-core" / "CMakeLists.txt",
+    )
+    for path in cmake_paths:
+        verify_cmake_version_source(path)
 
     print(f"AG99live product version is consistent: {version}")
 

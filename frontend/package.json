@@ -7,6 +7,7 @@
   "type": "module",
   "main": "./out/main/index.cjs",
   "scripts": {
+    "prebuild": "python ../scripts/sync_version.py",
     "dev": "node scripts/electron-vite-runner.cjs dev",
     "build:spout-sender": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-spout-sender.ps1",
     "start": "node scripts/electron-vite-runner.cjs preview",

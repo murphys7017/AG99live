@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(ag99_render_core VERSION 1.0.0 LANGUAGES CXX)
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../VERSION" AG99_PRODUCT_VERSION)
+string(STRIP "${AG99_PRODUCT_VERSION}" AG99_PRODUCT_VERSION)
+project(ag99_render_core VERSION ${AG99_PRODUCT_VERSION} LANGUAGES CXX)
 
 if(NOT WIN32)
   message(FATAL_ERROR "render-core currently supports Windows only")

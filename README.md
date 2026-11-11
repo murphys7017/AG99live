@@ -140,6 +140,7 @@ npm run build:spout-sender
 
 ~~~powershell
 python scripts/check_protocol_schema_manifest.py
+python scripts/sync_version.py
 python scripts/check_version_consistency.py
 cd frontend
 npm run typecheck
