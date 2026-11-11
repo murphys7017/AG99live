@@ -5,6 +5,8 @@ from types import SimpleNamespace
 from astrbot_plugin_ag99live_adapter.runtime import plugin_runtime
 from astrbot_plugin_ag99live_adapter.runtime.plugin_runtime import (
     get_config_value,
+    get_persisted_desktop_settings,
+    persist_desktop_setting,
     prune_retired_plugin_config_fields,
 )
 
@@ -99,6 +101,27 @@ def test_plugin_config_snapshot_reports_injected_and_file_sources(
     assert file_snapshot.path == str(config_path)
     assert file_snapshot.mtime_ns == config_path.stat().st_mtime_ns
     assert file_snapshot.config == {"general": {"client_uid": "file"}}
+
+
+def test_desktop_setting_persistence_is_scoped_to_platform(monkeypatch, tmp_path) -> None:
+    config_path = tmp_path / "plugin-config.json"
+    config_path.write_text('{"general": {"client_uid": "desktop"}}', encoding="utf-8")
+    monkeypatch.setattr(plugin_runtime, "_plugin_config", {})
+    monkeypatch.setattr(plugin_runtime, "_plugin_config_path", str(config_path))
+    monkeypatch.setattr(plugin_runtime, "_default_plugin_config_paths", ())
+
+    persist_desktop_setting(
+        "pet-a",
+        "live2d_physics_response_scale",
+        {"value": "1.25", "options": [], "reportedAt": "now"},
+    )
+
+    assert get_persisted_desktop_settings("pet-a")[
+        "live2d_physics_response_scale"
+    ]["value"] == "1.25"
+    assert get_persisted_desktop_settings("pet-b") == {}
+    saved = plugin_runtime.get_plugin_config_snapshot().config
+    assert saved["general"]["client_uid"] == "desktop"
 
 
 def test_reconcile_finds_surviving_adapter_by_metadata_after_reload(monkeypatch) -> None:

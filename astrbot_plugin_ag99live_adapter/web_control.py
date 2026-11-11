@@ -5,7 +5,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from math import isfinite
-from typing import Any, Literal
+from typing import Any, Literal, Mapping
 from uuid import uuid4
 
 from quart import g, jsonify, request
@@ -28,6 +28,7 @@ from .runtime.plugin_runtime import (
     DEFAULT_PRE_ACTION_PROVIDER_ID,
     get_live_control_platform,
     get_plugin_context,
+    get_persisted_desktop_settings,
     reconcile_control_platforms,
     set_plugin_config,
 )
@@ -687,11 +688,10 @@ _FIELDS_BY_PATH = {
 
 @dataclass(frozen=True)
 class DesktopSetting:
-    """A setting the desktop owns but the control page can still drive.
+    """A setting in the Adapter-owned desktop runtime configuration.
 
-    The value physically belongs to the machine running the desktop; the page
-    reaches it through the adapter's broker, so the adapter never stores it as
-    authoritative. This spec exists only so the page can label the control.
+    The connected desktop applies the value locally, while the Adapter keeps
+    the canonical persisted snapshot shared by TS and Native clients.
     """
 
     key: str
@@ -1050,6 +1050,9 @@ DESKTOP_SETTINGS_SPEC: tuple[DesktopSetting, ...] = (
 )
 
 _DESKTOP_SETTINGS_BY_KEY = {setting.key: setting for setting in DESKTOP_SETTINGS_SPEC}
+_DESKTOP_SECRET_SETTING_KEYS = frozenset(
+    setting.key for setting in DESKTOP_SETTINGS_SPEC if setting.kind == "password"
+)
 
 
 class ConfigValidationError(ValueError):
@@ -1465,7 +1468,11 @@ class WebControlPageApi:
             setting.key: {
                 "order": order,
                 **setting.to_json(),
-                **(entries.get(setting.key) or payload["settings"][setting.key]),
+                **(
+                    _public_desktop_setting_entry(setting.key, entries[setting.key])
+                    if setting.key in entries
+                    else payload["settings"][setting.key]
+                ),
             }
             for order, setting in enumerate(DESKTOP_SETTINGS_SPEC)
         }
@@ -1518,7 +1525,7 @@ class WebControlPageApi:
         return jsonify({
             "ok": True,
             "key": key,
-            "entry": entry,
+            "entry": _public_desktop_setting_entry(key, entry),
             **_desktop_settings_payload(platform),
         })
 
@@ -1724,6 +1731,16 @@ def _read_history_uid(value: Any):
     return history_uid, None
 
 
+def _public_desktop_setting_entry(
+    key: str,
+    entry: Mapping[str, Any],
+) -> dict[str, Any]:
+    public = dict(entry)
+    if key in _DESKTOP_SECRET_SETTING_KEYS and public.get("value"):
+        public["value"] = "configured"
+    return public
+
+
 def _desktop_settings_payload(platform: Any) -> dict[str, Any]:
     """Assemble the offline-safe view of every declared desktop setting.
 
@@ -1740,7 +1757,20 @@ def _desktop_settings_payload(platform: Any) -> dict[str, Any]:
     if connected != previous_connected:
         revision += 1
     _DESKTOP_CONNECTION_REVISIONS[platform_id] = (connected, revision)
-    snapshot = platform.desktop_settings_broker.snapshot() if platform else {}
+    canonical = get_persisted_desktop_settings(platform_id) if platform else {}
+    snapshot = {
+        **(platform.desktop_settings_broker.snapshot() if platform else {}),
+        **canonical,
+    }
+
+    def public_entry(key: str) -> dict[str, Any]:
+        entry = snapshot.get(key) or {
+            "value": "",
+            "options": [],
+            "reportedAt": "",
+        }
+        return _public_desktop_setting_entry(key, entry)
+
     return {
         "connected": connected,
         "connectionRevision": revision,
@@ -1750,12 +1780,7 @@ def _desktop_settings_payload(platform: Any) -> dict[str, Any]:
                 "order": order,
                 **setting.to_json(),
                 **(
-                    snapshot.get(setting.key)
-                    or {
-                        "value": "",
-                        "options": [],
-                        "reportedAt": "",
-                    }
+                    public_entry(setting.key)
                 ),
             }
             for order, setting in enumerate(DESKTOP_SETTINGS_SPEC)

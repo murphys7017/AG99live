@@ -43,6 +43,7 @@
 #include "ag99/runtime/protocol.hpp"
 #include "ag99/runtime/runtime_session.hpp"
 #include "ag99/runtime/winhttp_websocket.hpp"
+#include "ag99/native/settings_controller.hpp"
 #include "ag99/audio/audio_source.hpp"
 #include "ag99/audio/speech_signal.hpp"
 #include "ag99/audio/wav_audio.hpp"
@@ -761,6 +762,10 @@ public:
     }
   }
 
+  void SetAmbientMotionEnabled(bool enabled) {
+    _ambient_motion_enabled.store(enabled, std::memory_order_relaxed);
+  }
+
   bool LoadDemoMotions(
       const std::filesystem::path& model_directory,
       CubismModelSettingJson* setting) {
@@ -850,7 +855,8 @@ public:
 
     _model->LoadParameters();
     bool motion_updated = false;
-    if (_motionManager->IsFinished()) {
+    if (_motionManager->IsFinished()
+        && _ambient_motion_enabled.load(std::memory_order_relaxed)) {
       const auto idle = _motion_groups.find("Idle");
       if (idle != _motion_groups.end() && !idle->second.empty()) {
         std::uniform_int_distribution<std::size_t> choose_idle(
@@ -1011,6 +1017,7 @@ private:
   std::vector<csmInt32> _physics_response_parameter_indices;
   std::vector<csmFloat32> _physics_response_baseline_values;
   csmFloat32 _physics_response_scale = 1.0f;
+  std::atomic<bool> _ambient_motion_enabled{true};
   CubismEyeBlink* _eye_blink = nullptr;
   CubismBreath* _breath = nullptr;
 };
@@ -3483,6 +3490,14 @@ public:
       std::cerr << "[cubism] demo motion groups are unavailable; "
                    "rendering will continue without motion playback\n";
     }
+    _model_view_base_scale_x = _model->GetModelMatrix()->GetScaleX();
+    _model_view_base_scale_y = _model->GetModelMatrix()->GetScaleY();
+    _model_view_base_translate_x =
+        _model->GetModelMatrix()->GetTranslateX();
+    _model_view_base_translate_y =
+        _model->GetModelMatrix()->GetTranslateY();
+    ApplyModelViewSettings();
+    _model->SetAmbientMotionEnabled(_ambient_motion_enabled_setting);
 
     std::cout << "Loaded Live2D model: " << PathToUtf8(model_json) << '\n';
     return true;
@@ -3492,6 +3507,8 @@ public:
     if (!_model || !_model->GetModel()) {
       return;
     }
+
+    ApplyPendingModelViewSettings();
 
     CubismModel* cubism_model = _model->GetModel();
     const auto now = NowSeconds();
@@ -3585,6 +3602,93 @@ public:
       const ag99::runtime::DesktopSettingsQuery& query) {
     ag99::runtime::DesktopSettingsResult result{
         query.request_id, query.key, std::nullopt, {}};
+    if (query.key == "live2d_ambient_motion_enabled") {
+      std::scoped_lock lock(_motion_mutex);
+      if (query.action == "set") {
+        const auto value = query.value.value_or("");
+        if (value != "true" && value != "false") {
+          result.error = "desktop_setting_value_invalid";
+          return result;
+        }
+        _ambient_motion_enabled_setting = value == "true";
+        if (_model) {
+          _model->SetAmbientMotionEnabled(_ambient_motion_enabled_setting);
+        }
+      }
+      result.entry = ag99::runtime::DesktopSettingsEntry{
+          _ambient_motion_enabled_setting ? "true" : "false", {},
+          std::nullopt, std::nullopt, std::nullopt};
+      return result;
+    }
+    if (query.key == "model_view_scale"
+        || query.key == "model_view_offset_x"
+        || query.key == "model_view_offset_y") {
+      std::scoped_lock lock(_motion_mutex);
+      const auto make_entry = [&](double value, double minimum, double maximum,
+                                  double step) {
+        std::array<char, 32> value_text{};
+        const auto formatted = std::to_chars(
+            value_text.data(), value_text.data() + value_text.size(), value);
+        return ag99::runtime::DesktopSettingsEntry{
+            std::string(value_text.data(), formatted.ptr), {}, minimum,
+            maximum, step};
+      };
+      double* target = nullptr;
+      double minimum = 0.0;
+      double maximum = 0.0;
+      double step = 0.05;
+      if (query.key == "model_view_scale") {
+        target = &_model_view_scale_setting;
+        minimum = 0.8;
+        maximum = 2.0;
+      } else if (query.key == "model_view_offset_x") {
+        target = &_model_view_offset_x_setting;
+        minimum = -1.5;
+        maximum = 1.5;
+      } else {
+        target = &_model_view_offset_y_setting;
+        minimum = -1.5;
+        maximum = 1.5;
+      }
+      if (query.action == "set") {
+        const auto parsed = ParseDesktopSettingNumber(query.value.value_or(""));
+        if (!parsed) {
+          result.error = "desktop_setting_value_invalid";
+          return result;
+        }
+        if (*parsed < minimum || *parsed > maximum) {
+          result.error = "desktop_setting_value_out_of_range";
+          return result;
+        }
+        *target = *parsed;
+        _pending_model_view_settings = true;
+      }
+      result.entry = make_entry(*target, minimum, maximum, step);
+      return result;
+    }
+    if (query.key == "motion_engine_intensity_scale") {
+      std::scoped_lock lock(_motion_mutex);
+      if (query.action == "set") {
+        const auto parsed = ParseDesktopSettingNumber(query.value.value_or(""));
+        if (!parsed) {
+          result.error = "desktop_setting_value_invalid";
+          return result;
+        }
+        if (*parsed < 0.5 || *parsed > 2.5) {
+          result.error = "desktop_setting_value_out_of_range";
+          return result;
+        }
+        _motion_intensity_scale_setting =
+            std::round(*parsed * 100.0) / 100.0;
+      }
+      std::array<char, 32> value_text{};
+      const auto formatted = std::to_chars(
+          value_text.data(), value_text.data() + value_text.size(),
+          _motion_intensity_scale_setting);
+      result.entry = ag99::runtime::DesktopSettingsEntry{
+          std::string(value_text.data(), formatted.ptr), {}, 0.5, 2.5, 0.05};
+      return result;
+    }
     if (query.key != "live2d_physics_response_scale") {
       result.error = "desktop_setting_unsupported";
       return result;
@@ -3770,6 +3874,30 @@ public:
   }
 
 private:
+  void ApplyModelViewSettings() {
+    if (!_model || !_model->GetModelMatrix()) {
+      return;
+    }
+    auto* matrix = _model->GetModelMatrix();
+    matrix->Scale(
+        _model_view_base_scale_x * static_cast<csmFloat32>(_model_view_scale_setting),
+        _model_view_base_scale_y * static_cast<csmFloat32>(_model_view_scale_setting));
+    matrix->Translate(
+        _model_view_base_translate_x
+            + static_cast<csmFloat32>(_model_view_offset_x_setting),
+        _model_view_base_translate_y
+            + static_cast<csmFloat32>(_model_view_offset_y_setting));
+  }
+
+  void ApplyPendingModelViewSettings() {
+    std::scoped_lock lock(_motion_mutex);
+    if (!_pending_model_view_settings) {
+      return;
+    }
+    ApplyModelViewSettings();
+    _pending_model_view_settings = false;
+  }
+
   static std::optional<double> ParseDesktopSettingNumber(
       const std::string& input) {
     // Translate parseFiniteNumber (String.trim + Number), including radix
@@ -5473,6 +5601,7 @@ private:
       std::cerr << "[motion] unsupported motion intent schema\n";
       return std::nullopt;
     }
+    const bool expressive = ReadString(intent, "mode") == "expressive";
     const auto profile = SelectedModelProfile();
     if (!profile) {
       std::cerr << "[motion] no semantic axis profile is available\n";
@@ -5569,13 +5698,18 @@ private:
         }
         const auto& definition = definition_it->second;
         const double neutral = definition.neutral;
-        const double value = value_it->get<double>();
-        if (!std::isfinite(value)
-            || value < definition.value_min
-            || value > definition.value_max) {
+        const double raw_value = value_it->get<double>();
+        if (!std::isfinite(raw_value)
+            || raw_value < definition.value_min
+            || raw_value > definition.value_max) {
           invalid_axis_value = true;
           continue;
         }
+        const double value = expressive
+            ? definition.neutral
+                + (raw_value - definition.neutral)
+                    * _motion_intensity_scale_setting
+            : raw_value;
         resolved.emplace(
             id, AxisValue{value, neutral, definition.group});
         explicit_axes.insert(id);
@@ -6008,6 +6142,16 @@ private:
   std::optional<std::unordered_set<std::string>>
       _pending_physics_response_protected_parameter_ids;
   double _physics_response_scale_setting = 1.0;
+  bool _ambient_motion_enabled_setting = true;
+  double _model_view_scale_setting = 1.0;
+  double _model_view_offset_x_setting = 0.0;
+  double _model_view_offset_y_setting = 0.0;
+  double _motion_intensity_scale_setting = 1.35;
+  csmFloat32 _model_view_base_scale_x = 1.0f;
+  csmFloat32 _model_view_base_scale_y = 1.0f;
+  csmFloat32 _model_view_base_translate_x = 0.0f;
+  csmFloat32 _model_view_base_translate_y = 0.0f;
+  bool _pending_model_view_settings = false;
   std::optional<double> _pending_physics_response_scale;
   std::optional<std::string> _pending_thinking_turn_id;
   std::optional<InteractionSwayState> _interaction_sway;

@@ -229,15 +229,35 @@ export function useSettingsWindow() {
 
   function applySpeechVolume(): void {
     saveSpeechVolume(speechVolumePercent.value / 100);
+    bridge.sendCommand({
+      type: "persist_desktop_setting",
+      key: "speech_volume",
+      value: String(speechVolumePercent.value / 100),
+    });
   }
 
   function applyModelViewScale(): void {
     saveModelViewScale(modelViewScale.value);
+    bridge.sendCommand({
+      type: "persist_desktop_setting",
+      key: "model_view_scale",
+      value: String(modelViewScale.value),
+    });
   }
 
   function applyModelViewOffset(): void {
     saveModelViewOffsetX(modelViewOffsetX.value);
     saveModelViewOffsetY(modelViewOffsetY.value);
+    bridge.sendCommand({
+      type: "persist_desktop_setting",
+      key: "model_view_offset_x",
+      value: String(modelViewOffsetX.value),
+    });
+    bridge.sendCommand({
+      type: "persist_desktop_setting",
+      key: "model_view_offset_y",
+      value: String(modelViewOffsetY.value),
+    });
   }
 
   function onPetPreferenceChanged(event: StorageEvent): void {

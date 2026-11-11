@@ -62,6 +62,7 @@ class WebSocketTransport:
         refresh_runtime_settings_async: Callable[..., Awaitable[None]],
         send_current_model_and_conf: Callable[..., Awaitable[bool]],
         send_motion_tuning_samples_state: Callable[..., Awaitable[bool]],
+        synchronize_desktop_settings: Callable[[], Awaitable[None]],
         on_disconnect: Callable[[], Awaitable[None]],
     ) -> None:
         self.host = host
@@ -73,6 +74,7 @@ class WebSocketTransport:
         self._refresh_runtime_settings_async = refresh_runtime_settings_async
         self._send_current_model_and_conf = send_current_model_and_conf
         self._send_motion_tuning_samples_state = send_motion_tuning_samples_state
+        self._synchronize_desktop_settings = synchronize_desktop_settings
         self._on_disconnect = on_disconnect
 
         self._ws_server = None
@@ -478,6 +480,7 @@ class WebSocketTransport:
         )
         if not server_info_sent:
             raise RuntimeError("initial_server_info_send_failed")
+        await self._synchronize_desktop_settings()
         if not await self._send_current_model_and_conf(force=True):
             raise RuntimeError("initial_model_sync_send_failed")
         if not await self._send_motion_tuning_samples_state():

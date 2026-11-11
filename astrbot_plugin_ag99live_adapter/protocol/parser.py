@@ -30,6 +30,7 @@ from .constants import (
     TYPE_INPUT_TEXT,
     TYPE_SYSTEM_DESKTOP_RUNTIME_SETTINGS,
     TYPE_SYSTEM_DESKTOP_SETTINGS_RESULT,
+    TYPE_SYSTEM_DESKTOP_SETTINGS_UPDATE,
     TYPE_SYSTEM_HISTORY_DELETE,
     TYPE_SYSTEM_HISTORY_LOAD,
     TYPE_SYSTEM_MOTION_LAB_RAW_EVENT,
@@ -427,6 +428,15 @@ def _validate_payload(message_type: str, payload: dict[str, Any]) -> None:
                 )
             _require_payload_string(message_type, option, "id")
             _require_payload_string(message_type, option, "label")
+        return
+
+    if message_type == TYPE_SYSTEM_DESKTOP_SETTINGS_UPDATE:
+        _require_payload_string(message_type, payload, "update_id")
+        _require_payload_string(message_type, payload, "key")
+        if not isinstance(payload.get("value"), str):
+            raise ProtocolError(
+                f"`{message_type}` requires `payload.value` to be a string."
+            )
         return
 
 

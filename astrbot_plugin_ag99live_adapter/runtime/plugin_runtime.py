@@ -14,6 +14,7 @@ from astrbot.core.utils.astrbot_path import get_astrbot_config_path
 _state_lock = threading.RLock()
 _plugin_context: Any = None
 _plugin_config: dict[str, Any] = {}
+_plugin_config_object: Any = None
 _plugin_config_path: str | None = None
 _control_platforms: dict[str, Any] = {}
 ADAPTER_PLATFORM_NAME = "olv_pet_adapter"
@@ -23,6 +24,7 @@ PLUGIN_CONFIG_BASENAME = "astrbot_plugin_ag99live_adapter_config.json"
 # exposes this as an override, and deployments may set an empty value to use
 # the legacy independent-motion fallback.
 DEFAULT_PRE_ACTION_PROVIDER_ID = "ollama/qwen3:1.7b"
+DESKTOP_SETTINGS_CONFIG_KEY = "desktop_runtime_settings"
 _RETIRED_PLUGIN_CONFIG_PATHS = {
     "independent_motion": ("per_speech_segment", "segment_stream_enabled"),
     "desktop_observation": ("provider_id", "timeout_seconds"),
@@ -208,10 +210,12 @@ def get_live_control_platform(context: Any, platform_id: str) -> Any | None:
 
 def set_plugin_config(config: Mapping[str, Any] | None) -> None:
     global _plugin_config
+    global _plugin_config_object
     global _plugin_config_path
     with _state_lock:
         # AstrBotConfig is a dict subclass with framework-owned state that is not deepcopy-safe.
         _plugin_config = dict(config or {})
+        _plugin_config_object = config
         config_path = getattr(config, "config_path", None)
         _plugin_config_path = config_path if isinstance(config_path, str) and config_path else None
 
@@ -240,6 +244,66 @@ def get_plugin_config_snapshot() -> PluginConfigSnapshot:
             path=None,
             mtime_ns=None,
         )
+
+
+def get_persisted_desktop_settings(platform_id: str) -> dict[str, dict[str, Any]]:
+    """Return the canonical desktop settings for one Adapter platform instance."""
+    key = str(platform_id or "").strip()
+    if not key:
+        return {}
+    config = get_plugin_config_snapshot().config
+    root = config.get(DESKTOP_SETTINGS_CONFIG_KEY)
+    if not isinstance(root, dict):
+        return {}
+    values = root.get(key)
+    if not isinstance(values, dict):
+        return {}
+    return {
+        str(setting_key): dict(entry)
+        for setting_key, entry in values.items()
+        if isinstance(setting_key, str) and isinstance(entry, dict)
+    }
+
+
+def persist_desktop_setting(
+    platform_id: str,
+    key: str,
+    entry: Mapping[str, Any],
+) -> None:
+    """Persist one canonical desktop setting and refresh the in-process snapshot."""
+    platform_key = str(platform_id or "").strip()
+    setting_key = str(key or "").strip()
+    if not platform_key or not setting_key:
+        return
+
+    with _state_lock:
+        config = deepcopy(get_plugin_config_snapshot().config)
+        root = config.setdefault(DESKTOP_SETTINGS_CONFIG_KEY, {})
+        if not isinstance(root, dict):
+            root = {}
+            config[DESKTOP_SETTINGS_CONFIG_KEY] = root
+        values = root.setdefault(platform_key, {})
+        if not isinstance(values, dict):
+            values = {}
+            root[platform_key] = values
+        values[setting_key] = deepcopy(dict(entry))
+
+        global _plugin_config, _plugin_config_object
+        _plugin_config = config
+        save_config = getattr(_plugin_config_object, "save_config", None)
+        if callable(save_config):
+            _plugin_config_object.clear()
+            _plugin_config_object.update(config)
+            save_config()
+            return
+
+        path = _plugin_config_path or _default_plugin_config_paths[0]
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        temporary_path = f"{path}.tmp"
+        with open(temporary_path, "w", encoding="utf-8") as handle:
+            json.dump(config, handle, ensure_ascii=False, indent=2)
+            handle.write("\n")
+        os.replace(temporary_path, path)
 
 
 def _load_plugin_config_from_disk(

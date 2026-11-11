@@ -30,6 +30,7 @@ def test_websocket_transport_routes_binary_payload_to_binary_handler(install_fak
         refresh_runtime_settings_async=noop_async,
         send_current_model_and_conf=noop_async,
         send_motion_tuning_samples_state=noop_async,
+        synchronize_desktop_settings=noop_async,
         on_disconnect=noop_async,
     )
     transport.send_json = send_json  # type: ignore[method-assign]

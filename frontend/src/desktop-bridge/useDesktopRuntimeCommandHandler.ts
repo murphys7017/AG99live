@@ -29,6 +29,7 @@ interface DesktopRuntimeCommandAdapterPort {
     readonly motionTuningSamplesStatus: DesktopMotionTuningSamplesStatus;
   };
   setAddress: (address: string) => void;
+  persistDesktopSetting: (key: string, value: string) => boolean;
   setDesktopScreenshotOnSendEnabled: (enabled: boolean) => void;
   setMicrophoneDevice: (deviceId: string) => void;
   setMicrophoneDevices: (devices: DesktopMicrophoneDevice[]) => void;
@@ -92,12 +93,21 @@ export function createDesktopRuntimeCommandHandler(
     switch (command.type) {
       case "set_address":
         deps.adapter.setAddress(command.address);
+        deps.adapter.persistDesktopSetting("adapter_address", command.address);
+        return;
+      case "persist_desktop_setting":
+        deps.adapter.persistDesktopSetting(command.key, command.value);
         return;
       case "set_desktop_screenshot_on_send":
         deps.adapter.setDesktopScreenshotOnSendEnabled(command.enabled);
+        deps.adapter.persistDesktopSetting(
+          "desktop_screenshot_on_send",
+          String(command.enabled),
+        );
         return;
       case "set_microphone_device":
         deps.adapter.setMicrophoneDevice(command.deviceId);
+        deps.adapter.persistDesktopSetting("microphone_device", command.deviceId);
         return;
       case "set_microphone_devices":
         deps.adapter.setMicrophoneDevices(command.devices);
@@ -107,11 +117,27 @@ export function createDesktopRuntimeCommandHandler(
         return;
       case "set_motion_engine_settings":
         applyModelEngineSettings(deps.motionEngineSettings, command.settings);
+        deps.adapter.persistDesktopSetting(
+          "motion_engine_intensity_scale",
+          String(command.settings.motionIntensityScale),
+        );
         return;
       case "set_live2d_presentation_settings":
         applyLive2dPresentationSettingsSnapshot(
           deps.live2dPresentationSettings,
           command.settings,
+        );
+        deps.adapter.persistDesktopSetting(
+          "live2d_ambient_motion_enabled",
+          String(command.settings.ambientMotionEnabled),
+        );
+        deps.adapter.persistDesktopSetting(
+          "live2d_physics_response_scale",
+          String(command.settings.physicsResponseScale),
+        );
+        deps.adapter.persistDesktopSetting(
+          "live2d_render_dpr_cap",
+          String(command.settings.renderDprCap),
         );
         return;
       case "request_model_projection_sync":
@@ -166,12 +192,21 @@ export function createDesktopRuntimeCommandHandler(
         return;
       case "set_ptt_mode":
         deps.adapter.setPttMode(command.enabled);
+        deps.adapter.persistDesktopSetting("ptt_mode_enabled", String(command.enabled));
         return;
       case "set_ptt_key_binding":
         deps.adapter.setPttKeyBinding(command.binding);
+        deps.adapter.persistDesktopSetting("ptt_key_binding", JSON.stringify(command.binding));
         return;
       case "set_bilibili_live_settings":
         deps.setBilibiliLiveSettings(command.settings);
+        deps.adapter.persistDesktopSetting("bilibili_live_enabled", String(command.settings.enabled));
+        deps.adapter.persistDesktopSetting("bilibili_live_room_id", command.settings.roomId);
+        deps.adapter.persistDesktopSetting("bilibili_live_cookie", command.settings.cookie);
+        deps.adapter.persistDesktopSetting(
+          "bilibili_live_response_interval",
+          String(command.settings.responseIntervalSeconds),
+        );
         return;
       case "preview_compiled_semantic_motion": {
         deps.publishMotionPreviewStatus({

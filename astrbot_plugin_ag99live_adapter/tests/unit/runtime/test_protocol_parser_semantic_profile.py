@@ -17,6 +17,22 @@ def _message(message_type: str, payload: dict) -> dict:
     }
 
 
+def test_parse_inbound_message_accepts_desktop_settings_update() -> None:
+    envelope = parse_inbound_message(
+        _message(
+            "system.desktop_settings_update",
+            {
+                "update_id": "client-setting-test",
+                "key": "speech_volume",
+                "value": "0.75",
+            },
+        ),
+    )
+
+    assert envelope.type == "system.desktop_settings_update"
+    assert envelope.payload["value"] == "0.75"
+
+
 def test_parse_inbound_message_accepts_semantic_axis_profile_save() -> None:
     envelope = parse_inbound_message(
         _message(

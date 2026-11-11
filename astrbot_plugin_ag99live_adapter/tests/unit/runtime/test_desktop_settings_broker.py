@@ -86,3 +86,49 @@ def test_esp32_set_response_budget_starts_after_send(monkeypatch) -> None:
         assert len(sent) == 1
 
     asyncio.run(run())
+
+
+def test_client_update_persists_unsolicited_setting() -> None:
+    persisted: list[tuple[str, dict]] = []
+    broker = DesktopSettingsBroker(
+        send_json=lambda _payload: None,  # type: ignore[arg-type]
+        is_connected=lambda: True,
+        persist_entry=lambda key, entry: persisted.append((key, entry)),
+    )
+
+    assert broker.record_client_update({
+        "update_id": "client-setting-test",
+        "key": "speech_volume",
+        "value": "0.75",
+        "options": [],
+    })
+    assert persisted[0][0] == "speech_volume"
+    assert persisted[0][1]["value"] == "0.75"
+
+
+def test_sync_keeps_empty_canonical_values_and_migrates_missing_keys() -> None:
+    async def run() -> None:
+        calls: list[dict] = []
+        broker = DesktopSettingsBroker(
+            send_json=lambda _payload: None,  # type: ignore[arg-type]
+            is_connected=lambda: True,
+            get_canonical_snapshot=lambda: {
+                "bilibili_live_cookie": {"value": ""},
+            },
+        )
+
+        async def fake_query(*, key: str, action: str, value: str | None = None):
+            calls.append({"key": key, "action": action, "value": value})
+            return {}
+
+        broker.query = fake_query  # type: ignore[method-assign]
+        await broker.synchronize_canonical_settings(
+            ["bilibili_live_cookie", "speech_volume"],
+        )
+
+        assert calls == [
+            {"key": "bilibili_live_cookie", "action": "set", "value": ""},
+            {"key": "speech_volume", "action": "list", "value": None},
+        ]
+
+    asyncio.run(run())

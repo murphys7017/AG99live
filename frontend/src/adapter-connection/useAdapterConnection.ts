@@ -108,6 +108,7 @@ export interface AdapterConnectionInstance {
   initialize: () => Promise<void>;
   dispose: () => Promise<void>;
   setAddress: (nextAddress: string) => void;
+  persistDesktopSetting: (key: string, value: string) => boolean;
   setDesktopScreenshotOnSendEnabled: (enabled: boolean) => void;
   setMicrophoneDevice: (deviceId: string) => void;
   setMicrophoneDevices: (devices: Parameters<ReturnType<typeof createAdapterMicrophoneRuntime>["setMicrophoneDevices"]>[0]) => void;
@@ -332,6 +333,17 @@ export function createAdapterConnection(
     getSocket: () => socket,
     buildEnvelope: buildMessageEnvelope as (typeof buildMessageEnvelope),
   });
+
+  function persistDesktopSetting(key: string, value: string): boolean {
+    return outboundClient.send(
+      OUTBOUND_MESSAGE_TYPES.SYSTEM_DESKTOP_SETTINGS_UPDATE,
+      {
+        update_id: `client-setting-${createMessageId()}`,
+        key,
+        value,
+      },
+    );
+  }
 
   const { config: spoutConfig } = useSpoutSettings();
   const { config: esp32DisplayConfig } = useEsp32DisplaySettings();
@@ -1127,6 +1139,7 @@ export function createAdapterConnection(
     initialize,
     dispose,
     setAddress,
+    persistDesktopSetting,
     setDesktopScreenshotOnSendEnabled,
     setMicrophoneDevice,
     setMicrophoneDevices,

@@ -36,6 +36,8 @@ from .runtime.plugin_runtime import (
     register_control_platform,
     get_plugin_config_snapshot,
     get_plugin_context,
+    get_persisted_desktop_settings,
+    persist_desktop_setting,
     unregister_control_platform,
 )
 from .runtime.state import RuntimeState
@@ -43,6 +45,7 @@ from .protocol.builder import build_system_motion_tuning_samples_state
 from .protocol.constants import (
     TYPE_SYSTEM_DESKTOP_RUNTIME_SETTINGS,
     TYPE_SYSTEM_DESKTOP_SETTINGS_RESULT,
+    TYPE_SYSTEM_DESKTOP_SETTINGS_UPDATE,
 )
 from .runtime.desktop_settings_broker import DesktopSettingsBroker
 from .runtime.desktop_observation import DesktopFrameBroker, SCHEMA
@@ -233,6 +236,7 @@ class OLVPetPlatformAdapter(Platform):
             refresh_runtime_settings_async=self._refresh_runtime_settings_async,
             send_current_model_and_conf=self._send_current_model_and_conf,
             send_motion_tuning_samples_state=self._send_motion_tuning_samples_state,
+            synchronize_desktop_settings=self._synchronize_desktop_settings,
             on_disconnect=self._handle_transport_disconnect,
         )
         self.desktop_observation = DesktopFrameBroker(self.transport.send_json)
@@ -240,6 +244,15 @@ class OLVPetPlatformAdapter(Platform):
         self.desktop_settings_broker = DesktopSettingsBroker(
             send_json=self.transport.send_json,
             is_connected=lambda: self.transport._ws_client is not None,
+            get_canonical_snapshot=lambda: get_persisted_desktop_settings(
+                self.platform_id,
+            ),
+            persist_entry=lambda key, entry: persist_desktop_setting(
+                self.platform_id,
+                key,
+                entry,
+            ),
+            is_allowed_key=self._is_desktop_setting_key,
         )
         self.avatar_output_port = AstrBotAvatarOutputPort(
             send_json=self.transport.send_json,
@@ -699,6 +712,19 @@ class OLVPetPlatformAdapter(Platform):
         self._retain_conversation_platform_until_restart()
         self._sync_client_profile_from_runtime_state()
 
+    async def _synchronize_desktop_settings(self) -> None:
+        from .web_control import DESKTOP_SETTINGS_SPEC
+
+        await self.desktop_settings_broker.synchronize_canonical_settings(
+            setting.key for setting in DESKTOP_SETTINGS_SPEC
+        )
+
+    @staticmethod
+    def _is_desktop_setting_key(key: str) -> bool:
+        from .web_control import DESKTOP_SETTINGS_SPEC
+
+        return any(setting.key == key for setting in DESKTOP_SETTINGS_SPEC)
+
     def _retain_conversation_platform_until_restart(self) -> None:
         configured = getattr(self.runtime_state, "conversation_platform", "astrbot")
         if configured == self.conversation_platform:
@@ -800,7 +826,14 @@ class OLVPetPlatformAdapter(Platform):
             )
             return
         if message.type == TYPE_SYSTEM_DESKTOP_SETTINGS_RESULT:
-            self.desktop_settings_broker.resolve(message.payload)
+            if not self.desktop_settings_broker.resolve(message.payload):
+                logger.warning(
+                    "Ignoring unsolicited desktop settings result key=%s",
+                    message.payload.get("key", ""),
+                )
+            return
+        if message.type == TYPE_SYSTEM_DESKTOP_SETTINGS_UPDATE:
+            self.desktop_settings_broker.record_client_update(message.payload)
             return
         await self.frontend_system_handler.handle(
             message,

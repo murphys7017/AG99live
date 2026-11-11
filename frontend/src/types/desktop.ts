@@ -505,6 +505,7 @@ export interface DesktopAssistantFeedbackState {
 }
 
 export type DesktopRuntimeCommand =
+  | { type: "persist_desktop_setting"; key: string; value: string }
   | { type: "set_address"; address: string }
   | { type: "set_desktop_screenshot_on_send"; enabled: boolean }
   | { type: "set_microphone_device"; deviceId: string }

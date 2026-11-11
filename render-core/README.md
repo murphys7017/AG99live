@@ -141,6 +141,16 @@ Currently supported:
 - `live2d_physics_response_scale`: list/set, default `1`, range `0.5` to `2`,
   UI step `0.05`. Values are rounded to two decimal places, matching the TS
   presentation settings normalizer; they are not snapped to the UI step.
+- `live2d_ambient_motion_enabled`: list/set, default `true`. Disabling it
+  prevents a new random `Idle` motion from starting after the current motion
+  finishes; queued conversation motions remain independent.
+- `model_view_scale`: list/set, default `1`, range `0.8` to `2`, UI step `0.05`.
+- `model_view_offset_x` and `model_view_offset_y`: list/set, default `0`, range
+  `-1.5` to `1.5`, UI step `0.05`. Offsets use the same logical model-space
+  coordinates as the TS desktop.
+- `motion_engine_intensity_scale`: list/set, default `1.35`, range `0.5` to
+  `2.5`, UI step `0.05`. Native applies the scale only to expressive semantic
+  motion values before relation-graph range constraints.
 
 Accepted changes are queued under the model runtime mutex and applied by the
 render thread before the next Physics update. They remain in memory for this
