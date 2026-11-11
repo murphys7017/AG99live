@@ -43,6 +43,7 @@ export interface SystemServerInfoPayload {
   ws_url: string;
   http_base_url: string;
   auto_start_mic: boolean;
+  product_version: string;
   schema_manifest: ProtocolSchemaManifest;
 }
 

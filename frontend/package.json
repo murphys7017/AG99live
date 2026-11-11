@@ -8,6 +8,8 @@
   "main": "./out/main/index.cjs",
   "scripts": {
     "prebuild": "python ../scripts/sync_version.py",
+    "build:web": "python ../scripts/sync_version.py && vue-tsc --noEmit -p tsconfig.json && vite build",
+    "build:astrbot-page": "python ../scripts/sync_version.py && vue-tsc --noEmit -p tsconfig.json && vite build --config vite.astrbot-page.config.ts",
     "dev": "node scripts/electron-vite-runner.cjs dev",
     "build:spout-sender": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-spout-sender.ps1",
     "start": "node scripts/electron-vite-runner.cjs preview",
@@ -25,8 +27,6 @@
     "test:compile": "node scripts/compile-tests.cjs",
     "test": "npm run test:compile && node scripts/run-compiled-tests.cjs",
     "build": "npm run typecheck && electron-vite build",
-    "build:web": "vue-tsc --noEmit -p tsconfig.json && vite build",
-    "build:astrbot-page": "vue-tsc --noEmit -p tsconfig.json && vite build --config vite.astrbot-page.config.ts",
     "package:win": "npm run build:spout-sender && npm run build && electron-builder --win --x64",
     "package:win:dir": "npm run build:spout-sender && npm run build && electron-builder --win --x64 --dir",
     "preview": "vite preview"

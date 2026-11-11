@@ -477,6 +477,7 @@ export function parseSystemServerInfoPayload(
   }
   const autoStartMic = requiredBoolean(envelope.type, record.payload, "auto_start_mic");
   if (!autoStartMic.ok) return autoStartMic;
+  const productVersion = optionalString(record.payload.product_version) ?? "unknown";
   const schemaManifest = parseSchemaManifest(envelope.type, record.payload.schema_manifest);
   if (!schemaManifest.ok) return schemaManifest;
   return {
@@ -485,6 +486,7 @@ export function parseSystemServerInfoPayload(
       ws_url: normalizedWsUrl,
       http_base_url: normalizedHttpBaseUrl,
       auto_start_mic: autoStartMic.payload,
+      product_version: productVersion,
       schema_manifest: schemaManifest.payload,
     },
   };

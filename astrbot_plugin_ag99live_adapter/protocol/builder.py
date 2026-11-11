@@ -44,7 +44,7 @@ from .constants import (
     TYPE_SYSTEM_SEMANTIC_AXIS_PROFILE_SAVE_FAILED,
     TYPE_SYSTEM_SERVER_INFO,
 )
-from .schema_versions import OUTPUT_SEGMENT_SCHEMA_VERSION, SCHEMA_MANIFEST
+from .schema_versions import OUTPUT_SEGMENT_SCHEMA_VERSION, PRODUCT_VERSION, SCHEMA_MANIFEST
 from .parser import build_message_envelope
 
 
@@ -93,6 +93,7 @@ def build_system_server_info(
             "ws_url": ws_url,
             "http_base_url": http_base_url,
             "auto_start_mic": auto_start_mic,
+            "product_version": PRODUCT_VERSION,
             "schema_manifest": SCHEMA_MANIFEST,
         },
     )

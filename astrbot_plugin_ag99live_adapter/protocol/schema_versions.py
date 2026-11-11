@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Final
 
@@ -8,8 +9,14 @@ from typing import Any, Final
 _MANIFEST_PATH = Path(__file__).with_name("schema_manifest.json")
 _MANIFEST = json.loads(_MANIFEST_PATH.read_text(encoding="utf-8"))
 _SCHEMAS = _MANIFEST["schemas"]
+_METADATA_PATH = _MANIFEST_PATH.parents[1] / "metadata.yaml"
+_METADATA = _METADATA_PATH.read_text(encoding="utf-8")
+_PRODUCT_VERSION_MATCH = re.search(r"^version:\s*(\S+)\s*$", _METADATA, re.MULTILINE)
+if _PRODUCT_VERSION_MATCH is None:
+    raise RuntimeError("AG99live Adapter metadata.yaml is missing its product version.")
 
 SCHEMA_MANIFEST: Final[dict[str, Any]] = _MANIFEST
+PRODUCT_VERSION: Final[str] = _PRODUCT_VERSION_MATCH.group(1)
 PROTOCOL_VERSION: Final[str] = _MANIFEST["protocol_version"]
 MODEL_INFO_SCHEMA_VERSION: Final[str] = _SCHEMAS["model_info"]
 MOTION_INTENT_V4_SCHEMA_VERSION: Final[str] = _SCHEMAS["motion_intent"]

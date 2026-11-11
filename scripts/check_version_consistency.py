@@ -14,11 +14,16 @@ SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+$")
 
 def verify_cmake_version_source(path: Path) -> None:
     text = path.read_text(encoding="utf-8")
-    if "VERSION" not in text or "project(" not in text:
-        raise SystemExit(f"CMake project version is missing in {path}.")
-    if "../VERSION" not in text or "AG99_PRODUCT_VERSION" not in text:
+    source_pattern = re.compile(
+        r'file\(READ\s+"\$\{CMAKE_CURRENT_SOURCE_DIR\}/\.\./VERSION"\s+'
+        r"AG99_PRODUCT_VERSION\)"
+    )
+    project_pattern = re.compile(
+        r"project\([^\n]*VERSION\s+\$\{AG99_PRODUCT_VERSION\}"
+    )
+    if source_pattern.search(text) is None or project_pattern.search(text) is None:
         raise SystemExit(
-            f"CMake project version does not read the root VERSION in {path}."
+            f"CMake project version is not bound to the root VERSION in {path}."
         )
 
 

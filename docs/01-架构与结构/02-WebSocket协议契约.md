@@ -13,6 +13,7 @@ python scripts/check_protocol_schema_manifest.py
 ## 传输原则
 
 - WebSocket 在解析边界校验协议版本、消息类型、信封基本字段和消息专属必填字段。前端要求 `timestamp` 为非空字符串；后端归一化入站消息时会为缺失的 `timestamp` 补当前 UTC 时间。`turn_id` 是否允许为 `null` 由消息类型决定。
+- `system.server_info` 携带 Adapter 的 `product_version`，当前配套版本为 `1.0.0`。桌面端保留旧 Adapter 未发送该字段时的 `unknown` 兼容值。
 - 对启用精确键校验的 payload 和 slot，未知字段会被拒绝；不能将这一行为概括为所有后端 payload 的未知字段一律拒绝。
 - 完整文本/音频段通过 `type: output.segment` 一次提交，Payload 的 `schema_version` 为 `output.segment.v6`。如果同段动作尚未完成，初始动作槽可为 `pending`，随后只允许一次 `output.segment_motion` 终态更新；它补齐动作槽，不重开音频或文本段，也不是 M2 增量事件。
 - 文件、模型和缓存媒体通过 Adapter 的本机 HTTP 静态资源服务提供；前端只接受契约允许的绝对 URL。
