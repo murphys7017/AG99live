@@ -20,7 +20,7 @@ AG99 插件 `astrbot_plugin_ag99live_adapter` 将 AG99 的对话、TTS 和动作
 | WebSocket | `12396` | 输入、输出、控制、模型与系统消息。 |
 | HTTP | `12397` | 已扫描模型、缓存音频、图片和允许的静态资源。 |
 
-端口由 AstrBot 平台启动配置的 `port` 和 `http_port` 设置。其他根配置包括 `speaker_name` 和 `auto_start_mic`，属于启动级设置。Adapter 运行设置统一在 AG99live Web 控制台编辑；AstrBot 插件配置文件由 Adapter 用作持久化，不再提供第二套插件设置表单。桌面本机设置由桌面设置窗口管理，也可从 Web 控制台转发修改。
+端口由 AstrBot 平台启动配置的 `port` 和 `http_port` 设置。其他根配置包括 `speaker_name` 和 `auto_start_mic`，属于启动级设置。Adapter 运行设置统一在 AG99live Web 控制台编辑；AstrBot 插件配置文件由 Adapter 用作持久化，不再提供第二套插件设置表单。桌面运行设置也由 Adapter 保存每个桌宠实例的 canonical snapshot，Web 页面通过 broker 修改当前桌面端，客户端重连时自动重新应用同一份配置。
 
 ### 身份字段
 
@@ -102,7 +102,7 @@ Adapter 对每条输入流设置 12 MiB PCM 总量上限和 120 秒生命周期�
 
 **对话历史** 支持只读查看、新建、显式载入和确认删除。只读查看不会切换当前会话；新建或载入会话会改变桌宠后续聊天的上下文。API 检查会话所属的 Adapter 平台及 Client UID，不允许跨实例操作；新建的空会话也会保留在列表中。此功能直接复用 AG99 会话服务，不依赖桌面 WebSocket 在线，也不占用第二条连接。页面按需读取历史，会话和消息每页最多渲染 100 项。
 
-麦克风、全局快捷键和 Spout/ESP32 等本机功能仍由 AG99live 桌面运行时持有，Web 页面经桌面设置 broker 读写，不把本机配置存入 Adapter。Electron 还支持从 Web 修改鼠标凝视参数与托盘使用的 WebUI 基址；native runtime 以实际支持的设置项为准。实时动作预览仍保留本机入口；旧历史窗口保留到 Web 历史现场验收完成，不会自动同步 Web 会话选择，历史管理请优先使用 Web。
+麦克风、全局快捷键和 Spout/ESP32 等本机功能仍由 AG99live 桌面运行时执行，配置由 Adapter 的 canonical snapshot 统一保存，Web 页面经桌面设置 broker 读写。TS 与 Native 客户端只负责应用同一份配置；Native 尚未实现的设置会保留在 snapshot 中，并在兼容客户端连接后重新尝试下发。Electron 还支持从 Web 修改鼠标凝视参数与托盘使用的 WebUI 基址；native runtime 以实际支持的设置项为准。实时动作预览仍保留本机入口；旧历史窗口保留到 Web 历史现场验收完成，不会自动同步 Web 会话选择，历史管理请优先使用 Web。
 
 Electron 托盘和桌宠右键的 **打开 Web 控制面板** 会在默认浏览器打开本插件页面。默认 WebUI 基址为 `http://127.0.0.1:6185/`；使用其他地址或反向代理时，在桌面 **本机工具 > 本机设置** 或已连接的 Web 本机配置中设置。登录继续由 AG99 管理。
 

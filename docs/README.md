@@ -61,6 +61,7 @@ TypeScript 是持续开发和表现迭代实现。C++ 是冻结大版本后的�
 | 参考项目与能力契约 | [参考项目与能力契约](02-设计文档/08-参考项目与能力契约.md) |
 | AG99live 与 AG99 的边界和实施路线 | [AG99live 与 AG99 联合边界与扩展路线](02-设计文档/07-AG99live与AG99联合边界与扩展路线.md) |
 | Adapter、Interaction Orchestrator 与 Provider 重构计划 | [Adapter、Interaction Orchestrator 与 Provider 重构计划](02-设计文档/15-Adapter-Orchestrator-Provider重构计划.md) |
+| C++ Native Runtime 的整体模块、线程、所有权和迁移顺序 | [C++ Native Runtime 整体架构重设计](02-设计文档/16-C++原生运行时整体架构重设计.md) |
 | AG99 桌面主应用与身体接入计划 | AG99 仓库 `docs/Yakumo/dev/desktop-application-and-body-integration-plan.md` |
 | 小模型和 VTube Studio 原始数据的边界 | [小模型训练](05-小模型训练/01-动作小模型训练前置条件与职责边界.md) |
 | Persona 输出、M0/M1/M2 与动作意图训练样本如何归一化 | [Persona 动作意图样本归一化契约](05-小模型训练/04-Persona动作意图样本归一化契约.md) |
@@ -72,6 +73,7 @@ TypeScript 是持续开发和表现迭代实现。C++ 是冻结大版本后的�
 | --- | --- | --- |
 | 协议版本 | `astrbot_plugin_ag99live_adapter/protocol/schema_manifest.json` | 以 manifest 和生成类型为准；协议文档只解释 Schema 职责和使用边界。 |
 | 产品版本 | 根目录 `VERSION` | `scripts/sync_version.py` 同步 Desktop 和 Adapter，CMake 直接读取，`scripts/check_version_consistency.py` 校验。 |
+| 桌面运行配置 | Adapter 插件配置中的 `desktop_runtime_settings` | Web 页面写入 canonical snapshot；TS 与 Native 连接时应用同一份值。 |
 | 前端协议类型 | `frontend/src/types/protocol.ts` 与生成文件 | 描述解析和使用边界。 |
 | Adapter 生命周期 | `astrbot_plugin_ag99live_adapter/` | 描述 AG99 输入、段聚合、服务和清理。 |
 | 前端播放和动作执行 | `frontend/src/` | 描述组合根、所有权与终态。 |

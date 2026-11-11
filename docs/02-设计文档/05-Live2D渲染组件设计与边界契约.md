@@ -1,7 +1,7 @@
 # Live2D 渲染组件设计与边界契约
 
-状态:V1 代码基线设计与后续演进边界 · 编写日期:2026-10-01 · 范围:原生侧 Live2D 运行时组件化 + TypeScript/C++ 双实现关系
-性质:**边界契约与迁移方案;目前仅 D3D11 透明合成 surface 与 Cubism 绘制器已实现,其余运行时迁移仍属设计。**
+状态:V1 代码基线设计与后续演进边界 · 复核日期:2026-11-12 · 范围:原生侧 Live2D 运行时组件化 + TypeScript/C++ 双实现关系
+性质:**边界契约与迁移方案;D3D11/Cubism、参数混音、语音随动、交互贡献、参数计划执行和增量音频路径已经进入 C++;完整 TypeScript 编译器等价、宿主拆分和真实设备验收仍属后续工作。**
 
 当前 Adapter 的 `output.segment.payload.speech` slot 固定为 `absent`；本文对 Native speech cues 的解析与渲染讨论属于协议能力/Native 设计边界，不表示当前 AG99 Persona `segments[].speech` 会作为该 slot 发送。Persona 分段与逐段动作/TTS 关联见[动作生成与 Persona 分段关联](../01-架构与结构/07-动作生成与Persona分段关联.md)。TypeScript 是持续开发实现，C++ 是冻结大版本后的高性能稳定实现。
 
@@ -43,84 +43,45 @@
 
 ## 2. 翻译覆盖盘点(结论)
 
-结论一句话:**协议层与参数计划校验层翻译到位;"让角色活着"的参数运行时只翻译了约三分之一;
-动作编译器不是翻译而是平行重写,且漏掉了夹在两组 stage 之间的整个 `PerformanceSchedule` 层。**
+结论一句话:**协议层、参数计划校验层和主要参数运行时已经进入 C++;动作编译器仍是面向稳定子集的平行实现,尚未覆盖 TypeScript 的完整 stage 与 `PerformanceSchedule` 层。**
 
 ### 2.1 已忠实翻译(可作为替换基线)
 
 | 前端源 | C++ 对应 | 核对结论 |
 |---|---|---|
-| `model-engine/planParser.ts` (650行) | `render-core/src/main.cpp:1744-2049` | 字段白名单、5 种 curve、关键帧单调性、`at+transition ≤ duration`、spring 边界 `(0,10]` / `[0.5,1)`、weight `[0,1]`、expression 冲突拒绝、时长 `320–15000` 全部一致 |
-| `speechsignalruntime.ts:18-38,242-267` | `main.cpp:89-207` | 16 个常量逐一吻合;`advanceEnvelope` 数学一致;`voice_following.` / `body_` / `pitch` 分支一致 |
-| `parameterpresentation.ts:81-106` 轨道解析 | `main.cpp:2051-2073` | 一致 |
-| `parameterpresentation.ts:193-228` bounded 动力学 | `main.cpp:2079-2109` | 制动速度、钳制顺序、越界吸附一致 |
-| `lappmodel.ts` physics3.json 输出所有权 | `main.cpp:618-649,828-858` | 一致(输入/输出 ID 采集 + 受保护参数排除 + 响应缩放) |
-| `stages/semanticAxisRelationGraphStage.ts` | `main.cpp:2426-2552` | 关系图不动点传播、`derive` / `bounded_ratio`、方向冲突减半、`hardCap` 公式一致 |
+| `model-engine/planParser.ts` | `render-core/src/main.cpp:ParseParameterPlan` | 字段白名单、curve、关键帧、response、expression 和时长边界已进入 Native 参数计划解析；逐字段黄金样本仍待建立 |
+| `speechsignalruntime.ts` | `render-core/src/speech_signal.cpp` | 独立口型/语音能量曲线、语音状态滞回和包络常量已进入 Native；重音输入使用 RMS 上升沿近似 |
+| `parameterpresentation.ts` 轨道解析 | `render-core/src/main.cpp:ParseParameterPlan` | 参数轨道、modulation、response 配置已进入 Native 参数计划路径 |
+| `parameterpresentation.ts` bounded / spring 动力学 | `render-core/src/main.cpp:AdvanceBounded` / `AdvanceSpring` | 当前实现已按稳定规则收敛；逐帧数值等价仍需样本确认 |
+| `lappmodel.ts` physics3.json 输出所有权 | `render-core/src/main.cpp:NativeCubismModel` | 输入/输出 ID 采集、受保护参数排除和响应缩放已实现 |
+| `stages/semanticAxisRelationGraphStage.ts` | `render-core/src/main.cpp:CompileMotionPlan` | 关系图传播、方向冲突和范围约束已实现于 Native 编译子集 |
 
-### 2.2 完全缺失
+### 2.2 尚未与 TypeScript 等价的部分
 
-| 缺失项 | 前端规模 | 后果 |
+当前 C++ 已经具备可运行的参数运行时和稳定参数计划执行路径。下面记录的是仍未与 TypeScript 完整等价、或尚未用机器样本证明一致的部分：
+
+| 差异项 | TypeScript 参考 | 当前 C++ 状态 |
 |---|---|---|
-| `parametermixer.ts` 多贡献者混音器 | 757 行 | C++ 是**顺序单写者后写覆盖**。计划与口型命中同一参数时口型吃掉计划贡献;`AddNormalizedParameterValue`(拖拽)从 `default_value` 重算,会抹掉同参数上的计划值。无 `parameter_mixer_write_mismatch` 回读校验 |
-| 交互摇摆 + 视线跟随 | `activeparameterruntime.ts:47-69` | Adapter 的 "thinking" 状态在原生侧**无任何视觉表现**;只有裸窗口拖拽 |
-| 频谱重音通道 | `lipSyncTimelineSink.ts:191-194` | 前端从 `getByteFrequencyData` 算 `speechEmphasisValue`,`speechsignalruntime.ts:208-213` 以 `max(包络重音, 重音×0.22)` 混入。C++ 无 FFT、无重音输入 → 重音驱动的手势调制系统性偏弱 |
-| `PerformanceSchedule` 层 | `performanceSchedule.ts` 1713 + `performanceScheduleText.ts` 370 + `performanceComposition.ts` 231 + `performanceDeterminism.ts` 18 ≈ **2332 行** | 见 §2.4,这是最大的单块缺口 |
-| `parameterTrackGraphCompiler.ts` | 633 行 | 序列步骤合并为单一计划的逻辑缺失 |
-| 6 个语义 stage 中的 5 个 | `axisResolver` 341 / `intensity` 69 / `modeResolver` 69 / `timing` 46 / `intentValidator` 100 | 仅 `semanticAxisRelationGraph` 被翻译 |
-| 4 个参数 stage 全部 | `speechPose` 424 / `modelParameterBinding` 137 / `parameterTrackGraph` 195 / `resourcePolicy` 50 | 全部缺失 |
-| 播放时钟 / turn 生命周期 | `playback-timeline/` 3433 + `turn-playback/` 1519 | C++ `AudioWorkerLoop`(`main.cpp:1252-1294`)是朴素 FIFO,靠 `NowSeconds() + wav 时长` 墙钟估时发 `playback_finished`,无中断/排序协调 |
+| `parametermixer.ts` 多贡献者混音器 | 757 行 | 已有 `ApplyParameterFrame`、贡献者分组、单次 pre-Physics 写入和回读校验；TS/C++ 逐帧轨迹等价尚未用黄金样本证明 |
+| 交互摇摆 + 视线跟随 | `activeparameterruntime.ts` | 已有 interaction sway/gaze 贡献路径；真实输入、打断释放和跨端轨迹仍待验收 |
+| 语音随动与重音 | `speechsignalruntime.ts` / `lipSyncTimelineSink.ts` | 已恢复独立口型/语音能量曲线，并使用 RMS 上升沿生成重音；它不是 WebSDK 的 FFT 频谱输入，属于明确的表现降级 |
+| `PerformanceSchedule` 与 `parameterTrackGraphCompiler.ts` | `performanceSchedule.ts` / `parameterTrackGraphCompiler.ts` | 尚未移植完整调度总线和序列轨迹合并；当前稳定路径优先消费已编译的 `engine.parameter_plan.v3` |
+| semantic / parameter stages | `stages.ts` 及其 stage 实现 | `CompileMotionPlan` 是受限的原生编译子集，不是完整 TypeScript pipeline |
+| 播放时钟 / turn 生命周期 | `playback-timeline/` + `turn-playback/` | 已有 native audio worker、generation、segment terminal 和中断清理；尚未与 TypeScript Timeline 做完整行为等价验证 |
 
-### 2.3 真实失真(4 项,按影响排序)
+### 2.3 历史失真项与当前状态
 
-**F-1 口型弱约 7 倍且无噪声门**
+此前记录的 F-1（口型增益）、F-2（blend-in 起点）、F-3（spring 积分器）和 F-4（速度状态）已经在当前 C++ 代码中完成对应修正：独立口型/语音能量曲线位于 `render-core/src/speech_signal.cpp`，blend-in 使用 `presentation.initial_value`，spring 使用解析阻尼速度、梯形积分并携带速度状态。它们仍需要 TS/C++ 轨迹样本和真实模型观感验收，不能仅凭源码对照宣布表现等价。
 
-```
-前端 lipSyncTimelineSink.ts:189-190
-  lipSyncIntensity = clamp01((rms - 0.012) * 30)     // 独立曲线
-  speechEnergyValue = clamp01((rms - 0.008) * 5.5)    // 独立曲线
-C++ main.cpp:137
-  level = clamp(rms * 4.0, 0, 1)                      // 单一曲线,同时喂口型与语音能量
-```
+仍需关注的差异：
 
-TTS 典型 `rms ≈ 0.08` 时:前端口型饱和到 `1.0`,C++ 仅 `0.32` → 嘴基本不动。两条曲线的
-增益与噪底都不同,C++ 用一个值兼两职是两个错误叠加。
-
-**F-2 blend-in 起点取错值**
-
-前端从 `node.initialValue`(presentation 节点创建时的实时值)插值
-(`parameterpresentation.ts:118-133`);C++ 从 `binding.neutral_target_value`(计划申报中立值)
-插值(`main.cpp:2150-2162`)。只要实时值 ≠ 申报中立值(在上一次 motion / Physics / breath
-之后几乎总是成立),`slow_build_quick_release` 与 `pulse_settle` 首帧跳变。
-
-**F-3 spring 积分器换成了另一个算法**
-
-| | 前端 `parameterpresentation.ts:230-333` | C++ `main.cpp:2111-2142` |
-|---|---|---|
-| 速度 | **解析解** `resolveDampedSpringVelocity`:阻尼频率 `ω√(1-ζ²)`、衰减 `e^{-ζωΔt}`、cos/sin 相位 | **半隐式欧拉** `a = -2ζωv - ω²x` |
-| 积分 | **梯形** `(v_prev + v_next)/2 · Δt` | 显式 `value += v_next · Δt` |
-| settle | **每步**判定 | 仅末尾判定 |
-| 钳制顺序 | 先加速度限、再 `±maxVelocity` | 先 `±maxVelocity`、再加速度限 |
-
-过冲形态与收敛时间都不同。这不是翻译精度问题,是换了一种物理模型。
-
-**F-4 速度被有限差分反推,摧毁振荡状态**
-
-前端把解析速度存在节点里、settle 时归零;C++ `main.cpp:2249-2250` 用
-`velocity = (next_offset - previous_offset) / dt` 重算。对 spring 而言这抹掉了让振荡成立的
-二阶状态,退化为临界阻尼趋近;且 settle 后速度非零。
-
-**次要(校验放宽,不阻塞但应在替换时一并收紧)**
-
-- 空 / 缺失 `profile_id`、`model_id` 不再拒绝:前端 `planParser.ts:336` 要求两者非空;
-  C++ `main.cpp:1762-1763` 仅在不非空时校验**不匹配**。
-- modulation 点值不校验 `[-1,1]`:前端 `planParser.ts:524-525` 校验;C++ `ParseTrackPoint`
-  (`main.cpp:1730`) 只校验有限性。
-- voiced 退出用 `>=` 而非 `>`:前端 `speechsignalruntime.ts:175` 用严格大于;`main.cpp:144-145`
-  用 `>=`。测度为零,但属无谓偏离。
+- C++ 使用 50 Hz RMS 桶，WebSDK 使用独立的音频分析节奏；两者的时间采样不是同一实现。
+- C++ 重音来自 RMS 上升沿，WebSDK 仍可使用频谱输入；两者不应被文档描述成完全等价。
+- 负例拒绝、诊断 reason 顺序和复杂 sequence 轨迹仍需黄金样本固定。
 
 ### 2.4 编译器真实拓扑(修正此前的认知)
 
-C++ 侧与前端都不是"单条流水线",而是 **6 → PerformanceSchedule → 4** 三段:
+TypeScript 的完整编译拓扑是 **6 → PerformanceSchedule → 4** 三段；C++ 当前只实现其中的协议/参数计划执行和受限的 `motion_intent` 编译子集：
 
 ```
 engine.motion_intent.v4
@@ -148,12 +109,12 @@ engine.motion_intent.v4
 `compileFaceTrackTiming` / `compileSpeechTrackTiming` / `resolveSpeechPhraseGroup` 被多个 stage 共享。
 把它当"可以略过的中间步骤"是错误的。
 
-**C++ 现状的致命依赖缺口**:`compilePerformanceSchedule` 的两个主输入是 `assistantText` 与
-`speechCues`。C++ 的 `protocol.cpp:226-264` **已正确解析** speech cues(含 kind / phrase_index /
-position 校验),但 `main.cpp:1214-1250` 的 `OnSegment` 把 `segment.text.content` 只打到 stdout、
-`segment.speech.cues` **完全未读**,`AudioQueueItem`(`main.cpp:1207-1212`)只携带
-`url` / `turn_id` / `motion_payload`。**数据在协议层被正确送达,在宿主层被丢弃。**
-不先修这一处,`PerformanceSchedule` 层无从移植。
+**C++ 现状的主要依赖缺口**：`compilePerformanceSchedule` 的两个主输入是 `assistantText` 与
+`speechCues`。C++ 的 `protocol.cpp:226-264` **已正确解析** speech cues（含 kind / phrase_index /
+position 校验），但 `main.cpp:2726-2794` 的 `OnSegment` 尚未把 `segment.speech.cues` 接入原生
+动作编译器；`AudioQueueItem`（`main.cpp:1732-1738`）虽然保留完整 segment，当前编译路径仍只消费
+动作和播放身份。**数据在协议层被正确送达，在原生表现编译层尚未使用。**
+不先修这一处，`PerformanceSchedule` 层无法按 TypeScript 语义移植；这属于下一阶段编译器一致性工作，不影响当前 C++ 直接消费已编译参数计划的 V1 稳定路径。
 
 ---
 
@@ -176,7 +137,7 @@ render-core/
   src/main.cpp           # 只做装配:解析参数 → 构造三层 → 跑帧循环
 ```
 
-拆分的直接收益:`main.cpp` 现状 3311 行单编译单元,内含窗口/托盘/D3D11/DirectComposition/
+拆分的直接收益:`main.cpp` 当前仍是超过 6500 行的单编译单元,内含窗口/托盘/D3D11/DirectComposition/
 WAV 解码/麦克风/协议/两套编译器,`CompileMotionPlan` 是 400 行、6 层嵌套。编译器一旦成为
 独立纯函数库,即可脱离 GPU 与 SDK 做黄金样本比对——这是 §9 验证契约的前提。
 
@@ -252,8 +213,8 @@ host.draw_and_present();
 | 3 | 近似相等 epsilon | `1e-6`(`parameterTrackGraphCompiler` ×3)、`0.000001`(`speechPoseStage.ts:310`) | 同值两种拼写 |
 | 4 | 阈值 `0.0001` | `semanticAxisRelationGraphStage.ts` ×3 | "受约束但相等"判定 |
 | 5 | 中立容差 | `0.001`(`axisResolver` 全中立门)、`0.0001`(关系图) | 两个不同容差,勿合并 |
-| 6 | `MIN/MAX/DEFAULT_MOTION_DURATION_MS` = 320 / 15000 / 1000 | `constants.ts` → `timing` | C++ 已在 `main.cpp:1795` 硬编码 320/15000,需补 DEFAULT |
-| 7 | `MIN/MAX_PARAMETER_KEYFRAME_COUNT` = 2 / 4 | `constants.ts` → `parameterTrackGraphStage` | C++ 已在 `main.cpp:1943-1944` 硬编码,一致 |
+| 6 | `MIN/MAX/DEFAULT_MOTION_DURATION_MS` = 320 / 15000 / 1000 | `constants.ts` → `timing` | C++ 参数计划解析已使用 320/15000；原生 `motion_intent` 子集仍使用独立的 250/5000 窗口，必须作为能力边界固定并纳入样本 |
+| 7 | `MIN/MAX_PARAMETER_KEYFRAME_COUNT` = 2 / 4 | `constants.ts` → `parameterTrackGraphStage` | C++ 参数计划与 motion intent 子集的限制不同，需由黄金样本固定拒绝行为 |
 
 ### 4.3 十个 stage 契约
 
@@ -328,20 +289,19 @@ ParameterContributionOwner = interaction_sway | interaction_gaze | direct_plan |
 5. 合成 → 一次 response pass。
 6. 逐参数写入并**回读校验**,偏差 > 0.001 → 失败 `parameter_mixer_write_mismatch:{id}`。
 
-C++ 现状的 `UpdateAndDraw`(`main.cpp:1480-1524`)必须替换为该模型。当前它是:
-`UpdateMotion` → `ApplyQueuedMotion` → `ApplyDrag` → `UpdateAudioLevel` →
-`ApplyQueuedParameterPlan` → `ApplyLipSync` → `UpdatePhysicsAndPose`,每步各自
-`SetParameterValue`,后写覆盖。
+C++ 当前已经采用该模型。`UpdateAndDraw` 先更新动作和音频信号，再调用 `ApplyParameterFrame`，
+由贡献者模型完成一次参数解析、写入和回读校验，随后才进入 Physics 与 Cubism update。
+旧的“每个来源独立 `SetParameterValue`、后写覆盖”描述属于历史审计结论，不再代表当前代码。
 
 ### 5.2 语音信号契约
 
-保留 C++ 已翻译正确的部分(常量、包络数学、增益公式),**替换**信号来源:
+当前 C++ 已实现独立口型曲线、语音能量曲线、语音状态滞回和 RMS 上升沿重音包络。与 WebSDK 的差异必须显式记录:
 
-| 信号 | 前端来源 | C++ 必须改为 |
+| 信号 | 前端来源 | 当前 C++ |
 |---|---|---|
-| `lipSyncIntensity` | `(rms - 0.012) * 30` 钳位 | 采纳前端曲线,替换 `rms * 4.0` |
-| `speechEnergyValue` | `(rms - 0.008) * 5.5` 钳位 | 独立曲线,不得与口型共用一个值 |
-| `speechEmphasisValue` | `getByteFrequencyData` 频谱 | 需实现频谱重音分析,或**显式声明降级**并记录 `evidence_gap` |
+| `lipSyncIntensity` | `(rms - 0.012) * 30` 钳位 | 已采用同一曲线 |
+| `speechEnergyValue` | `(rms - 0.008) * 5.5` 钳位 | 已采用独立曲线 |
+| `speechEmphasisValue` | `getByteFrequencyData` 频谱 | 使用 RMS 上升沿近似，不等价于 FFT，需保留为表现降级和验收项 |
 
 采样率:前端为 30 Hz(`state.yaml:frontend_runtime_occupancy_followup` 记录 60 FPS 渲染 +
 30 Hz 分析);C++ 现状为 WAV RMS 50 Hz 分桶(`main.cpp:373-374`)。两者都必须显式声明并
@@ -349,11 +309,9 @@ C++ 现状的 `UpdateAndDraw`(`main.cpp:1480-1524`)必须替换为该模型。�
 
 ### 5.3 表现动力学契约
 
-- **P-1** blend-in 起点必须是 presentation 节点创建时的实时值(`initialValue`),**不得**用
-  计划申报的 `neutral_target_value`。修正 `main.cpp:2150-2162`。
-- **P-2** spring 必须移植**解析阻尼解**,不得用欧拉近似;积分用梯形 `(v_prev+v_next)/2·Δt`;
-  settle 判定**每步**执行;钳制顺序为"先加速度限、再 `±maxVelocity`"。
-- **P-3** 速度必须作为节点状态**携带**,settle 时归零;**禁止**用有限差分重算。
+- **P-1** blend-in 起点使用 presentation 节点创建时的实时值(`initialValue`)，当前 C++ 已实现。
+- **P-2** spring 使用解析阻尼速度、梯形积分、逐步 settle 和“先加速度限、再 `±maxVelocity`”的顺序，当前 C++ 已实现。
+- **P-3** 速度作为节点状态携带并在 settle 时归零，当前 C++ 已实现；仍需轨迹样本确认跨端数值一致。
 - **P-4** bounded 动力学现有 C++ 实现已正确,保留。
 
 ---
@@ -362,17 +320,16 @@ C++ 现状的 `UpdateAndDraw`(`main.cpp:1480-1524`)必须替换为该模型。�
 
 - 设备 / 交换链 / DirectComposition / 窗口 / 托盘 / 帧循环从 `main.cpp` 迁出,不改行为。
 - 帧循环顺序固定为 §3.3 的五步。
-- `delta_seconds` 钳制上限保持 `0.1`(`main.cpp:1487-1490`)。
+- `delta_seconds` 钳制上限保持 `0.1`，由 Native 帧循环统一执行。
 - 宿主**不得**解释任何协议字段,只消费已解析的结构体。
 
 ---
 
 ## 7. 协议与 Schema 权威契约
 
-### 7.1 现状缺陷
+### 7.1 当前状态
 
-`astrbot_plugin_ag99live_adapter/protocol/schema_manifest.json` 是版本唯一权威,共 10 个
-schema + `protocol_version = v2`:
+`astrbot_plugin_ag99live_adapter/protocol/schema_manifest.json` 是版本唯一权威，共 10 个 schema，`protocol_version = v2`：
 
 ```
 model_info = live2d_scan.v4                    motion_intent = engine.motion_intent.v4
@@ -385,26 +342,16 @@ semantic_axis_relation_graph = ag99.semantic_axis_relation_graph.v1
 voice_following_profile = ag99.voice_following_profile.v3
 ```
 
-C++ `runtime-core/include/ag99/runtime/protocol.hpp:18-21` 硬编码其中 4 个,**缺 6 个**。
-`scripts/check_protocol_schema_manifest.py` 只校验 manifest ↔ TS 生成文件,不读任何
-`.cpp` / `.py`。仓库无 CI(`.github/workflows` 零匹配)。后果:改 manifest 版本号时
-Python 与 TS 侧静默通过,C++ 在真实桌面运行才抛 `ProtocolError`。
+runtime-core 的 Native 头文件已经由 CMake 从 manifest 生成，`check_protocol_schema_manifest.py` 会同时核对 manifest、TypeScript 生成文件和 C++ 头文件。当前仍没有 CI 自动执行这项检查，因此构建前仍需显式运行脚本。
 
-### 7.2 契约要求
+### 7.2 仍需收口的协议边界
 
-- **S-1** C++ schema 常量必须由 `schema_manifest.json` **生成**,纳入
-  `runtime-core/CMakeLists.txt` 构建步骤。方向是"派生",不是"两处手工同步"。
-- **S-2** 移植编译器后,C++ 必须校验这 6 个当前缺失的 schema:
-  `semantic_axis_profile.v3`、`semantic_axis_relation_graph.v1`、
-  `voice_following_profile.v3`、`performance_curve_hint.v1`、
-  `parameter_action_library.v2`、`motion_tuning_sample.v2`。
-- **S-3** 现状 `SetModelSync`(`main.cpp:1526-1577`)以**临时 JSON 遍历**方式读取
-  `model_info.models[].semantic_axis_profile.axes[].parameter_bindings[].parameter_id`,
-  **无任何 schema 版本校验**。必须替换为经 S-2 校验的结构体。
-- **S-4** `OnSegment` 必须把 `text.content` 与 `speech.cues` **透传至编译器**
-  (见 §2.4),不得再只打 stdout。
-
----
+| 项 | 当前状态 |
+|---|---|
+| S-1：从 manifest 生成 C++ schema 常量 | 已完成，见 runtime-core CMake 和生成头文件 |
+| S-2：C++ 使用完整 schema 结构体校验 | 部分完成；协议核心覆盖主要输出与动作 schema，模型 Profile 仍有临时 JSON 遍历 |
+| S-3：`SetModelSync` 使用经校验的结构体 | 尚未完成；当前仍从 `model_info` 临时 JSON 读取 Profile 绑定 |
+| S-4：`OnSegment` 透传 `text.content` 与 `speech.cues` | 文本已用于诊断和播放身份，`speech.cues` 仍未进入原生动作编译路径 |
 
 ## 8. 替换策略(不留兼容层)
 
@@ -413,15 +360,15 @@ Python 与 TS 侧静默通过,C++ 在真实桌面运行才抛 `ProtocolError`。
 
 | 步 | 动作 | 同步删除 |
 |---|---|---|
-| R-1 | 建立 schema 生成步骤,`protocol.hpp` 改为生成头 | 手写的 4 个 `inline constexpr` 字面量 |
-| R-2 | 修 `OnSegment` 文本 / speech cues 丢弃 | stdout 打印分支 |
-| R-3 | 抽出 `compiler/` 纯函数库 + 黄金样本比对通过 | 无(此时 `CompileMotionPlan` 尚在,但标记为待删) |
-| R-4 | 用 `compiler/` 替换 `CompileMotionPlan` | `main.cpp:2309-2807` 全部(`CompileMotionPlan` + `ApplyQueuedMotion` + `MotionPlan` 结构) |
-| R-5 | 引入 `runtime/mixer`,改为贡献者模型 + 单次 pre-Physics 写入 | `ApplyDrag` / `ApplyQueuedParameterPlan` / `ApplyLipSync` 的直接 `SetParameterValue` |
-| R-6 | 修 F-1~F-4 与 §2.4 次要校验项 | 旧的包络/积分/信号源实现 |
-| R-7 | 抽出 `host/` | `main.cpp` 中的窗口/托盘/D3D11/合成/WAV/麦克风代码 |
-| R-8 | 接入 interaction sway / gaze 事件 | 无(纯新增能力) |
-| R-9 | 依 §10 裁定结果,删除另一侧被取代的编译器 | TS 侧 `model-engine/compiler/` 或 C++ 侧对应实现 |
+| R-1 | 建立 schema 生成步骤,`protocol.hpp` 改为生成头 | 已完成 |
+| R-2 | 修 `OnSegment` 文本 / speech cues 丢弃 | 文本已接入；`speech.cues` 仍待进入原生编译器 |
+| R-3 | 抽出 `compiler/` 纯函数库 + 黄金样本比对通过 | 尚未完成；当前保留 `CompileMotionPlan` 稳定子集 |
+| R-4 | 用 `compiler/` 替换 `CompileMotionPlan` | 尚未完成，依赖 R-3 的 TS/C++ 编译器契约 |
+| R-5 | 引入 `runtime/mixer`,改为贡献者模型 + 单次 pre-Physics 写入 | 已完成当前运行时路径 |
+| R-6 | 修 F-1~F-4 与 §2.4 次要校验项 | F-1~F-4 已在代码中修正；跨端轨迹和负例 reason 仍待验证 |
+| R-7 | 抽出 `host/` | 尚未完成，`main.cpp` 仍是大型装配单元 |
+| R-8 | 接入 interaction sway / gaze 事件 | 已有原生贡献路径；真实设备和跨端行为仍待验收 |
+| R-9 | 依 §10 的双轨决策保留各自实现；只有未来明确替换产品 owner 时才评估删除 | V1 不删除 TS `model-engine/compiler/`，也不删除 C++ 稳定运行时 |
 
 **禁止事项**(直接违反 `.ai/index.md`):
 
@@ -471,11 +418,11 @@ Python 与 TS 侧静默通过,C++ 在真实桌面运行才抛 `ProtocolError`。
 |---|---|---|---|
 | D-1 | TypeScript/C++ 运行时关系 | TypeScript 作为持续开发和表现迭代实现；C++ 作为冻结大版本后的高性能稳定实现；两者共享协议、Profile、编译规则和黄金样本 | V1 采用双轨实现，一次运行只选择一个实现，不要求 C++ 跟随每次 TypeScript 提交同步 |
 | D-2 | Motion Lab / Action Lab 的编译器依赖 | 开发工具继续使用 TypeScript 编译器；C++ 在稳定大版本冻结时按同一契约移植并通过黄金样本验证 | 工具链保持快速迭代，稳定身体运行时保持高性能和版本边界 |
-| D-3 | 是否立即启动 R-3~R-8,还是先只做组件化 | — | 当前 7 个文件已 modified 未提交;`state.yaml` 连续记录 native 侧 `evidence_gap` 未闭合 |
+| D-3 | 是否立即启动 R-3~R-8,还是先只做组件化 | 先完成文档、黄金样本和真实验收证据，再决定编译器迁移批次 | 当前基线先冻结代码与版本，不把新的表现能力并入 V1 |
 | D-4 | `performanceSchedule.ts` 六个 helper 的契约补齐由谁承担 | — | 阻塞 §4.3 中 stage 7 / 9 的完整 reason 集合 |
-| D-5 | 频谱重音分析在原生侧的实现或显式降级 | (a) 实现 FFT 重音;(b) 声明降级并记 `evidence_gap` | 决定 F-1 修复的完整度 |
+| D-5 | 频谱重音分析在原生侧的实现或显式降级 | (a) 实现 FFT 重音;(b) 声明 RMS 上升沿降级并记 `evidence_gap` | 决定 TS/C++ 语音重音的等价度 |
 
-**V1 结论**:TypeScript 与 C++ 采用双轨版本关系。TypeScript 负责下一版本的持续迭代，C++ 负责已冻结大版本的稳定运行。两者通过协议、编译规则、能力清单和黄金样本保持可验证的一致性；不在同一次运行中并行写入同一身体。
+**V1 结论**:TypeScript 与 C++ 采用双轨版本关系。TypeScript 负责下一版本的持续迭代，C++ 负责已冻结大版本的稳定运行。两者通过协议、编译规则、能力清单和黄金样本保持可验证的一致性；不在同一次运行中并行写入同一身体。当前下一步先补齐文档和验证证据，再决定是否启动完整编译器迁移。
 
 ---
 
@@ -487,9 +434,9 @@ Python 与 TS 侧静默通过,C++ 在真实桌面运行才抛 `ProtocolError`。
 | §4.3 reason 集合不完整 | 高 | stage 7 / 9 透传 `performanceSchedule.ts` 六个未取证 helper 的 reason | D-4 前置补齐,否则负例语料无法覆盖 |
 | 迁移期两套运行时并存 | 高 | Adapter 当前只允许一个 WebSocket 客户端(`render-core/README.md:91-96`),前端与原生同时直连会争抢会话 | 生产形态必须经本地 IPC 桥;R-3~R-8 期间不得让两者同时连 Adapter |
 | 无法自动验证视觉质量 | 中 | 原生侧无渲染断言 | 已在 §9.4 显式声明为 `evidence_gap` |
-| schema 漂移复发 | 中 | 现无 CI,`check_protocol_schema_manifest.py` 仅覆盖 TS | S-1 生成 + 纳入构建 |
-| 单编译单元腐化 | 中 | `main.cpp` 3311 行 | R-7 拆分 |
-| 现有 C++ 成果被误弃 | 低 | §2.1 的 6 项忠实翻译是有价值的基线 | R-4/R-5/R-6 复用而非重写 |
+| schema 漂移复发 | 中 | 现无 CI；脚本已经覆盖 manifest、TS 生成文件和 C++ 生成头，但仍需显式执行 | 将检查纳入 CI 或发布前检查 |
+| 单编译单元腐化 | 中 | `main.cpp` 当前超过 6500 行 | R-7 拆分 |
+| 现有 C++ 成果被误弃 | 低 | 参数混音、语音随动、交互贡献和参数计划执行已经是 V1 稳定路径 | R-3/R-4 复用运行时，不重写已验证路径 |
 
 ---
 
@@ -497,16 +444,13 @@ Python 与 TS 侧静默通过,C++ 在真实桌面运行才抛 `ProtocolError`。
 
 | 结论 | 证据 |
 |---|---|
-| 翻译到位项 | `main.cpp:1744-2049`、`89-207`、`2051-2073`、`2079-2109`、`618-649`、`2426-2552` |
-| F-1 口型失真 | `lipSyncTimelineSink.ts:189-190` ↔ `main.cpp:137` |
-| F-2 blend-in 起点 | `parameterpresentation.ts:118-133` ↔ `main.cpp:2150-2162` |
-| F-3 spring 算法 | `parameterpresentation.ts:230-333` ↔ `main.cpp:2111-2142` |
-| F-4 速度反推 | `parameterpresentation.ts:46-78` ↔ `main.cpp:2249-2250` |
-| 混音器缺失 | `parametermixer.ts:207-301` ↔ `main.cpp:1480-1524` |
-| sway / gaze 缺失 | `activeparameterruntime.ts:47-69` |
-| 频谱重音缺失 | `lipSyncTimelineSink.ts:191-194`、`speechsignalruntime.ts:208-213` |
-| 文本 / speech cues 被丢弃 | `protocol.cpp:226-264`(已解析)↔ `main.cpp:1214-1250`、`1207-1212`(丢弃) |
+| 翻译到位项 | `ParseParameterPlan`、`render-core/src/speech_signal.cpp`、`NativeCubismModel`、`AdvanceBounded` / `AdvanceSpring`、`CompileMotionPlan` |
+| F-1~F-4 历史失真项 | `render-core/src/speech_signal.cpp`、`main.cpp:4521-4606`、`main.cpp:4610-4643` |
+| 参数混音与回读 | `parametermixer.ts:207-301` ↔ `main.cpp:4743-5127` |
+| sway / gaze | `activeparameterruntime.ts:47-69` ↔ `main.cpp:4657-4741` |
+| RMS 重音降级 | `lipSyncTimelineSink.ts:191-194`、`speechsignalruntime.ts:208-213` ↔ `render-core/src/speech_signal.cpp` |
+| speech cues 仍未进入原生编译器 | `protocol.cpp:226-264`(已解析)↔ `main.cpp:2726-2794` |
 | 编译器拓扑 | `stages.ts:15-29`、`compileSemanticMotion.ts:36-130`、`compileModelParameterPlan.ts:26-60`、`performanceSchedule.ts:131-1176` |
-| schema 权威失效 | `schema_manifest.json`、`protocol.hpp:18-21`、`scripts/check_protocol_schema_manifest.py` |
+| schema 生成与检查 | `schema_manifest.json`、`protocol_manifest.hpp`、`scripts/check_protocol_schema_manifest.py` |
 | 双 owner(仓库既有结论) | `docs/codebase-audit.md` P0-1 / P0-2 |
 | 迁移方向(仓库既有记录) | `render-core/README.md:83-96` |

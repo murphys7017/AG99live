@@ -32,7 +32,9 @@ python scripts/check_protocol_schema_manifest.py
 
 桌面端在每次 WebSocket 连接建立时首先发送 `system.desktop_runtime_settings`，随后在设置变更时再次发送；`turn_id` 为 `null`，payload 必须包含布尔值 `persona_segment_stream_enabled`。Adapter 保存该连接的最新值，在构造 OLV 事件时决定是否请求 Persona 段流，并在断线时重置为关闭。设置写入后，同步消息先于桌面设置结果应答发送；普通文本及音频输入按同一 WebSocket 的顺序使用更新后的状态。
 
-桌面端在本机持久化该选项，默认关闭。此同步不依赖 Web 控制页面是否打开，也不读取 Desktop Settings Broker 为页面展示缓存的最后已知值。Core 的 Persona 段流总开关、逐 speech 段独立动作及能力检查仍参与准入。部署时需配套更新桌面端和 Adapter。
+Adapter 在 `desktop_runtime_settings` 中保存该选项的 canonical 值，默认关闭；桌面端连接时应用它并继续上报当前能力。此同步不依赖 Web 控制页面是否打开，也不把桌面端 localStorage 当成配置来源。Core 的 Persona 段流总开关、逐 speech 段独立动作及能力检查仍参与准入。部署时需配套更新桌面端和 Adapter。
+
+桌面端主动保存其他本机设置时使用独立的 `system.desktop_settings_update`，payload 为 `update_id`、`key` 和字符串 `value`。它不是 `system.desktop_settings_result` 的无请求变体；后者只用于响应 Adapter 发出的查询。Adapter 收到 update 后才更新 canonical snapshot，并按平台实例持久化。
 
 ## 原子输出段
 
