@@ -1,6 +1,6 @@
 name: astrbot_plugin_ag99live_adapter
 display_name: AG99live Adapter
 desc: AG99live desktop body adapter for AstrBot, using output.segment.v6 and frontend ModelEngine playback.
-version: 1.1.0
+version: 1.0.0
 author: murphys7017
 repo: https://github.com/murphys7017/AG99live

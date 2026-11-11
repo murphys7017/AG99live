@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(ag99_runtime_core VERSION 0.1.0 LANGUAGES CXX)
+project(ag99_runtime_core VERSION 1.0.0 LANGUAGES CXX)
 
 include(FetchContent)
 

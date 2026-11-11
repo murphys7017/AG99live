@@ -6,12 +6,13 @@ AG99 是以桌面体验为中心的智能体主应用；AG99live 是 AG99 的身
 
 ## 当前代码基线
 
-当前项目以 **V1 代码基线**整理文档。V1 是项目阶段标签，仓库暂时没有一个统一的 AG99live 软件 semver。源码中可直接确认的版本组合如下：
+当前项目以 **AG99live 1.0.0** 作为 V1 代码基线。源码中可直接确认的版本组合如下：
 
 | 组成 | 代码来源 | 当前版本 |
 | --- | --- | --- |
-| Desktop 前端 | `package.json` | `0.1.0` |
-| AG99live Adapter | `astrbot_plugin_ag99live_adapter/metadata.yaml` | `1.1.0` |
+| AG99live 产品 | 根目录 `VERSION` | `1.0.0` |
+| Desktop 前端 | `package.json`、`frontend/package.json` | `1.0.0` |
+| AG99live Adapter | `astrbot_plugin_ag99live_adapter/metadata.yaml` | `1.0.0` |
 | WebSocket 协议封套 | `astrbot_plugin_ag99live_adapter/protocol/schema_manifest.json` | `v2` |
 | 完整输出段 | Schema manifest | `output.segment.v6` |
 | 动作意图 | Schema manifest | `engine.motion_intent.v4` |
@@ -70,6 +71,7 @@ TypeScript 是持续开发和表现迭代实现。C++ 是冻结大版本后的�
 | 事实 | 唯一来源 | 文档应做什么 |
 | --- | --- | --- |
 | 协议版本 | `astrbot_plugin_ag99live_adapter/protocol/schema_manifest.json` | 以 manifest 和生成类型为准；协议文档只解释 Schema 职责和使用边界。 |
+| 产品版本 | 根目录 `VERSION` | 由版本一致性检查同步到 Desktop、Adapter 和 C++ 构建入口。 |
 | 前端协议类型 | `frontend/src/types/protocol.ts` 与生成文件 | 描述解析和使用边界。 |
 | Adapter 生命周期 | `astrbot_plugin_ag99live_adapter/` | 描述 AG99 输入、段聚合、服务和清理。 |
 | 前端播放和动作执行 | `frontend/src/` | 描述组合根、所有权与终态。 |
