@@ -298,7 +298,6 @@ performance_governor_continuity_envelope_20261031:
     repeated directions are attenuated rather than rejected. Visual timing and
     neutral release still require AG99, TTS, Electron and Live2D runtime
     acceptance.
-
 motion_lab_outbound_retry_idb_preservation_20261031:
   class: refactor
   risk: high
@@ -2214,3 +2213,132 @@ live2d_continuous_motion_protocol_20261108:
     repository's existing test-build TypeScript errors, and three RuntimeState
     tests fail because their fixture has no Provider registry. Live AstrBot reload,
     Provider generation, TTS and Live2D playback still require paired acceptance.
+desktop_settings_canonical_owner_20261111:
+  date: '2026-11-11'
+  class: feature
+  risk: high
+  status: source_updated_pending_runtime_acceptance
+  decision: >-
+    Adapter plugin configuration owns the canonical desktop runtime settings
+    snapshot per platform instance. The Web control page edits that snapshot;
+    connected TS or Native clients apply it through the existing desktop
+    settings query protocol. A first connected client is imported into the
+    snapshot, and later client reconnects reapply the saved values. Client
+    local storage is an application cache, not the source of truth.
+  scope: >-
+    Persist successful desktop setting responses under
+    desktop_runtime_settings, merge the persisted snapshot into offline Web
+    control responses, migrate the first connected client's values, and replay
+    canonical values during WebSocket initialization. Preserve the existing
+    one-client broker and unsupported-setting behavior.
+  validation: >-
+    Python compilation, frontend typecheck and diff whitespace checks passed.
+    Ten focused Adapter tests passed, including plugin config persistence,
+    platform scoping, broker timing, unsolicited client updates, and WebSocket
+    binary transport. No live TS/Native reconnect or
+    multi-setting runtime acceptance was run.
+  remaining: >-
+    Native still needs per-setting application support beyond Physics; values
+    for unsupported keys remain canonical and are retried on a compatible
+    client. The TS local settings window now emits canonical updates, but live
+    Web-to-TS/Native reconnect verification remains pending.
+native_settings_ambient_and_view_20261112:
+  date: '2026-11-12'
+  class: feature
+  risk: medium
+  status: source_updated_pending_native_runtime_acceptance
+  scope: >-
+    Extend the Native desktop settings broker consumer with
+    live2d_ambient_motion_enabled, model_view_scale/model_view_offset_x/y, and
+    motion_engine_intensity_scale.
+    Keep the shared Adapter/Web configuration source and existing Physics
+    behavior; disable only new random Idle starts and apply view transforms
+    relative to the model's loaded layout.
+  validation: >-
+    Render-core Release build, runtime-core protocol smoke, focused Adapter
+    settings tests, frontend typecheck, Python compilation, and diff
+    whitespace checks passed. Live Web-to-Native setting roundtrip and visible
+    motion acceptance remain pending.
+  remaining: >-
+    Continue Native settings in bounded slices: audio volume, microphone/device
+    input, and Spout only after each path has a clear Native owner and runtime
+    acceptance.
+native_runtime_architecture_redesign_20261112:
+  date: '2026-11-12'
+  class: architecture
+  risk: high
+  status: architecture_migration_complete_pending_live_acceptance
+  decision: >-
+    Stop adding Native capabilities directly to render-core/src/main.cpp. The
+    target architecture separates runtime-core protocol parsing,
+    NativeRuntimeCoordinator, SettingsController, pure MotionCompiler and
+    MotionScheduler, ParameterMixer, NativeModel, AudioRuntime and NativeHost.
+    The render thread owns Cubism state; the audio worker owns waveOut and the
+    audio clock; the network thread only produces typed events. Adapter remains
+    the sole persistent desktop-settings owner.
+  scope: >-
+    Add the overall C++ architecture proposal and migration order. Phase 1
+    extracts the settings controller, and Phase 2 moves the runtime coordinator
+    implementation out of main.cpp behind typed callbacks and services,
+    Phase 3 separates the motion compiler after golden samples, and later
+    phases split audio and host. No algorithm rewrite, second Adapter client,
+    second playback clock, or immediate broad refactor is included.
+  validation: >-
+    Proposal and phase status are recorded in
+    docs/02-设计文档/16-C++原生运行时整体架构重设计.md and indexed from
+    docs/README.md. Phase 1 adds
+    render-core/include/ag99/native/settings_controller.hpp and its source,
+    moves Native setting parsing/range/format logic out of NativeModel, and
+    preserves the existing Release build and protocol behavior. Phase 2 adds
+    render-core/include/ag99/native/runtime_coordinator.hpp with shared
+    segment-clock/terminal types, a single callback contract, and typed
+    RuntimeCoordinatorServices. The in-process RuntimeBridge boundary is now
+    NativeRuntimeCoordinator, implemented in
+    render-core/src/native_runtime_coordinator.cpp. WinMM microphone capture
+    and PCM uplink live in MicrophoneCapture, complete WAV and OLV PCM waveOut
+    sinks live in audio_runtime.cpp, and the typed Turn/Segment/OLV playback
+    ledger lives in playback_ledger.hpp. Phase 3 moves motion plan types to
+    motion_types.hpp, JSON validation helpers to json_utils.cpp, track-point
+    and axis relation-graph parsing to motion_compiler.cpp, and bounded /
+    spring scheduling math to motion_scheduler.cpp. Track time evaluation and
+    active/pending/terminal motion lifecycle are in motion_scheduler.hpp/cpp;
+    CompileMotionPlan and ParseParameterPlan are in
+    motion_compiler.cpp with typed contexts; NativeModel only supplies the
+    profile, intensity snapshot, parameter descriptors, and Cubism writes.
+    Audio clock, RMS, speech signal, playback lifecycle, PCM queues, playback
+    ack queue, and current audio identity now live in AudioRuntime. NativeHost
+    owns main-window creation, Win32 window procedure, tray menu, input
+    controls, and input window message posting. NativeModel/Cubism model
+    ownership now lives in native_model.cpp with typed services. main.cpp is
+    reduced to startup, D3D surface, and message-loop assembly. Release build,
+    all three CTest smoke targets, diff checks, frontend typecheck, and the ten
+    focused Adapter runtime tests pass.
+  remaining: >-
+    Code-level architecture migration is complete. Remaining evidence gaps are
+    live Web-to-Native reconnect, motion golden samples, visible model output,
+    audio-device timing, interruption, and reconnect acceptance.
+typescript_runtime_architecture_convergence_20261112:
+  date: '2026-11-12'
+  class: refactor
+  risk: high
+  status: source_implemented_pending_live_acceptance
+  decision: >-
+    Keep TypeScript as the continuous development implementation. Centralize
+    Live2D access behind Live2dRuntimePort, share SegmentIdentity and Sink/Turn
+    terminal predicates, and make canonical desktop settings replay an explicit
+    readiness handshake before desktop features start.
+  scope: >-
+    Refactor Live2D callers, preview/audio/gaze composition, Timeline and motion
+    identity keys, Adapter readiness state, and the desktop settings completion
+    protocol. Preserve existing playback behavior and do not touch concurrent
+    Native runtime work.
+  validation: >-
+    Frontend renderer, WebSDK and Node typechecks passed. Adapter Python
+    compilation, protocol schema manifest validation, two focused runtime test
+    files (14 tests), and diff whitespace checks passed. The existing frontend
+    test-project compilation remains blocked by pre-existing broad strict-mode
+    errors outside this change.
+  remaining: >-
+    Real Electron, AstrBot, TTS, model switching, reconnect, and Live2D model
+    acceptance are still required. Further splitting of useAdapterConnection,
+    usePetDesktopRuntime, and SessionStore should wait for that runtime check.

@@ -22,6 +22,7 @@ set(CUBISM_SHADER_PATH
   "${CUBISM_FRAMEWORK_PATH}/src/Rendering/D3D11/Shaders")
 set(AG99_RUNTIME_ROOT
   "${CMAKE_CURRENT_SOURCE_DIR}/../runtime-core")
+option(AG99_RENDER_BUILD_TESTS "Build Native settings smoke tests" ON)
 
 if(NOT EXISTS "${CUBISM_CORE_PATH}/include/Live2DCubismCore.h")
   message(FATAL_ERROR "Cubism Core was not found under ${CUBISM_CORE_PATH}")
@@ -59,6 +60,15 @@ set_target_properties(ag99_directxtk PROPERTIES
 
 add_executable(ag99-render-host WIN32
   src/main.cpp
+  src/settings_controller.cpp
+  src/json_utils.cpp
+  src/motion_compiler.cpp
+  src/motion_scheduler.cpp
+  src/microphone_capture.cpp
+  src/audio_runtime.cpp
+  src/native_runtime_coordinator.cpp
+  src/native_host.cpp
+  src/native_model.cpp
   src/audio_source.cpp
   src/audio_wav.cpp
   src/speech_signal.cpp
@@ -75,6 +85,32 @@ add_executable(ag99-render-host WIN32
 add_subdirectory("${AG99_RUNTIME_ROOT}"
   "${CMAKE_CURRENT_BINARY_DIR}/runtime-core"
   EXCLUDE_FROM_ALL)
+
+if(AG99_RENDER_BUILD_TESTS)
+  enable_testing()
+  add_executable(ag99-native-settings-smoke
+    tests/settings_controller_smoke.cpp
+    src/settings_controller.cpp
+  )
+  target_include_directories(ag99-native-settings-smoke PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+  )
+  target_link_libraries(ag99-native-settings-smoke PRIVATE ag99_runtime_core)
+  add_test(NAME ag99-native-settings-smoke COMMAND ag99-native-settings-smoke)
+
+  add_executable(ag99-native-motion-smoke
+    tests/motion_scheduler_smoke.cpp
+    src/json_utils.cpp
+    src/motion_compiler.cpp
+    src/motion_scheduler.cpp
+  )
+  target_include_directories(ag99-native-motion-smoke PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+  )
+  target_compile_definitions(ag99-native-motion-smoke PRIVATE NOMINMAX)
+  target_link_libraries(ag99-native-motion-smoke PRIVATE ag99_runtime_core)
+  add_test(NAME ag99-native-motion-smoke COMMAND ag99-native-motion-smoke)
+endif()
 
 set(FRAMEWORK_SOURCE D3D11)
 add_subdirectory("${CUBISM_FRAMEWORK_PATH}"
