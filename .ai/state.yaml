@@ -1,290 +1,143 @@
 state_meta:
-  schema_version: 2
+  schema_version: 3
   updated_at: '2026-11-13'
-  purpose: 保留当前有效架构、配置、播放和验收状态；历史切片保留在 Git 历史中。
-  retained_records: 17
-  archived_records: 102
-current_checkpoint:
-  status: ready_for_live_acceptance
-  commit: 337aa0b5
-  local_validation:
-  - Render-core Release build
-  - 3/3 CTest smoke
-  - frontend renderer/WebSDK/Node typecheck
-  - YAML parse and git diff check
-  live_acceptance_required:
-  - Adapter canonical settings replay and reconnect
-  - visible Native model/motion/Physics/audio
-  - microphone and interruption timing
-  - Spout/OBS output
-  - TS/C++ motion golden samples
-audio_segment_sync_20261111:
-  class: bugfix
-  risk: high
-  status: source_updated_pending_live_audio_acceptance
-  scope: Preserve first samples by finishing PCM gain ramp before scheduled audio; keep media gain open before the playing
-    callback; analyse post-gain audio. Decode queued PCM on bounded wire admission. Schedule at most one segment ahead against
-    the preceding finished output's AudioContext tail; transfer presentation and lip-sync ownership after the preceding segment
-    settles. Account for scheduled wait in start deadlines and cancel queued output on interruption. Apply a 1 ms onset ramp
-    and appended 1 ms return-to-zero guard without dropping or overlapping received samples.
-  validation: Renderer typecheck and PCM decode boundary smoke passed. A minimal PCM public boundary smoke with a simulated
-    audio scheduler confirmed adjacent segment times, retained sample count, boundary ramps and rejection after finish. Review
-    corrections reject scheduling after failed production and suppress late end guards; minimal public-boundary smoke checks
-    pass for both. This is not output-device or end-to-end evidence. No real TTS and recording comparison yet. Source commit
-    authorized; deployment remains out of scope.
-  limitations: Continuous scheduling depends on next-segment data arriving before the previous scheduled tail; network/TTS
-    starvation still creates real gaps. Live recording comparison, interruption and subtitle/lip handoff acceptance remain
-    required. AudioContext clock is not yet compensated to device output. Mk6 declares mouth form, funnel and width controls
-    but LipSync only uses ParamMouthOpenY. Phoneme-driven mouth shapes remain outside this first slice.
-native_olv_native_playback_20261110:
-  class: feature
-  risk: high
-  status: source_updated_locally_validated_pending_live_runtime_acceptance
-  scope: Complete the Native OLV presentation path behind the existing desktop capability flag. Track incremental text/audio/motion
-    terminal state per segment, feed accepted PCM into the existing lip-sync/RMS clock, coalesce the latest validated motion
-    payload and release it through NativeModel's existing motion queue after audio drain, and include OLV segments in the
-    existing playback_finished gate. Keep the TS timeline and Core/Adapter wire contracts unchanged; Native text remains preview/feedback
-    state because the Native host has no separate history store.
-  validation: Render-core Release host build, runtime-core Release protocol smoke test, CTest, and git diff whitespace checks
-    pass. The capability is opt-in through AG99_NATIVE_OLV=1 and remains off by default. Source review confirms OLV text,
-    PCM, motion and terminal acknowledgement share one turn/segment lifecycle. No real Adapter/Core/TTS/audio-device/Live2D
-    joint run has been completed in this slice.
-  limitations: Native motion is released as a motion-only plan after the corresponding PCM stream drains and only the latest
-    OLV motion update is retained. A motion tail beyond the frontend 1.8-second limit is rejected, and motion plan replacement
-    is treated as a normal handoff. A paired runtime acceptance is still required to verify provider timing, waveOut device
-    admission, interruption/reconnect cleanup, and visible model output. Existing Native history UI is preview-only by design;
-    the Adapter/TS path remains responsible for desktop history recording.
-native_olv_protocol_boundary_20261110:
-  class: feature
-  risk: high
-  status: source_updated_locally_validated_pending_native_runtime_acceptance
-  scope: Extend runtime-core with the first OLV downlink protocol boundary without changing the existing output.segment.v6
-    or microphone type=1 paths. Parse incremental text/audio/motion stream events, shared identity and sequence constraints,
-    end status/length fields, and type=2 PCM frame metadata, sample offsets, and bounded payloads. Track turn/segment/resource
-    stream lifecycles, text and audio capacities, and cross-segment audio order before dispatching accepted OLV events through
-    new optional callbacks. Add the frontend `control.audio_credit` builder and Native `system.desktop_runtime_settings` capability
-    declaration for the later PCM worker; add a bounded single Native PCM worker and waveOut block sink that sends cumulative
-    credit after device admission, while keeping `persona_segment_stream_enabled=false` until timeline/lip-sync/text/motion
-    presentation is wired.
-  validation: runtime-core Release build and CTest protocol smoke test pass, including direct event parsing, type=2 frame
-    parsing, lifecycle rejection, OLV-only synth_finished handling, audio credit construction, capability declaration, and
-    RuntimeProtocolSession dispatch. Both runtime-core and render-core Release builds pass, and Git whitespace checks pass.
-    Live Adapter/Core/ WebSocket and real audio/Live2D playback acceptance remain outstanding. The worker sink is compile-
-    and lifecycle-validated but not enabled in capability negotiation; sink/admission/credit failures interrupt and clear
-    the affected Turn; audio end status/reason and total sample count are checked before successful drain. Text preview and
-    the existing 50 Hz RMS signal now have Native ingress, while Timeline/lip-sync clock ownership, incremental motion presentation,
-    and final playback receipt remain outstanding. The review pass additionally corrected Unicode codepoint end lengths, adapter-source
-    validation, cumulative audio-credit consistency, and the Native connection-state update after capability-send failure.
-  limitations: This is still a receive/validation boundary only. It does not yet enforce audio credit or backpressure, bounded
-    playback queues, PCM sink timing, or Live2D motion execution. The next slice must connect these callbacks to the existing
-    runtime ownership without creating a parallel player.
-native_runtime_protocol_and_frame_clock_20261110:
-  class: refactor
-  risk: high
-  status: source_updated_locally_validated_pending_native_runtime_acceptance
-  scope: Continue the C++ native runtime migration without changing the stable TS desktop behavior. Align runtime-core with
-    output.segment.v6, derive Native protocol constants from the Adapter schema manifest at CMake configure time, and reuse
-    one monotonic timestamp per render frame for audio, parameter mixing, and motion-plan evaluation. Cache model parameter
-    IDs at load time and remove transient per-frame source-label and parameter-ID allocations from the parameter mixer without
-    changing priorities. Add an idle fast path after pending Physics settings are applied, so empty frames skip contribution
-    collection and mixing. Reuse the render-thread frame scratch vectors for active frames to avoid repeated container allocation,
-    including the per-parameter contribution lists used by the mixer. Add a repeatable PowerShell sampler for Native CPU and
-    memory baselines. Replace the Native WAV temporary-file/PlaySound path with in-memory PCM playback through `waveOut`,
-    while keeping the existing serial, RMS, clock, interruption, and failure boundaries. Accept v6 pending motion and same-identity
-    `output.segment_motion`, attaching late motion to the active audio clock and rejecting expired motion windows.
-  validation: CMake Release builds pass for runtime-core and render-core, the protocol replay smoke test passes, the manifest
-    check and Ruff pass, and git diff whitespace checks pass. The Native sampler was smoke-tested with a short Mk6 run. Changes
-    are confined to the AG99live source repo; the generated AstrBot deployment copy was not edited or deployed.
-  limitations: Native rendering, audio timing, GPU occupancy, and protocol behavior still require paired live acceptance against
-    the Adapter and a real model. No performance percentage is claimed without a before/after native benchmark.
-dual_conversation_platform_dsh_execution_20261102:
-  class: feature
-  risk: high
-  status: source_reviewed_protocol_chain_smoke_pending_live_dsh
-  scope: Add a selectable conversation platform with AstrBot as the unchanged default and DeepSeek Harness as a local stdio
-    JSON-RPC ConversationProvider. DSH assistant text uses the existing Turn/Segment/output.segment.v6 path; tool, code, PTC
-    and approval activity uses a separate ExecutionEvent contract and output.execution.v1 presentation event. Existing AstrBot
-    composition and output.segment.v6 behavior remain the default path.
-  validation: Focused DSH provider/orchestrator/middleware tests pass (35 tests), including real SessionEvent tool/result
-    and PTC sub-call envelopes through output.execution and final output.segment delivery. Python compileall, protocol schema
-    manifest, and diff whitespace checks pass. Existing renderer typecheck and plugin checks remain recorded from the prior
-    slice.
-  limitations: No dsh executable is available in this workspace, so a live SDK process, credential, approval policy, TTS/Live2D
-    joint playback, reconnect, and production frontend acceptance remain unverified. Platform switching is composition-time
-    and requires an adapter restart; saving the setting while a platform is live logs that requirement.
-desktop_settings_canonical_owner_20261111:
-  date: '2026-11-11'
-  class: feature
-  risk: high
-  status: source_updated_pending_runtime_acceptance
-  decision: Adapter plugin configuration owns the canonical desktop runtime settings snapshot per platform instance. The Web
-    control page edits that snapshot; connected TS or Native clients apply it through the existing desktop settings query
-    protocol. A first connected client is imported into the snapshot, and later client reconnects reapply the saved values.
-    Client local storage is an application cache, not the source of truth.
-  scope: Persist successful desktop setting responses under desktop_runtime_settings, merge the persisted snapshot into offline
-    Web control responses, migrate the first connected client's values, and replay canonical values during WebSocket initialization.
-    Preserve the existing one-client broker and unsupported-setting behavior.
-  validation: Python compilation, frontend typecheck and diff whitespace checks passed. Ten focused Adapter tests passed,
-    including plugin config persistence, platform scoping, broker timing, unsolicited client updates, and WebSocket binary
-    transport. No live TS/Native reconnect or multi-setting runtime acceptance was run.
-  remaining: Native still needs per-setting application support beyond Physics; values for unsupported keys remain canonical
-    and are retried on a compatible client. The TS local settings window now emits canonical updates, but live Web-to-TS/Native
-    reconnect verification remains pending.
-native_settings_ambient_and_view_20261112:
-  date: '2026-11-12'
-  class: feature
-  risk: medium
-  status: source_updated_pending_native_runtime_acceptance
-  scope: Extend the Native desktop settings broker consumer with live2d_ambient_motion_enabled, model_view_scale/model_view_offset_x/y,
-    and motion_engine_intensity_scale. Keep the shared Adapter/Web configuration source and existing Physics behavior; disable
-    only new random Idle starts and apply view transforms relative to the model's loaded layout.
-  validation: Render-core Release build, runtime-core protocol smoke, focused Adapter settings tests, frontend typecheck,
-    Python compilation, and diff whitespace checks passed. Live Web-to-Native setting roundtrip and visible motion acceptance
-    remain pending.
-  remaining: Complete live Native settings acceptance, including microphone/device input and Spout, after paired Adapter and
-    device runs.
-native_settings_speech_volume_20261112:
-  date: '2026-11-12'
-  class: feature
-  risk: medium
-  status: source_updated_locally_validated_pending_native_runtime_acceptance
-  scope: Add the shared Web desktop setting speech_volume to Native SettingsController and apply it to both complete WAV and
-    OLV PCM waveOut outputs, including currently open devices and subsequent playback.
-  validation: Render-core Release build, all three CTest smoke targets, frontend typecheck, and diff whitespace checks pass.
-    No real waveOut volume perception or live Web-to-Native setting roundtrip has been completed.
-  remaining: Complete live Web-to-Native settings and audio-device acceptance.
-native_settings_microphone_device_20261112:
-  date: '2026-11-12'
-  class: feature
-  risk: medium
-  status: source_updated_locally_validated_pending_native_runtime_acceptance
-  scope: Add the shared Web desktop setting microphone_device to Native. Enumerate WinMM capture devices as desktop setting
-    options, use the selected device or the Windows mapper for future starts, and restart an active microphone stream when
-    the selected device changes.
-  validation: Render-core Release build, all three CTest smoke targets, frontend typecheck, YAML parsing, and diff whitespace
-    checks pass. Physical WinMM device enumeration and live Web-to-Native selection acceptance remain pending.
-  remaining: Complete live settings roundtrip and desktop device acceptance, including a real capture device switch.
-native_settings_cursor_gaze_20261112:
-  date: '2026-11-12'
-  class: feature
-  risk: medium
-  status: source_updated_locally_validated_pending_native_runtime_acceptance
-  scope: Add the shared Web cursor-gaze settings to Native and use them in the render-thread gaze poll, stationary threshold,
-    dwell delay, and disable path. Preserve the existing profile-driven gaze parameter bindings.
-  validation: Render-core Release build and all three CTest smoke targets pass. Live cursor interaction and Web-to-Native
-    setting roundtrip remain unverified.
-  remaining: Complete live settings and visible desktop behavior acceptance, including a real Spout receiver.
-native_settings_adapter_address_20261112:
-  date: '2026-11-12'
-  class: feature
-  risk: medium
-  status: source_updated_locally_validated_pending_native_runtime_acceptance
-  scope: Make the canonical adapter_address setting update Native's stored reconnect URL while preserving the current connection
-    until an explicit reconnect.
-  validation: Render-core Release build, all three CTest smoke targets, YAML parsing, and diff whitespace checks pass. Live
-    canonical replay and reconnect to a non-default Adapter address remain unverified.
-  remaining: Complete live settings and reconnect acceptance.
-native_spout_output_20261112:
-  date: '2026-11-12'
-  class: feature
-  risk: high
-  status: source_updated_locally_validated_pending_spout_device_acceptance
-  scope: Add an optional Native Spout output path using the repository's existing AG99liveSpoutSender.exe protocol. Read back
-    the D3D11 RGBA backbuffer, stream bounded frames on a worker thread, expose spout_enabled through the unified desktop
-    settings broker, and fail explicitly when the sender is unavailable.
-  validation: Render-core Release build, all three CTest smoke targets, Spout setting failure boundary, automatic Release
-    resource copy, YAML parsing, and diff whitespace checks pass. No real Spout/OBS receiver or GPU readback performance acceptance
-    has been run.
-  remaining: Run paired Spout/OBS acceptance on the target machine and verify frame cadence, transparency, shutdown and sender
-    recovery.
-native_v1_code_completion_audit_20261112:
-  date: '2026-11-12'
-  class: release
-  risk: high
-  status: code_complete_pending_live_acceptance
-  scope: 'Audit the Native V1 desktop implementation after the architecture and settings slices: unified Adapter-owned settings,
-    coordinator/playback ledger, motion compiler/scheduler subset, model/Cubism path, audio WAV/OLV path, microphone capture,
-    Host/tray/input, Adapter reconnect, and optional Spout output.'
-  validation: Current source has no known code-level blocker in the V1 stable path. Release render-core build, CTest settings/motion/protocol
-    smoke, frontend renderer/WebSDK/Node typechecks, YAML parsing, diff checks, automatic Spout resource copy, and a real
-    Native host process/window startup observation all pass. Full TypeScript PerformanceSchedule/compiler equivalence remains
-    an explicit reference-implementation boundary, not a V1 replacement gate.
-  evidence_gap: Live Web-to-Native canonical settings replay, reconnect/cancel/late-motion behavior, visible model/Physics/motion
-    quality, real waveOut and microphone device behavior, Spout/OBS receiver output, and TS/C++ motion golden samples still
-    require paired runtime/device acceptance.
-  remaining: Perform the paired live acceptance pass. Do not claim Native/TS behavioral equivalence from source and smoke
-    validation alone.
-native_live_host_window_smoke_20261112:
-  date: '2026-11-12'
-  class: validation
-  risk: high
-  status: native_process_and_window_observed_pending_visual_device_acceptance
-  scope: Launch the current Release ag99-render-host with the Mk6 model and startup text against the local Adapter, confirm
-    the Native process remains responsive and creates the expected render window, then close the test process.
-  validation: Release host process 64452 started successfully, remained responsive, and exposed the window title AG99live
-    Native Render Core before controlled shutdown. This proves host startup/window creation only; no screenshot, visual motion,
-    audio-device or settings roundtrip evidence was collected.
-  remaining: Capture a real visible model frame and complete paired Adapter, audio, motion, reconnect and settings acceptance.
-native_runtime_architecture_redesign_20261112:
-  date: '2026-11-12'
-  class: architecture
-  risk: high
-  status: architecture_migration_complete_pending_live_acceptance
-  decision: Stop adding Native capabilities directly to render-core/src/main.cpp. The target architecture separates runtime-core
-    protocol parsing, NativeRuntimeCoordinator, SettingsController, pure MotionCompiler and MotionScheduler, ParameterMixer,
-    NativeModel, AudioRuntime and NativeHost. The render thread owns Cubism state; the audio worker owns waveOut and the audio
-    clock; the network thread only produces typed events. Adapter remains the sole persistent desktop-settings owner.
-  scope: Add the overall C++ architecture proposal and migration order. Phase 1 extracts the settings controller, and Phase
-    2 moves the runtime coordinator implementation out of main.cpp behind typed callbacks and services, Phase 3 separates
-    the motion compiler after golden samples, and later phases split audio and host. No algorithm rewrite, second Adapter
-    client, second playback clock, or immediate broad refactor is included.
-  validation: Proposal and phase status are recorded in docs/02-设计文档/16-C++原生运行时整体架构重设计.md and indexed from docs/README.md.
-    Phase 1 adds render-core/include/ag99/native/settings_controller.hpp and its source, moves Native setting parsing/range/format
-    logic out of NativeModel, and preserves the existing Release build and protocol behavior. Phase 2 adds render-core/include/ag99/native/runtime_coordinator.hpp
-    with shared segment-clock/terminal types, a single callback contract, and typed RuntimeCoordinatorServices. The in-process
-    RuntimeBridge boundary is now NativeRuntimeCoordinator, implemented in render-core/src/native_runtime_coordinator.cpp.
-    WinMM microphone capture and PCM uplink live in MicrophoneCapture, complete WAV and OLV PCM waveOut sinks live in audio_runtime.cpp,
-    and the typed Turn/Segment/OLV playback ledger lives in playback_ledger.hpp. Phase 3 moves motion plan types to motion_types.hpp,
-    JSON validation helpers to json_utils.cpp, track-point and axis relation-graph parsing to motion_compiler.cpp, and bounded
-    / spring scheduling math to motion_scheduler.cpp. Track time evaluation and active/pending/terminal motion lifecycle are
-    in motion_scheduler.hpp/cpp; CompileMotionPlan and ParseParameterPlan are in motion_compiler.cpp with typed contexts;
-    NativeModel only supplies the profile, intensity snapshot, parameter descriptors, and Cubism writes. Audio clock, RMS,
-    speech signal, playback lifecycle, PCM queues, playback ack queue, and current audio identity now live in AudioRuntime.
-    NativeHost owns main-window creation, Win32 window procedure, tray menu, input controls, and input window message posting.
-    NativeModel/Cubism model ownership now lives in native_model.cpp with typed services. main.cpp is reduced to startup,
-    D3D surface, and message-loop assembly. Release build, all three CTest smoke targets, diff checks, frontend typecheck,
-    and the ten focused Adapter runtime tests pass.
-  remaining: Code-level architecture migration is complete. Remaining evidence gaps are live Web-to-Native reconnect, motion
-    golden samples, visible model output, audio-device timing, interruption, and reconnect acceptance.
-typescript_runtime_architecture_convergence_20261112:
-  date: '2026-11-12'
-  class: refactor
-  risk: high
-  status: source_implemented_pending_live_acceptance
-  decision: Keep TypeScript as the continuous development implementation. Centralize Live2D access behind Live2dRuntimePort,
-    share SegmentIdentity and Sink/Turn terminal predicates, and make canonical desktop settings replay an explicit readiness
-    handshake before desktop features start.
-  scope: Refactor Live2D callers, preview/audio/gaze composition, Timeline and motion identity keys, Adapter readiness state,
-    and the desktop settings completion protocol. Preserve existing playback behavior and do not touch concurrent Native runtime
-    work.
-  validation: Frontend renderer, WebSDK and Node typechecks passed. Adapter Python compilation, protocol schema manifest validation,
-    two focused runtime test files (14 tests), and diff whitespace checks passed. The existing frontend test-project compilation
-    remains blocked by pre-existing broad strict-mode errors outside this change.
-  remaining: Real Electron, AstrBot, TTS, model switching, reconnect, and Live2D model acceptance are still required. Further
-    splitting of useAdapterConnection, usePetDesktopRuntime, and SessionStore should wait for that runtime check.
-architecture_boundary_followup_20261113:
-  date: '2026-11-13'
-  class: refactor
-  risk: high
-  status: source_reviewed_ready_for_live_acceptance
-  decision: Keep NativeRuntimeCoordinator as the protocol/ledger coordinator while NativePlaybackRuntime owns the audio worker,
-    NativeInputRuntime owns microphone capture lifecycle, and NativeTransport owns the low-level WebSocket client. Keep the
-    TypeScript desktop root split into a foundation composition module plus application orchestration.
-  scope: Extract Native playback execution and input capture boundaries, narrow RuntimeCoordinatorServices, add the TypeScript
-    desktop runtime foundation, and extend the explicit SessionStore port to incremental stream writes. Preserve existing
-    behavior and concurrent Native user changes.
-  validation: Render-core Release build and all three CTest smoke targets passed after the Native extraction. Frontend renderer,
-    WebSDK, and Node typechecks passed after the composition and SessionStore port changes.
-  remaining: Live Electron/AstrBot/Native reconnect, visible model, device timing, Spout/OBS output, and interruption acceptance
-    remain. The current code is the stable checkpoint for real testing; further splitting should wait for evidence from that
-    run.
+  purpose: 当前架构计划、所有权边界、不变量和验收缺口。历史里程碑保留在 Git 历史，不在此重复。
+  baseline: AG99live 1.0.0
+  code_checkpoint: 337aa0b5
+  followup_checkpoint: 400e8ad3
+
+architecture:
+  product:
+    typescript_desktop: 持续开发和表现参考实现
+    native_desktop: 冻结版本后的独立高性能实现
+    adapter: 唯一持久化配置源和单桌面 WebSocket 对端
+    runtime_selection: TS 与 Native 手动择一连接 Adapter，不并行连接
+  ownership:
+    adapter:
+      owns:
+        - desktop_runtime_settings canonical snapshot
+        - protocol session and single-client admission
+        - conversation, provider, TTS and media production
+    runtime_core:
+      owns:
+        - wire schema validation
+        - RuntimeProtocolSession
+        - typed protocol events and builders
+    native_runtime:
+      owns:
+        - turn/segment/playback ledger
+        - connection generation
+        - terminal and playback_finished coordination
+        - settings application result
+    native_transport:
+      owns:
+        - Native Adapter WebSocket lifetime
+        - text/binary receive and send callbacks
+        - reconnect URL
+    native_input:
+      owns:
+        - WinMM microphone device and stream lifecycle
+        - PCM uplink and input stream terminal state
+    native_playback:
+      owns:
+        - audio worker
+        - complete WAV and OLV PCM admission
+        - playback clock, RMS, audio credit and drain
+    native_motion:
+      owns:
+        - motion intent subset compilation
+        - parameter plan parsing
+        - bounded/spring scheduling and terminal state
+    native_model:
+      owns:
+        - Cubism model/resources
+        - Physics/Pose/Expression
+        - parameter contribution and single write path
+        - model view, ambient motion and cursor gaze
+    native_host:
+      owns:
+        - HWND, tray, input window and drag/click-through
+        - D3D11 composition surface and frame loop
+        - Native reconnect command
+    spout:
+      owns:
+        - optional D3D11 backbuffer readback
+        - bounded RGBA sender worker
+        - AG99liveSpoutSender process lifecycle
+
+  data_flow:
+    downlink: Adapter -> runtime-core -> NativeTransport -> NativeRuntimeCoordinator
+    render: NativeRuntimeCoordinator -> MotionScheduler/NativeModel -> Cubism render thread
+    audio: NativeRuntimeCoordinator -> NativePlaybackRuntime/AudioRuntime -> waveOut
+    uplink: NativeInputRuntime -> runtime-core -> Adapter
+    receipt: audio/motion/text terminal evidence -> one playback_finished path
+
+  config:
+    source_of_truth: Adapter desktop_runtime_settings
+    native_behavior:
+      - receive canonical values during connection replay
+      - keep effective values in memory
+      - return explicit applied/rejected/unsupported results
+      - never create a second persistence store
+    native_supported:
+      - live2d_physics_response_scale
+      - live2d_ambient_motion_enabled
+      - model_view_scale
+      - model_view_offset_x
+      - model_view_offset_y
+      - motion_engine_intensity_scale
+      - speech_volume
+      - microphone_device
+      - cursor_gaze_enabled
+      - cursor_gaze_poll_interval_ms
+      - cursor_gaze_dwell_ms
+      - cursor_gaze_stationary_distance_px
+      - adapter_address
+      - spout_enabled
+
+  invariants:
+    - one Adapter WebSocket client per Adapter instance
+    - one Native transport owner
+    - one playback ledger and one playback_finished authority
+    - one audio clock shared by complete and OLV playback
+    - render thread is the only Cubism state writer
+    - audio/input workers never call Cubism
+    - late events modify ledger state and never reopen devices directly
+    - TS and Native do not write the same model concurrently
+    - unsupported settings remain canonical and are not silently accepted
+
+  code_status:
+    architecture: Phase 1-4 source migration complete; boundary follow-up committed
+    native_runtime: coordinator, transport, input, playback and model boundaries present
+    typescript_runtime: foundation, desktop host port and SessionStore port present
+    spout: source and Release resource copy present; receiver acceptance pending
+    local_validation:
+      - render-core Release build
+      - 3/3 CTest smoke targets
+      - frontend renderer/WebSDK/Node typecheck
+      - YAML parse and git diff check
+      - Native host process/window startup observation
+
+  explicit_boundaries:
+    - full TypeScript PerformanceSchedule/compiler equivalence remains a reference-implementation migration, not a V1 replacement gate
+    - Native microphone VAD and FFT speech emphasis remain outside the current stable slice
+    - window resize and D3D device-loss recovery are not implemented
+    - screenshot/PTT/Bilibili/ESP32 remain TS/Electron-owned features unless a Native owner is added deliberately
+
+live_acceptance:
+  required:
+    - Adapter canonical settings replay and Native reconnect
+    - visible Mk6 model, motion, Physics and lip-sync quality
+    - WAV/OLV waveOut timing, interruption and drain
+    - real microphone enumeration, switching and capture
+    - cancel, reconnect, late motion and unique receipt behavior
+    - Spout/OBS frame output, transparency, cadence and shutdown
+    - TS/C++ motion golden samples
+  rule: local smoke/build evidence must not be reported as TS/Native behavioral equivalence
+
+test_commands:
+  native_build: cmake --build render-core/build --config Release --parallel 4
+  native_tests: ctest --test-dir render-core/build -C Release --output-on-failure
+  frontend_types: npm run typecheck
+  state_parse: python -c "import yaml; yaml.safe_load(open('.ai/state.yaml', encoding='utf-8'))"
+  whitespace: git diff --check
