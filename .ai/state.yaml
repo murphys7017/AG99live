@@ -1,2520 +1,290 @@
+state_meta:
+  schema_version: 2
+  updated_at: '2026-11-13'
+  purpose: 保留当前有效架构、配置、播放和验收状态；历史切片保留在 Git 历史中。
+  retained_records: 17
+  archived_records: 102
+current_checkpoint:
+  status: ready_for_live_acceptance
+  commit: 337aa0b5
+  local_validation:
+  - Render-core Release build
+  - 3/3 CTest smoke
+  - frontend renderer/WebSDK/Node typecheck
+  - YAML parse and git diff check
+  live_acceptance_required:
+  - Adapter canonical settings replay and reconnect
+  - visible Native model/motion/Physics/audio
+  - microphone and interruption timing
+  - Spout/OBS output
+  - TS/C++ motion golden samples
 audio_segment_sync_20261111:
   class: bugfix
   risk: high
   status: source_updated_pending_live_audio_acceptance
-  scope: >-
-    Preserve first samples by finishing PCM gain ramp before scheduled audio;
-    keep media gain open before the playing callback; analyse post-gain audio.
-    Decode queued PCM on bounded wire admission. Schedule at most one segment
-    ahead against the preceding finished output's AudioContext tail; transfer
-    presentation and lip-sync ownership after the preceding segment settles.
-    Account for scheduled wait in start deadlines and cancel queued output on
-    interruption. Apply a 1 ms onset ramp and appended 1 ms return-to-zero guard
-    without dropping or overlapping received samples.
-  validation: >-
-    Renderer typecheck and PCM decode boundary smoke passed. A minimal PCM public
-    boundary smoke with a simulated audio scheduler confirmed adjacent segment
-    times, retained sample count, boundary ramps and rejection after finish.
-    Review corrections reject scheduling after failed production and suppress
-    late end guards; minimal public-boundary smoke checks pass for both.
-    This is not output-device or end-to-end evidence. No real TTS and recording
-    comparison yet. Source commit authorized; deployment remains out of scope.
-  limitations: >-
-    Continuous scheduling depends on next-segment data arriving before the
-    previous scheduled tail; network/TTS starvation still creates real gaps.
-    Live recording comparison, interruption and subtitle/lip handoff acceptance
-    remain required. AudioContext clock is not yet compensated to device output.
-    Mk6 declares mouth form, funnel and width controls but LipSync only uses
-    ParamMouthOpenY. Phoneme-driven mouth shapes remain outside this first slice.
-
+  scope: Preserve first samples by finishing PCM gain ramp before scheduled audio; keep media gain open before the playing
+    callback; analyse post-gain audio. Decode queued PCM on bounded wire admission. Schedule at most one segment ahead against
+    the preceding finished output's AudioContext tail; transfer presentation and lip-sync ownership after the preceding segment
+    settles. Account for scheduled wait in start deadlines and cancel queued output on interruption. Apply a 1 ms onset ramp
+    and appended 1 ms return-to-zero guard without dropping or overlapping received samples.
+  validation: Renderer typecheck and PCM decode boundary smoke passed. A minimal PCM public boundary smoke with a simulated
+    audio scheduler confirmed adjacent segment times, retained sample count, boundary ramps and rejection after finish. Review
+    corrections reject scheduling after failed production and suppress late end guards; minimal public-boundary smoke checks
+    pass for both. This is not output-device or end-to-end evidence. No real TTS and recording comparison yet. Source commit
+    authorized; deployment remains out of scope.
+  limitations: Continuous scheduling depends on next-segment data arriving before the previous scheduled tail; network/TTS
+    starvation still creates real gaps. Live recording comparison, interruption and subtitle/lip handoff acceptance remain
+    required. AudioContext clock is not yet compensated to device output. Mk6 declares mouth form, funnel and width controls
+    but LipSync only uses ParamMouthOpenY. Phoneme-driven mouth shapes remain outside this first slice.
 native_olv_native_playback_20261110:
   class: feature
   risk: high
   status: source_updated_locally_validated_pending_live_runtime_acceptance
-  scope: >-
-    Complete the Native OLV presentation path behind the existing desktop
-    capability flag. Track incremental text/audio/motion terminal state per
-    segment, feed accepted PCM into the existing lip-sync/RMS clock, coalesce
-    the latest validated motion payload and release it through NativeModel's
-    existing motion queue after audio drain, and include OLV segments in the
-    existing playback_finished gate. Keep the TS timeline and Core/Adapter
-    wire contracts unchanged; Native text remains preview/feedback state
-    because the Native host has no separate history store.
-  validation: >-
-    Render-core Release host build, runtime-core Release protocol smoke test,
-    CTest, and git diff whitespace checks pass. The capability is opt-in
-    through AG99_NATIVE_OLV=1 and remains off by default. Source review
-    confirms OLV text, PCM, motion and
-    terminal acknowledgement share one turn/segment lifecycle. No real
-    Adapter/Core/TTS/audio-device/Live2D joint run has been completed in this
-    slice.
-  limitations: >-
-    Native motion is released as a motion-only plan after the corresponding
-    PCM stream drains and only the latest OLV motion update is retained. A
-    motion tail beyond the frontend 1.8-second limit is rejected, and motion
-    plan replacement is treated as a normal handoff. A paired runtime
-    acceptance is still required to verify provider timing,
-    waveOut device admission, interruption/reconnect cleanup, and visible
-    model output. Existing Native history UI is preview-only by design; the
-    Adapter/TS path remains responsible for desktop history recording.
-
+  scope: Complete the Native OLV presentation path behind the existing desktop capability flag. Track incremental text/audio/motion
+    terminal state per segment, feed accepted PCM into the existing lip-sync/RMS clock, coalesce the latest validated motion
+    payload and release it through NativeModel's existing motion queue after audio drain, and include OLV segments in the
+    existing playback_finished gate. Keep the TS timeline and Core/Adapter wire contracts unchanged; Native text remains preview/feedback
+    state because the Native host has no separate history store.
+  validation: Render-core Release host build, runtime-core Release protocol smoke test, CTest, and git diff whitespace checks
+    pass. The capability is opt-in through AG99_NATIVE_OLV=1 and remains off by default. Source review confirms OLV text,
+    PCM, motion and terminal acknowledgement share one turn/segment lifecycle. No real Adapter/Core/TTS/audio-device/Live2D
+    joint run has been completed in this slice.
+  limitations: Native motion is released as a motion-only plan after the corresponding PCM stream drains and only the latest
+    OLV motion update is retained. A motion tail beyond the frontend 1.8-second limit is rejected, and motion plan replacement
+    is treated as a normal handoff. A paired runtime acceptance is still required to verify provider timing, waveOut device
+    admission, interruption/reconnect cleanup, and visible model output. Existing Native history UI is preview-only by design;
+    the Adapter/TS path remains responsible for desktop history recording.
 native_olv_protocol_boundary_20261110:
   class: feature
   risk: high
   status: source_updated_locally_validated_pending_native_runtime_acceptance
-  scope: >-
-    Extend runtime-core with the first OLV downlink protocol boundary without
-    changing the existing output.segment.v6 or microphone type=1 paths. Parse
-    incremental text/audio/motion stream events, shared identity and sequence
-    constraints, end status/length fields, and type=2 PCM frame metadata,
-    sample offsets, and bounded payloads. Track turn/segment/resource stream
-    lifecycles, text and audio capacities, and cross-segment audio order before
-    dispatching accepted OLV events through new optional callbacks. Add the
-    frontend `control.audio_credit` builder and Native
-    `system.desktop_runtime_settings` capability declaration for the later
-    PCM worker; add a bounded single Native PCM worker and waveOut block sink
-    that sends cumulative credit after device admission, while keeping
-    `persona_segment_stream_enabled=false` until timeline/lip-sync/text/motion
+  scope: Extend runtime-core with the first OLV downlink protocol boundary without changing the existing output.segment.v6
+    or microphone type=1 paths. Parse incremental text/audio/motion stream events, shared identity and sequence constraints,
+    end status/length fields, and type=2 PCM frame metadata, sample offsets, and bounded payloads. Track turn/segment/resource
+    stream lifecycles, text and audio capacities, and cross-segment audio order before dispatching accepted OLV events through
+    new optional callbacks. Add the frontend `control.audio_credit` builder and Native `system.desktop_runtime_settings` capability
+    declaration for the later PCM worker; add a bounded single Native PCM worker and waveOut block sink that sends cumulative
+    credit after device admission, while keeping `persona_segment_stream_enabled=false` until timeline/lip-sync/text/motion
     presentation is wired.
-  validation: >-
-    runtime-core Release build and CTest protocol smoke test pass, including
-    direct event parsing, type=2 frame parsing, lifecycle rejection, OLV-only
-    synth_finished handling, audio credit construction, capability declaration,
-    and RuntimeProtocolSession dispatch. Both runtime-core and render-core
-    Release builds pass, and Git whitespace checks pass. Live Adapter/Core/
-    WebSocket and real audio/Live2D playback acceptance remain outstanding.
-    The worker sink is compile- and lifecycle-validated but not enabled in
-    capability negotiation; sink/admission/credit failures interrupt and clear
-    the affected Turn; audio end status/reason and total sample count are
-    checked before successful drain. Text preview and the existing 50 Hz RMS
-    signal now have Native ingress, while Timeline/lip-sync clock ownership,
-    incremental motion presentation, and final playback receipt remain
-    outstanding.
-    The review pass additionally corrected Unicode codepoint end lengths,
-    adapter-source validation, cumulative audio-credit consistency, and the
-    Native connection-state update after capability-send failure.
-  limitations: >-
-    This is still a receive/validation boundary only. It does not yet enforce
-    audio credit or backpressure, bounded playback queues, PCM sink timing, or
-    Live2D motion execution. The next slice must connect these callbacks to the
-    existing runtime ownership without creating a parallel player.
-
+  validation: runtime-core Release build and CTest protocol smoke test pass, including direct event parsing, type=2 frame
+    parsing, lifecycle rejection, OLV-only synth_finished handling, audio credit construction, capability declaration, and
+    RuntimeProtocolSession dispatch. Both runtime-core and render-core Release builds pass, and Git whitespace checks pass.
+    Live Adapter/Core/ WebSocket and real audio/Live2D playback acceptance remain outstanding. The worker sink is compile-
+    and lifecycle-validated but not enabled in capability negotiation; sink/admission/credit failures interrupt and clear
+    the affected Turn; audio end status/reason and total sample count are checked before successful drain. Text preview and
+    the existing 50 Hz RMS signal now have Native ingress, while Timeline/lip-sync clock ownership, incremental motion presentation,
+    and final playback receipt remain outstanding. The review pass additionally corrected Unicode codepoint end lengths, adapter-source
+    validation, cumulative audio-credit consistency, and the Native connection-state update after capability-send failure.
+  limitations: This is still a receive/validation boundary only. It does not yet enforce audio credit or backpressure, bounded
+    playback queues, PCM sink timing, or Live2D motion execution. The next slice must connect these callbacks to the existing
+    runtime ownership without creating a parallel player.
 native_runtime_protocol_and_frame_clock_20261110:
   class: refactor
   risk: high
   status: source_updated_locally_validated_pending_native_runtime_acceptance
-  scope: >-
-    Continue the C++ native runtime migration without changing the stable TS
-    desktop behavior. Align runtime-core with output.segment.v6, derive Native
-    protocol constants from the Adapter schema manifest at CMake configure time,
-    and reuse one monotonic timestamp per render frame for audio, parameter
-    mixing, and motion-plan evaluation. Cache model parameter IDs at load time
-    and remove transient per-frame source-label and parameter-ID allocations
-    from the parameter mixer without changing priorities. Add an idle fast path
-    after pending Physics settings are applied, so empty frames skip
-    contribution collection and mixing. Reuse the render-thread frame scratch
-    vectors for active frames to avoid repeated container allocation, including
-    the per-parameter contribution lists used by the mixer. Add a repeatable
-    PowerShell sampler for Native CPU and memory baselines.
-    Replace the Native WAV temporary-file/PlaySound path with in-memory PCM
-    playback through `waveOut`, while keeping the existing serial, RMS, clock,
-    interruption, and failure boundaries. Accept v6 pending motion and
-    same-identity `output.segment_motion`, attaching late motion to the active
-    audio clock and rejecting expired motion windows.
-  validation: >-
-    CMake Release builds pass for runtime-core and render-core, the protocol
-    replay smoke test passes, the manifest check and Ruff pass, and git diff
-    whitespace checks pass. The Native sampler was smoke-tested with a short
-    Mk6 run. Changes are confined to the AG99live source repo;
-    the generated AstrBot deployment copy was not edited or deployed.
-  limitations: >-
-    Native rendering, audio timing, GPU occupancy, and protocol behavior still
-    require paired live acceptance against the Adapter and a real model. No
-    performance percentage is claimed without a before/after native benchmark.
-
+  scope: Continue the C++ native runtime migration without changing the stable TS desktop behavior. Align runtime-core with
+    output.segment.v6, derive Native protocol constants from the Adapter schema manifest at CMake configure time, and reuse
+    one monotonic timestamp per render frame for audio, parameter mixing, and motion-plan evaluation. Cache model parameter
+    IDs at load time and remove transient per-frame source-label and parameter-ID allocations from the parameter mixer without
+    changing priorities. Add an idle fast path after pending Physics settings are applied, so empty frames skip contribution
+    collection and mixing. Reuse the render-thread frame scratch vectors for active frames to avoid repeated container allocation,
+    including the per-parameter contribution lists used by the mixer. Add a repeatable PowerShell sampler for Native CPU and
+    memory baselines. Replace the Native WAV temporary-file/PlaySound path with in-memory PCM playback through `waveOut`,
+    while keeping the existing serial, RMS, clock, interruption, and failure boundaries. Accept v6 pending motion and same-identity
+    `output.segment_motion`, attaching late motion to the active audio clock and rejecting expired motion windows.
+  validation: CMake Release builds pass for runtime-core and render-core, the protocol replay smoke test passes, the manifest
+    check and Ruff pass, and git diff whitespace checks pass. The Native sampler was smoke-tested with a short Mk6 run. Changes
+    are confined to the AG99live source repo; the generated AstrBot deployment copy was not edited or deployed.
+  limitations: Native rendering, audio timing, GPU occupancy, and protocol behavior still require paired live acceptance against
+    the Adapter and a real model. No performance percentage is claimed without a before/after native benchmark.
 dual_conversation_platform_dsh_execution_20261102:
   class: feature
   risk: high
   status: source_reviewed_protocol_chain_smoke_pending_live_dsh
-  scope: >-
-    Add a selectable conversation platform with AstrBot as the unchanged default
-    and DeepSeek Harness as a local stdio JSON-RPC ConversationProvider. DSH
-    assistant text uses the existing Turn/Segment/output.segment.v6 path; tool,
-    code, PTC and approval activity uses a separate ExecutionEvent contract and
-    output.execution.v1 presentation event. Existing AstrBot composition and
-    output.segment.v6 behavior remain the default path.
-  validation: >-
-    Focused DSH provider/orchestrator/middleware tests pass (35 tests),
-    including real SessionEvent tool/result and PTC sub-call envelopes through
-    output.execution and final output.segment delivery. Python compileall,
-    protocol schema manifest, and diff whitespace checks pass. Existing
-    renderer typecheck and plugin checks remain recorded from the prior slice.
-  limitations: >-
-    No dsh executable is available in this workspace, so a live SDK process,
-    credential, approval policy, TTS/Live2D joint playback, reconnect, and
-    production frontend acceptance remain unverified. Platform switching is
-    composition-time and requires an adapter restart; saving the setting while
-    a platform is live logs that requirement.
-
-motion_provider_stream_output_bound_20261101:
-  class: bugfix
-  risk: medium
-  status: source_reviewed_pending_runtime_acceptance
-  scope: >-
-    Bound the shared action Provider text stream collector to 16,000 characters,
-    close oversized iterators, and degrade independent motion and performance
-    curve work with explicit failure reasons while core text and TTS continue.
-    Prompt text, Live2D protocol and C++ remain unchanged.
-  validation: >-
-    Changed Python modules pass py_compile and git diff whitespace inspection.
-    No automated tests or runtime integration checks are run per user scope.
-  limitations: >-
-    The bound is an adapter policy and needs real Provider responses to tune;
-    it applies to the shared collector used by action, curve and pre-action paths.
-
-continuity_handoff_envelope_20261101:
-  class: bugfix
-  risk: high
-  status: source_reviewed_pending_runtime_acceptance
-  scope: >-
-    Preserve the active parameter plan and ContinuityEnvelope when a speech
-    segment ends through the intentional handoff path, so the successor motion
-    can compile against the prior segment state. Ordinary completion, failure,
-    interruption and stop still clear continuity state. Prompt text, Live2D
-    protocol and C++ remain unchanged.
-  validation: >-
-    Renderer vue-tsc typecheck and git diff whitespace inspection pass. No
-    automated tests or runtime integration checks are run per user scope.
-  limitations: >-
-    The handoff state still needs real multi-segment AG99, TTS, Electron and
-    Live2D playback acceptance to confirm visual continuity and interruption
-    behavior.
-
-audio_stream_resource_bounds_20261031:
-  class: bugfix
-  risk: medium
-  status: source_reviewed_pending_runtime_acceptance
-  scope: >-
-    Bound each active microphone stream to 12 MiB of PCM payload and 120 seconds
-    of capture lifetime. Expire unsealed streams, release their buffers and
-    notify the existing control_error path. Prompt text, Live2D protocol and C++
-    remain unchanged.
-  validation: >-
-    The changed Python module passes py_compile and git diff whitespace
-    inspection. No automated tests or runtime integration checks are run per
-    user scope.
-  limitations: >-
-    The limits are adapter-side safety bounds and need live microphone/VAD/STT
-    acceptance to tune for long captures. The existing wire messages and error
-    envelope remain unchanged.
-
-motion_lab_rejection_ack_bounded_outbox_20261031:
-  class: bugfix
-  risk: high
-  status: source_reviewed_pending_runtime_acceptance
-  scope: >-
-    Release MotionLab outbound in-flight entries when the existing backend
-    control_error reports enqueue failure, and bound the IndexedDB-backed
-    outbound event set to 512 entries with oldest-first local eviction. Keep
-    the existing protocol messages, Prompt text, Live2D protocol and C++
-    unchanged.
-  validation: >-
-    Renderer vue-tsc typecheck and git diff whitespace inspection pass. No
-    automated tests or runtime integration checks are run per user scope.
-  limitations: >-
-    Queue-capacity eviction and backend enqueue rejection discard optional
-    MotionLab observations locally after emitting diagnostics; they preserve
-    dialogue and playback availability rather than guaranteeing telemetry
-    completeness.
-
-pending_motion_ttl_capacity_prepared_cache_20261031:
-  class: bugfix
-  risk: high
-  status: source_reviewed_pending_runtime_acceptance
-  scope: >-
-    Bound renderer pending inbound motion payloads with a 30-second TTL and
-    64-entry capacity, evicting the oldest stale work through the existing
-    failure path. Give prepared semantic motion entries the same bounded TTL
-    and capacity with timer cleanup on consume, segment interruption, and stop.
-    Prompt text, Live2D protocol and C++ remain unchanged.
-  validation: >-
-    Renderer vue-tsc typecheck and git diff whitespace inspection pass. No
-    automated tests or runtime integration checks are run per user scope.
-  limitations: >-
-    Expiry and capacity eviction drop optional motion preparation and rely on
-    the existing fallback/rejection path. Runtime playback timing still needs
-    AG99, Electron, TTS and Live2D acceptance.
-
-deferred_motion_capacity_motion_lab_overflow_20261031:
-  class: bugfix
-  risk: high
-  status: source_reviewed_pending_runtime_acceptance
-  scope: >-
-    Degrade late-motion registration cleanly when the bounded delivery registry
-    is full, preserving the existing segment failure metadata path. Make MotionLab
-    queue-full observation drops bounded, rate-limited, and inspectable through
-    queue statistics and explicit rejection logs. Prompt text, Live2D protocol and
-    C++ remain unchanged.
-  validation: >-
-    Changed Python modules pass py_compile and git diff whitespace inspection.
-    No automated tests or runtime integration checks are run per user scope.
-  limitations: >-
-    Capacity overflow still drops the optional late motion and marks that segment
-    with a deterministic failure reason. MotionLab queue-full events remain
-    lossy, but the monotonic drop count and contextual logs make the loss visible.
-
-deferred_motion_bounded_send_retry_cleanup_20261031:
-  class: bugfix
-  risk: high
-  status: source_reviewed_pending_runtime_acceptance
-  scope: >-
-    Give DeferredMotionDelivery a bounded retry loop for late output.segment_motion
-    sends and remove delivery entries after success, expiry, terminal cancellation,
-    or retry exhaustion. Prompt text, Live2D protocol and C++ remain unchanged.
-  validation: >-
-    Changed Python modules pass py_compile and git diff whitespace inspection.
-    No automated tests or runtime integration checks are run per user scope.
-  limitations: >-
-    Retries are bounded to four attempts with 250ms to 2s backoff inside a
-    30-second post-readiness send window. A permanently unavailable connection
-    still drops the optional late motion after logging the exhaustion reason.
-
-performance_governor_continuity_envelope_20261031:
-  class: refactor
-  risk: high
-  status: source_reviewed_pending_runtime_acceptance
-  scope: >-
-    Add an internal PerformanceGovernor and ContinuityEnvelope at the Model
-    Engine compile boundary. Bound active action axes and sequence steps, damp
-    repeated semantic directions across consecutive plans, and hand off
-    preempted parameter ownership by releasing orphan bindings to neutral.
-    Prompt text, Live2D protocol and C++ remain unchanged.
-  validation: >-
-    Frontend renderer, WebSDK and Node TypeScript typechecks pass, and git diff
-    whitespace inspection passes. No automated tests or runtime integration
-    checks are run per user scope.
-  limitations: >-
-    Governor budgets are internal defaults (8 active axes, 4 sequence steps) and
-    repeated directions are attenuated rather than rejected. Visual timing and
-    neutral release still require AG99, TTS, Electron and Live2D runtime
-    acceptance.
-motion_lab_outbound_retry_idb_preservation_20261031:
-  class: refactor
-  risk: high
-  status: source_reviewed_pending_runtime_acceptance
-  scope: >-
-    Add bounded exponential retry scheduling to the MotionLab IndexedDB outbound
-    queue after transient send rejection. Pause retries while disconnected and
-    resume immediately on reconnect. Upgrade the local database without clearing
-    persisted events; retain valid records and remove only records that fail local
-    storage validation. Prompt, Live2D protocol and C++ remain unchanged.
-  validation: >-
-    Frontend renderer, WebSDK and Node TypeScript typechecks pass, and git diff
-    whitespace inspection passes. No automated tests or runtime integration checks
-    are run per user scope.
-  limitations: >-
-    The retry budget is bounded to 250ms through 5s backoff and does not add a new
-    wire acknowledgement contract. Records that are structurally invalid in the
-    existing store cannot be reconstructed and are removed with a warning.
-
-performance_curve_request_lifecycle_20261031:
-  class: refactor
-  risk: high
-  status: source_reviewed_pending_runtime_acceptance
-  scope: >-
-    Add a bounded request-level timeout to PerformanceCurveRuntime, record timeout
-    failures, and track whether a ready hint was actually attached before output
-    egress. A result that becomes ready after the egress snapshot is now treated as
-    missed and cleaned up deterministically. Prompt text, Live2D protocol and C++
-    remain unchanged.
-  validation: >-
-    Changed Python modules pass py_compile and git diff whitespace inspection.
-    No automated tests or runtime integration checks are run per user scope.
-  limitations: >-
-    The default curve request budget is 8 seconds and can be overridden through the
-    internal runtime state attribute performance_curve_request_timeout_seconds.
-    Attachment remains best-effort and does not delay output segment egress.
-
-multi_segment_motion_continuity_run_index_20261031:
-  class: refactor
-  risk: high
-  status: source_reviewed_pending_runtime_acceptance
-  scope: >-
-    Make multi-segment independent motion generation ordered when a shared motion
-    context is available, carrying each accepted segment payload through the
-    existing recent-executed reference channel for the next segment. Replace the
-    MotionLab recorder's single active run with a runId-indexed bounded active set.
-    Prompt text, motion payload/protocol shape, Live2D execution and C++ remain
-    unchanged.
-  validation: >-
-    Frontend renderer, WebSDK and Node TypeScript typechecks pass, Python static
-    compilation passes, and git diff whitespace inspection passes. No automated
-    tests or runtime integration checks are run per user scope.
-  limitations: >-
-    Continuity ordering falls back to the configured parallel path when the shared
-    motion context cannot be prepared. Runtime visual continuity still needs AG99,
-    TTS, Electron and Live2D acceptance. Unterminated MotionLab runs are bounded
-    at 64 entries and older entries are pruned with a diagnostic warning.
-
-playback_release_late_motion_continuity_20261031:
-  class: refactor
-  risk: high
-  status: source_reviewed_pending_runtime_acceptance
-  scope: >-
-    Move segment release blocker arbitration into PlaybackTimeline.startSegmentJob,
-    keep session material readiness in turn-playback selectors, and allow deferred
-    motion that arrives after completed audio to use a bounded motion-only tail.
-    Late tails older than 1800ms are rejected with an explicit reason. Prompt,
-    Live2D protocol and C++ remain unchanged.
-  validation: >-
-    Frontend renderer, WebSDK and Node TypeScript typechecks pass; git diff
-    whitespace inspection passes. No automated tests or runtime integration checks
-    were run, per user scope.
-  limitations: >-
-    Segment handoff still interrupts the previous direct plan through the existing
-    ModelEngine ownership path; the runtime captures the current model base for the
-    next plan, but real visual continuity needs AG99/TTS/Electron/Live2D runtime
-    acceptance. The 1800ms late-tail budget is an adapter policy and may need tuning.
-
-adapter_event_context_motion_tuning_contract_20261031:
-  class: refactor
-  risk: high
-  status: source_reviewed_pending_runtime_acceptance
-  scope: >-
-    Centralize Adapter event identity, stop state, Persona stream state, motion
-    route and deferred performance-curve state in AdapterEventContext. Keep
-    AstrBot extras as a compatibility mirror at the boundary, and reject
-    motion-tuning samples before transport when required recorded context or
-    compiled-motion identity is missing. Prompt, Live2D protocol and C++ remain
-    unchanged.
-  validation: >-
-    Changed Python modules pass py_compile and git diff whitespace inspection;
-    frontend renderer, WebSDK and Node TypeScript typechecks pass. Static review
-    confirmed identity and termination writes now go through AdapterEventContext.
-    No automated tests or runtime integration checks were run, per user scope.
-  limitations: >-
-    TurnCoordinator still mirrors the established AstrBot identity/stop extras
-    at the ingress/termination boundary through AdapterEventContext. The output
-    protocol metadata remains unchanged. Runtime acceptance is still pending.
-
-platform_event_adapter_state_20261031:
-  class: refactor
-  risk: high
-  status: source_reviewed_pending_runtime_acceptance
-  scope: >-
-    Move platform_event's adapter-owned negotiation flags, motion acknowledgement
-    state, turn identities, stop state and sanitized raw reply text into a
-    structured private event state. Keep AstrBot get_extra/set_extra as the
-    compatibility boundary and retain output platform_extras required by the
-    existing delivery coordinator. Prompt, Live2D protocol and C++ remain
-    unchanged.
-  validation: >-
-    platform_event.py, persona_lifecycle.py and main.py pass py_compile and
-    git diff whitespace inspection. No automated tests or runtime integration
-    checks were run, per user scope.
-  limitations: >-
-    Core still receives the established compatibility extras through
-    set_extra, while output-segment metadata remains a cross-module delivery
-    contract. A later slice can move the remaining platform_event orchestration
-    helpers if that boundary is intentionally redesigned.
-
-persona_expression_frame_adapter_20261031:
-  class: refactor
-  risk: high
-  status: source_reviewed_pending_runtime_acceptance
-  scope: >-
-    Establish PersonaExpressionFrame as the immutable Adapter ingress fact for
-    one AG99 Persona segment. Reuse PersonaTurnSessionRegistry and
-    PersonaResultState as the mutable owners of tasks, deadlines, delivery and
-    cancellation. Route intent-ready, segment-ready and complete Persona
-    result hooks through the frame without changing Prompt text, desktop
-    protocol, Live2D execution or C++ sources.
-  validation: >-
-    Changed Python modules pass py_compile and git diff whitespace inspection.
-    No automated tests or runtime integration checks were run, per user scope.
-  limitations: >-
-    platform_event compatibility extras remain at the AstrBot boundary and
-    independent motion still uses its existing provider prompt. A later batch
-    must decide how to migrate those inputs without introducing a second
-    mutable Persona state owner.
-
-persona_motion_training_sample_capture_20261024:
-  class: feature
-  risk: high
-  status: local_source_updated_pending_v3_migration_plugin_reload_and_runtime_acceptance
-  scope: >-
-    Replace Motion Lab raw-event observations with per-Persona-segment
-    motion.persona_sample.v1 snapshots for M0 nonstreaming, M1 Persona segment
-    streaming, and M2 OLV incremental delivery. Capture user input, available
-    history, Persona speech/actions/tendency, motion route, Provider prompts and
-    outputs, and target Persona Effect arguments. Keep the actual M2 intent-ready
-    request separate from the later complete segment snapshot. Upgrade SQLite
-    raw-event schema to v3 and clear old desktop pending events. Preserve tuning
-    samples, VTube Studio recordings, AstrBot chat history, and the C++ validation
-    project.
-  validation: >-
-    Deployed Motion Lab raw-event database was inspected read-only: 0 rows remain
-    and schema metadata is v2, so the first load of the updated Adapter will run
-    the v3 reset. The local AstrBot Core hook implementation confirms intent-ready
-    dispatch at segment_start and complete segment dispatch at segment_end with
-    the same segment message identity. Review correction records M2 Provider
-    previews as provider candidates with a local index, not as delivered motion
-    updates; the contract states that wire seq/revision/anchor and stream terminal
-    status are not captured. M0/M1 successful independent results now receive a
-    post-binding segment identity snapshot, and Provider result statuses no
-    longer imply delivery. Thirty-four focused tests passed after the
-    correction; Ruff, frontend typecheck, plugin structure check, state YAML
-    parse, and git diff whitespace check passed. A separate existing
-    independent-motion prompt test still fails because it expects a "memory"
-    field that the current prompt builder does not emit; this task did not change
-    prompt construction.
-  limitations: >-
-    Updated plugin source has not been synchronized to Downloads/AstrBot and the
-    plugin has not been restarted. IndexedDB v1 pending events clear when the new
-    renderer opens the upgraded database. Live M0/M1/M2, Provider, TTS, and
-    Live2D behavior remains unverified.
-
-desktop_return_presence_20261019:
-  class: feature
-  risk: high
-  status: reviewed_selectively_synced_pending_paired_load_and_acceptance
-  scope: >-
-    User approved first implementation of return-to-desktop interaction. Electron
-    main owns a timing-only detector using powerMonitor lock/unlock, suspend/resume
-    and idle seconds. Default lock/suspend minimum 60s, idle threshold 300s and 3s
-    confirmation requiring another input; one bump or automatic wake alone fails.
-    Optional presence.v1 no-chat-turn request/result capability connects matching
-    main/preload/renderer and adapter. Source emits one 30s cancellable return fact,
-    with natural summary/duration only, into existing Gate/Policy/Persona/TTS/motion.
-    Busy dialogue drops the opportunity; new dialogue, inactive/unknown state,
-    disconnect/disable withdraw it. Per-client opportunity cooldown defaults 900s.
-    Stable monitor identity retains observed suspend across ordinary reconnect;
-    first receive aligns sequence and never replays a confirmed old return.
-    Feature/config disable and new desktop/client context reset baseline. No new
-    provider, OCR, screenshot, key contents, forced speech or pure-action policy.
-  validation: >-
-    Renderer/WebSDK/Node typechecks and full Electron main/preload/renderer build
-    passed. Changed Python Ruff/compile and plugin structure checks passed (zero
-    errors/warnings). Public detector checks confirmed unlock and idle return,
-    single-bump rejection, timeout and startup/reconnect baseline; follow-up resume
-    boundary preserved resume rather than mislabeling unlock. Actual public wire
-    parser accepts the presence result and rejects chat-turn attribution; invalid
-    state rejected by validator. Eight adapter targets matched HEAD baselines
-    before selective sync and now byte-match source. Review traced native IPC,
-    reconnect baseline, admission, input cancellation and existing Sensor intake.
-    Corrected presence chat-turn rejection diagnostic; actual public parser success
-    and rejection checks plus changed-file Ruff/compile passed on 2026-10-20.
-    No broad/mock integration suite.
-  limitations: >-
-    Default disabled; no saved user settings modified or process restart.
-    User requested scoped commits; bypass whole-directory deployment hook and
-    selectively sync only the eight related adapter files.
-    Must load the newly built Electron main/preload/renderer and matching adapter;
-    existing Core cancellation API must be loaded through full AstrBot restart.
-    Real Windows lock/suspend events, input confirmation and live Policy/TTS/Live2D
-    output require manual acceptance. Idle recovery is not physical presence proof.
-    Do not lock/suspend the user's machine automatically. Unrelated audit document,
-    deployed plugin/state/J-space edits kept; concurrent passive behavior work is
-    already committed separately and is outside this review.
-
-desktop_observation_conversation_priority_20261019:
-  class: feature
-  risk: high
-  status: reviewed_selectively_synced_pending_paired_restart_and_acceptance
-  scope: >-
-    Conversation takes priority over desktop sampling. Add configurable 60-second
-    quiet wait, default on startup/reconnect too. Text preparation, real PTT/VAD
-    speech, queued/active turns and unfinished playback pause screenshot requests.
-    Silent continuous microphone frames do not keep the window busy. Input resets
-    a source cancellation event; playback completion resets the quiet timer and
-    baseline revision without cancelling its own acknowledgement. Check before
-    capture and after capture/comparison; resumed sampling establishes a new frame.
-    Pass optional generic Sensor cancel_event through paired Core. Intake/Inbox
-    drops withdrawn facts; Policy/expression work cancels, action deadlines/signals
-    reach final output events. Preserve unrelated mixed-batch facts and avoid old
-    transient material watermarks settling them. No frontend or quiet-hour change.
-  validation: >-
-    Changed Python Ruff/compilation passed; plugin structure check zero errors or
-    warnings. Public window boundary checks busy/wait rejection, completion revision
-    and input invalidation. Public Sensor/Inbox boundary removes/rejects cancelled
-    desktop facts while retaining unrelated task material. Action/Event boundary
-    carries deadline/cancellation to stopped output. Review fixed PTT preparation
-    cleanup and mixed-batch restore/replacement material handling; two changed
-    modules pass Ruff/compilation. Public Inbox restore and ordinary coalescing
-    boundaries passed. Five related adapter targets
-    matched source HEAD baselines before selective sync and now byte-match source.
-  limitations: >-
-    No process restart; whole-directory commit hook bypassed to preserve work. Full AstrBot restart required for new Sensor
-    argument and paired cancellation handling; plugin hot reload is insufficient.
-    Real async Provider cancellation, VAD/normal dialogue, playback and policy
-    acceptance still require live logs. Already-sent client fragments cannot be
-    recalled; normal input interruption still owns existing playback. No new
-    frontend build required; preserve unrelated deployed and governance edits.
-
-desktop_observation_math_only_20261019:
-  class: refactor
-  risk: medium
-  status: reviewed_selectively_synced_pending_runtime_load
-  scope: >-
-    User requested mathematical-only desktop change detection. Remove visual
-    provider calls, JSON parsing, provider selection and model timeout settings.
-    Estimate area using 144 RGB 12x12 blocks at 192x108; count a block only if
-    mean SSIM is below 0.85 and mean absolute RGB difference is at least 12/255.
-    Existing user area threshold, sampling interval and TTL remain in use.
-    Preserve admission, connection ownership, remaining lifetime and Core policy.
-    No frontend or Core behavior changes; quiet-hours settings belong to user.
-  validation: >-
-    Changed modules passed Ruff and compilation; plugin structure check found
-    zero errors/warnings. Public comparison boundary produced 1.39 percent for
-    a small patch, 68.75 for a large patch, zero for identical data and zero for
-    an unchanged-layout synthetic +32 brightness shift. No model in this path.
-    Four related adapter files matched source HEAD baseline before selective
-    synchronization, and now match working source bytes. Unrelated edits kept.
-    Whole-directory post-commit deployment bypassed to preserve deployed edits.
-  limitations: >-
-    Review found no additional blockers. No process restart or plugin reload. Actual desktop accuracy and
-    active Policy/TTS/Live2D playback not accepted yet. Block-area estimates
-    differ from old pixel-area percentages; calibrate on actual desktop.
-    Videos/scrolling can be genuine changes without requiring proactive speech.
-    Quiet hours previously held all three admitted events; user handles them.
-
-desktop_observation_large_change_repair_20261019:
-  class: bugfix
-  risk: high
-  status: reviewed_built_selectively_synced_pending_paired_reload
-  scope: >-
-    Bound shared screenshot operations rather than raw IPC promises. Timeouts
-    release the slot, pause automatic retries, allow explicit foreground recovery
-    and discard late image results. Native IPC itself is not forcibly cancelled.
-    Add a geometric changed-area filter (15 percent initial configurable gate,
-    24/255 RGB channel delta on 192x108 frames); run image work off the event loop.
-    Only large-area candidates reach the boolean-only vision model. Small
-    notifications/popups and minor avatar motion may be ignored; no pet masking
-    or Windows notification integration. Same-content resize is not a large change.
-    Timestamp capture requests using local monotonic time. Capture/send waits,
-    filtering, model and admission consume one lifetime; only remaining TTL is
-    submitted. Core separately pins Sensor expiry before permission waits.
-  validation: >-
-    Final call-path review found no additional blockers.
-    Renderer/WebSDK/Node typechecks and full Electron production build passed.
-    Changed Python Ruff/compilation passed. Controlled public capture-boundary
-    smoke reproduced hang recovery, paused automatic retries and late-result
-    rejection. Synthetic small/large changed areas were 0.59 and 63.02 percent;
-    the 15 percent gate rejects the small sample. Same visible content at
-    slightly different image sizes measured zero changed area. Actual native
-    Ollama with new large-change guidance returned true in 540ms warm on a
-    synthetic large change. Expired frame and delayed-admission deadline smoke
-    passed. These are boundary checks, not live desktop/Policy/TTS acceptance.
-  limitations: >-
-    Five related adapter files selectively synced after baseline verification;
-    whole-directory post-commit deployment bypassed to preserve unrelated work.
-    No process restart. Keep feature disabled until paired frontend/adapter/Core load. A complete AstrBot restart is
-    required for the private Sensor callback timing change; plugin-only hot
-    reload is insufficient. Real desktop threshold calibration/accuracy pending.
-    Already-admitted facts retain existing Core TTL semantics, not source retraction.
-    Preserve unrelated dirty state and deployed plugin edits.
-
-desktop_change_observation_20261019:
-  class: feature
-  risk: high
-  status: reviewed_built_selectively_synced_pending_paired_reload
-  scope: >-
-    AG99live owns opt-in desktop sampling and Qwen-compatible vision comparison.
-    Reuse Electron capture with shared single-flight IPC and resize to 768px.
-    Dedicated versioned request/result system messages have no chat Turn;
-    negotiate capability only on Electron. Plugin lifecycle owns workers and
-    existing RuntimeObservationSensor registration; submit changed boolean and
-    frame hash with TTL/coalescing. Core queue/gate/Policy/output are unchanged.
-    Configuration changes, disconnect generations and unload cancel workers;
-    stale results do not cross connections. No screenshots persisted or placed
-    into chat history. Default disabled; model selected explicitly.
-  plan: docs/desktop-observation-plan.md
-  validation: >-
-    Renderer typecheck, changed Python Ruff and compilation passed. Plugin
-    structural checker returned zero errors/warnings. Real Ollama advertises
-    vision capability. Actual native Provider compared synthetic visible change
-    and returned true in 362ms warm; direct identical-image model comparison
-    earlier incorrectly returned true after 12233ms. Exact identical inputs now
-    bypass inference. This guards the exact case but does not establish model
-    accuracy on real desktops. Wire acceptance/rejection smoke passed.
-    Capture wire roundtrip, disconnect cancellation and real Core sensor payload
-    validation passed. No changed-frame content or screenshots logged. Review
-    fixed pre-capture session configuration/disable snapshot and discards
-    pending comparisons when client identity changes. Existing public
-    session-disabled capability boundary passed (one case). Full Electron main,
-    preload and renderer production build passed. Eight reviewed adapter files
-    selectively synced with source-HEAD prechecks; no whole-folder overwrite.
-  limitations: >-
-    No process restart or real Electron desktop, MiniMax Policy,
-    microphone, TTS or Live2D acceptance. No automatic desktop-content analysis;
-    Policy receives change facts, not screenshot understanding. Need paired
-    frontend/adapter reload and explicit opt-in/model selection. Preserve all
-    unrelated working-tree changes and deployed plugin edits.
-
-json_record_recovery_and_stream_eof_20261018:
-  class: bugfix
-  risk: high
-  scope: >-
-    Add shared complete-record syntax recovery: strict parse, existing repair
-    library, then one configured local model attempt per Turn. Preserve literal
-    values/order/nesting; reject duplicates, invented content and unterminated
-    strings. Retain schema/protocol validation, cancellation and owning deadlines.
-    Persona consumes repaired complete JSONL records incrementally and dispatches
-    the final no-newline record. Verified normal Provider stop may close existing
-    speech with empty thought and finish, marked stream_recovered_at_eof; no EOF
-    recovery after error, cancellation, length/content filtering or tool calls.
-    Independent motion uses the same recovery API. User-requested duration weights
-    clamp finite numeric values to 1..3; in-range fractional, missing, boolean and
-    nonnumeric values remain invalid. Per user clarification, missing/null motion
-    axes are omitted while other valid axes remain; never replace a null axis
-    with zero or default a missing duration_weight to one. Native Ollama forwards request-local JSON
-    schema/thinking/sampling options. Expected plugin skips are DEBUG; runtime
-    diagnostics explicitly say settling and separate session_id from UMO.
-  configuration: >-
-    Added Chinese-labelled JSON repair provider/timeout settings. Library-only
-    default; local default and Alice profile select ollama/qwen3.5:0.8b with a
-    three-second repair cap additionally bounded by the original owning budget.
-  validation: >-
-    Twelve focused Persona parser/protocol cases passed. Changed-file Ruff,
-    compilation and whitespace checks passed. Source/deployment motion files
-    match. Actual native Ollama Provider recovered a complete record that the
-    library could not preserve, without changing keys/values/nesting. Observed
-    3372ms under a ten-second smoke cap; this is not proof of production latency
-    within the configured three-second request cap. Public clamp/rejection smoke
-    passed for 9 -> 3, '-2' -> 1 and boolean rejection. Public null-axis/clamp
-    boundary passed: null axes omitted, other axes retained, all-null map empty.
-    The focused repaired-stream/EOF boundary passed again after fingerprint
-    hardening, including preservation of empty objects versus empty arrays.
-    Final review: both repaired-stream boundaries and the 1.1-second late-motion
-    boundary passed (3 cases); renderer typecheck passed. Long complete memory
-    JSON keeps its 256K bound; huge integer weights clamp without float overflow.
-  limitations: >-
-    No AstrBot restart or frontend deployment. End-to-end TTS/Live2D
-    acceptance pending. Background memory timeouts are separate: failed durable
-    jobs retain their journal and are recovered on restart; no blind timeout
-    increase or automatic retry added. Timing fields overlap and cannot be summed
-    to establish an unmeasured remainder. Existing unrelated dirty work preserved.
-
-olv_desktop_image_annotation_20261018:
-  class: bugfix
-  risk: medium
-  scope: >-
-    Label the screenshot attachment as the user's current desktop screenshot,
-    without OCR or analysis instructions. Sync only platform_event.py to the
-    AstrBot deployment after confirming the files match. Core separately keeps
-    OLV current-turn images without text-triggered ambient screenshot filtering.
-  validation: >-
-    Source and deployed platform_event.py are byte-identical. Python compile
-    and scoped Ruff checks passed.
-  evidence_gap: >-
-    Requires AstrBot/plugin reload and live image-request acceptance. No restart,
-    frontend rebuild or Provider API invocation. Commit-time whole-directory
-    deployment hook bypassed to preserve unrelated dirty deployed plugin files;
-    the changed source/deployment file is already byte-identical.
-
-motion_deadline_playback_repair_20261018:
-  class: bugfix
-  risk: high
-  scope: >-
-    Preserve incremental motion ordering independently of PCM release. Permit a
-    valid action after its speech completed using the existing motion-only path;
-    exclude that pending action's own timeline from release blockers. Replace a
-    completed audio timeline with an unstarted action by a fresh synthetic-clock
-    timeline. Keep failed audio, interrupted/terminal turns and motion terminal
-    protection. Core separately removes its conflicting one-second drain limit.
-  validation: >-
-    Renderer typecheck passed. Public store/orchestrator/timeline boundary smoke
-    confirmed a late action after completed audio starts once in motion-only
-    mode with a fresh synthetic clock, and interrupted turns reject later input.
-    Whitespace checks passed. This is boundary evidence, not Live2D acceptance.
-  evidence_gap: >-
-    No renderer deployment or live MiniMax/TTS/hardware/Live2D acceptance.
-    Ordinary conversational motion outputs from M3 remain a separate issue.
-
-pcm_chunk_resampling_noise_20261018:
-  class: bugfix
-  risk: medium
-  scope: >-
-    Request 32000 Hz for the speech AudioContext to match PCM source buffers,
-    avoiding independent resampler edges on each short AudioBuffer. Log actual
-    context sample rate. Keep streaming, clock, volume and buffering unchanged.
-  validation: >-
-    User heard no noise in the direct TTS WAV sample. Real Electron offline
-    rendering of that PCM reproduced split-buffer differences at 48000 Hz
-    (1000-sample chunks: error RMS 0.002027, peak 0.245911). At 32000 Hz, split
-    versus whole rendering was identical for 512/1000/2048-sample chunks.
-    Production runtime loaded into hidden Electron yielded a 32000 Hz PCM
-    session and disposed cleanly. Renderer typecheck passed.
-  acceptance: >-
-    User confirmed the audible playback issue is fixed in actual use on
-    2026-10-18 and requested committing this scoped fix.
-  evidence_gap: >-
-    Acceptance covers the reported noise on the user's device; other audio
-    devices and sample rates have not been assessed.
-
-ptt_audio_tail_and_press_ownership_20261018:
-  class: bugfix
-  risk: high
-  scope: >-
-    Preserve PTT capture tails with a bounded ordered PCM flush marker from
-    AudioWorklet or native IPC before closing the input. Flush the native
-    partial PCM16 frame and retain microphone standby. Admit the next press
-    after the capture boundary closes without waiting for the previous image.
-    Use one keyboard source per host and reject unpaired global key events.
-    Pad streaming CTC finalization with one second of synthetic silence at
-    the input sample rate, outside the raw review audio. Make finish idempotent,
-    reject duplicate seals, and retain real PCM when sealed recognition fails.
-    Follow-up review upgrades an in-flight PTT stop when device change or
-    disposal requests hardware release. Keyboard admission follows actual
-    global-hook availability, preserves foreground keys when unavailable,
-    releases a held capture on source change, and ignores stale status reads.
-  validation: >-
-    Python syntax, scoped Ruff, renderer and Electron Node typechecks passed.
-    Full desktop build (main, preload, renderer) and WebSDK typecheck passed.
-    No automated tests requested or run.
-  evidence_gap: >-
-    No real microphone, native IPC, rapid key cycle, screenshot or ASR device
-    acceptance. No process restart. Main, preload and renderer must be rebuilt
-    and loaded together. Existing concurrent motion changes remain separate.
-
-ptt_screenshot_asr_overlap_and_preaction_draft_20261018:
-  class: feature
-  risk: high
-  status: sources_synced_locally_validated_pending_paired_reload_and_live_acceptance
-  scope: >-
-    PTT screenshot capture overlaps one early ASR task after audio_stream_seal;
-    audio_stream_end still atomically commits the same-turn image and transcript.
-    Add audio_input manifest negotiation, strict capture identity, sealed input
-    bounds, timeout and cancellation. Preserve no-screenshot and VAD semantics.
-    Add an ASR-valid-text-owned lightweight preaction request and dedicated
-    frontend admission into existing ModelEngine before Core Turn creation.
-    Request text is capped at 100 Unicode characters; personality is selected
-    from current persona core/expressive sections without relationships/history
-    or current pose. Read already published behavioral/emotion snapshots only.
-    Bound request/production to 800 ms and first JSON / 128 output tokens;
-    support cancellation, expiry and formal-motion ownership transfer, carrying
-    orphan parameters to neutral through the same plan as continuity sources.
-  user_boundary: >-
-    User approved implementation after confirming 100-char input, richer core
-    personality and removal of relationship/history/current-pose context.
-    User requested review and scoped commits. No VAD tuning or process restart.
-    Preserve existing ASR overlap and concurrent NeuroBrain work.
-  validation: >-
-    Four focused public speech ingress checks passed: sealed transcription/image
-    commit and identity rejection, cancelled input rejection, direct PTT and VAD.
-    Changed Python Ruff, renderer/Node type checks and manifest consistency passed.
-    Two input-owned request boundary checks passed using actual Core persona
-    resolver and isolated streaming Provider: early single JSON and cancellation.
-    Actual TS parser/ModelEngine/compiler boundary accepted clock-free preaction,
-    formal takeover, orphan continuity parameters and refused a late reaction.
-    Current persona selection retained all core personality lines in 449 chars
-    and excluded relationship markers; no paid Provider or device run.
-    Review fixed superseded-ASR ownership, async begin/cancel supersession and
-    input-only interrupts publishing terminal events for absent Core turns.
-    Three request/coordinator boundary checks and scoped Ruff passed after fixes.
-    These are isolated boundary checks, not live-chain acceptance evidence.
-    Canonical Live Git object writes were denied by Windows ACL during commit;
-    reviewed source remains uncommitted there. Core companion commit is separate.
-  evidence_gap: >-
-    No real Provider/Electron screenshot/playback acceptance. Measured historical
-    screenshot waits are not a measured speedup. Paired Adapter/frontend loading
-    and reconnect are required because the manifest contract changed.
-    Requires the audio_input and pre_action manifest contracts together. Reused
-    SDK parameter transfer is source-traced, not proof of visual continuity.
-    Eight changed/new Adapter code/schema files copied to the Core deployment
-    and SHA256 matched. Frontend source changed; no packaged desktop build or
-    process reload. Preserve concurrent Core expression/NeuroBrain changes.
-
-neurobrain_persona_result_motion_context_20261013:
-  date: '2026-10-13'
-  class: bugfix
-  risk: high
-  scope: >-
-    Restrict NeuroBrain state enrichment to independent motion generated per
-    Persona speech segment. Pass persona_result_id into the one shared motion
-    context preparation, wait up to one second for that exact update, and omit
-    NeuroBrain state on timeout rather than use a previous cached snapshot.
-    AstrBot remains the only writer, other plugins use its read-only API, and
-    the output.segment.v5 protocol remains unchanged.
-  validation: >-
-    Focused AG99live middleware tests passed (19); focused AstrBot interaction
-    tests passed (52); NeuroBrain WebSocket/API tests passed (11) with uv.
-    AstrBot bridge-hook smoke, plugin structure check, Ruff, Python compilation,
-    scoped diff checks, and a loopback WebSocket authorization/state smoke passed.
-  evidence_gap: >-
-    No live NeuroBrain WebSocket, AstrBot, AG99live, TTS, Electron, and Live2D
-    acceptance. No host restart or commit.
-
-persona_motion_failure_contract_fix_20261013:
-  date: '2026-10-13'
-  class: bugfix
-  risk: medium
-  scope: >-
-    Declare deferred Persona motion expectation before materialization. Return
-    indexed failure metadata even when no motion payload succeeds, and emit
-    failed motion slots while continuing text/audio. Unfinalized work uses an
-    explicit incomplete reason instead of becoming absent. Hidden-markup text
-    overrides are now projected per original Persona segment before Core accepts
-    the final concatenated text.
-  validation: >-
-    One finalizer boundary smoke and two output-envelope checks passed. The
-    parameterized component fixture was corrected to reload message utilities.
-    Scoped Ruff, diff and state YAML checks passed.
-  evidence_gap: >-
-    No live Provider timeout/parser failure or interrupt/reconnect acceptance.
-    Hidden-markup segment projection has no live acceptance. No deployment, host
-    restart. Curve enablement and motion Prompt optimization were
-    reviewed only; no configuration or model input changes.
-
-persona_action_playback_boundary_fix_20261013:
-  date: '2026-10-13'
-  class: bugfix
-  risk: medium
-  scope: >-
-    Electron releases the first locally unsettled segment and waits for all
-    required timeline sinks, including an audio-backed motion tail. Remove the
-    selector that skipped the tail. Generation and delivery remain concurrent.
-  validation: >-
-    Renderer typecheck and Electron Vite build passed. One source-backed
-    segment-selection smoke holds an audio-completed motion tail and releases
-    the next segment after motion completion. Diff and state YAML checks passed.
-  evidence_gap: >-
-    No live audio/Live2D acceptance. Native host playback is not changed by this
-    Electron fix. Installed desktop restart or deployment remains pending.
-
-persona_segment_ready_delivery_20261013:
-  date: '2026-10-13'
-  class: feature
-  risk: high
-  scope: >-
-    Per-segment motion Futures publish individual results before the batch task
-    completes. The motion finalizer opts into segment materialization and waits
-    only for the requested index, retaining work until the last output. OLV
-    accepts incremental Persona parts and flushes ready logical segments without
-    closing their parent or Turn. Existing ID binding and ordered coordinator
-    remain authoritative.
-  verification: >-
-    Public finalizer boundary emits index zero while the full batch is pending,
-    and removes work after index one. Public platform send/flush boundary keeps
-    parent and turn open until completion. Core public delivery smoke also covers
-    early first output, cancellation and a later TTS failure. Real providers,
-    Electron and Live2D playback remain unverified.
-  assumptions: >-
-    Requires the matching AstrBot segment-materialization contribution contract.
-    Current local plugin config changed to parallel=true and max_concurrency=2;
-    installed-source synchronization uses the repository post-commit hook;
-    running host reload remains pending.
-  non_goals: >-
-    No restart. No partial Persona JSON parsing or changes to frontend
-    output.segment wire schema. No effect/tool execution before validation.
-
-motion_text_inputs_prompt_logs_20261013:
-  date: '2026-10-13'
-  class: refactor
-  risk: medium
-  scope: >-
-    Independent motion requests no longer send images. Strip desktop context
-    wrappers from current and historic dialogue. Persona segment hooks pass
-    actions and tendency alongside speech. Reuse allowed memory summary fields
-    from the current canonical pack, capped at six unique 240-character entries.
-    Keep legal axes, levels and resource constraints. Retain at most two relevant
-    examples and three recent executions, projected onto the same output contract.
-    Runtime metadata is removed; incompatible or oversized records are omitted. Detailed wiring is DEBUG;
-    segmented generation summary and final delivery remain INFO.
-  validation: >-
-    One request boundary smoke passed for text history, exposed memory summaries,
-    speech/actions/tendency, omitted image inputs, normalized examples/executions
-    and excluded runtime metadata. It uses a stub provider
-    and normalizer and is not evidence of actual model motion quality.
-    Scoped Ruff, Python syntax, JSON/YAML parsing and diff checks performed.
-  evidence_gap: >-
-    No live provider, TTS, Electron or Live2D acceptance. No measured latency
-    improvement yet. Source changes are not yet reloaded into the running host.
-  non_goals: >-
-    Change main reply image handling, capability resolution, thinking settings,
-    parallel generation or output ordering. No host restart.
-
-persona_motion_plain_echo_failure_20261012:
-  date: '2026-10-12'
-  class: bugfix
-  risk: medium
-  scope: >-
-    Unify missing segment motion and schedule failure reasons in the output
-    coordinator. Unindexed Persona Plain echoes do not require or overwrite
-    motion state; failed motion still accompanies delivered text and audio.
-  non_goals: >-
-    Change output.segment.v5, weaken identity or success/failure conflicts,
-    alter frontend playback, change JSON parsing, or restart the running host.
-  verification: >-
-    Three output coordinator boundary smoke checks passed: ordered successful motion
-    and a failed-motion Record plus Plain echo reaching output.segment with
-    text/audio present; conflicting Persona segment counts remain rejected.
-    No-cache Ruff F checks, in-memory Python syntax compilation, YAML parsing,
-    and git diff checks passed. Installed and source coordinators have matching
-    SHA256 hashes. Initial TEMP and Ruff cache permission errors were resolved
-    using an available temporary directory and no-cache checks.
-  evidence_gap: >-
-    No live Provider, Electron/native playback, audio, or Live2D run has
-    verified the change. The running host has not been restarted or reloaded.
-
-native_runtime_turn_playback_ack:
-  recorded_at: "2026-10-04"
-  reviewed_at: "2026-10-05"
-  class: feature
-  risk: high
-  status: source_complete_pending_live_acceptance
-  scope:
-    - "Translate the Adapter turn protocol into the native runtime: distinguish synth_finished, successful/failed turn_finished, and interrupt."
-    - "Emit at most one turn-level playback_finished only after synthesis closes and every output segment's audio and motion reach terminal state."
-    - "Cancel only the retired turn's queued/current audio and motion; generation-tag acknowledgement work and serialize its final send check against turn retirement."
-    - "Choose failure reasons in segment order with text, audio, then motion priority to match the TypeScript completion coordinator."
-  review_corrections:
-    - "Retain interrupted assembler turns until the Adapter publishes turn_finished, while rejecting further output and synthesis signals."
-    - "Serialize final motion delivery with turn retirement so canceled plans cannot be queued again by a late audio-worker callback."
-    - "Stop only the captured audio serial under the audio-file mutex; publish playback serial, RMS, and start/end timestamps under that same mutex."
-    - "Make missing motion sinks produce a reachable failure terminal instead of leaving the segment unfinished."
-  non_actions:
-    - "Do not change the wire schema or implement a retry policy different from the current TypeScript client's one-shot failure behavior."
-    - "Do not modify concurrent Web snapshot work."
-    - "Do not claim hardware-accurate audio position or live playback acceptance."
-  validation:
-    - "Release ag99-runtime-protocol-smoke build passed; ctest passed (1/1), including synth-finished rejection and interrupt followed by failed turn-finished callback with the backend reason."
-    - "Release ag99-render-host build passed after coordinator, interruption, and audio-serial cancellation corrections."
-    - "Independent read-only review found no remaining deterministic lock-order or acknowledgement-loss issue in the current diff."
-    - "git diff --check passed; only line-ending conversion warnings were emitted."
-  evidence_gap:
-    - "No live Adapter + native host + audio + Live2D run verified multi-segment acknowledgement timing, output-failure cancellation, or interruption during playback."
-    - "A playback_finished send failure is terminal for the local coordinator and is not retried, matching the TypeScript coordinator; recovery relies on connection cleanup/reconnect."
-    - "The replay CLI still dispatches controls independently of RuntimeProtocolSession, so it does not validate the new synthesis/interruption lifecycle."
-
-
-native_runtime_review_followups:
-  recorded_at: "2026-10-04"
-  class: bugfix
-  risk: high
-  status: source_complete_pending_live_acceptance
-  scope:
-    - "Protect WebSocket finalization against close/receive-exit races; disable new callbacks, attempt synchronous receive cancellation, wait at most 1.5 seconds for receive and in-flight callbacks, then detach while shared state retains handles until receive exits; run full close only after receive returns."
-    - "Mark microphone stream end as dropped after queue loss or sender failure; finalize the previous stream before a retry replaces its identity, and account for in-flight and queued bytes lost on send failure."
-    - "Retire output-segment turns on turn_finished/interrupt, reject segments for unstarted or recently retired turns, and bound active turns, pending segments, committed message IDs, and retired turn IDs."
-    - "Validate complete finite PCM RIFF/WAVE chunk structure before playback, require a valid duration and successful PlaySoundW start, and report specific playback failure reasons."
-    - "Keep Cubism asset paths wide through file access and decode SDK/model JSON path strings as UTF-8, including texture paths."
-    - "Serialize microphone Start/Stop transitions across user toggles, reconnect, transport-close cleanup, and runtime shutdown."
-    - "Preserve WinHTTP receive error codes in diagnostics and document callback capture lifetime requirements."
-  non_actions:
-    - "Do not launch the Native Host, connect to Adapter, or claim live microphone/audio/model-path verification."
-    - "Do not modify unrelated frontend/control-panel work already present in the worktree."
-  review: >-
-    Adapter speech ingress rejects a microphone stream marked dropped, so capture
-    queue overflow and failed binary sends now invalidate that stream instead of
-    presenting it as complete. Turn assembly now requires control.turn_started
-    before accepting output, matching the Adapter's outbound ordering and
-    preventing terminal turns from being recreated by late segments. The WAV
-    parser matches the Adapter's finite RIFF PCM cache contract. Cubism's SDK
-    callback accepts std::string paths; the host treats those resource names as
-    UTF-8 and converts to native wide paths before Windows file access. The
-    WebSocket finalization is synchronized with external close, and full close
-    runs only after Receive returns. Close disables new callbacks and waits a
-    bounded time for an in-flight callback; the RuntimeBridge owner separately
-    drains its callbacks, while generic callbacks that capture references must
-    keep those targets alive until in-flight callbacks finish. Receive errors
-    preserve the WinHTTP code.
-    Microphone Start/Stop transitions are serialized across UI and transport
-    lifecycle paths. A pending synchronous Receive is cancelled when possible; after
-    1.5 seconds the worker is detached and its shared state retains the WinHTTP
-    handles until Receive exits. A stalled callback can extend close while it
-    drains, and an uncancellable silent peer can retain connection resources.
-  validation:
-    - "`cmake --build render-core/build --config Release --target ag99-render-host --parallel 4` passed after microphone lifecycle serialization."
-    - "`cmake --build runtime-core/build --config Release --target ag99-runtime-protocol-smoke --parallel 4` passed."
-    - "`ctest --test-dir runtime-core/build -C Release --output-on-failure` passed (1/1)."
-    - "`ctest --test-dir render-core/build/runtime-core -C Release --output-on-failure` passed (1/1); replay sample emitted the expected ready segment."
-    - "`python -m pytest astrbot_plugin_ag99live_adapter/tests/unit/runtime/test_desktop_settings_broker.py -q` passed (1 passed)."
-    - "`npm run typecheck:renderer`, focused `desktopSettingsResponder.test.ts`, and `npm run build:astrbot-page` passed."
-    - "`git diff --check` passed; only existing line-ending conversion warnings were emitted."
-  evidence_gap:
-    - "No live WebSocket shutdown race, microphone toggle/disconnect race, microphone queue overflow/send failure, Adapter audio download/playback, non-ASCII model asset path, or layered-window click-through behavior was exercised."
-
-
-web_control_tray_and_gaze_migration:
-  recorded_at: "2026-10-05"
-  class: feature
-  risk: medium
-  status: source_complete_pending_live_acceptance
-  scope:
-    - "Add a shared Electron tray/pet context menu with the AstrBot Web control panel as the primary configuration entry."
-    - "Persist an HTTP/HTTPS Dashboard base URL in Electron userData, editable offline locally or via the existing desktop settings broker."
-    - "Create legacy utility windows only on demand; retain local connection recovery, history, and real-time action preview until their Web paths are complete."
-    - "Expose cursor-gaze enable, polling interval, dwell delay, and movement threshold in the Web desktop settings list."
-    - "Represent the default microphone with a nonempty protocol option ID and translate it to the existing empty internal device ID at the responder boundary."
-  non_actions:
-    - "Do not modify native runtime or concurrent independent-motion changes."
-    - "Do not add a standalone unauthenticated Web service or store AstrBot login credentials in Electron."
-    - "Do not claim complete history/preview migration or foreground/background FPS configuration."
-    - "Do not commit or deploy this batch without a separate request."
-  validation:
-    - "Electron build passed with renderer, WebSDK, and Node type checks; embedded AstrBot page build passed."
-    - "WebUI URL and cursor-setting success/rejection boundary smoke checks passed."
-    - "Default-microphone protocol payload accepted, empty option ID rejected by the real inbound parser."
-    - "web_control.py syntax compilation and git diff --check passed."
-    - "Independent source review found no deterministic new blocking issue in tray, URL IPC/persistence, lazy windows, or broker/spec alignment."
-  evidence_gap:
-    - "Live Electron tray interaction, browser login/deep-link opening, cold auxiliary-window opening, and saved URL recovery are not yet exercised."
-    - "A reloaded AstrBot plugin plus connected Electron must verify authenticated gaze/default-microphone changes; no native acceptance is implied."
-
-
-native_runtime_migration_review_2026_10_05:
-  recorded_at: "2026-10-05"
-  clarified_at: "2026-10-06"
-  class: review
-  risk: high
-  status: superseded_by_native_desktop_settings_physics_2026_10_06
-  findings:
-    - "The latest native turn coordinator commit is source-reviewed and its Release build/runtime smoke checks remain green; no new blocking regression was found in the reviewed completion/cancellation path."
-    - "The existing Web input path is already stable: PetOverlayView send_text -> DesktopRuntimeCommand -> usePetDesktopRuntime -> adapter.sendText -> input.text. It must be reused rather than duplicated in the AstrBot server-side control page."
-    - "The AstrBot Web control page currently owns configuration and desktop-settings broker traffic; it has no direct chat-input transport to the desktop. The broker is request/response for settings and cannot replace the single Adapter WebSocket session."
-    - "The native host currently has a Win32 demo input window and a direct Adapter WebSocket. The user clarified that TS stays as the reference desktop and C++ is an independent high-performance implementation; the user manually chooses which one to run against the single-client Adapter. A sole-Native-client/TS-to-Native IPC architecture is not required."
-  migration_estimate:
-    native_minimal_runtime_demo: "65-75%"
-    native_full_replacement_of_ts_desktop_runtime: "40-55%"
-  next_slice:
-    - "Keep existing Web configuration as the source of truth."
-    - "Keep PetOverlayView input semantics and protocol envelope behavior."
-    - "Translate native input and runtime behavior from TS while retaining the independent TS desktop; do not remove its playback/render owner or add launch interlocks."
-    - "Add native handling for system.desktop_settings_query so the existing Web settings broker can drive the Native-owned renderer settings."
-  validation:
-    - "Source call-chain review completed for Web input, Web control, Adapter broker, Electron bridge, and native host."
-    - "git diff --check passed."
-    - "No live Web input -> Native render acceptance performed in this review."
-  non_actions:
-    - "No Web control page duplicate chat transport was added."
-    - "No unrelated Adapter interaction-motion worktree changes were committed."
-
-
-web_control_full_configuration_audit:
-  recorded_at: "2026-10-04"
-  class: review
-  risk: medium
-  status: source_reviewed_pending_live_acceptance
-  scope:
-    - "Audit the remaining desktop settings against the AstrBot Web control page."
-    - "Expose the existing action-parameter exclusion keywords in the Web Action Lab as a local page preference."
-  non_actions:
-    - "Do not invent a control/action-preview API that is not implemented by the backend."
-    - "Do not migrate runtime snapshots, history queues, or status/tool shortcuts as user settings."
-    - "Do not commit without a separate explicit request."
-  findings:
-    - "Plugin config schema and desktop broker settings cover all existing functional settings discovered in the desktop settings window."
-    - "The only remaining user preference is parameterExcludeKeywords, shared through localStorage by BaseActionPreviewPanel and SemanticAxisProfileEditor; the Web Action Lab now exposes the same preference without widening the desktop protocol."
-  validation:
-    - "`npm run typecheck:renderer` passed from `frontend`."
-    - "`npm run build:astrbot-page` passed and regenerated the embedded control page bundle."
-    - "`python -m py_compile astrbot_plugin_ag99live_adapter/web_control.py astrbot_plugin_ag99live_adapter/runtime/desktop_settings_broker.py` passed."
-    - "`git diff --check` passed."
-  evidence_gap:
-    - "Live authenticated AstrBot page behavior and connected desktop synchronization still need user acceptance testing."
-
-web_control_migration_followup_2026_10_05:
-  recorded_at: "2026-10-05"
-  class: review
-  risk: medium
-  status: source_reviewed_next_slice_pending_bridge_design
-  findings:
-    - "The first three previously identified desktop configuration groups are already migrated: microphone/screenshot/audio controls, Bilibili settings, and Spout/ESP32 settings are declared in DESKTOP_SETTINGS_SPEC and handled by the Electron desktop broker path."
-    - "The Web control page already polls desktop settings while its settings section is visible, so it can recover current values after desktop reconnects without adding another protocol."
-    - "At this review, history and real-time preview were still desktop-only. The 2026-10-06 implementation reuses the existing server-side ConversationHistoryBridge for history; only real-time preview still needs a desktop runtime command path."
-  non_actions:
-    - "Do not duplicate the existing microphone, Bilibili, Spout, or ESP32 configuration fields."
-    - "Do not add runtime-status fields to the settings protocol before a bridge contract exists."
-    - "Do not modify native/runtime or concurrent Adapter changes."
-  next_slice:
-    - "Reuse the authenticated AstrBot conversation service for history; design a desktop runtime command path only for action preview."
-    - "Keep the current settings broker request/response contract unchanged."
-
-
-native_desktop_settings_physics_2026_10_06:
-  recorded_at: "2026-10-06"
-  class: feature
-  risk: medium
-  status: source_complete_native_launched_pending_authenticated_web_acceptance
-  scope:
-    - "Translate the existing system.desktop_settings_query parser and system.desktop_settings_result builder into runtime-core without changing the wire contract."
-    - "Connect the Native host to the existing Web settings broker for live2d_physics_response_scale list/set only; use the TS range [0.5,2], two-decimal normalization, step metadata 0.05, and error codes."
-    - "Queue accepted settings under the model mutex and apply the Cubism setter on the render thread before Physics updates."
-    - "Preserve TS as a standalone reference desktop and C++ as its independent high-performance implementation, selected manually by the user."
-  non_actions:
-    - "Do not implement unsupported setting keys, settings persistence, a new Web service, a TS-to-Native bridge, launch mutual exclusion, or concurrent-desktop coordination."
-    - "Unsupported keys return desktop_setting_unsupported; accepted Physics settings survive reconnects but not Native host restarts."
-    - "Do not alter or commit concurrent Adapter/Web worktree changes; this slice is not committed."
-    - "Do not bypass Dashboard authentication or treat broker cache/bulk-list responses as live Native acceptance."
-  review_corrections:
-    - "Follow the real TS parser rather than the earlier strict-key assumption: allow extra fields and omitted set value, retain an empty string, reject null value, and trim request/key identifiers."
-    - "Enable smoke assertions in Release after including library headers, preserving the libraries' Release macro definitions."
-    - "Format numeric settings using to_chars so integral values match TS String(number) rather than JSON's trailing .0."
-  validation:
-    - "Release ag99-render-host build passed. An attempted combined build could not locate the excluded smoke project at the render build root; the standalone runtime build was used successfully."
-    - "Release ag99-runtime-protocol-smoke build and ctest in runtime-core/build passed (1/1), with assertions active."
-    - "Independent source review traced query/result contract, numeric parsing/normalization, callback generation/lifetime/lock ordering, and render-thread-only application without a blocking finding."
-    - "At the user's request, launched the rebuilt Native host with the Mk6 model; process 38112 was responsive, the transparent 640x820 window showed a fully framed model, and the actual Adapter on port 12396 accepted its connection."
-    - "Confirmed the real authenticated Web business API uses /api/plug/astrbot_plugin_ag99live_adapter/control/desktop/settings on Dashboard port 6185; an unauthenticated request returned 401."
-  evidence_gap:
-    - "An authenticated single-key Web list/set/rejection roundtrip and visible Physics response changes still require acceptance using the user's logged-in Dashboard session; Native is left running for this check."
-    - "Startup/render/connection evidence does not verify audio playback, input messaging, compiler parity, or a performance improvement."
-
-web_control_history_migration_2026_10_06:
-  recorded_at: "2026-10-06"
-  class: feature
-  risk: high
-  status: source_complete_pending_authenticated_history_acceptance
-  scope:
-    - "Add authenticated history read/create/load/delete API routes backed by the existing AstrBot conversation service, without a second WebSocket or changes to Native."
-    - "Make viewing read-only, validate conversation UMO and platform ownership before load/delete, retain empty conversations, and serialize Web/legacy-WS history operations on the same bridge lock."
-    - "Add a Web history column with separate view/load commands, delete confirmation, single-flight requests, platform revision guards, shallow immutable state and at most 100 rendered histories/messages per page."
-  non_actions:
-    - "Do not commit, deploy, restart AstrBot, or modify concurrent Adapter/native work."
-    - "Retain the legacy local history entry pending live Web acceptance; do not push uncorrelated Web history messages into its WebSocket response stream."
-    - "Do not claim that the history lock serializes AstrBot in-flight main replies or external database writes."
-  validation:
-    - "Renderer typecheck and embedded AstrBot page build passed."
-    - "A frontend response boundary smoke accepted the matching platform/viewed/current history shape and rejected a different platform."
-    - "Python syntax compilation and scoped diff checks passed; independent source review found no blocking auth, ownership, read-side-effect, lock-reentry or UI contract issues."
-    - "Playwright rendered the production page with a visual-only bridge fixture at 1440 and 320 pixels; the 320-pixel document had no horizontal overflow and only 100 message nodes for 104 messages. The older page rendered the remaining four messages; refresh preserved the viewed non-current history. Viewing, explicit load confirmation, and cancelable delete confirmation were exercised in the fixture."
-  evidence_gap:
-    - "An attempted isolated real AstrBot ConversationManager/SQLite/Quart boundary smoke was blocked before API execution by Python WinError 5 when creating its temporary data directory; no live manager result is claimed."
-    - "Actual Dashboard login, Web history actions, chat-buffer changes and concurrent reply behavior still require live acceptance."
-    - "Pagination currently bounds DOM only; HTTP responses and normalization still include all summaries and the viewed conversation messages."
-
-motion_playback_logging_and_start_boundary_2026_10_06:
-  recorded_at: "2026-10-06"
-  class: bugfix
-  risk: medium
-  status: source_complete_pending_live_acceptance
-  scope:
-    - "Fix the motion sink start boundary so an allowed void callback result is normalized to accepted instead of being rejected by strict true checks."
-    - "Add correlated frontend logs from output.segment ingress through Timeline release, motion scheduling, model compilation, Direct Parameter activation, and the first Live2D parameter frame."
-    - "Keep the existing original and independent motion generation routes switchable; do not change AstrBot image-history behavior."
-  findings:
-    - "The motion-only and audio-backed paths both reach the shared Timeline and scheduler; the previous executor could misclassify a legal void motion start callback as motion_sink_start_rejected."
-    - "The new logs record turnId, messageId, timelineId, payload kind, clock source/phase, runId, plan summary, runtime rejection reason, and first-frame contribution/readback diagnostics without logging the full parameter plan."
-    - "A model that is not in CompleteSetup while a direct plan is active now emits a one-shot render-blocked diagnostic."
-  validation:
-    - "npm run typecheck:renderer passed."
-    - "npm run typecheck:websdk passed."
-    - "npm run typecheck:node passed."
-    - "AstrBot plugin structural check reported 0 errors and 0 warnings."
-    - "python -m compileall -q astrbot_plugin_ag99live_adapter passed."
-    - "git diff --check passed; only existing line-ending conversion warnings were emitted."
-  evidence_gap:
-    - "No live AstrBot + Electron + browser audio + Live2D run has yet confirmed visible action movement or exercised every new log branch."
-    - "The existing playback-timeline and model-engine smoke scripts remain blocked by pre-existing Cubism Framework strict-type errors in the repository test compilation path."
-
-persona_segment_independent_motion_2026_10_10:
-  recorded_at: "2026-10-10"
-  class: feature
-  risk: high
-  status: source_complete_pending_live_acceptance
-  scope:
-    - "Consume AstrBot Persona segments[].speech as the authoritative visible and TTS segment boundary."
-    - "Add an independent Live2D Provider path that generates one motion result per non-empty speech segment, with optional serial or parallel execution."
-    - "Bind generated motion payloads to the matching Persona segment index through the output contributor, TTS tracking, and RuntimeState turn batches."
-    - "Keep the existing whole-reply independent Provider path and Persona effect path available through configuration."
-    - "Expose independent_motion.per_speech_segment in the plugin schema and Web control configuration."
-  review_corrections:
-    - "Preserve segment indexes and whitespace-sensitive speech text instead of flattening Persona output before matching."
-    - "Treat empty speech segments as text-only output with motion absent, including TTS motion-only gap resend paths."
-    - "Require exact speech-segment tuple matching before consuming a stored motion batch; do not let mismatched concurrent candidates clear valid batches."
-    - "Cancel per-turn Persona Provider generation tasks and clear both whole-turn results and segment batches when a turn terminates."
-    - "Use AstrBot delivery metadata to distinguish indexed Record segments from the merged dual-output Plain echo, and keep legacy speech cues off Persona subsegments."
-  non_actions:
-    - "Do not modify the local AstrBot checkout; it is used only as the implementation contract and source reference."
-    - "Do not add a plugin-level timeout beyond the Provider's existing behavior in this slice."
-    - "Do not claim live Electron, TTS, audio, or Live2D acceptance from source tests."
-  validation:
-    - "python -m pytest astrbot_plugin_ag99live_adapter/tests/unit -q passed: 97 passed, 15 warnings."
-    - "python -m compileall -q astrbot_plugin_ag99live_adapter passed."
-    - "_conf_schema.json parsed successfully."
-    - "git diff --check passed; only Windows LF/CRLF conversion warnings were emitted."
-    - "Independent source review found no deterministic blocking issue in segment matching, empty-segment handling, missing-segment resend, or turn cancellation."
-    - "Scoped source review covered AstrBot Record delivery metadata, dual-output Plain echo handling, sparse segment indexes, and Persona speech-cue isolation."
-  evidence_gap:
-    - "No live AstrBot + Electron + TTS + browser audio + Live2D run has yet verified multi-segment Provider timing, visible motion, or interruption during segment generation."
-    - "Persona segment hooks await the selected Provider calls; a slow Provider can delay Persona output until its own timeout or completion."
-
-persona_segment_independent_motion_acceleration_2026_10_11:
-  recorded_at: "2026-10-11"
-  class: feature
-  risk: medium
-  status: source_complete_pending_live_acceptance
-  scope:
-    - "Add configurable bounded concurrency and per-segment timeout for independent Persona speech-segment motion requests."
-    - "Build one turn-scoped motion context snapshot so history, images, capability, runtime references, and diagnostics are not recomputed for every segment."
-    - "Remove the redundant nested task layer while preserving segment-index mapping, task cancellation tracking, and existing serial mode behavior."
-    - "Expose max_concurrency and segment_timeout_seconds in the plugin schema and Web control configuration."
-  non_actions:
-    - "Do not change output.segment wire schema or current logical-segment playback order."
-    - "Do not add AstrBot deferred output or concurrent TTS delivery in this slice."
-    - "Do not change the once-per-materialization TTS probability gate."
-  validation:
-    - "The full Adapter unit suite passed: 99 passed, 15 warnings."
-    - "Focused middleware, platform prompt, and turn-interrupt tests passed: 27 passed."
-    - "python -m compileall -q astrbot_plugin_ag99live_adapter passed."
-    - "scripts/check_protocol_schema_manifest.py passed."
-    - "git diff --check passed; only Windows line-ending conversion warnings were emitted."
-  evidence_gap:
-    - "No live Provider, AstrBot TTS, Electron, audio, or Live2D run has measured the latency improvement or verified provider-specific concurrency limits."
-    - "AstrBot still awaits the complete Persona hook and synthesizes TTS segments serially; deferred per-segment motion/TTS overlap remains a separate core change."
-
-persona_segment_motion_pre_tts_correlation_20261012:
-  recorded_at: "2026-10-12"
-  class: feature
-  risk: high
-  status: validated_pending_live_acceptance
-  scope:
-    - "Start independent motion generation from the Persona result hook before outbound TTS materialization."
-    - "Bind each action to the matching TTS segment by backend turn ID, Persona result ID, segment index, parent message ID, TTS message ID, and TTS request ID."
-    - "Join completed motion work after per-segment TTS materialization and before platform delivery."
-    - "Cancel and clear turn-owned motion work on termination and disconnect, resolving the runtime turn ID from the AstrBot event."
-  non_actions:
-    - "Do not parallelize TTS or change the output.segment wire schema."
-    - "Do not claim live Provider, AstrBot, Electron, audio, or Live2D acceptance."
-  validation:
-    - "Focused AG99 runtime and middleware tests passed: 21 passed."
-    - "AstrBot interaction output and voice boundary tests passed: 58 passed."
-    - "Python compilation passed in both repositories; git diff --check passed."
-    - "Independent review found and verified the frontend/backend turn-ID cleanup mismatch; regression coverage now uses distinct IDs and covers disconnect reset."
-    - "Review fixes align Persona TTS segment identity fields across binders and consumers; six focused TTS, concurrency, timeout, interrupt, and disconnect tests passed."
-    - "Shared context preparation is bounded by the per-segment timeout; finalizer wait accounts for that stage and uses the Core 30-second cap when the per-segment timeout is disabled."
-  architecture:
-    - "Motion work is registered by event._turn_id plus persona_result_id; TTS bindings are indexed by persona_segment_index and validated against parent/message/request IDs."
-    - "Core allocates parent output message IDs before collecting contributors, then invokes post-materialization finalizers after TTS segments are materialized and before delivery."
-  evidence_gap:
-    - "A live multi-segment Provider, TTS, Electron, audio, and Live2D run is still required to verify end-to-end timing and visible motion."
-
-neurobrain_passive_behavior_stream_20261014:
-  recorded_at: "2026-10-14"
-  class: feature
-  risk: high
-  status: implemented_pending_live_acceptance
-  scope:
-    - "Add an OLV-only passive NeuroBrain action runtime owned by the AG99live Adapter platform lifecycle."
-    - "Use AstrBot Provider text_chat_stream() and emit each complete NDJSON action as an ordered motion-only output.segment.v5 segment."
-    - "Gate requests on configuration, desktop connection, idle Turn, minimum request interval, cooldown, result TTL, and timeout."
-    - "Validate streamed semantic-axis actions against the active Semantic Axis Profile and read only the NeuroBrain read-only API."
-  architecture:
-    - "Passive playback uses its own passive: Turn identity and existing output.segment.v5 motion slot; no wire schema change."
-    - "Passive motions do not enter chat history, ordinary motion prompt history, Motion Lab conversation samples, or performance-curve state."
-    - "Only actual streamed text chunks are accepted; providers that return a final-only response are skipped without a non-streaming fallback."
-  non_actions:
-    - "Do not change AstrBot core or normal chat, Persona, or TTS generation paths."
-    - "Do not change NeuroBrain state writes or the AG99live WebSocket protocol."
-    - "Do not start or restart AstrBot, Electron, Native Host, or Live2D for this source-level implementation."
-  validation:
-    - "Focused output segment and RuntimeState semantic-profile tests passed: 9 passed."
-    - "Python compileall, Ruff on changed Python files, schema JSON parsing, and git diff --check passed."
-    - "AstrBot plugin structure check completed with 0 errors and 0 warnings."
-  evidence_gap:
-    - "No live AstrBot streaming Provider, NeuroBrain instance, OLV desktop, Electron, or Live2D run has verified incremental timing or visible queued motion."
-
-olv_stream_review_fixes_20261015:
-  class: bugfix
-  risk: high
-  status: source_validated_pending_live_acceptance
-  scope:
-    - "Fix Adapter Hook admission, lifecycle-isolated motion work, active flag scope, and desktop stream failure termination in separate commits."
-  validation:
-    - "Prior review reproduced unsafe Adapter Hook admission and sibling-task invisibility of lifecycle-local extras using actual AstrBot APIs."
-    - "Step 1: actual AstrBot registration confirms all four Adapter legacy Hooks declare stream safety; Ruff and diff checks passed."
-    - "Step 2: real AstrBot lifecycle and OLV send boundary confirms runtime-owned work survives request scope and attaches the matching motion; cleanup removes the registry entry."
-    - "Step 3: Core 75012004d clears stream activity in finally; AST, Ruff and diff checks passed while preserving unrelated Core edits."
-    - "Step 4: actual segment/Turn protocol boundaries preserve an accepted prefix, publish failed synthesis and prevent a successful playback acknowledgement from overriding generation failure."
-    - "Frontend protocol/Session/completion boundary preserves the prefix until settlement, then emits a failed acknowledgement; missing failure reason is rejected. Renderer typecheck passed."
-    - "Electron production build, changed-file Ruff/AST checks, protocol manifest validation, plugin structure check (0 errors, 0 warnings), state YAML and diff checks passed."
-  evidence_gap:
-    - "Other installed plugin Hooks still require independent compatibility review; no live stream acceptance or application restart is authorized."
-    - "2026-10-16 user steering: do not require NeuroBrain integration work to continue the plan; retain existing Core admission checks and document that an admitted unsafe Hook can still block streaming."
-  followup_review:
-    - "Core physical delivery fixes preserve state-only indices, use per-part output identity, and avoid orphan TTS metadata in no-TTS output. Actual parser/Core/OLV/Adapter boundary smoke passed without a real Provider, motion generation, audio device or model."
-    - "Plan now lists concrete manual phase-1 connection, early playback, interruption/reconnect, failure and gate-off acceptance checks."
-    - "Core 673175355 commits only the physical-delivery hunks; the user's contributor-compatibility change remains uncommitted. Ruff, AST, YAML and diff checks passed."
-    - "Live 00:59/01:00 logs identify disabled AngelHeart output-Hook false rejection and missing coordinated pre-publication failure closure. Core 38404d16f selects only admitted Hooks and aborts an unrouted failed stream explicitly; real admission/abort boundaries passed. NeuroBrain is not modified."
-
-olv_stream_setting_desktop_ownership_20261015:
-  recorded_at: "2026-10-15"
-  class: feature
-  risk: high
-  status: implemented_pending_live_acceptance
-  scope:
-    - "Move the Adapter OLV Persona segment-stream gate from plugin configuration to the frontend-owned Desktop Settings panel."
-    - "Persist the desktop-local value and push system.desktop_runtime_settings on every connection and setting change; use the current connection's value for each OLV event."
-    - "Log the effective desktop setting on each independent-motion route and update the OLV streaming plan with the 2026-10-15 21:48 log review."
-  architecture:
-    - "The desktop app owns the Adapter-side stream opt-in and persists it in localStorage; Broker queries serve the settings UI only. The Adapter resets the runtime opt-in on disconnect and receives a fresh snapshot on reconnect."
-    - "AstrBot Core's persona_segment_stream_enabled remains an independent global gate."
-  non_actions:
-    - "Do not change the Core global stream setting, independent-motion enablement, or per_speech_segment plugin settings."
-    - "User requested review and commit; retain the existing post-commit Adapter file deployment hook. Do not restart or reload AstrBot, Electron, or the Adapter."
-  validation:
-    - "Focused Adapter platform-event gate test passed: 1 passed."
-    - "Source-backed handle_msg boundary smoke accepts boolean runtime sync, changes the next OLV event's gate without a Broker, and rejects string values without changing the gate."
-    - "Frontend desktop settings responder test passed; renderer typecheck, Electron production build, and isolated Web control panel production build passed."
-    - "Ruff on changed Adapter Python files, Adapter JSON schema parsing, state YAML parsing, plugin structure check (0 errors and 0 warnings), and git diff --check passed."
-  evidence_gap:
-    - "A test-project TypeScript compile is blocked by existing Live2D SDK type errors; the targeted desktop-settings test compiled and passed independently."
-    - "The updated desktop frontend and Adapter have not been loaded by the running applications; post-commit file deployment alone does not establish runtime activation or live OLV stream acceptance."
-
-persona_optional_motion_chat_stream_only_20261016:
-  recorded_at: "2026-10-16"
-  class: bugfix
-  risk: medium
-  status: source_validated_pending_live_acceptance
-  scope:
-    - "Use one shared chat-stream collector for independent motion and performance-curve Providers."
-    - "Remove text_chat fallback paths; unsupported, final-only, failed, or timed-out optional requests produce a local failure and allow Persona text/TTS delivery to continue."
-    - "Keep the per-segment hard budget and first-chunk diagnostics while preserving indexed motion delivery."
-  non_actions:
-    - "Do not change output.segment.v5 or the desktop playback protocol."
-    - "Do not claim token-level audio streaming or preview/final motion fusion."
-    - "Do not restart AstrBot or modify unrelated Core worktree changes."
-  validation:
-    - "Focused Adapter runtime suite passed: 120 tests."
-    - "Python compileall, changed-file diff checks, YAML parsing and plugin structure checks passed; runtime tests use test doubles and do not establish live acceptance."
-    - "Review located Ruff in the AstrBot venv; changed runtime Python files and the stream collector smoke test passed Ruff."
-    - "Review corrected repeated-delta loss and the segment-ready path's restarted Provider budget. Two collector boundary cases and the segment-ready Hook smoke passed."
-  evidence_gap:
-    - "A restarted AstrBot with DeepSeek/MiniMax action and curve Providers still needs live OLV verification of first-chunk timing, optional failure isolation, TTS delivery, and visible Live2D playback."
-
-olv_core_text_preparation_progress_20261017:
-  date: '2026-10-17'
-  class: feature
-  risk: high
-  status: core_boundary_committed_production_wiring_pending
-  core_commit: 3d0463dec
-  scope: "Core now prepares decoded deltas with cross-delta private-tag filtering and full-prefix response safety, without repeating complete-message decorators."
-  validation: "Actual Core event and keyword strategy passed. Prepared deltas fed actual MiniMax PCM before second input; 234802 samples drained, first frame 1797 ms after service start including connection/task setup. Ruff, diff and YAML checks passed."
-  constraints: "Private markup must close within its Persona segment; input 1 MiB UTF-8 and visible text 65536 UTF-16 units. finish returns validation text, not a replay delta."
-  evidence_gap: "Not called by OLV producer/Adapter sending yet. No default activation, restart, whole-dialogue latency comparison or real Live2D acceptance. Preserve original Core dirty files."
-
-olv_incremental_audio_order_review_20261017:
-  date: '2026-10-17'
-  class: bugfix
-  risk: medium
-  status: store_boundary_validated
-  scope: "Reject a later segment's PCM until every earlier segment has an explicit audio production end, without advancing its samples or sequence. Playback drain remains the timeline consumer's responsibility."
-  validation: "Actual public SessionStore rejected segment 1 before segment 0 EOF with zero samples retained, then accepted the same first packet after explicit empty segment 0 EOF. Renderer typecheck passed."
-  evidence_gap: "Store boundary only; no repeat of the unchanged Electron suite or new live Provider/Live2D run."
-
-olv_incremental_desktop_dispatch_20261016:
-  date: '2026-10-16'
-  class: feature
-  risk: high
-  status: real_desktop_dispatch_boundary_validated_not_enabled
-  scope:
-    - "Wire formal inbound JSON text/audio/motion start/end, text deltas and type-2 PCM through current-Turn admission into the existing SessionStore and PCM timeline."
-    - "Keep per-resource production state, sequence and accepted samples in Store; distinguish producer EOF from playback drain and exclude incremental segments from the atomic executor."
-    - "Bound each Turn to 256 segments / 262144 UTF-16 text units, each segment to 65536 units; wire text_length remains Unicode codepoints. Match Python identity length using codepoints."
-    - "Reject mixed atomic/incremental delivery, repeated/reordered streams and discontinuous PCM. Cancel open production on Turn failure/interruption while keeping accepted prefix."
-  validation:
-    - "Renderer typecheck passed. Actual Python binary encoder and loopback WebSocket -> formal inbound -> real Store -> PCM timeline -> completion coordinator passed first-sample-before-EOF, synth-before-drain, one post-drain acknowledgement and optional-motion failure isolation."
-    - "The same public boundary rejected duplicate PCM without advancing its 12800 accepted samples. A targeted actual priority-interrupt run cancelled open streams and ignored stale PCM."
-    - "Unicode text '好的🙂' retained three codepoints and exactly one complete-segment history entry. No broad suites."
-    - "Initial isolated fixture omitted activeWsAddress and failed URL rewriting before handshake; supplying the real loopback address corrected the fixture. No production change was made for that fixture error."
-  evidence_gap:
-    - "Synthetic sine PCM, muted Electron, no real Provider or Live2D model. Completion observed at its existing acknowledgement port, not at a running AstrBot TurnCoordinator."
-    - "Core incremental preparation/production, Adapter production, motion update/fusion and server flow control remain pending. Motion only admits start/end in this batch."
-    - "Cold output primer still begins at first PCM packet. No new capability advertised, active default switched or application restarted; original AstrBot dirty files preserved."
-
-olv_ordered_inbound_transport_20261016:
-  date: '2026-10-16'
-  class: feature
-  risk: high
-  status: real_transport_boundary_validated_pcm_route_pending
-  scope:
-    - "Await inbound handlers in wire order with a 128-message/16-MiB bound including in-flight data; reject oversized frames and set binaryType=arraybuffer."
-    - "Prioritize only validated, handshaken interrupts for the current Turn, settling its timeline and aborting the in-flight handler signal. Other Turn interrupts retain wire order."
-    - "Unify handler/queue failures with existing connection audio/session cleanup. Close aborts and discards queued work; async consumers must cooperate with cancellation."
-  validation:
-    - "Reviewed be66ffd PCM timeline start, failed-prefix drain and interruption paths; no new blocking finding."
-    - "Renderer typecheck passed. Real Python WebSocket server plus Electron transport preserved awaited order, aborted a priority-interrupted wait and explicitly rejected queue overflow while executing only the first handler."
-    - "Scoped diff and state YAML checks passed; no broad suites."
-  evidence_gap:
-    - "Transport callback evidence only; no actual application session admission, Provider, PCM downlink playback or Live2D acceptance."
-    - "Browser WebSocket has no receive backpressure. This bounds local intake and fails overflow; server credit/flow control and formal stream dispatch are pending."
-    - "No application restart or incremental capability activation. Preserve original AstrBot dirty files."
-
-olv_pcm_timeline_binding_20261016:
-  date: '2026-10-16'
-  class: feature
-  risk: high
-  status: electron_timeline_boundary_validated_not_enabled
-  scope:
-    - "Wire PCM through ConversationPlaybackAudioRuntime into existing audio/lip-sync timeline sinks and interrupt ownership."
-    - "Report start after AudioContext consumes first samples; share analyser attachment without fabricating an HTMLAudioElement."
-    - "Preserve failed production status after accepted audio drains and reject simultaneous URL/PCM output."
-  validation:
-    - "Renderer typecheck and scoped diff checks passed."
-    - "Actual Electron/WebAudio plus PlaybackTimeline and real lip-sync sink passed preparation-not-started, consumed-sample start, shared clock/identity, unknown duration, drain completion, timeline interruption and stale append rejection."
-    - "Initial boundary run found the required audio sink start callback missing; preparation now starts through that callback and the corrected run passed."
-    - "Review retained known final duration when EOF precedes first consumed samples, and releases the previous PCM owner before terminal projection can synchronously release the next segment. The Electron boundary passed with EOF before start."
-  evidence_gap:
-    - "No Live2D model loaded; real lip-sync sink reported unavailable while audio completed. Muted output is not audible-device acceptance."
-    - "Formal socket dispatch, incremental playback segment storage, Core text preparation and Adapter production remain pending. No default capability or application restart."
-    - "The existing audio start deadline and device primer remain; started timestamp estimates AudioContext consumption, not hardware output latency."
-
-olv_pcm_desktop_session_20261016:
-  date: '2026-10-16'
-  class: feature
-  risk: high
-  status: electron_webaudio_boundary_validated_not_enabled
-  scope:
-    - "Add attachPcm to the existing speech output runtime, sharing its AudioContext, analyser, fade and single-active-session ownership."
-    - "Schedule ordered PCM directly with a four-second/128-node bound, sample-consumption clock, volume sync, drain completion and interruptible writer backpressure."
-    - "Core review commit 67abf4b7a rejects truncated Provider completion and unsolicited flush acknowledgements."
-  validation:
-    - "Renderer typecheck passed. A real Electron/WebAudio muted boundary run passed unknown-duration playback, underrun clock freeze, duplicate offset rejection, EOF drain, buffer bound and cancellation wake."
-    - "Real MiniMax Core service returned 62416 samples after completion validation changes; a premature Provider EOF was rejected."
-    - "Source review and diff checks passed; no broad or repeated suites."
-  evidence_gap:
-    - "Production OLV delta preparation, socket dispatch, timeline/Turn binding and motion fusion remain pending; no capability advertised or application restarted."
-    - "Muted boundary scheduling is not audible-output, lip-sync or Live2D acceptance. The existing 350 ms cold device primer remains and should overlap stream preparation."
-
-olv_pcm_downlink_boundary_20261016:
-  date: '2026-10-16'
-  class: feature
-  risk: high
-  status: protocol_and_transport_boundaries_validated_not_enabled
-  scope:
-    - "Encode type-2 PCM downlink frames with complete identities, safe sample ranges and bounded frame size."
-    - "Send binary and JSON on the same connection with backpressure; deferred replies remain bound to their originating client."
-    - "Add a strict matching TypeScript decoder; do not advertise stream capability before the producer and playback sink exist."
-  core_commits:
-    - "2fa0550ee: close text input when interrupted during flush acknowledgement."
-    - "c50eb6de3: expose the prepared-text-to-tagged-PCM voice service."
-  validation:
-    - "Actual Python encoder output decoded in TypeScript; an uplink frame was rejected. Targeted TypeScript compilation passed."
-    - "Current Core with an isolated root passed real loopback JSON/binary WebSocket delivery and rejection of a stale connection-bound sender."
-    - "Real Core PCM service passed two-segment identity, sample continuity and first-audio-before-second-input checks."
-  validation_environment:
-    - "An initial AG99-cwd probe imported the system AstrBot 4.14.6 package and auto-normalized AG99live/data/cmd_config.json, an ignored test config with zero Providers. Its exact pre-probe contents were not captured; no reconstruction from a different config was attempted."
-    - "Repeated transport validation pinned the current Core source and an isolated ASTRBOT_ROOT. The actual Downloads/AstrBot config still contains its 32 Providers, interaction middleware and memory; the preserved Downloads-clone config backup hash is unchanged."
-  evidence_gap:
-    - "OLV producer preparation/callback wiring, desktop socket dispatch and PCM sink are pending; this is not desktop playback or motion-fusion acceptance."
-    - "No application restart or active-path switch."
-
-olv_incremental_pcm_provider_substep_20261016:
-  date: '2026-10-16'
-  class: feature
-  risk: high
-  status: core_provider_committed_pending_consumer_implementation
-  core_commit: a612ad275
-  scope:
-    - "AstrBot exposes support_pcm_stream/get_pcm_stream with acknowledged segment boundaries and incremental MiniMax PCM output."
-    - "The existing file/WAV callers and active OLV delivery remain unchanged."
-  validation:
-    - "New implementation live two-segment smoke passed: PCM before second input, two flush boundaries, 80 chunks, 153810 bytes."
-    - "Public Provider early close passed in about 47 ms with no leftover bidi tasks. Invalid endpoint rejected before connection."
-    - "Scoped Ruff, Python syntax, state YAML and diff checks passed."
-  evidence_gap:
-    - "Core OLV incremental delivery, Adapter downlink and Electron PCM playback are not connected yet."
-    - "Do not restart or ask the user to validate the complete pipeline at this stage; no new default capability enabled."
-
-olv_incremental_pipeline_batch1_20261016:
-  date: '2026-10-16'
-  class: feature
-  risk: high
-  status: contract_and_observability_ready_audio_boundary_probed
-  scope:
-    - "Freeze text, audio and motion stream identities, ordering, revision, completion and backpressure contract."
-    - "Add per-request/per-segment motion diagnostics for first chunk, stream termination, valid result and deadline stage."
-    - "Do not advertise unsupported protocol capability or alter active playback/deadline behavior in this batch."
-  validation:
-    - "Actual configured MiniMax model and voice passed bidirectional first-audio-before-second-text, flush, cancel and finish checks."
-    - "A separate PCM 32000 Hz mono probe passed: first chunk after text in about 234 ms; 78020 bytes received."
-  evidence_gap:
-    - "Provider boundary only: no live Core-to-Adapter-to-Electron chunk playback, lip sync or motion fusion acceptance."
-    - "Subsequent implementation must remove full-material barriers and separate motion generation lifetime from delivery."
-
-olv_incremental_pipeline_plan_revision_20261016:
-  date: '2026-10-16'
-  class: documentation
-  risk: medium
-  status: plan_updated_runtime_not_changed
-  scope:
-    - "User clarified that each stage must process and forward usable increments without full-segment, full-motion-JSON or full-audio barriers."
-    - "Replace the active plan with parallel text/audio and motion streams in the existing Turn and playback timeline; mark complete-material phase 1 as historical."
-    - "Separate first-response waiting from motion generation lifetime and require a delivery/fusion channel for valid late motion."
-  validation:
-    - "Traced the local motion stream collector, TTS base queue implementation and MiniMax TTS audio aggregation."
-    - "Reassessment verified the official MiniMax bidirectional TTS API and its sentence buffering, flush/cancel and completion semantics; actual account/model acceptance is still unverified."
-    - "Traced existing Persona speech_delta suppression in OLV, URL audio sink duration barrier and missing late motion revision contract."
-    - "Plan source-reviewed; no runtime changes or repeat test suites."
-  evidence_gap:
-    - "Incremental wire fields, selected Provider input capabilities, chunk format and motion fusion still need implementation design and real acceptance."
-    - "No commit, deployment, configuration changes or host restart."
-
-persona_optional_motion_completion_and_action_only_20261016:
-  date: '2026-10-16'
-  class: bugfix
-  risk: medium
-  status: source_validated_pending_live_acceptance
-  scope:
-    - "Preserve motion failure diagnostics without failing successfully delivered core text/audio when optional motion has no payload."
-    - "Keep actual motion playback, action-only, text/audio and synthesis failures visible."
-    - "Join action-only streamed segments with their indexed motion Future and retain explicit intent in motion generation input selection."
-  validation:
-    - "Two public Adapter send boundary cases passed; targeted frontend compile and Session-to-playback-ack boundary passed."
-    - "Scoped Ruff, plugin structure and diff checks passed."
-  evidence_gap:
-    - "Pre-commit source review found no new blocking issue. No live Provider, TTS, Electron, Live2D or interruption acceptance; no host restart. Adapter file synchronization is handled by the repository post-commit hook."
-    - "Frontend requires rebuild and reload to activate the completion fix."
-
-ag99live_duplicate_clone_cleanup_20261016:
-  recorded_at: "2026-10-16"
-  class: maintenance
-  risk: high
-  status: completed
-  scope:
-    - "Synchronize applicable OLV streaming changes from the temporary Downloads clone into the Documents clone."
-    - "Keep a local recovery branch for the Downloads clone history and remove the duplicate Downloads working directory."
-  non_actions:
-    - "Do not overwrite the Documents clone's user-edited OLV plan document."
-    - "Do not copy the ignored Downloads cmd_config.json over the active configuration."
-    - "Do not restart AstrBot or deploy runtime files as part of cleanup."
-  validation:
-    - "Downloads history is retained as local branch codex/olv-stream-work-from-download."
-    - "The ignored Downloads cmd_config.json is preserved as a non-active backup before deletion."
-    - "The duplicate directory was verified as a normal Git directory before removal."
-    - "Final filesystem check confirmed C:/Users/Administrator/Downloads/AG99live no longer exists."
-
-olv_incremental_adapter_writer_20261017:
-  date: '2026-10-17'
-  class: feature
-  risk: high
-  scope: >-
-    Bind incremental JSON/PCM output to the existing OutputSegmentCoordinator
-    Turn lock and original WebSocket. Expose a gated platform event entry,
-    reject mixed atomic delivery, require explicit resource closure, invalidate
-    stale writers, and serialize playback acknowledgement with synthesis closure.
-  validation: >-
-    Pinned-current-Core TurnCoordinator and real loopback WebSocket emitted
-    twelve messages with 40000 synthetic PCM samples. Premature closure and ack
-    rejected; ack arriving during closure accepted; stale writer rejected.
-    Actual desktop parsers and SessionStore accepted the same serialized messages,
-    two bounded PCM packets and Unicode lengths. Scoped Ruff, plugin structure
-    and diff checks passed.
-  evidence_gap: >-
-    Probe sends playback acknowledgement without playing audio. No actual
-    Provider, Electron playback or Live2D acceptance in this batch. Core producer
-    does not call the new entry; motion updates/fusion and downstream flow control
-    remain pending. Capability remains unadvertised and disabled. No restart.
-
-olv_core_producer_adapter_gate_20261017:
-  date: '2026-10-17'
-  class: feature
-  risk: high
-  scope: >-
-    Declare the existing desktop OLV stream setting as an internal request for
-    the connection-bound incremental writer, and wire the Core Persona producer
-    to send accepted text deltas plus PCM frames through it. Keep the atomic
-    segment path as fallback when the writer cannot be opened.
-  validation: >-
-    Current Core focused Persona stream tests, compile and Ruff checks passed.
-    A Core boundary probe exercised hidden-markup filtering, visible text,
-    synthetic PCM and explicit resource end states. Adapter Ruff and diff checks
-    passed. Core commit ece8c24b1 and Adapter commit 8fc3738 are present; the
-    post-commit hook deployed the Adapter gate and the deployed file hash matches.
-  evidence_gap: >-
-    No real Provider/WebSocket/Electron playback or Live2D acceptance. Motion
-    update/fusion and capability negotiation remain pending. Do not claim full
-    lifecycle streaming or restart the host from this state.
-
-olv_incremental_motion_update_20261017:
-  date: '2026-10-17'
-  class: feature
-  risk: high
-  scope: >-
-    Carry the existing Persona motion Future into the same incremental motion
-    stream. Adapter publishes a sequenced motion update and terminal result;
-    Core waits asynchronously per segment with a timeout fallback; desktop
-    validates and stores the normalized payload for the existing motion timeline.
-  validation: >-
-    Python writer output plus rebuilt TypeScript parser and SessionStore smoke
-    accepted text, PCM ordering, motion update, and motion completion. Frontend
-    vue-tsc, Adapter Ruff and Core Ruff/compile checks passed.
-  evidence_gap: >-
-    No real motion Provider, WebSocket, timeline start or Live2D acceptance.
-    Update proves state/protocol handoff only; motion fusion, late replacement
-    policy and capability advertisement remain pending. No restart.
-
-olv_incremental_motion_timeline_start_20261017:
-  date: '2026-10-17'
-  class: feature
-  risk: high
-  scope: >-
-    Start an incremental segment's normalized motion payload through the
-    existing PlaybackTimeline/ModelEngine sink after the PCM timeline has
-    actually started. Preserve the motion payload through production end and
-    let the existing ModelEngine terminal callback settle playback.
-  validation: >-
-    Frontend vue-tsc passed after adding the public runtime start boundary and
-    orchestrator watch for audio-started plus motion payload. Protocol/session
-    smoke accepted update then completed motion without marking it absent.
-  evidence_gap: >-
-    No Electron, real motion Provider, ModelEngine or Live2D runtime acceptance.
-    Audio and motion live-start timing remains to be verified after restart.
-
-olv_nonstream_latency_20261017:
-  class: feature
-  risk: medium
-  status: source_validated_pending_live_acceptance
-  scope: "N0: record capture shutdown, end queue, screenshot, send and file playback milestones with renderer timeOrigin; whitelist content-free IPC events."
-  validation: "Renderer/node typechecks and focused desktop latency event boundary passed. General test compilation hits unrelated SDK typing errors; no SDK changes made."
-  evidence_gap: "No Electron restart or hardware playback measurement. Backend existing ASR/Persona/TTS timings remain in use; motion attribution follows in N5."
-
-olv_nonstream_output_prewarm_20261017:
-  class: feature
-  risk: medium
-  status: source_validated_pending_live_acceptance
-  scope: "N2: microphone stream start prepares the shared output device, deduplicates in-flight primers and retains active file/PCM sessions; preparation is rechecked before playback."
-  validation: "Renderer typecheck and public runtime boundary passed: concurrent cold preparation, warm reuse, active media preservation, disposed rejection."
-  evidence_gap: "No real device/Electron acceptance or measured first-audio gain. Existing post-commit hook deploys Adapter files without restarting AstrBot."
-
-olv_nonstream_release_screenshot_20261017:
-  class: feature
-  risk: medium
-  status: source_validated_pending_live_acceptance
-  scope: "N3: begin a fresh screenshot at microphone release concurrently with capture teardown/end-queue waiting; retain atomic audio-end image delivery."
-  validation: "Renderer typecheck passed; source trace preserves socket identity recheck and existing image failure semantics."
-  evidence_gap: "Actual overlap savings need new milestone logs. ASR still starts after the complete end envelope; no claim that screenshot cost was eliminated."
-
-olv_nonstream_memory_cache_prewarm_20261017:
-  class: feature
-  risk: medium
-  status: source_validated_pending_live_acceptance
-  scope: "N1 narrow slice: capture-owned, five-second bounded preparation initializes routed Memory service and warms existing recall caches for current identity/conversation; no Prompt cache or formal Turn. PTT start and VAD speech-start trigger; end/disconnect cancel."
-  validation: "Scoped Ruff, AST and public preparation success/early-cancel smoke passed. py_compile encountered a local pycache permission error; AST used instead."
-  evidence_gap: "No live memory-cache hit or latency improvement measured. Formal collectors re-read current config/identity/local state and only reuse existing keyed recall caches; no direct snapshot adoption or waiting on background update. Full collector/capability preparation remains outside this narrow slice."
-
-olv_nonstream_deferred_motion_20261017:
-  class: feature
-  risk: high
-  status: boundary_validated_pending_live_acceptance
-  scope: "N4: file-audio segments may declare motion pending in output.segment.v6; one identity-bound output.segment_motion resolves it before synth closure. Adapter owns bounded deferred tasks and cancels on Turn/disconnect. Desktop attaches valid late motion to existing audio timeline or explicitly expires it after audio terminal; M0 never enters PCM delivery."
-  validation: "Renderer/node typechecks, manifest check, scoped Ruff/AST passed. Real loopback WebSocket delivery proved audio-before-motion-before-close and cancellation. Store/parser/actual timeline/orchestrator boundary proved early audio, late motion start without audio replay and duplicate rejection. AstrBot page build passed."
-  evidence_gap: "No live Persona/TTS/motion Provider plus Electron/Live2D acceptance. v6 changes require matching desktop and Adapter; handshake rejects v5. Existing Core output_controller user hunk untouched. Motion provider timeout/quality and visual blending need live review."
-
-olv_nonstream_speech_motion_handoff_20261017:
-  class: feature
-  risk: high
-  status: timeline_boundary_validated_pending_live_acceptance
-  scope: "N5: when same-Turn next file audio is ready and previous speech actually ended, stop previous motion ownership through ModelEngine and settle as intentional handoff before next audio. Preserve final tails, motion-only segments, audio ordering and general timeline blockers. Expire ungenerated motion outside its speech window; add identified motion start/end/handoff events."
-  validation: "Renderer/node typechecks passed. Actual Store/timeline/orchestrator boundary proved next audio waits for audio end but not old motion tail and handoff is completed, not failed. Existing standalone runtime tail blocking check and latency IPC whitelist check passed."
-  evidence_gap: "Historical long-gap cause remains unproven without actual motion-end logs. No Electron/Live2D visual continuity acceptance; uses existing stop semantics rather than a new blend engine. Real event observations are now available for confirmation."
-
-olv_nonstream_deferred_motion_app_review_20261017:
-  class: bugfix
-  risk: medium
-  status: source_validated_pending_live_acceptance
-  scope: "N4 follow-up source review: reserve pending segment motion in the real app speech-only admission gate, preventing fallback speech animation from claiming the slot before its deferred Provider result."
-  validation: "Full renderer typecheck passed; actual duration-ready -> speech-only preparation -> motion-start chain traced."
-  evidence_gap: "Existing boundary test did not instantiate the full model app, so this correction is source/static validated; real desktop acceptance remains pending."
-
-olv_nonstream_build_acceptance_20261017:
-  class: maintenance
-  risk: medium
-  status: build_validated_pending_live_acceptance
-  scope: "Final review and complete Electron build for N0-N7 nonstream optimization commits; no service restart or runtime mode switch."
-  validation: "npm run build passed renderer/WebSDK/node checks and Electron main/preload/renderer generation. AstrBot page build, changed Adapter Ruff, schema manifest and unique-key state YAML checks passed."
-  validation_gap: "Core generic AI-state validator was also tried on Live and rejects its existing record-only format (missing task/context/checks_run/validation_gap top-level terms); Live governance format was not rewritten. Actual microphone, Providers and Live2D acceptance remains pending."
-
-olv_stream_input_identity_20261017:
-  class: bugfix
-  risk: high
-  status: real_core_loopback_boundary_validated_pending_live_acceptance
-  scope: "T0b/R0: submit the Adapter server-created backend input ID as event _turn_id so Core PlatformTurnContextFactory adopts the already registered identity; reject conflicting pre-existing event identity. Preserve writer identity/terminal checks."
-  validation: "Real local WebSocket input.text through MessageFactory/OLVPetPlatformEvent, Core TurnContext creation and writer delivered incremental text; wrong and terminal identities rejected without probe-side manual mapping. Scoped Ruff/AST passed."
-  evidence_gap: "No live Persona/TTS/Electron run. Isolated probe had no synchronized SemanticAxisProfile and logged the expected optional MotionLab profile error; identity/output assertions passed. No runtime setting switch or restart."
-
-olv_stream_motion_terminal_20261017:
-  class: bugfix
-  risk: high
-  status: public_boundary_validated_pending_live_acceptance
-  scope: "T2/R2: use the existing motion-only timeline for confirmed zero-audio incremental segments; explicitly reject unreleased motion after audio failure or completed speech. Preserve current-audio attachment before blockers and acknowledge late production events without reopening local motion terminals. Interrupted sessions cannot release new work."
-  validation: "Renderer typecheck passed. Public incremental event runtime through real Store, normalizer, orchestrator and PlaybackTimeline started one motion-only job without replaying text/audio; failed zero-audio input rejected motion and a later production end preserved failure. Both settled locally. The body sink is an acceptance stub; no hardware."
-  evidence_gap: "Real Live2D execution, actual PCM failure and late-motion windows require joint desktop acceptance. No restart/settings change."
-
-olv_stream_motion_budget_20261017:
-  class: bugfix
-  risk: high
-  status: cross_repo_boundary_validated_pending_live_acceptance
-  scope: "T2/R5: remove the 750 ms streaming cap; use finite configured budget (default 5 s, max 60 s) bounded by Core Turn remaining time. Main preview/segment paths retain one absolute deadline across context, concurrency admission and Provider. Expose the registered producer deadline to Core, rather than minting another delivery wait."
-  validation: "Public Core output with actual OLV event, registry and writer accepted two delayed motion results at 1.15 s under a 2 s configuration, with all streams terminal and no pending tasks. Ruff and plugin structure checks passed. Core companion removes its 1 s override."
-  evidence_gap: "Isolated producer instead of real motion inference; no live success-rate or latency comparison. Adapter and Core companion changes require joint loading."
-
-olv_stream_audio_credit_20261017:
-  class: feature
-  risk: high
-  status: real_socket_boundary_and_build_validated_pending_live_acceptance
-  scope: "T3/R7: synchronous wire admission plus one bounded PCM playback worker; cumulative byte/frame credit from desktop to Adapter, 128 KiB/64 frames per result. Credit wait is outside the shared writer lock; reset/retirement wakes waiters. Bilateral audio_credit.v1 manifest/settings negotiation requires matching builds. Audio production closure no longer invalidates admitted playback."
-  validation: "Actual local WebSocket passed Python writer/TurnCoordinator -> compiled TypeScript transport/Store/worker -> parsed credit/playback acknowledgement. Text/motion/synth_finished advanced during blocked PCM; third frame resumed only after credit, invalid credit rejected, reset released a blocked sender. Full renderer/WebSDK/node checks and Electron build passed; scoped Ruff and generated schema check passed."
-  evidence_gap: "Playback sink accepts deterministic PCM without hardware; no actual Provider, Electron device/Live2D, production overload or measured latency distribution. Existing mode preserved; no restart. New protocol requires both processes to load matching builds before reconnecting."
-
-olv_stream_first_stage_metrics_20261017:
-  class: maintenance
-  risk: medium
-  status: source_and_type_validated_pending_live_acceptance
-  scope: "T0 partial: once-per-result Adapter first text/PCM/motion successful-send observations and desktop first text/PCM admission; per-segment PCM preparation, first consumed sample estimate and successful drain. Reuse the existing bounded stage whitelist and desktop latency bridge without content logging."
-  validation: "Renderer/node typechecks and changed Adapter Ruff passed. Source traced from actual inbound worker and PCM output.started callback; first-sample stage uses output's monotonic sample estimate rather than callback dispatch time."
-  evidence_gap: "No live latency sample collected. IPC callback epoch is observation time; the estimated sample epoch is renderer timeOrigin plus monotonicMs. No hardware loopback measurement. T0 baseline and Provider connect/task-ready correlation remain incomplete."
-
-olv_motion_terminal_observation_20261017:
-  class: maintenance
-  risk: medium
-  status: source_type_validated_pending_live_acceptance
-  scope: "Review correction: emit distinct motion_failed/motion_interrupted stages instead of recording every terminal as motion_ended. Keep success stage unchanged and reuse the bounded stage whitelist."
-  evidence: "03:12 M0 first segment has a motion_ended event without motion_started; its following segment has a valid started/completed record. Existing metric did not distinguish failed/interrupted closure. No new runtime root cause is asserted from missing start alone."
-  validation: "Renderer and node typechecks; direct source trace from motion terminal status to stage selection. No hardware or Provider run."
-  evidence_gap: "Need freshly loaded playback/MotionLab rejection diagnostics to identify the first segment's historical failure cause."
-
-olv_stream_local_interrupt_20261017:
-  class: bugfix
-  risk: high
-  status: public_boundary_validated_pending_live_acceptance
-  scope: "T3 review correction: a locally interrupted/retired Turn must quietly retire its PCM worker before the server interrupt echo, rather than treating the expected append rejection as a fatal connection error. New Turn start retires any older queue generation."
-  validation: "Actual loopback flow still passed. Its real wire start/chunk replayed through a fresh public consumer: local Store interruption followed by blocked append rejection produced no fatal callback and no late credit. Renderer typecheck passed."
-  evidence_gap: "No actual microphone barge-in/device run. The isolated cancellation acceptance does not verify hardware cancellation timing."
-
-olv_stream_speech_only_admission_20261017:
-  class: bugfix
-  risk: medium
-  status: source_type_validated_pending_live_acceptance
-  scope: "T2 review correction: the actual model app's speech-only preparation/start admission now also rejects an open incremental motion production stream. Existing M0 pending guard remains. Avoid reserving the body for a default speech-only plan while semantic motion is still being produced."
-  validation: "Traced real app -> ModelEngine preparePlaybackTimeline/handlePlaybackTimelineStarted -> shared canStartSpeechOnlyMotion callback. Public Store contract records motion stream status independently of M0 pending; renderer typecheck passed."
-  evidence_gap: "No full model app or Live2D run. The earlier M0 historical missing-start sample is not claimed as reproduced or solved by this M2-specific condition."
-
-olv_stream_final_build_20261017:
-  class: maintenance
-  risk: medium
-  status: final_build_and_boundary_validated_pending_live_acceptance
-  scope: "Complete implementation/review record for T0b/T1/T2/T3 and scoped T4 HTTP ownership, preserving user mode and unrelated Core changes. Documentation separates implemented boundaries, historical evidence and deferred R6 architecture."
-  validation: "Final npm run build passed renderer/WebSDK/node checks and Electron main/preload/renderer generation after local-cancel, stage metrics and speech-only changes. Scoped Adapter Ruff, generated manifest and unique-key YAML checks passed; 11 deployed runtime source hashes matched."
-  evidence_gap: "No process restart, installer/publication or remote push. Pair-load the new audio_credit manifest/settings capability in Adapter and desktop before M2 acceptance. No actual Provider/device/Live2D performance or M2 p50/p95."
-olv_nonstream_deferred_motion_preparation_20261017:
-  class: bugfix
-  risk: high
-  status: real_model_engine_boundary_and_build_validated_pending_live_acceptance
-  scope: "Repair M0 deferred semantic motion that reaches a playing audio timeline without a duration-ready prepared plan. Compile within its known remaining audio window and rebase the existing audio reader to the same attachment sample; preserve preparation, model/profile and Turn ownership checks."
-  evidence: "Five live M0 turns at 15:39-15:42 each generated both motions, rejected first motion with motion_plan_not_prepared_before_audio_start, and played the second. Previous deferredMotionOutput smoke replaced the body sink and omitted the actual ModelEngine."
-  validation: "Upgraded the same public protocol -> Store -> orchestrator -> timeline -> real ModelEngine/compiler boundary, with only audio/device execution isolated. Previous ModelEngine reproduces first-motion failure; corrected implementation starts it at relative zero, follows subsequent audio samples without replay, and rejects an exhausted window. Narrow test compile and final npm run build passed."
-  evidence_gap: "No process restart, real Provider request or device/Live2D verification after this fix. Unknown-duration M2 preparation remains outside this repair; the earlier 03:12 historical failure is not retrospectively assigned this cause."
-  review_correction: "Public expired-window case reproduced ModelEngine stuck pending after session motion failed. Window rejection now sets failed through the existing active-run state guard; re-read the original device clock after compilation to reject an exhausted/retired window before invoking the player. The same boundary asserts engine failure as well as session terminal state."
-
-olv_stream_open_pcm_motion_preparation_20261017:
-  class: bugfix
-  risk: high
-  status: real_model_engine_boundary_and_build_validated_pending_live_acceptance
-  scope: "Accept an active, identity-bound PCM clock whose final duration is still null. Prepare the action with existing bounded semantic timing, retain valid performance curves, and rebase to the same audio sample; known exhausted windows, failed preparation and retirement still reject. No synthetic audio duration or EOF wait."
-  evidence: "Two real M2 turns at 15:54 delivered text/PCM and generated five motion payloads, but all five failed with late_motion_audio_window_unavailable. This identifies the known-duration-only preparation logic in the runtime; exact loaded commit remains unverified despite the user not manually updating."
-  validation: "Same public incremental event -> Store -> orchestrator -> timeline -> actual ModelEngine/compiler case fails before this change and starts before audio EOF afterward. Relative clock, preserved curve, open audio production state and user interruption checked; existing M0 success/expiry case retained. Narrow compile and full npm run build passed."
-  evidence_gap: "Final audio/device and motion execution interfaces remain isolated in the boundary check. No new real conversation or Live2D result after this change; original 03:12 sample cause is not retroactively asserted. Exact process version must be recorded on next live acceptance."
-
-olv_action_only_delivery_accounting_20261017:
-  class: bugfix
-  risk: high
-  status: writer_boundary_validated_pending_live_acceptance
-  scope: "Expose delivered_motion_segment_indexes from canonical writer segment state, marking only after the bound sender accepts a motion update. Companion Core uses this delivery fact for action-only output accounting and completion/history."
-  validation: "Actual public writer through an isolated sender counted repeated updates to one segment once and excluded another segment ending failed without a payload. Scoped F lint passed; Core parser/controller boundary checks passed. Contract wording also corrected for text EOF suffix and canonical delivered speech."
-  evidence_gap: "Requires paired Core and Adapter deployment; downlink acceptance does not prove desktop execution. No runtime reload, paid Provider or device/Live2D acceptance."
-
-olv_action_only_playback_ack_20261017:
-  class: bugfix
-  risk: high
-  status: public_completion_boundary_validated_pending_live_acceptance
-  scope: "Expose a bounded wait for the existing playback_finished -> turn_finished result. Core uses it only for action-only replies; desktop execution failure and missing acknowledgement become failed Core turns."
-  validation: "Public TurnCoordinator wait resolved both successful playback and terminal failure. PlatformEvent closed synth output then waited for the result and raised on failure. Actual incremental motion publish records first-output time at accepted update. Focused adapter tests and scoped Ruff passed."
-  evidence_gap: "No Electron/Live2D runtime run, provider run, or 30 s timeout run. The frontend's existing local timeline remains the authority for execution result."
-
-neurobrain_current_state_application_20261018:
-  class: refactor
-  risk: high
-  scope: >-
-    User-authorized parameterless NeuroBrain current-state reads for segment
-    motion, passive behavior and pre-action. Remove result-wait and state-key
-    configuration; read at each segment request rather than in shared context.
-    Preserve existing pre-action/streaming work and the disabled passive toggle.
-  validation: >-
-    Two existing segment prompt boundary checks passed with current-state reads.
-    Paired plugin CUDA checkpoint smoke passed idle evolution, input clamping,
-    immediate detached reads and invalid input rejection. Scoped static checks
-    passed; source and deployed copies have matching NeuroBrain changes.
-  evidence_gap: >-
-    No live plugin reload, Provider call or Electron/Live2D acceptance. Requires
-    paired NeuroBrain plugin and adapter reload. No commit or publication.
-  review_validation: >-
-    Fixed independent tick scheduling and worker liveness reporting. Real CUDA
-    checkpoint recheck passed ordered inputs on separate ticks, subsequent idle
-    advancement, nonblocking reads, clamp/rejection and clean worker shutdown.
-    No live application reload or desktop acceptance.
-
-idle_motion_isolation_20261018:
-  class: bugfix
-  risk: high
-  scope: >-
-    User requires slower idle motion, no foreground status/history changes or Turn
-    ownership, and parameter-mixer blending rather than active plan replacement.
-    Add optional output.idle_motion with null Turn and existing motion payload.
-    Remove passive Turn/segment path. Add a lower-priority SDK idle source, smooth
-    entry/release and response continuity at foreground handoff.
-  validation: >-
-    Renderer/WebSDK/Electron types pass. Isolated backend stream emits exactly one
-    idle packet without touching a frozen Session; frontend accepts that packet
-    and rejects Turn-bound idle packets. Mixer handoff has zero first-frame jump
-    in both directions and foreground target wins.
-  evidence_gap: >-
-    No live model/Provider/Desktop acceptance, service restart or feature
-    enablement. Keep unrelated working changes.
-  build: >-
-    Electron production build completed. Isolated SDK mixer runtime advances and
-    retires idle state automatically; maximum per-frame delta 0.126 on a simulated
-    60 Hz parameter surface. Overlapping idle plans are rejected rather than
-    replacing the active layer. Visual acceptance still requires paired reload.
-  review_validation: >-
-    Corrected idle-error retry to avoid advancing foreground time twice. Exclude
-    idle targets from parameters already driven by foreground bindings so idle
-    cannot alter foreground release/settling. Public mixer smoke verifies both
-    properties; the existing VAD case passes after completing its fixture imports
-    and input-preparation state. Renderer/WebSDK/Electron types and production
-    build pass. Commit only in AG99live; its post-commit hook deploys to data.
-
-independent_motion_segment_only_20261020:
-  class: refactor
-  risk: high
-  status: local_validation_passed_pending_live_acceptance
-  scope: >-
-    Remove the independent whole-reply action generation route: LLM request and
-    response hooks, whole-reply task/result cache, scheduling and cleanup. Keep
-    Persona Effect when independent motion is disabled. When enabled, generate
-    independent actions per nonempty Persona speech segment. Preserve ordinary
-    Persona-result batching and OLV incremental segment-start execution as two
-    timings of the same segment route. Remove per_speech_segment from runtime UI
-    and state; prune its persisted legacy config key at startup. Preserve complete
-    output.segment delivery, incremental output, Persona Effect, pre-action,
-    idle motion, action failure isolation and turn-owned segment cancellation.
-    Refresh architecture/readme/flow docs and mark the patch audit finding closed.
-  validation: >-
-    54 focused adapter runtime tests passed, including plugin hooks, segment
-    routing, config pruning, prompt annotations and turn cancellation. Changed
-    Python Ruff, compileall, AstrBot plugin structure validation and git diff
-    whitespace checks passed. Repository search found no production whole-reply
-    action hooks/cache/scheduling references or independent_motion per-segment
-    runtime state. Old persisted config-key cleanup remains intentionally present.
-  evidence_gap: >-
-    No live AstrBot restart, real Provider/TTS conversation, OLV segment-stream
-    acceptance or Live2D playback verification. The post-commit hook is expected
-    to sync Adapter files to the AstrBot deployment copy; a successful sync does
-    not prove a running Core or desktop loaded the code. Preserve unrelated dirty
-    AstrBot main-repo files.
-persona_lifecycle_unification_20261024:
-  class: refactor
-  risk: high
-  status: source_reviewed_and_locally_validated_pending_baseline_metric_and_live_acceptance
-  scope: >-
-    Unify Adapter Persona turn, result, segment, TTS binding, M0/M1/M2 delivery,
-    cancellation, and Motion Lab lifecycle ownership. Remove the obsolete
-    whole-reply work/task registry, persona_stream_motion module, and duplicate
-    platform delivery dictionaries while preserving existing user changes.
-  validation: >-
-    Stage 0 ownership, M0/M1/M2 call-chain, and parallel state-transition
-    baseline documents exist. Python compileall and Ruff pass. Focused Persona,
-    plugin-hook, and Turn interruption tests pass (31 tests). The old production
-    registry/module/delivery dictionary references have no remaining callers.
-  evidence_gap: >-
-    The workspace already contained unrelated uncommitted changes before Stage 0,
-    so production net line deletion cannot be proven from current HEAD diff.
-    A Stage 0 file snapshot is required for that metric. Real Core, Provider,
-    TTS, Electron, and Live2D joint acceptance remains pending.
-
-prompt_persona_projection_repairs_20261025:
-  class: bugfix
-  risk: high
-  status: source_validated_pending_paired_core_restart_and_live_acceptance
-  scope: >-
-    Replace the Adapter's pre-action heading heuristic with the paired Core's
-    shared persona parser. Preserve plain paragraphs, formatted headings and
-    free-form author text; retain the explicit character_core override. Add the
-    current Interaction's allowed persona.summary to independent motion's stable
-    system reference, shared across segments. Keep motion semantics, per-segment
-    scheduling, parameter mixing, NeuroBrain and Passive unchanged.
-  validation: >-
-    The public pre-action request/emission boundary and the independent-motion
-    request payload boundary passed. Shared-parser formatted/free-form cases
-    passed in the paired Core. Scoped Ruff and Python compilation passed.
-    Plugin structure validation reported no errors or warnings. Documentation
-    now distinguishes static system data from dynamic user data.
-  evidence_gap: >-
-    No live Provider, warm-cache, voice or Live2D acceptance and no service
-    restart. This source depends on the paired Core persona parser changes;
-    fully restart AstrBot to load both after deployment. The post-commit hook
-    deploys managed Adapter files through deploy_adapter.ps1. Preserve the
-    unrelated untracked continuous-presence design document.
-
-persona_motion_dataset_pipeline_20261027:
-  class: feature
-  risk: medium
-  status: source_checks_passed_pending_live_collection
-  scope: >-
-    Capture the per-event motion source route when the OLV event is created and
-    reuse it for M1 segment routing, result scheduling, and M0/M1 TTS segment
-    identity with the bound message ID; remove the success-only duplicate
-    scheduler snapshot, and add a read-only v3
-    Motion Lab reducer, review JSONL and manually approved training JSONL export.
-    Require explicit source_route and delivery_mode, exclude NeuroBrain samples,
-    preserve Provider candidates separately from final normalized results, and
-    associate frontend playback evidence. No database migration, deployment,
-    continuous-presence behavior or training-job submission.
-  validation: >-
-    Targeted Python compilation, CLI help entry points, YAML parse and git diff
-    whitespace checks passed after route latching. The Stage 5 reducer follow-up
-    preserves raw-event schema v3 and training schema v1, validates review schema
-    v2, and reports malformed event details and collection status counts. No tests
-    or live database were run.
-  evidence_gap: >-
-    Target AstrBot has not been synchronized or restarted, and its runtime database
-    was not inspected. Live M0/M1/M2 collection, Provider/TTS/playback correlation
-    and final queue flush remain unverified. Recorder queue capacity is 500 and
-    write failure can reject observations; export after graceful shutdown for a
-    stable collection window.
-
-persona_lifecycle_identity_boundary_20261028:
-  class: refactor
-  risk: high
-  status: stage3_source_implementation_complete_pending_stage6_live_acceptance
-  scope: >-
-    Freeze the Persona lifecycle ownership and transition contract. Require
-    PersonaTurnIdentity for Registry Turn APIs and PersonaSegmentIdentity for
-    segment admission. Store the TTS binding identity as a PersonaSegmentIdentity.
-    Replace the dynamic delivery assembly dictionary with typed state; keep
-    stream terminal status on PersonaResultState, Provider result only in its
-    Future handoff, and M2 motion pending/revision/dedup/terminal state in the
-    OLV writer. Reject late admission after Result/Turn retirement. Keep Core,
-    WebSocket/OLV, and Motion Lab raw-event schemas unchanged.
-  validation: >-
-    Stage 2 previously passed eleven focused tests, Ruff, Python compilation,
-    YAML parsing, and diff whitespace checks. Stage 3 source review confirmed the
-    PersonaResultState.delivery_state and PersonaSegmentState.provider_result
-    fields/assignments are gone, as are platform-side M2 wire mirrors. Provider
-    result reads now come from the Future handoff. Python compileall and git diff
-    --check passed. Ruff was unavailable; no tests were run during Stage 3.
-  evidence_gap: >-
-    No live Core/Provider/TTS/OLV/desktop/Live2D acceptance. M0/M1/M2 behavior,
-    Core OLV motion-stream closure after Provider Future cancellation, and delayed
-    TTS binding still require target environment acceptance; Stage 6 final
-    verification remains.
-
-persona_lifecycle_delivery_convergence_20261028:
-  class: refactor
-  risk: high
-  status: stage4_source_review_complete_pending_live_acceptance
-  scope: >-
-    Review M0 complete-result v6 delivery, M1 Persona-segment v6 finalization,
-    and M2 OLV resource streams against the shared Persona result/segment identity
-    and ownership matrix. Preserve protocol-specific wire state; add no shared
-    delivery interface unless it removes real duplicate control flow.
-  validation: >-
-    Source review traced M0 result-task assembly, M1 segment Future/TTS binding
-    into the v6 finalizer, and M2 IncrementalOutputSession ownership of text,
-    audio, and motion wire state. The routes share identity and Provider result
-    semantics but have distinct timing and failure handling; no common delivery
-    interface was justified. No protocol or output schema changed.
-  evidence_gap: >-
-    No target Core, Provider, TTS, v6, OLV, desktop, or Live2D joint acceptance.
-
-persona_lifecycle_motion_lab_stage5_20261028:
-  class: feature
-  risk: medium
-  status: source_checks_passed_pending_live_collection
-  scope: >-
-    Complete the read-only Motion Lab reducer. Separate collection_status from
-    quality.status; preserve malformed event identity/reason and field-conflict
-    values/source IDs, including contradictory playback terminal facts; validate
-    review schema v2; reject approved open/incomplete samples at export. Keep
-    raw-event schema v3, training schema v1, and public
-    Core/WebSocket/OLV contracts unchanged.
-  validation: >-
-    Python compileall, CLI help, state YAML parsing, and git diff --check passed.
-    Summary and manifest expose malformed event details and collection status
-    counts. Review validation checks database schema, filters, row counts,
-    diagnostics, collection/quality/review fields and immutable sample digests.
-    No tests or live Motion Lab database were used.
-  evidence_gap: >-
-    Target collection and export have not been exercised against a real database.
-    A missing terminal fact remains open because the recorder cannot distinguish
-    an active request from a cancellation that produced no terminal snapshot.
-    M2 OLV wire completion and desktop playback remain separate unrecorded or
-    independently observed facts; Phase 6 runtime acceptance is pending.
-
-incremental_writer_discard_guard_20261028:
-  class: bugfix
-  risk: medium
-  status: source_checks_passed_pending_paired_core_runtime_acceptance
-  scope: >-
-    Allow discarding an incremental output writer only while its Turn output
-    queue is open and before any wire send has been attempted. Preserve possibly
-    delivered OLV segment state on the desktop and prevent v6 fallback after
-    incremental start events or interrupted writes. Keep the OLV wire schema
-    unchanged.
-  validation: >-
-    Source review confirmed stream start creates client segment state and v6
-    commit rejects mixed incremental delivery. Writer records attempted wire
-    sends before awaiting transport; discard checks queue state and requires no
-    wire activity or segments. Python compilation, YAML parsing, and git diff
-    whitespace checks passed; no tests were run.
-  evidence_gap: >-
-    This repository has no production callsite for the new discard event hook.
-    Paired Core must invoke it before any segment start and honor false by
-    continuing or terminating OLV. No paired runtime or desktop acceptance.
-
-continuous_presence_stage0_baseline_20261028:
-  class: review
-  risk: medium
-  status: phase0_partial_baseline_data_and_live_render_observed
-  scope: >-
-    Read-only baseline for the continuous-presence plan: inspect deployed Motion
-    Lab schema/data and the active Mk6 Live2D model's ambient motion, eye blink,
-    breathing parameters, and parameter-mixer path. No C++ work, NeuroBrain
-    integration, code behavior changes, setting changes, or process restart.
-  validation: >-
-    Target state/motion_lab.sqlite3 is schema v3 with 1,993 raw events, including
-    858 motion.persona_sample.v1 events through 2026-10-28 03:00 Asia/Shanghai.
-    Stored events cover M0 and M2 modes; no M1 mode was found. A targeted
-    read-only capture of the AG99live Live2D window showed different rendered
-    frames about eight seconds apart. Mk6 declares no EyeBlink parameter IDs,
-    while its 平和 idle motion includes eye-open and ParamBreath curves. Required
-    Cubism breath parameter IDs are present. No tests were run.
-  evidence_gap: >-
-    Stage 0 remains incomplete: renderer mode and the actual ambient-motion
-    setting were not readable; the screenshot does not attribute animation to
-    idle or Cubism auto-blink; breath contribution was not isolated; model
-    switching was not tested. The deployed main.py differs from the workspace,
-    so current uncommitted collection changes are not confirmed loaded. The
-    separate cache database remains schema v2 and was not modified.
-
-continuous_presence_stage1_local_wiring_20261028:
-  class: feature
-  risk: medium
-  status: renderer_typecheck_passed_pending_live_runtime_acceptance
-  scope: >-
-    Add renderer-owned PresenceStateStore diagnostics for existing Adapter
-    connection and microphone state, playback audio, active Turn Playback phase,
-    accepted pre-action, cursor gaze activation, selected model, and Live2D
-    renderer lifecycle. Correlate pre-action cancellation by Turn/request ID and
-    monotonic generation. Keep diagnostics high-level and exclude conversation
-    text, model URLs, cursor coordinates, and action payloads. Do not add AG99
-    semantic requests.
-  validation: >-
-    Source tracing confirmed the existing owners and event points for each local
-    state. Renderer status is reported from useLive2dRenderer through
-    DesktopPetCanvas and PetDesktopView. Pre-action cancellation now retains its
-    request ID, and stale reducer revisions are ignored; ModelEngine blocks and
-    stops only the matching canceled request while Turn terminal events remain
-    Turn-scoped. Natural pre-action terminals clear only their matching
-    preparation, and model/Profile changes clear the current preparation after
-    cancellation. The renderer TypeScript check, state YAML parse, and git diff
-    --check passed. No tests or live runtime check were run.
-  evidence_gap: >-
-    AG99 RuntimeObservationSensorHandle is not registered in this workspace, and
-    no paired AG99 runtime is available to verify semantic bridging, model
-    switching, delayed events, disconnect recovery, or end-to-end presence
-    snapshots. Stage 1 remains incomplete.
-
-live2d_motion_shadow_comparison_20261030:
-  class: feature
-  risk: high
-  status: source_checks_passed_synced_pending_ollama_provider_and_live_acceptance
-  scope: >-
-    Run the configured shadow action Provider beside the existing independent
-    motion Provider with the exact same production system prompt, user prompt,
-    and text contexts. Keep DeepSeek as the only published/played result. Record
-    shadow raw text, normalized candidate, Provider identity and timings in the
-    existing Motion Lab sample for comparison and later manual training review.
-    Bound shadow generation to five seconds by default. Do not change the
-    production prompt or automatically promote shadow output to training target.
-  validation: >-
-    The configured primary Provider is deepseek-nothink/deepseek-flash and
-    independent motion is enabled. Local Ollama contains
-    ag99-spark-x26-action-v5:q8_test. Two focused tests passed for M2 prompt
-    identity/primary-only publication and Reducer candidate preservation.
-    Ruff, changed-file Python compilation, Reducer CLI help, and git diff --check
-    passed. Five deployed plugin targets matched workspace HEAD before selective
-    synchronization.
-  evidence_gap: >-
-    No Ollama Provider is configured in AstrBot yet, so shadow_enabled remains
-    false and no shadow_provider_id is selected. Reload the selectively synced
-    plugin after adding the local Ollama model as an AstrBot Provider; then
-    collect paired Motion Lab samples and verify DeepSeek playback, shadow
-    latency, comparison review, and later approved training export.
-
-live2d_motion_training_input_20261031:
-  class: feature
-  risk: high
-  status: prompt_synced_pending_plugin_reload_and_new_sample_acceptance
-  scope: >-
-    Treat intent_tags as optional Provider metadata while preserving the v4 wire
-    shape with an Adapter-generated minimal tag when omitted. Defer stream action
-    Provider requests until persona segment speech is ready by default, with an
-    explicit stream_preview_enabled opt-in for the older early-preview behavior.
-    Preserve per-segment generation, primary-only publication, shadow comparison,
-    motion_steps validation, and DeepSeek teacher-data collection. Strengthen
-    production guidance for explicit repeated, bidirectional, and ordered motion.
-    Exclude samples whose captured request has empty segment.speech, omit
-    intent_tags from production SFT targets, and report motion-shape distribution.
-    Remove the fixed 234-sample cap and direct the next full-dataset SFT run to a
-    new v6 adapter output while retaining the prior v5 adapter.
-  validation: >-
-    Motion contract tests passed (6) and independent shadow tests passed (2).
-    Changed Python files compile; direct production-prompt smoke confirmed the
-    sequence guidance and optional intent_tags language. Evaluator boundary
-    checks accept motion_steps without intent_tags and reject a one-step sequence.
-    Training YAML parsed with the new v3 dataset path, v6 output path, and no
-    max_samples cap. Dataset and evaluator CLI help, source/deployed plugin
-    structure checks, and git diff --check passed. The two changed prompt files
-    were selectively synced to the AstrBot plugin directory and verified byte
-    identical. Ruff is unavailable; model evaluation and training were not run
-    because this environment lacks peft and the experiment virtualenv.
-  evidence_gap: >-
-    Restart or reload the target AstrBot before collecting the next teacher-data
-    window. Then confirm motion_request.prompt.segment.speech is populated,
-    DeepSeek remains the played primary result, shadow remains comparison-only,
-    and explicit repeated or ordered requests produce useful motion_steps.
-    Prepare the cumulative dataset after collection and inspect its speech filter
-    and motion-shape counts before starting v6 training.
-
-live2d_continuous_motion_protocol_20261108:
-  class: feature
-  risk: high
-  status: source_reviewed_locally_validated_pending_deployment_and_training_run
-  scope: >-
-    Apply the user-approved destructive AG99live protocol update. Runtime parameter
-    actions now require motion_steps of 1-4 steps with concrete axis_values and no
-    root axis_levels or root axis_values compatibility. Training export removes
-    motion_guidance and neurobrain_state from inputs, converts historical level
-    labels offline, and emits only motion_steps plus required duration_hint_ms.
-    Update the frontend, prompts, Motion Lab projections, training scripts and
-    validation docs without editing the generated AstrBot deployment copy.
-  validation: >-
-    Frontend renderer/WebSDK/Node typecheck passed. Python compile checks passed.
-    Focused continuous-motion contract, selector, runtime boundary and scheduling
-    tests passed (207 tests when excluding the three existing RuntimeState provider
-    registry failures). Read-only Motion Lab export was exercised against the
-    deployment database: 530 strict samples were converted and checked for the new
-    output fields, including stripping motion_guidance and neurobrain_state.
-    Git diff whitespace checks passed.
-  evidence_gap: >-
-    The new LoRA has not been trained or deployed. npm test remains blocked by the
-    repository's existing test-build TypeScript errors, and three RuntimeState
-    tests fail because their fixture has no Provider registry. Live AstrBot reload,
-    Provider generation, TTS and Live2D playback still require paired acceptance.
+  scope: Add a selectable conversation platform with AstrBot as the unchanged default and DeepSeek Harness as a local stdio
+    JSON-RPC ConversationProvider. DSH assistant text uses the existing Turn/Segment/output.segment.v6 path; tool, code, PTC
+    and approval activity uses a separate ExecutionEvent contract and output.execution.v1 presentation event. Existing AstrBot
+    composition and output.segment.v6 behavior remain the default path.
+  validation: Focused DSH provider/orchestrator/middleware tests pass (35 tests), including real SessionEvent tool/result
+    and PTC sub-call envelopes through output.execution and final output.segment delivery. Python compileall, protocol schema
+    manifest, and diff whitespace checks pass. Existing renderer typecheck and plugin checks remain recorded from the prior
+    slice.
+  limitations: No dsh executable is available in this workspace, so a live SDK process, credential, approval policy, TTS/Live2D
+    joint playback, reconnect, and production frontend acceptance remain unverified. Platform switching is composition-time
+    and requires an adapter restart; saving the setting while a platform is live logs that requirement.
 desktop_settings_canonical_owner_20261111:
   date: '2026-11-11'
   class: feature
   risk: high
   status: source_updated_pending_runtime_acceptance
-  decision: >-
-    Adapter plugin configuration owns the canonical desktop runtime settings
-    snapshot per platform instance. The Web control page edits that snapshot;
-    connected TS or Native clients apply it through the existing desktop
-    settings query protocol. A first connected client is imported into the
-    snapshot, and later client reconnects reapply the saved values. Client
-    local storage is an application cache, not the source of truth.
-  scope: >-
-    Persist successful desktop setting responses under
-    desktop_runtime_settings, merge the persisted snapshot into offline Web
-    control responses, migrate the first connected client's values, and replay
-    canonical values during WebSocket initialization. Preserve the existing
-    one-client broker and unsupported-setting behavior.
-  validation: >-
-    Python compilation, frontend typecheck and diff whitespace checks passed.
-    Ten focused Adapter tests passed, including plugin config persistence,
-    platform scoping, broker timing, unsolicited client updates, and WebSocket
-    binary transport. No live TS/Native reconnect or
-    multi-setting runtime acceptance was run.
-  remaining: >-
-    Native still needs per-setting application support beyond Physics; values
-    for unsupported keys remain canonical and are retried on a compatible
-    client. The TS local settings window now emits canonical updates, but live
-    Web-to-TS/Native reconnect verification remains pending.
+  decision: Adapter plugin configuration owns the canonical desktop runtime settings snapshot per platform instance. The Web
+    control page edits that snapshot; connected TS or Native clients apply it through the existing desktop settings query
+    protocol. A first connected client is imported into the snapshot, and later client reconnects reapply the saved values.
+    Client local storage is an application cache, not the source of truth.
+  scope: Persist successful desktop setting responses under desktop_runtime_settings, merge the persisted snapshot into offline
+    Web control responses, migrate the first connected client's values, and replay canonical values during WebSocket initialization.
+    Preserve the existing one-client broker and unsupported-setting behavior.
+  validation: Python compilation, frontend typecheck and diff whitespace checks passed. Ten focused Adapter tests passed,
+    including plugin config persistence, platform scoping, broker timing, unsolicited client updates, and WebSocket binary
+    transport. No live TS/Native reconnect or multi-setting runtime acceptance was run.
+  remaining: Native still needs per-setting application support beyond Physics; values for unsupported keys remain canonical
+    and are retried on a compatible client. The TS local settings window now emits canonical updates, but live Web-to-TS/Native
+    reconnect verification remains pending.
 native_settings_ambient_and_view_20261112:
   date: '2026-11-12'
   class: feature
   risk: medium
   status: source_updated_pending_native_runtime_acceptance
-  scope: >-
-    Extend the Native desktop settings broker consumer with
-    live2d_ambient_motion_enabled, model_view_scale/model_view_offset_x/y, and
-    motion_engine_intensity_scale.
-    Keep the shared Adapter/Web configuration source and existing Physics
-    behavior; disable only new random Idle starts and apply view transforms
-    relative to the model's loaded layout.
-  validation: >-
-    Render-core Release build, runtime-core protocol smoke, focused Adapter
-    settings tests, frontend typecheck, Python compilation, and diff
-    whitespace checks passed. Live Web-to-Native setting roundtrip and visible
-    motion acceptance remain pending.
-  remaining: >-
-    Complete live Native settings acceptance, including microphone/device input
-    and Spout, after paired Adapter and device runs.
+  scope: Extend the Native desktop settings broker consumer with live2d_ambient_motion_enabled, model_view_scale/model_view_offset_x/y,
+    and motion_engine_intensity_scale. Keep the shared Adapter/Web configuration source and existing Physics behavior; disable
+    only new random Idle starts and apply view transforms relative to the model's loaded layout.
+  validation: Render-core Release build, runtime-core protocol smoke, focused Adapter settings tests, frontend typecheck,
+    Python compilation, and diff whitespace checks passed. Live Web-to-Native setting roundtrip and visible motion acceptance
+    remain pending.
+  remaining: Complete live Native settings acceptance, including microphone/device input and Spout, after paired Adapter and
+    device runs.
 native_settings_speech_volume_20261112:
   date: '2026-11-12'
   class: feature
   risk: medium
   status: source_updated_locally_validated_pending_native_runtime_acceptance
-  scope: >-
-    Add the shared Web desktop setting speech_volume to Native SettingsController
-    and apply it to both complete WAV and OLV PCM waveOut outputs, including
-    currently open devices and subsequent playback.
-  validation: >-
-    Render-core Release build, all three CTest smoke targets, frontend typecheck,
-    and diff whitespace checks pass. No real waveOut volume perception or live
-    Web-to-Native setting roundtrip has been completed.
-  remaining: >-
-    Complete live Web-to-Native settings and audio-device acceptance.
+  scope: Add the shared Web desktop setting speech_volume to Native SettingsController and apply it to both complete WAV and
+    OLV PCM waveOut outputs, including currently open devices and subsequent playback.
+  validation: Render-core Release build, all three CTest smoke targets, frontend typecheck, and diff whitespace checks pass.
+    No real waveOut volume perception or live Web-to-Native setting roundtrip has been completed.
+  remaining: Complete live Web-to-Native settings and audio-device acceptance.
 native_settings_microphone_device_20261112:
   date: '2026-11-12'
   class: feature
   risk: medium
   status: source_updated_locally_validated_pending_native_runtime_acceptance
-  scope: >-
-    Add the shared Web desktop setting microphone_device to Native. Enumerate
-    WinMM capture devices as desktop setting options, use the selected device
-    or the Windows mapper for future starts, and restart an active microphone
-    stream when the selected device changes.
-  validation: >-
-    Render-core Release build, all three CTest smoke targets, frontend typecheck,
-    YAML parsing, and diff whitespace checks pass. Physical WinMM device
-    enumeration and live Web-to-Native selection acceptance remain pending.
-  remaining: >-
-    Complete live settings roundtrip and desktop device acceptance, including
-    a real capture device switch.
+  scope: Add the shared Web desktop setting microphone_device to Native. Enumerate WinMM capture devices as desktop setting
+    options, use the selected device or the Windows mapper for future starts, and restart an active microphone stream when
+    the selected device changes.
+  validation: Render-core Release build, all three CTest smoke targets, frontend typecheck, YAML parsing, and diff whitespace
+    checks pass. Physical WinMM device enumeration and live Web-to-Native selection acceptance remain pending.
+  remaining: Complete live settings roundtrip and desktop device acceptance, including a real capture device switch.
 native_settings_cursor_gaze_20261112:
   date: '2026-11-12'
   class: feature
   risk: medium
   status: source_updated_locally_validated_pending_native_runtime_acceptance
-  scope: >-
-    Add the shared Web cursor-gaze settings to Native and use them in the
-    render-thread gaze poll, stationary threshold, dwell delay, and disable
-    path. Preserve the existing profile-driven gaze parameter bindings.
-  validation: >-
-    Render-core Release build and all three CTest smoke targets pass. Live
-    cursor interaction and Web-to-Native setting roundtrip remain unverified.
-  remaining: >-
-    Complete live settings and visible desktop behavior acceptance, including
-    a real Spout receiver.
+  scope: Add the shared Web cursor-gaze settings to Native and use them in the render-thread gaze poll, stationary threshold,
+    dwell delay, and disable path. Preserve the existing profile-driven gaze parameter bindings.
+  validation: Render-core Release build and all three CTest smoke targets pass. Live cursor interaction and Web-to-Native
+    setting roundtrip remain unverified.
+  remaining: Complete live settings and visible desktop behavior acceptance, including a real Spout receiver.
 native_settings_adapter_address_20261112:
   date: '2026-11-12'
   class: feature
   risk: medium
   status: source_updated_locally_validated_pending_native_runtime_acceptance
-  scope: >-
-    Make the canonical adapter_address setting update Native's stored reconnect
-    URL while preserving the current connection until an explicit reconnect.
-  validation: >-
-    Render-core Release build, all three CTest smoke targets, YAML parsing, and
-    diff whitespace checks pass. Live canonical replay and reconnect to a
-    non-default Adapter address remain unverified.
-  remaining: >-
-    Complete live settings and reconnect acceptance.
+  scope: Make the canonical adapter_address setting update Native's stored reconnect URL while preserving the current connection
+    until an explicit reconnect.
+  validation: Render-core Release build, all three CTest smoke targets, YAML parsing, and diff whitespace checks pass. Live
+    canonical replay and reconnect to a non-default Adapter address remain unverified.
+  remaining: Complete live settings and reconnect acceptance.
 native_spout_output_20261112:
   date: '2026-11-12'
   class: feature
   risk: high
   status: source_updated_locally_validated_pending_spout_device_acceptance
-  scope: >-
-    Add an optional Native Spout output path using the repository's existing
-    AG99liveSpoutSender.exe protocol. Read back the D3D11 RGBA backbuffer,
-    stream bounded frames on a worker thread, expose spout_enabled through the
-    unified desktop settings broker, and fail explicitly when the sender is
-    unavailable.
-  validation: >-
-    Render-core Release build, all three CTest smoke targets, Spout setting
-    failure boundary, automatic Release resource copy, YAML parsing, and diff
-    whitespace checks pass. No real Spout/OBS receiver or GPU readback
-    performance acceptance has been run.
-  remaining: >-
-    Run paired Spout/OBS acceptance on the target machine and verify frame
-    cadence, transparency, shutdown and sender recovery.
+  scope: Add an optional Native Spout output path using the repository's existing AG99liveSpoutSender.exe protocol. Read back
+    the D3D11 RGBA backbuffer, stream bounded frames on a worker thread, expose spout_enabled through the unified desktop
+    settings broker, and fail explicitly when the sender is unavailable.
+  validation: Render-core Release build, all three CTest smoke targets, Spout setting failure boundary, automatic Release
+    resource copy, YAML parsing, and diff whitespace checks pass. No real Spout/OBS receiver or GPU readback performance acceptance
+    has been run.
+  remaining: Run paired Spout/OBS acceptance on the target machine and verify frame cadence, transparency, shutdown and sender
+    recovery.
 native_v1_code_completion_audit_20261112:
   date: '2026-11-12'
   class: release
   risk: high
   status: code_complete_pending_live_acceptance
-  scope: >-
-    Audit the Native V1 desktop implementation after the architecture and
-    settings slices: unified Adapter-owned settings, coordinator/playback
-    ledger, motion compiler/scheduler subset, model/Cubism path, audio WAV/OLV
-    path, microphone capture, Host/tray/input, Adapter reconnect, and optional
-    Spout output.
-  validation: >-
-    Current source has no known code-level blocker in the V1 stable path.
-    Release render-core build, CTest settings/motion/protocol smoke, frontend
-    renderer/WebSDK/Node typechecks, YAML parsing, diff checks, automatic Spout
-    resource copy, and a real Native host process/window startup observation
-    all pass. Full TypeScript PerformanceSchedule/compiler equivalence remains
+  scope: 'Audit the Native V1 desktop implementation after the architecture and settings slices: unified Adapter-owned settings,
+    coordinator/playback ledger, motion compiler/scheduler subset, model/Cubism path, audio WAV/OLV path, microphone capture,
+    Host/tray/input, Adapter reconnect, and optional Spout output.'
+  validation: Current source has no known code-level blocker in the V1 stable path. Release render-core build, CTest settings/motion/protocol
+    smoke, frontend renderer/WebSDK/Node typechecks, YAML parsing, diff checks, automatic Spout resource copy, and a real
+    Native host process/window startup observation all pass. Full TypeScript PerformanceSchedule/compiler equivalence remains
     an explicit reference-implementation boundary, not a V1 replacement gate.
-  evidence_gap: >-
-    Live Web-to-Native canonical settings replay, reconnect/cancel/late-motion
-    behavior, visible model/Physics/motion quality, real waveOut and microphone
-    device behavior, Spout/OBS receiver output, and TS/C++ motion golden samples
-    still require paired runtime/device acceptance.
-  remaining: >-
-    Perform the paired live acceptance pass. Do not claim Native/TS behavioral
-    equivalence from source and smoke validation alone.
+  evidence_gap: Live Web-to-Native canonical settings replay, reconnect/cancel/late-motion behavior, visible model/Physics/motion
+    quality, real waveOut and microphone device behavior, Spout/OBS receiver output, and TS/C++ motion golden samples still
+    require paired runtime/device acceptance.
+  remaining: Perform the paired live acceptance pass. Do not claim Native/TS behavioral equivalence from source and smoke
+    validation alone.
 native_live_host_window_smoke_20261112:
   date: '2026-11-12'
   class: validation
   risk: high
   status: native_process_and_window_observed_pending_visual_device_acceptance
-  scope: >-
-    Launch the current Release ag99-render-host with the Mk6 model and startup
-    text against the local Adapter, confirm the Native process remains
-    responsive and creates the expected render window, then close the test
-    process.
-  validation: >-
-    Release host process 64452 started successfully, remained responsive, and
-    exposed the window title AG99live Native Render Core before controlled
-    shutdown. This proves host startup/window creation only; no screenshot,
-    visual motion, audio-device or settings roundtrip evidence was collected.
-  remaining: >-
-    Capture a real visible model frame and complete paired Adapter, audio,
-    motion, reconnect and settings acceptance.
+  scope: Launch the current Release ag99-render-host with the Mk6 model and startup text against the local Adapter, confirm
+    the Native process remains responsive and creates the expected render window, then close the test process.
+  validation: Release host process 64452 started successfully, remained responsive, and exposed the window title AG99live
+    Native Render Core before controlled shutdown. This proves host startup/window creation only; no screenshot, visual motion,
+    audio-device or settings roundtrip evidence was collected.
+  remaining: Capture a real visible model frame and complete paired Adapter, audio, motion, reconnect and settings acceptance.
 native_runtime_architecture_redesign_20261112:
   date: '2026-11-12'
   class: architecture
   risk: high
   status: architecture_migration_complete_pending_live_acceptance
-  decision: >-
-    Stop adding Native capabilities directly to render-core/src/main.cpp. The
-    target architecture separates runtime-core protocol parsing,
-    NativeRuntimeCoordinator, SettingsController, pure MotionCompiler and
-    MotionScheduler, ParameterMixer, NativeModel, AudioRuntime and NativeHost.
-    The render thread owns Cubism state; the audio worker owns waveOut and the
-    audio clock; the network thread only produces typed events. Adapter remains
-    the sole persistent desktop-settings owner.
-  scope: >-
-    Add the overall C++ architecture proposal and migration order. Phase 1
-    extracts the settings controller, and Phase 2 moves the runtime coordinator
-    implementation out of main.cpp behind typed callbacks and services,
-    Phase 3 separates the motion compiler after golden samples, and later
-    phases split audio and host. No algorithm rewrite, second Adapter client,
-    second playback clock, or immediate broad refactor is included.
-  validation: >-
-    Proposal and phase status are recorded in
-    docs/02-设计文档/16-C++原生运行时整体架构重设计.md and indexed from
-    docs/README.md. Phase 1 adds
-    render-core/include/ag99/native/settings_controller.hpp and its source,
-    moves Native setting parsing/range/format logic out of NativeModel, and
-    preserves the existing Release build and protocol behavior. Phase 2 adds
-    render-core/include/ag99/native/runtime_coordinator.hpp with shared
-    segment-clock/terminal types, a single callback contract, and typed
-    RuntimeCoordinatorServices. The in-process RuntimeBridge boundary is now
-    NativeRuntimeCoordinator, implemented in
-    render-core/src/native_runtime_coordinator.cpp. WinMM microphone capture
-    and PCM uplink live in MicrophoneCapture, complete WAV and OLV PCM waveOut
-    sinks live in audio_runtime.cpp, and the typed Turn/Segment/OLV playback
-    ledger lives in playback_ledger.hpp. Phase 3 moves motion plan types to
-    motion_types.hpp, JSON validation helpers to json_utils.cpp, track-point
-    and axis relation-graph parsing to motion_compiler.cpp, and bounded /
-    spring scheduling math to motion_scheduler.cpp. Track time evaluation and
-    active/pending/terminal motion lifecycle are in motion_scheduler.hpp/cpp;
-    CompileMotionPlan and ParseParameterPlan are in
-    motion_compiler.cpp with typed contexts; NativeModel only supplies the
-    profile, intensity snapshot, parameter descriptors, and Cubism writes.
-    Audio clock, RMS, speech signal, playback lifecycle, PCM queues, playback
-    ack queue, and current audio identity now live in AudioRuntime. NativeHost
-    owns main-window creation, Win32 window procedure, tray menu, input
-    controls, and input window message posting. NativeModel/Cubism model
-    ownership now lives in native_model.cpp with typed services. main.cpp is
-    reduced to startup, D3D surface, and message-loop assembly. Release build,
-    all three CTest smoke targets, diff checks, frontend typecheck, and the ten
-    focused Adapter runtime tests pass.
-  remaining: >-
-    Code-level architecture migration is complete. Remaining evidence gaps are
-    live Web-to-Native reconnect, motion golden samples, visible model output,
-    audio-device timing, interruption, and reconnect acceptance.
+  decision: Stop adding Native capabilities directly to render-core/src/main.cpp. The target architecture separates runtime-core
+    protocol parsing, NativeRuntimeCoordinator, SettingsController, pure MotionCompiler and MotionScheduler, ParameterMixer,
+    NativeModel, AudioRuntime and NativeHost. The render thread owns Cubism state; the audio worker owns waveOut and the audio
+    clock; the network thread only produces typed events. Adapter remains the sole persistent desktop-settings owner.
+  scope: Add the overall C++ architecture proposal and migration order. Phase 1 extracts the settings controller, and Phase
+    2 moves the runtime coordinator implementation out of main.cpp behind typed callbacks and services, Phase 3 separates
+    the motion compiler after golden samples, and later phases split audio and host. No algorithm rewrite, second Adapter
+    client, second playback clock, or immediate broad refactor is included.
+  validation: Proposal and phase status are recorded in docs/02-设计文档/16-C++原生运行时整体架构重设计.md and indexed from docs/README.md.
+    Phase 1 adds render-core/include/ag99/native/settings_controller.hpp and its source, moves Native setting parsing/range/format
+    logic out of NativeModel, and preserves the existing Release build and protocol behavior. Phase 2 adds render-core/include/ag99/native/runtime_coordinator.hpp
+    with shared segment-clock/terminal types, a single callback contract, and typed RuntimeCoordinatorServices. The in-process
+    RuntimeBridge boundary is now NativeRuntimeCoordinator, implemented in render-core/src/native_runtime_coordinator.cpp.
+    WinMM microphone capture and PCM uplink live in MicrophoneCapture, complete WAV and OLV PCM waveOut sinks live in audio_runtime.cpp,
+    and the typed Turn/Segment/OLV playback ledger lives in playback_ledger.hpp. Phase 3 moves motion plan types to motion_types.hpp,
+    JSON validation helpers to json_utils.cpp, track-point and axis relation-graph parsing to motion_compiler.cpp, and bounded
+    / spring scheduling math to motion_scheduler.cpp. Track time evaluation and active/pending/terminal motion lifecycle are
+    in motion_scheduler.hpp/cpp; CompileMotionPlan and ParseParameterPlan are in motion_compiler.cpp with typed contexts;
+    NativeModel only supplies the profile, intensity snapshot, parameter descriptors, and Cubism writes. Audio clock, RMS,
+    speech signal, playback lifecycle, PCM queues, playback ack queue, and current audio identity now live in AudioRuntime.
+    NativeHost owns main-window creation, Win32 window procedure, tray menu, input controls, and input window message posting.
+    NativeModel/Cubism model ownership now lives in native_model.cpp with typed services. main.cpp is reduced to startup,
+    D3D surface, and message-loop assembly. Release build, all three CTest smoke targets, diff checks, frontend typecheck,
+    and the ten focused Adapter runtime tests pass.
+  remaining: Code-level architecture migration is complete. Remaining evidence gaps are live Web-to-Native reconnect, motion
+    golden samples, visible model output, audio-device timing, interruption, and reconnect acceptance.
 typescript_runtime_architecture_convergence_20261112:
   date: '2026-11-12'
   class: refactor
   risk: high
   status: source_implemented_pending_live_acceptance
-  decision: >-
-    Keep TypeScript as the continuous development implementation. Centralize
-    Live2D access behind Live2dRuntimePort, share SegmentIdentity and Sink/Turn
-    terminal predicates, and make canonical desktop settings replay an explicit
-    readiness handshake before desktop features start.
-  scope: >-
-    Refactor Live2D callers, preview/audio/gaze composition, Timeline and motion
-    identity keys, Adapter readiness state, and the desktop settings completion
-    protocol. Preserve existing playback behavior and do not touch concurrent
-    Native runtime work.
-  validation: >-
-    Frontend renderer, WebSDK and Node typechecks passed. Adapter Python
-    compilation, protocol schema manifest validation, two focused runtime test
-    files (14 tests), and diff whitespace checks passed. The existing frontend
-    test-project compilation remains blocked by pre-existing broad strict-mode
-    errors outside this change.
-  remaining: >-
-    Real Electron, AstrBot, TTS, model switching, reconnect, and Live2D model
-    acceptance are still required. Further splitting of useAdapterConnection,
-    usePetDesktopRuntime, and SessionStore should wait for that runtime check.
-architecture_boundary_followup_20261112:
-  date: '2026-11-12'
-  class: refactor
-  risk: high
-  status: source_updated_pending_review_and_live_acceptance
-  decision: >-
-    Keep the Native audio queue private to AudioRuntime and expose a narrow
-    queue facade to the coordinator. Keep the Cubism model dependent on typed
-    audio callbacks, and route all TS Electron preload access through
-    DesktopHostPort.
-  scope: >-
-    Add shared Native segment types, AudioRuntime queue operations, coordinator
-    queue migration, NativeModel audio port callbacks, and the TS desktop host
-    port. Preserve concurrent Native edits and do not rewrite the remaining
-    large orchestration modules in one pass.
-  validation: >-
-    Frontend renderer/WebSDK/Node typechecks passed. Render-core Release build
-    and all three CTest smoke targets passed. No live Electron, Native reconnect,
-    or visible Live2D acceptance was run.
-  remaining: >-
-    Split the remaining NativeRuntimeCoordinator playback/transport logic and
-    TS composition roots in follow-up slices after reviewing this boundary
-    change against the current Native working tree.
-  progress: >-
-    Added NativeTransport as the WebSocket owner, removed the static NativeHost
-    instance lookup, and introduced an explicit TurnPlaybackSessionPort for the
-    TS composition layers. Render-core Release build, CTest smoke, frontend
-    typecheck, and diff checks remain green.
+  decision: Keep TypeScript as the continuous development implementation. Centralize Live2D access behind Live2dRuntimePort,
+    share SegmentIdentity and Sink/Turn terminal predicates, and make canonical desktop settings replay an explicit readiness
+    handshake before desktop features start.
+  scope: Refactor Live2D callers, preview/audio/gaze composition, Timeline and motion identity keys, Adapter readiness state,
+    and the desktop settings completion protocol. Preserve existing playback behavior and do not touch concurrent Native runtime
+    work.
+  validation: Frontend renderer, WebSDK and Node typechecks passed. Adapter Python compilation, protocol schema manifest validation,
+    two focused runtime test files (14 tests), and diff whitespace checks passed. The existing frontend test-project compilation
+    remains blocked by pre-existing broad strict-mode errors outside this change.
+  remaining: Real Electron, AstrBot, TTS, model switching, reconnect, and Live2D model acceptance are still required. Further
+    splitting of useAdapterConnection, usePetDesktopRuntime, and SessionStore should wait for that runtime check.
 architecture_boundary_followup_20261113:
   date: '2026-11-13'
   class: refactor
   risk: high
   status: source_reviewed_ready_for_live_acceptance
-  decision: >-
-    Keep NativeRuntimeCoordinator as the protocol/ledger coordinator while
-    NativePlaybackRuntime owns the audio worker, NativeInputRuntime owns
-    microphone capture lifecycle, and NativeTransport owns the low-level
-    WebSocket client. Keep the TypeScript desktop root split into a foundation
-    composition module plus application orchestration.
-  scope: >-
-    Extract Native playback execution and input capture boundaries, narrow
-    RuntimeCoordinatorServices, add the TypeScript desktop runtime foundation,
-    and extend the explicit SessionStore port to incremental stream writes.
-    Preserve existing behavior and concurrent Native user changes.
-  validation: >-
-    Render-core Release build and all three CTest smoke targets passed after
-    the Native extraction. Frontend renderer, WebSDK, and Node typechecks passed
-    after the composition and SessionStore port changes.
-  remaining: >-
-    Live Electron/AstrBot/Native reconnect, visible model, device timing,
-    Spout/OBS output, and interruption acceptance remain. The current code is
-    the stable checkpoint for real testing; further splitting should wait for
-    evidence from that run.
+  decision: Keep NativeRuntimeCoordinator as the protocol/ledger coordinator while NativePlaybackRuntime owns the audio worker,
+    NativeInputRuntime owns microphone capture lifecycle, and NativeTransport owns the low-level WebSocket client. Keep the
+    TypeScript desktop root split into a foundation composition module plus application orchestration.
+  scope: Extract Native playback execution and input capture boundaries, narrow RuntimeCoordinatorServices, add the TypeScript
+    desktop runtime foundation, and extend the explicit SessionStore port to incremental stream writes. Preserve existing
+    behavior and concurrent Native user changes.
+  validation: Render-core Release build and all three CTest smoke targets passed after the Native extraction. Frontend renderer,
+    WebSDK, and Node typechecks passed after the composition and SessionStore port changes.
+  remaining: Live Electron/AstrBot/Native reconnect, visible model, device timing, Spout/OBS output, and interruption acceptance
+    remain. The current code is the stable checkpoint for real testing; further splitting should wait for evidence from that
+    run.
