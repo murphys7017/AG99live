@@ -21,9 +21,18 @@ def verify_cmake_version_source(path: Path) -> None:
     project_pattern = re.compile(
         r"project\([^\n]*VERSION\s+\$\{AG99_PRODUCT_VERSION\}"
     )
-    if source_pattern.search(text) is None or project_pattern.search(text) is None:
+    semantic_guard_pattern = re.compile(
+        r"if\(NOT\s+AG99_PRODUCT_VERSION\s+MATCHES\s+"
+        r'"\^\[0-9\]\+\\\\\.\[0-9\]\+\\\\\.\[0-9\]\+\$"\)'
+    )
+    if (
+        source_pattern.search(text) is None
+        or project_pattern.search(text) is None
+        or semantic_guard_pattern.search(text) is None
+    ):
         raise SystemExit(
-            f"CMake project version is not bound to the root VERSION in {path}."
+            "CMake project version must read and semantically validate the root "
+            f"VERSION in {path}."
         )
 
 

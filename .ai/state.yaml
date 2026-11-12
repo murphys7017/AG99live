@@ -95,6 +95,17 @@ architecture:
       - adapter_address
       - spout_enabled
 
+  versioning:
+    source_of_truth: VERSION
+    current: 1.0.0
+    required_match:
+      - root package.json
+      - frontend package.json and package-lock.json
+      - Adapter metadata.yaml
+      - Runtime Core and Render Core CMake project versions
+    sync_command: python scripts/sync_version.py
+    check_command: python scripts/check_version_consistency.py
+
   invariants:
     - one Adapter WebSocket client per Adapter instance
     - one Native transport owner
@@ -115,6 +126,7 @@ architecture:
       - render-core Release build
       - 3/3 CTest smoke targets
       - frontend renderer/WebSDK/Node typecheck
+      - product version consistency check across Desktop, Adapter and CMake
       - YAML parse and git diff check
       - Native host process/window startup observation
 
@@ -139,5 +151,6 @@ test_commands:
   native_build: cmake --build render-core/build --config Release --parallel 4
   native_tests: ctest --test-dir render-core/build -C Release --output-on-failure
   frontend_types: npm run typecheck
+  version_check: python scripts/check_version_consistency.py
   state_parse: python -c "import yaml; yaml.safe_load(open('.ai/state.yaml', encoding='utf-8'))"
   whitespace: git diff --check

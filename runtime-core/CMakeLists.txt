@@ -2,6 +2,10 @@ cmake_minimum_required(VERSION 3.25)
 
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../VERSION" AG99_PRODUCT_VERSION)
 string(STRIP "${AG99_PRODUCT_VERSION}" AG99_PRODUCT_VERSION)
+if(NOT AG99_PRODUCT_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
+  message(FATAL_ERROR
+    "Root VERSION must contain a semantic product version (x.y.z), got: ${AG99_PRODUCT_VERSION}")
+endif()
 project(ag99_runtime_core VERSION ${AG99_PRODUCT_VERSION} LANGUAGES CXX)
 
 include(FetchContent)

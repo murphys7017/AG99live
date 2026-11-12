@@ -13,6 +13,8 @@ AG99 是以桌面体验为中心的智能体主应用；AG99live 是 AG99 的身
 | AG99live 产品 | 根目录 `VERSION` | `1.0.0` |
 | Desktop 前端 | `package.json`、`frontend/package.json` | `1.0.0` |
 | AG99live Adapter | `astrbot_plugin_ag99live_adapter/metadata.yaml` | `1.0.0` |
+| Runtime Core | `runtime-core/CMakeLists.txt` 读取根目录 `VERSION` | `1.0.0` |
+| Render Core | `render-core/CMakeLists.txt` 读取根目录 `VERSION` | `1.0.0` |
 | WebSocket 协议封套 | `astrbot_plugin_ag99live_adapter/protocol/schema_manifest.json` | `v2` |
 | 完整输出段 | Schema manifest | `output.segment.v6` |
 | 动作意图 | Schema manifest | `engine.motion_intent.v4` |
