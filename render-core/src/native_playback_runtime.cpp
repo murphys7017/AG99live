@@ -144,6 +144,18 @@ struct NativePlaybackRuntime::Impl {
           job.frame.sample_rate,
           job.frame.channels,
           state);
+      if (state.audio_clock_started) {
+        NativeSegmentClock clock;
+        clock.turn_id = identity.turn_id;
+        clock.message_id = identity.segment_message_id;
+        clock.sequence = static_cast<std::int64_t>(identity.segment_index);
+        clock.started_at_seconds = state.audio_start_seconds;
+        clock.duration_seconds = static_cast<double>(state.samples)
+            / std::max<std::uint32_t>(1, state.sample_rate);
+        clock.audio_serial = state.audio_serial;
+        clock.generation = job.generation;
+        services_.update_incremental_audio_clock(identity, clock);
+      }
       auto& credit = state.credits[identity.persona_result_id];
       credit.first += job.frame.pcm.size();
       credit.second += 1;
@@ -234,7 +246,15 @@ struct NativePlaybackRuntime::Impl {
                 / std::max<std::uint32_t>(1, state.sample_rate));
     services_.audio_runtime->ResetAudioRms();
     services_.complete_incremental_audio(job.identity, clock, true, {});
-    state = IncrementalWorkerState{};
+    state.active = false;
+    state.identity = {};
+    state.samples = 0;
+    state.sample_rate = 0;
+    state.audio_serial = 0;
+    state.audio_clock_started = false;
+    state.audio_start_seconds = 0.0;
+    state.rms_sum = 0.0;
+    state.rms_samples = 0;
   }
 
   void AudioWorkerLoop() {

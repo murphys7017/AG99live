@@ -159,6 +159,11 @@ public:
                 std::string_view reason) {
               CompleteIncrementalAudio(identity, std::move(clock), success, reason);
             },
+            .update_incremental_audio_clock = [this](
+                const ag99::runtime::IncrementalIdentity& identity,
+                const NativeSegmentClock& clock) {
+              UpdateIncrementalAudioClock(identity, clock);
+            },
             .is_segment_playback_open = [this](const AudioQueueItem& item) {
               return IsSegmentPlaybackOpen(item);
             },
@@ -894,6 +899,20 @@ private:
       MaybeDispatchIncrementalMotion(identity);
     }
     QueuePlaybackAcknowledgement(identity.turn_id);
+  }
+
+  void UpdateIncrementalAudioClock(
+      const ag99::runtime::IncrementalIdentity& identity,
+      const NativeSegmentClock& clock) {
+    std::scoped_lock lock(playback_mutex_);
+    const auto turn = playback_turns_.find(identity.turn_id);
+    if (turn == playback_turns_.end()
+        || turn->second.generation != clock.generation) {
+      return;
+    }
+    if (auto* segment = FindIncrementalSegmentLocked(identity, turn->second)) {
+      segment->clock = clock;
+    }
   }
 
   void RetireTurn(const std::string& turn_id, bool cancel_playback) {

@@ -44,6 +44,9 @@ struct NativePlaybackRuntimeServices {
       NativeSegmentClock,
       bool,
       std::string_view)> complete_incremental_audio;
+  std::function<void(
+      const ag99::runtime::IncrementalIdentity&,
+      const NativeSegmentClock&)> update_incremental_audio_clock;
   std::function<bool(const AudioQueueItem&)> is_segment_playback_open;
   std::function<std::optional<ag99::runtime::MotionSlot>(
       const AudioQueueItem&, const NativeSegmentClock&)>
