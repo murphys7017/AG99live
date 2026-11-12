@@ -335,9 +335,11 @@ waveOut 输出上应用同一倍率；它不改变 RMS/lip-sync 分析输入。
 
 ### 7.1 当前状态
 
-`astrbot_plugin_ag99live_adapter/protocol/schema_manifest.json` 是版本唯一权威，共 10 个 schema，`protocol_version = v2`：
+`astrbot_plugin_ag99live_adapter/protocol/schema_manifest.json` 是版本唯一权威，当前登记 13 个 schema，`protocol_version = v2`：
 
 ```
+pre_action = olv.pre_action.v1                  audio_input = olv.audio_input.v1
+audio_credit = olv.audio_credit.v1
 model_info = live2d_scan.v4                    motion_intent = engine.motion_intent.v4
 motion_tuning_sample = ag99.motion_tuning_sample.v2
 output_segment = output.segment.v6              parameter_plan = engine.parameter_plan.v3

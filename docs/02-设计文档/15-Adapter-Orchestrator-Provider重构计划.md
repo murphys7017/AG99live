@@ -2,7 +2,7 @@
 
 > **状态：设计/计划**
 >
-> **复核日期：2026-11-02**
+> **复核日期：2026-11-13**
 >
 > **当前进度：Phase 0/1 的中立契约、黄金事件序列、AstrBot callback bridge、TTS/Motion 生命周期事件适配和首条文本/Avatar Output 垂直切片已建立；Interaction Orchestrator 已承接 Provider 事件订阅、STT/TTS/Motion 主动请求入口、前端协议解析与 Turn 行为分发、活动事件 owner、连接清理、AstrBot event stop 调度、SegmentAssembler 与增量输出入口、Turn/Segment 事实快照、Conversation 事实回流、取消注册、terminal registry、终态提交/回滚、`control.turn_started`/`control.turn_finished` 和 timing 状态；`output.segment.v6` 与 `control.synth_finished` 已统一通过 AvatarOutputPort 发布。AstrBot TTS/Motion/STT capability binding、生命周期事实转换、Provider Registry 和 Provider 组合根已收敛到 `adapters/astrbot`。Phase 5 已增加 DSH ConversationProvider、共享文本段装配器、DSH runtime composition 和本地 Harness JSON-RPC 进程桥；设置中可选择 AstrBot 或 DSH。工具/代码执行通过独立 Execution 事件流和 `output.execution` 发送，不再伪装成普通对话文本。AstrBot 4.14.6 的本地 Adapter import 和平台/hook 聚焦测试已通过；真实 DSH profile、TTS/Live2D 联合运行和目标环境验收仍待接入。**
 >
@@ -70,6 +70,19 @@ WebSocketTransport
 | `protocol/` | 已提供 envelope、二进制帧、版本和输出段 DTO | 继续作为跨 Adapter 和前端的稳定边界 |
 
 当前代码中没有发现活动的 `<@anim>` 生成或解析路径。生产动作已经走结构化 Motion 和 `output.segment.v6`；残留样例属于文本清洗/透传回归测试，历史审计文档中的旧描述不作为当前实现规范。
+
+### DSH 当前实现范围
+
+当前生产组合中的 DSH 是 **Conversation-only 实验路径**：
+
+- `platform_adapter.py` 根据配置选择 `DshHarnessConversationProvider` 或 AstrBot Conversation Provider；
+- 两者都接入同一个 `InteractionOrchestrator`、`OutputSegmentCoordinator`、`AvatarOutputPort` 和前端播放链；
+- DSH 当前只替换 Conversation Provider，STT、TTS 和 Motion 仍来自 AstrBot capability bridge；
+- DSH 事件通过 `TextConversationEventAssembler` 汇入现有输出段队列，不创建第二个 WebSocket、Turn、PlaybackTimeline 或播放时钟；
+- `DshConversationRuntime` 已提供中立组合辅助，但当前平台生产路径仍在 `platform_adapter.py` 中手工完成相同装配。
+- `conversation.platform` 只在适配器创建时选择 Provider；运行中的实例不会热切换，修改后需要重启适配器（通常随 AstrBot 一起重启）才能生效。
+
+因此，当前 DSH 模式不能视为独立的 AG99live 对话运行时。后续若要支持独立 DSH，应先把 Provider 选择和组合移出平台类，再分别定义 DSH 的 STT、TTS、Motion 能力来源；在此之前保持它作为 Conversation-only 实验路径。
 
 ## 3. 不变的架构约束
 

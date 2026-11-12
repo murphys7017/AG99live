@@ -1,153 +1,200 @@
+<div align="center">
+
 # AG99live
 
-**让 AG99 在桌面上成为可见、可听、会回应的 Live2D 角色。**
+### 点燃自己的历史。
 
-AG99live 是 AG99 的桌面表现端：加载 Live2D 模型，播放语音，并同步字幕与动作；对话、人设和模型调用由 [AG99](https://github.com/murphys7017/AG99) 提供。
+**让 AI 不只是说话，也能通过表情、动作与陪伴回应你。**
 
-Windows · Electron · Live2D Cubism · Spout2
+一个基于 **Live2D** 的开源 AI 虚拟陪伴桌宠项目。  
+以 **实时语义动作生成** 为核心，结合角色状态、语音交互与开放插件生态，探索更自然、更有连续性的长期陪伴。
 
-当前冻结版本为 **AG99live 1.0.0**。Desktop、Adapter、Runtime Core 和 Render Core 共享此产品版本；协议与动作模型版本独立记录。
+[**下载桌面版**](https://github.com/murphys7017/AG99live/releases) · [**观看演示**](https://space.bilibili.com/41761329/lists?sid=8438550) · [**动作模型**](https://huggingface.co/AkiPolaris777/live2d-expression-model-gguf) · [**开发文档**](docs/README.md)
 
-[下载桌面版](https://github.com/murphys7017/AG99live/releases) · [快速开始](#快速开始) · [功能介绍](#体验亮点) · [实机演示视频](https://space.bilibili.com/41761329/lists?sid=8438550) · [OBS 设置](#在-obs-中使用) · [开发文档](docs/README.md)
+Windows · Live2D Cubism · AI Motion Generation · AstrBot Ecosystem
 
-![AG99live 桌面陪伴场景插画](docs/assets/readme/readme-cover.jpg)
+![AG99live 项目封面](docs/assets/readme/readme-cover.jpg)
 
-## 体验亮点
+</div>
 
-### 聊天时，角色会跟着回复一起表现
+## 让虚拟角色真正参与交流
 
-语音播放时，Live2D 角色可以同步做口型、转头、视线和姿态变化。动作可按回复分段关联，让长回复也能边说边表现，而不是等语音播完再统一摆一个姿势。每个模型通过自己的 Profile 映射动作，不必为每个模型重写一套动作语义。
+很多 AI 桌宠已经能够聊天、说话和播放 Live2D 动画，但角色的表现往往仍然依赖关键词、预设表情或固定动作。
 
-动作表现会沿着同一条回复时间线进入：Persona 或动作 Provider 先产生语义动作，桌面端再进行动作预算、重复方向抑制、段间连续性衔接和抢占释放。动作迟到时只在有限尾部窗口内接管，过期结果会被丢弃，不重播已经完成的语音。当前重点仍是通过真实 AG99、TTS、Electron 和 Live2D 运行观察首帧延迟、段间余势与打断收势。
+**AG99live 想做得更进一步：让 AI 不仅决定“说什么”，也参与决定“怎样表达”。**
 
-### 没有新消息时，也有基础的待机表现
+我们希望角色能够理解对话语义，结合当前交互与角色状态，实时组织表情、视线、头部姿态等动作；在一次次相处中，通过记忆和共同经历形成更连贯的陪伴体验。
 
-桌面端提供可配置的待机动作、呼吸、眨眼、鼠标凝视和思考随动。这些本地表现不需要为每次眨眼或光标移动调用大模型；实际效果取决于设置和 Live2D 模型是否提供相应参数。
 
-### 回复还在生成，角色可以先有反应
+![AG99live 实时交互演示](docs/assets/readme/AG99live-readme-preview.gif)
 
-可选的轻量预动作在有效语音转写后提前请求一个简短反应；正式回复开始后，再由实际动作平滑接管。增量流式路径也可以逐步交付文本、音频和动作，让即时回复不必等整段内容全部完成。预动作、流式播放和真实设备间的完整效果仍需现场验收；当前增量流式覆盖即时回复，委派任务的最终结果仍走完整交付。细节见[流式实施计划](docs/02-设计文档/12-OLV全生命周期流式实施计划.md)与[轻量预动作说明](docs/02-设计文档/14-轻量预动作Prompt与接入.md)。
+> 上方为项目演示片段。完整演示请前往 [Bilibili](https://space.bilibili.com/41761329/lists?sid=8438550) 观看。动作生成的实际效果会随模型、配置和运行环境有所不同。
 
-### 桌面互动遵循对话优先
+## 核心特色
 
-可选的桌面观察只用数学方法判断画面是否发生大范围变化，不做 OCR、不分析画面内容，也不把截图发给模型。返回互动依据 Windows 锁屏/休眠与输入恢复形成机会。两项功能默认关闭；事件交给 AG99 的主动策略决定是否回应，不保证每次都说话，实机误报、漏报和语音表现仍待验收。规则见[桌面变化观察计划](docs/desktop-observation-plan.md)和[返回电脑互动计划](docs/desktop-return-plan.md)。
+### 01 · AI 实时生成 Live2D 动作
 
-### 从桌面表演延伸到直播和外设
+**不再只是“识别关键词 → 播放固定动画”。**
 
-Spout2 可把透明 Live2D 画面交给 OBS。桌面端也能把 Bilibili 弹幕按设置合并后送入 AG99；需要小屏展示时，可将桌宠头部画面裁切并推送到 ESP32。弹幕接入不是完整的直播演出调度；ESP32 输出需要兼容设备并单独配置。
+AG99live 将角色行为分成两个相互协作的部分：
 
-## 和 AG99 生态协作
+- **语义动作生成**：大语言模型或专门训练的轻量模型，根据对话内容、上下文和可用的角色状态生成动作意图。
+- **动作执行与表现**：AG99live 根据 Live2D Profile 将语义动作映射到模型参数，完成校验、限幅、连续衔接与播放。
 
-AG99 管理对话、人设、记忆、工具和主动策略；AG99live 负责桌面输入、即时反应、Live2D 表现、音频播放和设备连接。两者协作复用同一条回复和播放链路，不各自维护一套会话或动作播放器。
+因此，角色可以根据交流内容动态组合表情、视线、姿态等表现，而不必只在几段提前制作的动画之间切换。长回复也可以按语音片段逐步呈现动作，让角色在说话的同时表达。
 
-安装 NeuroBrain 后，按 Persona 分段生成的动作可以读取当前情绪与行为状态，作为动作选择的辅助信息；它不是动作命令，也不是基础对话的依赖。后台被动动作属于实验功能，默认关闭。
+这也是我们持续投入最多精力的方向：**让动作符合语义、随交流自然变化，并保持连续性。**
 
-Profile Editor 用于校准不同 Live2D 模型，Motion Lab 用于检查动作从输入到执行的过程。仓库还附有独立的 VTube Studio 数据录制工具，供开发者采集和检查原始参数；它不控制 VTube Studio，也不参与桌宠的实时动作播放。
+### 02 · 专为动作生成训练的轻量模型
+
+为了让语义动作生成更适合实时交互，我们训练了面向 Live2D 表现的轻量语言模型。它生成结构化动作意图，具体参数映射与实时播放仍由 AG99live 的动作系统负责。
+
+**当前公开模型：** [Live2D Expression Model — GGUF](https://huggingface.co/AkiPolaris777/live2d-expression-model-gguf)
+
+模型作为可选的动作生成能力接入。模型文件、量化规格与推理配置请以 Hugging Face 仓库说明为准。
+
+### 03 · 有连续状态的角色表现
+
+角色不应该只在收到消息的一瞬间“活过来”。
+
+AG99live 提供呼吸、眨眼、待机动作、鼠标凝视和思考随动等本地表现，同时探索让对话动作参考角色状态、交互上下文与情绪信息。
+
+这些基础行为不需要每一次都调用大模型；而在真正交流时，状态信息又可以参与更复杂的动作决策。
+
+我们想实现的不是持续不断的夸张动作，而是**在不同情境下有节奏、有连贯性的表达**。
+
+### 04 · 更接近自然对话的实时响应
+
+对于桌面陪伴，等待时间和表达时序同样重要。即使模型回答得很好，如果声音、字幕与动作各自滞后，互动也会显得生硬。
+
+AG99live 围绕实时体验设计了流式回复、分段语音播放、字幕与动作同步、轻量预反应以及交互打断处理等机制。目标是让角色尽早给出反馈，并在整个回答过程中保持可见、可听的连续表现。
+
+实际延迟会受后端模型、TTS、设备与网络等因素影响。
+
+### 05 · 长期记忆与共同经历
+
+**陪伴不只是连续聊天，更是能够记得过去。**
+
+AG99live 起源于 AstrBot 插件生态，可以与长期记忆、自学习、知识库等社区插件协同工作，让角色在后续交流中参考过去的对话与共同经历。
+
+这些能力并非全部由 AG99live 自己实现：后端与插件提供记忆、学习和工具能力，AG99live 则专注于把交流内容转化为自然的语音与角色表现。
+
+我们希望这些逐渐积累的经历，最终能让每个人的虚拟伙伴拥有不同的互动历史。
+
+### 06 · 主动互动，而不只是等待消息
+
+除用户主动发起的对话外，AG99live 也在探索基于桌面事件的互动机会，例如用户返回电脑、桌面活动出现变化时，让后端策略判断是否适合回应。
+
+这类机制以**避免打扰、尊重对话节奏**为前提，而不是每检测到一次变化就强制让角色说话。相关能力属于可选或持续实验的功能。
+
+## 开放生态：AG99live × AG99 × AstrBot
+
+AG99live 最初从 AstrBot 插件发展而来，并保持与兼容的 AstrBot 环境及社区插件协作的设计。
+
+为了进一步优化响应速度、流式处理和桌面交互，我们还开发了配套后端 **[AG99](https://github.com/murphys7017/AG99)**：它基于 AstrBot 源码修改扩展，保留插件兼容方向，并针对 AG99live 的实时交互需求进行优化。
+
+| 组件 | 主要职责 |
+| --- | --- |
+| **AG99live** | Live2D 渲染、语音与字幕播放、动作生成链路、桌面互动和设备连接 |
+| **[AG99](https://github.com/murphys7017/AG99)** | 对话、人设、模型调用、插件、工具与实时消息协作 |
+| **AstrBot 社区插件** | 根据需要扩展长期记忆、自学习、知识库等功能 |
+
+AG99live 可以配合兼容的 AstrBot 后端使用。**若希望获得项目当前更完整的实时交互体验，推荐搭配 AG99。**
+
+## 更多玩法
+
+除了日常桌面陪伴，AG99live 还提供了面向创作与开发的扩展能力：
+
+- **多 Live2D 模型适配**：通过 Profile Editor 配置和校准模型参数映射。
+- **直播与录制**：借助 Spout2 向 OBS 输出透明 Live2D 画面；支持将 Bilibili 弹幕接入后端交互链路。
+- **动作实验**：使用 Motion Lab 检查和调试语义动作从生成到执行的过程。
+- **外部显示**：探索将角色画面输出到 ESP32 等兼容设备。
+
+不同功能可能需要单独安装或配置，详情参阅 [项目文档](docs/README.md)。
 
 ## 界面预览
 
+**桌面交互界面**
+
 ![AG99live 桌面运行界面](docs/assets/readme/QQ20260722-021900.png)
+
+**Live2D Profile Editor**
 
 ![AG99live Profile Editor](docs/assets/readme/QQ20260722-021910.png)
 
-## 工作方式
-
-AG99 负责对话与语音生成，Adapter 把回复交给桌面端。AG99live 在同一播放时间线上协调音频、字幕和动作，再由 Live2D runtime 渲染角色。
-
-~~~text
-用户输入
-  -> AG99：生成对话与 TTS
-  -> Adapter：接收回复，并校验 Persona 或独立 Provider 生成的动作
-  -> 播放引擎：同步语音、字幕与动作
-  -> Live2D 画面 -> 可选 Spout2 / OBS
-~~~
-
-完整协议、动作生成和播放时序见[文档中心](docs/README.md)。
-
-当前动作表现链路、资源边界和后续优化优先级见[当前实现与交互表现基线](docs/01-架构与结构/10-当前实现与交互表现基线.md)。
-
-## 动作生成模型成果与训练计划
-
-当前已有一版可供 AG99live 运行时实验使用的公开动作生成 LoRA 模型：[AkiPolaris777/ag99live-live2d-expression-model](https://huggingface.co/AkiPolaris777/ag99live-live2d-expression-model)。模型基于 `XHToken/Spark-X2.6-1.7B-Base`，当前推荐版本为 `v7-20261102`。按照当前运行时契约，模型输出必须使用 `motion_steps[].axis_values` 表达动作步骤，不直接生成模型相关的底层参数；具体参数映射、校验、限幅和播放仍由 AG99live 的 Adapter、Semantic Axis Profile 和 ModelEngine 完成。
-
-模型卡和版本标签记录了输入 Prompt、输出 JSON、训练继承关系与加载方式。当前成果已经进入 AG99live 动作 Provider 的可选实验路径，真实不同模型、语音段、打断和动作质量仍需在完整桌面链路中持续验收。
-
-模型统一命名为 **AG99 Live2D 表情动作生成模型**。每一轮训练都必须在上一轮已验证的 adapter 基础上追加训练，并在模型卡中记录基础版本、训练日期、训练数据范围和验证结果；禁止把基础模型重新训练后继续沿用旧版本名称。
-
-发布物使用统一标识：`ag99-live2d-expression-YYYYMMDD-rNN`。同一标识用于本地输出目录、Ollama 标签和 Hugging Face 仓库后缀；稳定版与实验版在 README 中明确区分。每个 Hugging Face 模型卡必须说明 GitHub 项目地址、输入 Prompt、输出 JSON 结构、适用的 AG99live 运行时、基础模型、训练继承关系和已知限制。
-
-动作模型采用连续动作协议：训练输出统一为 `motion_steps[].axis_values`，1 个稳定姿态也必须使用 1 个 step，连续动作使用 2–4 个按播放顺序排列的 step。输出必须通过当前 Live2D 模型的 `value_range` 校验，并在真实播放链路中保持可执行。历史等级数据只在离线导出训练集时转换，不进入运行时协议。
-
-真实运行数据会持续进入 Motion Lab，并用于统计每个轴的真实取值、出现频率、轴之间的共现关系和动作序列中的变化。训练集会优先使用这些真实动作标签；数据质量较弱的样本可以作为弱监督，但会保留 Provider 来源和标签来源，避免把模型自己的回退结果误当成高质量教师答案。
-
-后续训练会继续积累 `motion_steps`、往返动作、先后动作和真实参数转移数据，统一提升同一个连续动作协议的覆盖率。Live2D 的语义轴 Profile 仍负责每个模型的 `value_range`、反转关系、多参数绑定和安全校验；运行时不再做等级到参数的协议转换。
-
-训练结果以真实输入、协议合法率、轴覆盖率、动作形状匹配和 Live2D 播放表现共同评估。训练 loss 只能作为训练过程指标，不能单独代表动作质量或泛化能力。
-
-当模型达到稳定可用的阶段，会整理可分享的 Adapter、量化模型和配置说明。需要这个动作模型的开发者可以直接获取对应版本；训练过程中的真实对话、运行日志和 Motion Lab 原始数据不会随模型包公开。
+更多动态效果：[查看 Bilibili 实机演示](https://space.bilibili.com/41761329/lists?sid=8438550)。
 
 ## 快速开始
 
-### 前置条件
+AG99live 当前主要面向 **Windows 10 / 11**。你还需要一个已配置对话模型与 TTS 的 AG99 或兼容 AstrBot 后端，以及适配当前 runtime 的 Live2D 模型。
 
-- Windows 10 或 11。
-- 已运行并配置好对话模型与 TTS 的 AG99 环境。
-- 与当前 Live2D runtime 兼容的模型。
-- Node.js 20 或更高版本仅在从源码运行桌面端时需要。
+1. 从 [GitHub](https://github.com/murphys7017/AG99live) 下载 AG99live 源码。
+2. 将仓库中的 `astrbot_plugin_ag99live_adapter/` 安装到后端插件目录，并在后端的 Python 环境中安装该插件 `requirements.txt` 所列的依赖。
+3. 启动 AG99 / AstrBot，启用 **AG99live Adapter**。
+4. 进入`frontend`文件夹运行命令`npm run dev`启动 AG99live，在设置中连接 Adapter，同步并选择 Live2D 模型。(目前是这样，程序包正在开发优化中)
+5. 配置语音、动作模型或其他可选插件，开始与角色交流。
 
-### 使用发布版
+Adapter 默认监听本机回环地址：
 
-1. 从 [GitHub Releases](https://github.com/murphys7017/AG99live/releases) 下载并安装 AG99live 桌面版。
-2. 从本仓库或配套源码包取得 <code>astrbot_plugin_ag99live_adapter/</code>，复制到 AG99 的插件目录，并使用 AG99 的 Python 环境安装该插件的 <code>requirements.txt</code>。
-3. 启动 AG99，在插件管理中启用 **AG99live Adapter**。
-4. 启动 AG99live，在设置中连接 Adapter、同步模型并选择要使用的 Live2D 模型。
-
-Adapter 默认只监听本机回环地址：
-
-| 服务 | 默认地址 | 用途 |
+| 服务 | 地址 | 用途 |
 | --- | --- | --- |
-| WebSocket | <code>ws://127.0.0.1:12396</code> | 桌面端与 AG99 之间的输入、回复和控制消息 |
-| HTTP | <code>http://127.0.0.1:12397</code> | 模型、图片和缓存媒体 |
-
-Adapter 运行设置可在 AG99 WebUI 的 **AG99live 控制台**管理；麦克风、快捷键和设备等本机设置由桌面端管理。登录仍由 AG99 处理。
+| WebSocket | `ws://127.0.0.1:12396` | 交互消息与控制 |
+| HTTP | `http://127.0.0.1:12397` | 模型与媒体资源 |
 
 ### 从源码运行
 
-~~~powershell
+从仓库根目录执行（需要 Node.js 20 或更高版本）：
+
+```powershell
 cd frontend
 npm install
 npm run dev
-~~~
+```
 
-开发桌面端仍需安装并启用 AG99live Adapter。首次启动后，在桌面设置中连接 Adapter 并选择 Live2D 模型。
+桌面端启动后仍需要连接正在运行的 Adapter。更多配置与开发说明见 [文档中心](docs/README.md)。
 
-## 在 OBS 中使用
+### OBS 透明画面输出
 
-1. 启动 AG99live。
-2. 在 OBS 添加 **Spout2 Capture**，选择 <code>AG99live.Live2D</code>。
-3. 使用**预乘 Alpha**合成模式。
+在 OBS 中添加 **Spout2 Capture**，选择 `AG99live.Live2D`，并使用**预乘 Alpha**合成模式。若 Spout2 Sender 未成功启动，桌面端仍可独立运行，但不会输出 Spout 画面。
 
-如果 Spout2 Sender 无法启动，桌面端仍可运行，但不会提供 Spout 输出。自行构建 Sender 时，在 Windows 安装 Visual Studio Build Tools（MSVC x64），然后运行：
+## 开发进展
 
-~~~powershell
-cd frontend
-npm run build:spout-sender
-~~~
+AG99live 正在推进首个正式版本的收尾工作。当前关注的重点包括：
 
-## 开发与状态
+- 让实时生成的动作更符合语义，减少重复和突兀切换。
+- 优化语音、字幕与动作的时序衔接和交互延迟。
+- 完善状态系统、主动互动与不同 Live2D 模型的适配。
 
-从仓库根目录运行协议检查，再检查前端类型：
+**下一阶段，我们计划探索基于 C++ 的高性能实现**，以降低当前桌面运行环境的资源占用，并改善渲染与交互效率。这属于后续方向，并非现有版本已完成的功能。
 
-~~~powershell
-python scripts/check_protocol_schema_manifest.py
-python scripts/sync_version.py
-python scripts/check_version_consistency.py
-cd frontend
-npm run typecheck
-~~~
+## 名字的由来
 
-这些检查不替代 AG99、TTS、桌面端、声卡和 Live2D 的完整联机验收。当前实现范围与待验收项目见[当前状态与验收边界](docs/01-架构与结构/06-当前状态与验收边界.md)。
+**AG99** 的名称灵感来自 SCP 基金会中文分部作品 [《SCP-CN-1559 — 青鸟》](https://scp-wiki-cn.wikidot.com/scp-cn-1559) 中的 **AG-99（异学九十九）** 相关设定。
 
-## 第三方资源
+> 点燃自己的历史。
 
-仓库中的 Live2D 模型、贴图、动作、预览图和第三方 SDK 可能采用不同许可。使用或再分发前，请检查对应资源目录中的授权文件。
+我们以这句话表达项目的愿景：一个虚拟伙伴不应只有当前这一次回答，也应该能够借由持续的交流与共同经历，逐渐积累属于彼此的历史。
+
+我们想做的，不只是一个“会聊天的 Live2D”，而是一个**能够用自己的方式表达、并陪伴你经历时间的虚拟角色**。
+
+## 相关项目与资源
+
+- [AG99 — 配套 AI 后端](https://github.com/murphys7017/AG99)
+- [AstrBot — 开源智能体与插件生态](https://github.com/AstrBotDevs/AstrBot)
+- [Live2D Expression Model — GGUF](https://huggingface.co/AkiPolaris777/live2d-expression-model-gguf)
+- [AG99live 开发文档](docs/README.md)
+- [AG99live Bilibili 演示](https://space.bilibili.com/41761329/lists?sid=8438550)
+
+## 资源与许可
+
+仓库中的 Live2D 模型、贴图、动作、预览素材及第三方 SDK 可能分别适用不同许可。使用或再分发前，请检查各资源的授权文件。SCP-CN-1559 为第三方创作作品，项目命名灵感不代表与原作者或 SCP 基金会存在官方关联。
+
+---
+
+<div align="center">
+
+**AG99live · 点燃自己的历史**
+
+*让 AI 不止于对话。*
+
+</div>
