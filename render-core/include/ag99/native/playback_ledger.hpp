@@ -1,9 +1,6 @@
 #pragma once
 
 #include <cstdint>
-#include <condition_variable>
-#include <deque>
-#include <mutex>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -96,21 +93,6 @@ enum class PlaybackAckSendResult {
   Sent,
   Canceled,
   Failed,
-};
-
-struct AudioQueueState {
-  std::mutex audio_queue_mutex;
-  std::mutex audio_join_mutex;
-  std::condition_variable audio_queue_condition;
-  std::deque<AudioQueueItem> audio_queue;
-  std::deque<IncrementalAudioJob> incremental_audio_queue;
-  std::size_t incremental_audio_queued_bytes = 0;
-  std::size_t incremental_audio_queued_frames = 0;
-  std::deque<PlaybackAcknowledgementItem> playback_ack_queue;
-  std::string current_audio_turn_id;
-  std::string current_audio_message_id;
-  std::uint64_t current_audio_generation = 0;
-  std::uint64_t current_audio_serial = 0;
 };
 
 }  // namespace ag99::native

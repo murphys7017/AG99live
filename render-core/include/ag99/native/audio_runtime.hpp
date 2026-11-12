@@ -23,6 +23,8 @@
 
 namespace ag99::native {
 
+struct AudioQueueState;
+
 struct AudioQueueWork {
   std::optional<PlaybackAcknowledgementItem> acknowledgement;
   std::optional<IncrementalAudioJob> incremental;
@@ -162,8 +164,6 @@ public:
                                   std::string_view message_id,
                                   std::uint64_t generation,
                                   std::uint64_t serial);
-
-  NativeAudioOutput& audio_output() noexcept { return audio_output_; }
 
 private:
   NativeAudioOutput audio_output_;
