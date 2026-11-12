@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from "vue";
+import { desktopHostPort } from "../desktop-bridge/desktopHostPort.js";
 import { useDesktopBridge } from "../desktop-bridge/useDesktopBridge";
 
 const bridge = useDesktopBridge();
@@ -80,7 +81,7 @@ function handleApproveLatestAssistantSegment(): void {
 }
 
 function showContextMenu(event: MouseEvent): void {
-  window.ag99desktop?.showContextMenu({
+  desktopHostPort.getApi()?.showContextMenu({
     x: event.clientX,
     y: event.clientY,
     screenX: event.screenX,
@@ -113,7 +114,7 @@ function finishWindowDrag(): void {
 
   activePointerId.value = null;
   isDragging.value = false;
-  window.ag99desktop?.endWindowDrag();
+  desktopHostPort.getApi()?.endWindowDrag();
 }
 
 function handlePointerDown(event: PointerEvent): void {
@@ -130,7 +131,7 @@ function handlePointerDown(event: PointerEvent): void {
 
   activePointerId.value = event.pointerId;
   isDragging.value = true;
-  window.ag99desktop?.startWindowDrag(event.screenX, event.screenY);
+  desktopHostPort.getApi()?.startWindowDrag(event.screenX, event.screenY);
   (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
   event.preventDefault();
 }

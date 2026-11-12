@@ -6,6 +6,7 @@ import type {
   DesktopPttHookStatus,
 } from "../types/desktop";
 import { matchesPttKeyBinding } from "../adapter-connection/core/pttKeyBinding.js";
+import { desktopHostPort } from "../desktop-bridge/desktopHostPort.js";
 
 export interface PushToTalkAdapterPort {
   readonly state: {
@@ -126,7 +127,7 @@ export function usePushToTalkController(adapter: PushToTalkAdapterPort): PushToT
     if (!payload) {
       return;
     }
-    window.ag99desktop?.reportPttEventAck?.({
+    desktopHostPort.getApi()?.reportPttEventAck?.({
       eventId: payload.eventId,
       kind: payload.kind,
       status,
@@ -159,7 +160,7 @@ export function usePushToTalkController(adapter: PushToTalkAdapterPort): PushToT
   }
 
   function installPttIpcListeners(): void {
-    const onIpc = window.ag99desktop?.onIpc as
+    const onIpc = desktopHostPort.getApi()?.onIpc as
       | ((channel: string, callback: (payload: DesktopPttEventPayload) => void) => () => void)
       | undefined;
     detachPttIpcKeyDown = onIpc?.(
@@ -212,15 +213,15 @@ export function usePushToTalkController(adapter: PushToTalkAdapterPort): PushToT
     installPttKeyboardListeners();
     // Exactly one source is admitted. Foreground keys remain usable if the
     // native hook is unavailable or the binding has no native keycode.
-    if (window.ag99desktop?.onIpc) {
+    if (desktopHostPort.getApi()?.onIpc) {
       useGlobalPtt = true;
       installPttIpcListeners();
-      detachPttHookStatus = window.ag99desktop.onPttHookStatus?.((status) => {
+      detachPttHookStatus = desktopHostPort.getApi()!.onPttHookStatus?.((status) => {
         hookStatusGeneration += 1;
         selectKeyboardSource(status);
       });
       const generation = hookStatusGeneration;
-      void window.ag99desktop.getPttHookStatus?.().then((status) => {
+      void desktopHostPort.getApi()!.getPttHookStatus?.().then((status) => {
         if (generation === hookStatusGeneration) selectKeyboardSource(status);
       }).catch((error: unknown) => {
         console.warn("[PTT] could not read global hook status", error);

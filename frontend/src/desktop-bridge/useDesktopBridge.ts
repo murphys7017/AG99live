@@ -32,6 +32,7 @@ import {
   safeNormalizeSnapshot,
 } from "./snapshot.js";
 import { cloneJson } from "../utils/cloneJson.js";
+import { desktopHostPort } from "./desktopHostPort.js";
 
 const RUNTIME_CHANNEL_NAME = "ag99live.desktop.runtime";
 const PROFILE_AUTHORING_CHANNEL_NAME = "ag99live.desktop.profile_authoring";
@@ -277,8 +278,8 @@ export function createDesktopBridge(): DesktopBridgeInstance {
 
   function sendRuntimeBridgeMessage(payload: RuntimeBridgeMessage): void {
     const nextPayload = cloneJson(payload);
-    if (window.ag99desktop) {
-      window.ag99desktop.sendRuntimeBridgeMessage(nextPayload);
+    if (desktopHostPort.getApi()) {
+      desktopHostPort.getApi()!.sendRuntimeBridgeMessage(nextPayload);
       return;
     }
     runtimeChannel?.postMessage(nextPayload);
@@ -358,8 +359,8 @@ export function createDesktopBridge(): DesktopBridgeInstance {
       }
     };
 
-    if (window.ag99desktop) {
-      removeRuntimeBridgeListener = window.ag99desktop.onRuntimeBridgeMessage(
+    if (desktopHostPort.getApi()) {
+      removeRuntimeBridgeListener = desktopHostPort.getApi()!.onRuntimeBridgeMessage(
         (payload: unknown) => handleRuntimeBridgeMessage(payload as RuntimeBridgeMessage),
       );
     } else if ("BroadcastChannel" in window) {
@@ -402,7 +403,7 @@ export function createDesktopBridge(): DesktopBridgeInstance {
       );
     }
 
-    const useRuntimeStorageFallback = !window.ag99desktop && !("BroadcastChannel" in window);
+    const useRuntimeStorageFallback = !desktopHostPort.getApi() && !("BroadcastChannel" in window);
     const useProfileStorageFallback = !("BroadcastChannel" in window);
     if (useRuntimeStorageFallback || useProfileStorageFallback) {
       const onStorage = (event: StorageEvent) => {
@@ -444,7 +445,7 @@ export function createDesktopBridge(): DesktopBridgeInstance {
       };
     }
 
-    const detachWindowState = window.ag99desktop?.onWindowState((nextState: DesktopWindowVisibilityState) => {
+    const detachWindowState = desktopHostPort.getApi()?.onWindowState((nextState: DesktopWindowVisibilityState) => {
       state.windowState = nextState;
     });
     removeWindowStateListener = () => {

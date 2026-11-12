@@ -65,10 +65,14 @@ add_executable(ag99-render-host WIN32
   src/motion_compiler.cpp
   src/motion_scheduler.cpp
   src/microphone_capture.cpp
+  src/native_input_runtime.cpp
   src/audio_runtime.cpp
+  src/native_playback_runtime.cpp
   src/native_runtime_coordinator.cpp
+  src/native_transport.cpp
   src/native_host.cpp
   src/native_model.cpp
+  src/spout_output.cpp
   src/audio_source.cpp
   src/audio_wav.cpp
   src/speech_signal.cpp
@@ -91,6 +95,7 @@ if(AG99_RENDER_BUILD_TESTS)
   add_executable(ag99-native-settings-smoke
     tests/settings_controller_smoke.cpp
     src/settings_controller.cpp
+    src/spout_output.cpp
   )
   target_include_directories(ag99-native-settings-smoke PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
@@ -174,3 +179,15 @@ target_link_libraries(ag99-render-host PRIVATE
   imm32
   winmm
 )
+
+set(AG99_SPOUT_RESOURCE_DIR
+  "${CMAKE_CURRENT_SOURCE_DIR}/../frontend/resources/spout")
+if(EXISTS "${AG99_SPOUT_RESOURCE_DIR}/AG99liveSpoutSender.exe")
+  add_custom_command(TARGET ag99-render-host POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+      "$<TARGET_FILE_DIR:ag99-render-host>/spout"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+      "${AG99_SPOUT_RESOURCE_DIR}"
+      "$<TARGET_FILE_DIR:ag99-render-host>/spout"
+    COMMENT "Copying optional Native Spout sender resources")
+endif()

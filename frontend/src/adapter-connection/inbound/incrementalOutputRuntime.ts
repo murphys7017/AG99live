@@ -1,4 +1,4 @@
-import type { useTurnPlaybackSessionStore } from "../../turn-playback/useTurnPlaybackSessionStore.js";
+import type { TurnPlaybackSessionPort } from "../../turn-playback/sessionStorePort.js";
 import type { IncrementalIdentity } from "../../turn-playback/incrementalSegments.js";
 import type { PcmTimelineStream } from "../../playback-timeline/pcmTimelinePlayback.js";
 import type { IncrementalOutputEvent } from "./incrementalOutputProtocol.js";
@@ -29,7 +29,7 @@ type AudioJob = { id: IncrementalIdentity } & (
 
 /** Wire admission is synchronous. One bounded worker owns actual PCM playback. */
 export function createIncrementalOutputRuntime(options: {
-  getStore(): ReturnType<typeof useTurnPlaybackSessionStore>;
+  getStore(): TurnPlaybackSessionPort;
   currentTurnId(): string | null;
   openPcm(turnId: string, messageId: string): Promise<PcmTimelineStream>;
   displayText(text: string, turnId: string): void;

@@ -155,15 +155,15 @@ export function useSettingsWindow() {
   }
 
   function toggleHistoryWindow(): void {
-    window.ag99desktop?.toggleAuxWindow("history");
+    desktopHostPort.getApi()?.toggleAuxWindow("history");
   }
 
   function toggleActionLabWindow(): void {
-    window.ag99desktop?.toggleAuxWindow("action_lab");
+    desktopHostPort.getApi()?.toggleAuxWindow("action_lab");
   }
 
   function toggleSubtitleWindow(): void {
-    window.ag99desktop?.toggleSubtitleWindow();
+    desktopHostPort.getApi()?.toggleSubtitleWindow();
   }
 
   function requestModelProjectionSync(): void {
@@ -171,7 +171,7 @@ export function useSettingsWindow() {
   }
 
   async function saveWebControlUrl(): Promise<boolean> {
-    const desktop = window.ag99desktop;
+    const desktop = desktopHostPort.getApi();
     if (!desktop || webControlBusy.value) return false;
     webControlBusy.value = true;
     webControlStatus.value = "";
@@ -192,7 +192,7 @@ export function useSettingsWindow() {
     if (webControlBusy.value) return;
     if (webControlUrl.value !== savedWebControlUrl && !await saveWebControlUrl()) return;
     try {
-      if (await window.ag99desktop?.openWebControlPanel()) return;
+      if (await desktopHostPort.getApi()?.openWebControlPanel()) return;
     } catch {
       // The native entry reports browser-launch failures; keep the local status useful too.
     }
@@ -201,7 +201,7 @@ export function useSettingsWindow() {
 
   onMounted(async () => {
     try {
-      const currentUrl = await window.ag99desktop?.getWebControlUrl();
+      const currentUrl = await desktopHostPort.getApi()?.getWebControlUrl();
       if (currentUrl) {
         webControlUrl.value = currentUrl;
         savedWebControlUrl = currentUrl;
@@ -311,7 +311,7 @@ export function useSettingsWindow() {
 
   async function restartAsAdministrator(): Promise<void> {
     administratorRestartStatus.value = "正在请求管理员权限...";
-    const requested = await window.ag99desktop?.restartAsAdministrator?.();
+    const requested = await desktopHostPort.getApi()?.restartAsAdministrator?.();
     if (!requested) {
       administratorRestartStatus.value = "管理员重启请求失败，请手动右键应用并选择“以管理员身份运行”。";
     }
@@ -452,3 +452,4 @@ export function useSettingsWindow() {
     formatScale,
   };
 }
+import { desktopHostPort } from "../desktop-bridge/desktopHostPort.js";

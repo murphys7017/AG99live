@@ -3,7 +3,9 @@
 #include <d3d11.h>
 #include <windows.h>
 
+#include <cstdint>
 #include <memory>
+#include <vector>
 
 namespace ag99::live2d {
 
@@ -19,6 +21,7 @@ public:
   HRESULT Initialize(HWND window, UINT width, UINT height);
   HRESULT BeginFrame() noexcept;
   HRESULT Present(UINT sync_interval = 1, UINT flags = 0) noexcept;
+  HRESULT ReadbackRgba(std::vector<std::uint8_t>& output) noexcept;
   void Shutdown() noexcept;
 
   // Returned interfaces are borrowed and remain valid until Shutdown().

@@ -11,28 +11,10 @@
 #include <vector>
 
 #include "ag99/native/audio_runtime.hpp"
+#include "ag99/native/segment_types.hpp"
 #include "ag99/runtime/protocol.hpp"
 
 namespace ag99::native {
-
-// Render-host metadata shared by the audio and motion sides of one output
-// segment. It is intentionally outside the wire protocol: the adapter owns
-// protocol identities, while the coordinator owns local playback timing.
-struct NativeSegmentClock {
-  std::string turn_id;
-  std::string message_id;
-  std::int64_t sequence = 0;
-  double started_at_seconds = 0.0;
-  double duration_seconds = 0.0;
-  std::uint64_t audio_serial = 0;
-  std::uint64_t generation = 0;
-};
-
-struct NativeSegmentTerminal {
-  NativeSegmentClock clock;
-  bool success = false;
-  std::string reason;
-};
 
 // Host-facing callbacks are the only dependency from the runtime coordinator
 // into the model/render host. The coordinator never receives a JSON callback
@@ -66,23 +48,12 @@ struct RuntimeCoordinatorServices {
   std::function<void(bool)> set_feedback_approved;
   std::function<bool()> runtime_connected;
   std::function<void(bool)> set_runtime_connected;
-  std::function<void(float, double)> update_audio_level;
-  std::function<float(std::string_view)> speech_audio_gain;
   std::function<void()> reset_speech_signal;
   std::function<std::optional<AudioPlayback>(
       const std::string&, std::string&)> play_audio_url;
   std::function<void(std::optional<std::uint64_t>)> stop_current_audio;
   std::function<void()> stop_incremental_audio;
-  NativeAudioOutput* audio_output = nullptr;
-  NativePcmStreamOutput* incremental_audio_output = nullptr;
-  std::mutex* incremental_audio_output_mutex = nullptr;
-  std::atomic<double>* audio_end_seconds = nullptr;
-  std::atomic<double>* audio_start_seconds = nullptr;
-  std::atomic<float>* audio_level = nullptr;
-  std::atomic<std::uint64_t>* audio_serial = nullptr;
-  std::mutex* audio_signal_mutex = nullptr;
-  std::vector<float>* audio_rms = nullptr;
-  AudioQueueState* audio_queue = nullptr;
+  AudioRuntime* audio_runtime = nullptr;
 };
 
 class NativeRuntimeCoordinator final {

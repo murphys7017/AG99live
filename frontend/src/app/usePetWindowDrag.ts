@@ -52,7 +52,7 @@ export function usePetWindowDrag(): {
     activePointerId.value = null;
     isDragging.value = false;
     if (wasDragging) {
-      window.ag99desktop?.endWindowDrag();
+      desktopHostPort.getApi()?.endWindowDrag();
     }
     if (!hadPointer && !wasDragging) {
       return;
@@ -61,7 +61,7 @@ export function usePetWindowDrag(): {
       return;
     }
 
-    window.ag99desktop?.setIgnoreMouseEvents(true);
+    desktopHostPort.getApi()?.setIgnoreMouseEvents(true);
   }
 
   function handlePointerDown(event: PointerEvent): void {
@@ -98,9 +98,9 @@ export function usePetWindowDrag(): {
 
       setPetWindowPointerPending(false);
       setPetWindowDragging(true);
-      window.ag99desktop?.setIgnoreMouseEvents(false);
+    desktopHostPort.getApi()?.setIgnoreMouseEvents(false);
       isDragging.value = true;
-      window.ag99desktop?.startWindowDrag(event.screenX, event.screenY);
+      desktopHostPort.getApi()?.startWindowDrag(event.screenX, event.screenY);
     }
 
     event.preventDefault();
@@ -136,3 +136,4 @@ export function usePetWindowDrag(): {
     handlePointerCancel,
   };
 }
+import { desktopHostPort } from "../desktop-bridge/desktopHostPort.js";

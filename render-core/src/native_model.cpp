@@ -569,10 +569,10 @@ public:
     _model->UpdateMotion(delta_seconds);
     ApplyQueuedMotion(now);
     _model->ApplyDrag(services_.drag_x->load(), services_.drag_y->load());
-    services_.audio_runtime->UpdateAudioLevel(delta_seconds, now);
+      services_.audio.update_audio_level(delta_seconds, now);
     ApplyParameterFrame(
-        services_.audio_runtime->SpeechLipSyncIntensity(),
-        services_.audio_runtime->audio_end_seconds().load() > now,
+        services_.audio.speech_lip_sync_intensity(),
+        services_.audio.audio_end_seconds() > now,
         delta_seconds,
         now);
     _model->UpdatePhysicsAndPose(delta_seconds);
@@ -668,6 +668,11 @@ public:
       if (before.ambient_motion_enabled != after.ambient_motion_enabled
           && _model) {
         _model->SetAmbientMotionEnabled(after.ambient_motion_enabled);
+      }
+      if (std::abs(before.speech_volume - after.speech_volume) > 1e-9
+          && services_.audio.set_speech_volume) {
+        services_.audio.set_speech_volume(
+            static_cast<float>(after.speech_volume));
       }
     }
     return result;
@@ -778,6 +783,13 @@ public:
 
   void UpdateCursorGaze(
       HWND window) {
+    const auto& settings = _settings.Snapshot();
+    if (!settings.cursor_gaze_enabled) {
+      std::scoped_lock lock(_motion_mutex);
+      _interaction_gaze.reset();
+      _gaze_candidate_valid = false;
+      return;
+    }
     if (!window || !IsWindowVisible(window)) {
       return;
     }
@@ -785,7 +797,7 @@ public:
     if (now_ms < _next_cursor_poll_ms) {
       return;
     }
-    _next_cursor_poll_ms = now_ms + 100.0;
+    _next_cursor_poll_ms = now_ms + settings.cursor_gaze_poll_interval_ms;
 
     POINT cursor{};
     RECT bounds{};
@@ -802,7 +814,8 @@ public:
     std::scoped_lock lock(_motion_mutex);
     const bool moved = !_gaze_candidate_valid
         || std::hypot(cursor.x - _gaze_candidate_x,
-                      cursor.y - _gaze_candidate_y) > 14.0;
+                      cursor.y - _gaze_candidate_y)
+            > settings.cursor_gaze_stationary_distance_px;
     if (moved) {
       _gaze_candidate_valid = true;
       _gaze_candidate_x = cursor.x;
@@ -816,7 +829,7 @@ public:
 
     _gaze_candidate_x = cursor.x;
     _gaze_candidate_y = cursor.y;
-    if (now_ms - _gaze_candidate_since_ms < 450.0) {
+    if (now_ms - _gaze_candidate_since_ms < settings.cursor_gaze_dwell_ms) {
       return;
     }
     if (!_interaction_gaze) {
@@ -1239,7 +1252,7 @@ private:
               0.0f);
           frame_target += gesture * binding.modulation_amplitude
               * static_cast<float>(binding.modulation_direction)
-              * services_.audio_runtime->SpeechAudioGain(binding.axis_id);
+              * services_.audio.speech_audio_gain(binding.axis_id);
         }
         _frame_contributions.push_back(ParameterFrameContribution{
             binding.parameter_id,

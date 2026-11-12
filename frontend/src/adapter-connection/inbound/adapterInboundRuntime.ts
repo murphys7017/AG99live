@@ -25,13 +25,13 @@ import {
 import type { useAdapterHistory } from "../history/useAdapterHistory.js";
 import type { useAdapterMotionTuning } from "../motion-tuning/useAdapterMotionTuning.js";
 import type { ModelSyncInstance } from "../model-sync/useModelSync.js";
-import type { useTurnPlaybackSessionStore } from "../../turn-playback/useTurnPlaybackSessionStore.js";
+import type { TurnPlaybackSessionPort } from "../../turn-playback/sessionStorePort.js";
 
 export interface AdapterInboundRuntimeDeps {
   onIdleMotion?: (event: IdleMotionEvent) => void;
   onPreAction: (event: PreActionEvent) => void;
   state: AdapterConnectionState;
-  getSessionStore: () => ReturnType<typeof useTurnPlaybackSessionStore>;
+  getSessionStore: () => TurnPlaybackSessionPort;
   openPcmForTimelinePlayback(turnId: string, messageId: string): Promise<PcmTimelineStream>;
   displayIncrementalText(text: string, turnId: string): void;
   recordIncrementalText(text: string, turnId: string): void;

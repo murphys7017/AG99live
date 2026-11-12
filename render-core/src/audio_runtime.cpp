@@ -2,6 +2,7 @@
 #include <mmsystem.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <iostream>
 #include <utility>
@@ -10,6 +11,16 @@
 #include "ag99/native/playback_ledger.hpp"
 
 namespace ag99::native {
+
+namespace {
+
+DWORD VolumeWord(float volume) noexcept {
+  const auto normalized = std::clamp(volume, 0.0f, 1.0f);
+  const auto word = static_cast<DWORD>(std::lround(normalized * 0xffff));
+  return word | (word << 16);
+}
+
+}  // namespace
 
 AudioRuntime::AudioRuntime()
     : queue_(std::make_unique<AudioQueueState>()) {}
@@ -93,6 +104,36 @@ void AudioRuntime::StopIncrementalAudio() {
   audio_rms_.clear();
 }
 
+bool AudioRuntime::StartIncrementalAudioOutput(
+    std::uint32_t sample_rate, std::uint16_t channels) {
+  std::scoped_lock lock(incremental_audio_output_mutex_);
+  return incremental_audio_output_.Start(sample_rate, channels);
+}
+
+bool AudioRuntime::AppendIncrementalAudio(
+    std::span<const std::uint8_t> pcm) {
+  std::scoped_lock lock(incremental_audio_output_mutex_);
+  return incremental_audio_output_.Append(pcm);
+}
+
+bool AudioRuntime::DrainIncrementalAudio(std::chrono::milliseconds timeout) {
+  std::scoped_lock lock(incremental_audio_output_mutex_);
+  return incremental_audio_output_.WaitForDrain(timeout);
+}
+
+void AudioRuntime::SetSpeechVolume(float volume) noexcept {
+  const auto normalized = std::clamp(volume, 0.0f, 1.0f);
+  speech_volume_.store(normalized);
+  {
+    std::scoped_lock lock(audio_output_mutex_);
+    audio_output_.SetVolume(normalized);
+  }
+  {
+    std::scoped_lock lock(incremental_audio_output_mutex_);
+    incremental_audio_output_.SetVolume(normalized);
+  }
+}
+
 void AudioRuntime::UpdateAudioLevel(float delta_seconds, double now) {
   const double remaining = audio_end_seconds_.load() - now;
   float level = 0.0f;
@@ -123,6 +164,182 @@ float AudioRuntime::SpeechLipSyncIntensity() const {
 void AudioRuntime::ResetSpeechSignal() {
   speech_signal_.Reset();
 }
+
+void AudioRuntime::ResetAudioRms() {
+  std::scoped_lock lock(audio_signal_mutex_);
+  audio_rms_.clear();
+}
+
+void AudioRuntime::AppendAudioRms(float rms) {
+  std::scoped_lock lock(audio_signal_mutex_);
+  audio_rms_.push_back(rms);
+}
+
+void AudioRuntime::EnqueueSegment(AudioQueueItem item) {
+  {
+    std::scoped_lock lock(queue_->audio_queue_mutex);
+    queue_->audio_queue.push_back(std::move(item));
+  }
+  queue_->audio_queue_condition.notify_one();
+}
+
+bool AudioRuntime::EnqueueIncremental(
+    IncrementalAudioJob job,
+    std::size_t max_bytes,
+    std::size_t max_frames) {
+  {
+    std::scoped_lock lock(queue_->audio_queue_mutex);
+    const auto next_bytes = queue_->incremental_audio_queued_bytes
+        + job.frame.pcm.size();
+    const auto next_frames = queue_->incremental_audio_queued_frames + 1;
+    if (next_bytes > max_bytes
+        || next_frames > max_frames
+        || queue_->incremental_audio_queue.size() >= max_frames) {
+      return false;
+    }
+    queue_->incremental_audio_queued_bytes = next_bytes;
+    queue_->incremental_audio_queued_frames = next_frames;
+    queue_->incremental_audio_queue.push_back(std::move(job));
+  }
+  queue_->audio_queue_condition.notify_one();
+  return true;
+}
+
+void AudioRuntime::EnqueueAcknowledgement(PlaybackAcknowledgementItem item) {
+  {
+    std::scoped_lock lock(queue_->audio_queue_mutex);
+    queue_->playback_ack_queue.push_back(std::move(item));
+  }
+  queue_->audio_queue_condition.notify_one();
+}
+
+bool AudioRuntime::WaitAndTakeWork(
+    AudioQueueWork& work,
+    const std::function<bool()>& stop_requested) {
+  std::unique_lock lock(queue_->audio_queue_mutex);
+  queue_->audio_queue_condition.wait(lock, [&] {
+    return stop_requested()
+        || !queue_->playback_ack_queue.empty()
+        || !queue_->incremental_audio_queue.empty()
+        || !queue_->audio_queue.empty();
+  });
+  if (stop_requested()
+      && queue_->playback_ack_queue.empty()
+      && queue_->incremental_audio_queue.empty()
+      && queue_->audio_queue.empty()) {
+    return false;
+  }
+  work = {};
+  if (!queue_->playback_ack_queue.empty()) {
+    work.acknowledgement = std::move(queue_->playback_ack_queue.front());
+    queue_->playback_ack_queue.pop_front();
+  } else if (!queue_->incremental_audio_queue.empty()) {
+    work.incremental = std::move(queue_->incremental_audio_queue.front());
+    queue_->incremental_audio_queue.pop_front();
+    queue_->incremental_audio_queued_bytes -= work.incremental->frame.pcm.size();
+    queue_->incremental_audio_queued_frames -= 1;
+  } else if (!queue_->audio_queue.empty()) {
+    work.segment = std::move(queue_->audio_queue.front());
+    queue_->audio_queue.pop_front();
+  }
+  return true;
+}
+
+std::optional<std::uint64_t> AudioRuntime::ClearTurnQueues(
+    std::string_view turn_id) {
+  std::optional<std::uint64_t> audio_serial;
+  {
+    std::scoped_lock lock(queue_->audio_queue_mutex);
+    for (auto it = queue_->audio_queue.begin(); it != queue_->audio_queue.end();) {
+      if (it->turn_id == turn_id) {
+        it = queue_->audio_queue.erase(it);
+      } else {
+        ++it;
+      }
+    }
+    for (auto it = queue_->incremental_audio_queue.begin();
+         it != queue_->incremental_audio_queue.end();) {
+      if (it->identity.turn_id == turn_id) {
+        queue_->incremental_audio_queued_bytes -= it->frame.pcm.size();
+        queue_->incremental_audio_queued_frames -= 1;
+        it = queue_->incremental_audio_queue.erase(it);
+      } else {
+        ++it;
+      }
+    }
+    queue_->playback_ack_queue.erase(
+        std::remove_if(
+            queue_->playback_ack_queue.begin(),
+            queue_->playback_ack_queue.end(),
+            [&](const PlaybackAcknowledgementItem& item) {
+              return item.turn_id == turn_id;
+            }),
+        queue_->playback_ack_queue.end());
+    if (queue_->current_audio_turn_id == turn_id) {
+      audio_serial = queue_->current_audio_serial;
+      queue_->current_audio_turn_id.clear();
+      queue_->current_audio_message_id.clear();
+      queue_->current_audio_generation = 0;
+      queue_->current_audio_serial = 0;
+    }
+  }
+  queue_->audio_queue_condition.notify_one();
+  return audio_serial;
+}
+
+void AudioRuntime::ClearAllQueues() {
+  {
+    std::scoped_lock lock(queue_->audio_queue_mutex);
+    queue_->audio_queue.clear();
+    queue_->incremental_audio_queue.clear();
+    queue_->incremental_audio_queued_bytes = 0;
+    queue_->incremental_audio_queued_frames = 0;
+    queue_->playback_ack_queue.clear();
+    queue_->current_audio_turn_id.clear();
+    queue_->current_audio_message_id.clear();
+    queue_->current_audio_generation = 0;
+    queue_->current_audio_serial = 0;
+  }
+  queue_->audio_queue_condition.notify_all();
+}
+
+void AudioRuntime::NotifyQueueOne() noexcept {
+  queue_->audio_queue_condition.notify_one();
+}
+
+void AudioRuntime::NotifyQueueAll() noexcept {
+  queue_->audio_queue_condition.notify_all();
+}
+
+void AudioRuntime::SetCurrentAudio(
+    std::string turn_id,
+    std::string message_id,
+    std::uint64_t generation,
+    std::uint64_t serial) {
+  std::scoped_lock lock(queue_->audio_queue_mutex);
+  queue_->current_audio_turn_id = std::move(turn_id);
+  queue_->current_audio_message_id = std::move(message_id);
+  queue_->current_audio_generation = generation;
+  queue_->current_audio_serial = serial;
+}
+
+void AudioRuntime::ClearCurrentAudioIfMatches(
+    std::string_view turn_id,
+    std::string_view message_id,
+    std::uint64_t generation,
+    std::uint64_t serial) {
+  std::scoped_lock lock(queue_->audio_queue_mutex);
+  if (queue_->current_audio_turn_id == turn_id
+      && queue_->current_audio_message_id == message_id
+      && queue_->current_audio_generation == generation
+      && queue_->current_audio_serial == serial) {
+    queue_->current_audio_turn_id.clear();
+    queue_->current_audio_message_id.clear();
+    queue_->current_audio_generation = 0;
+    queue_->current_audio_serial = 0;
+  }
+}
+
 NativeAudioOutput::~NativeAudioOutput() {
   Stop();
 }
@@ -157,6 +374,7 @@ bool NativeAudioOutput::Start(
     handle_ = nullptr;
     return false;
   }
+  SetVolume(volume_);
 
   bytes_ = std::move(bytes);
   header_ = WAVEHDR{};
@@ -176,6 +394,13 @@ bool NativeAudioOutput::Start(
     return false;
   }
   return true;
+}
+
+void NativeAudioOutput::SetVolume(float volume) noexcept {
+  volume_ = std::clamp(volume, 0.0f, 1.0f);
+  if (handle_) {
+    waveOutSetVolume(handle_, VolumeWord(volume_));
+  }
 }
 
 void NativeAudioOutput::Stop() noexcept {
@@ -222,7 +447,16 @@ bool NativePcmStreamOutput::Start(
   }
   block_align_ = format.nBlockAlign;
   stopping_ = false;
+  SetVolume(volume_);
   return true;
+}
+
+void NativePcmStreamOutput::SetVolume(float volume) noexcept {
+  std::scoped_lock lock(mutex_);
+  volume_ = std::clamp(volume, 0.0f, 1.0f);
+  if (handle_) {
+    waveOutSetVolume(handle_, VolumeWord(volume_));
+  }
 }
 
 bool NativePcmStreamOutput::Append(std::span<const std::uint8_t> pcm) {

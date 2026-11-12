@@ -9,6 +9,7 @@ import type {
   BilibiliDanmakuMessage,
   BilibiliLiveSettings,
 } from "../types/bilibili-live.js";
+import { desktopHostPort } from "../desktop-bridge/desktopHostPort.js";
 
 const DEFAULT_HOST = {
   host: "broadcastlv.chat.bilibili.com",
@@ -247,7 +248,7 @@ export class BilibiliLiveClient {
 }
 
 async function fetchDanmakuInfo(settings: BilibiliLiveSettings): Promise<BilibiliDanmakuInfo> {
-  const bridge = window.ag99desktop?.getBilibiliDanmakuInfo;
+  const bridge = desktopHostPort.getApi()?.getBilibiliDanmakuInfo;
   if (!bridge) {
     throw new Error("Bilibili live bridge is unavailable.");
   }

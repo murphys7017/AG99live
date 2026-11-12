@@ -9,7 +9,7 @@ export function reportLatencyStage(
   monotonicMs: number = performance.now(),
 ): void {
   if (typeof window === "undefined") return;
-  window.ag99desktop?.reportLatencyEvent?.({
+  desktopHostPort.getApi()?.reportLatencyEvent?.({
     type: "pipeline_stage",
     stage,
     turnId,
@@ -20,3 +20,4 @@ export function reportLatencyStage(
     timestampEpochMs: Date.now(),
   });
 }
+import { desktopHostPort } from "../../desktop-bridge/desktopHostPort.js";

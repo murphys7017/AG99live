@@ -14,6 +14,8 @@
 #include <thread>
 #include <vector>
 
+#include "ag99/runtime/protocol.hpp"
+
 namespace ag99::runtime {
 class WinHttpWebSocketClient;
 }
@@ -29,6 +31,8 @@ public:
   bool Start();
   void Stop(std::string_view reason);
   bool running() const noexcept;
+  ag99::runtime::DesktopSettingsResult HandleDeviceSetting(
+      const ag99::runtime::DesktopSettingsQuery& query);
 
 private:
   static constexpr std::size_t kBufferCount = 4;
@@ -48,6 +52,9 @@ private:
   void CloseDevice();
   std::string StreamId() const;
   std::string TurnId() const;
+  static std::vector<ag99::runtime::DesktopSettingOption> EnumerateDevices();
+  static std::string WideToUtf8(const wchar_t* value);
+  UINT SelectedDeviceId() const;
 
   ag99::runtime::WinHttpWebSocketClient& websocket_;
   std::atomic<HWAVEIN> device_{nullptr};
@@ -68,6 +75,7 @@ private:
   bool send_failed_ = false;
   std::string stream_id_;
   std::string turn_id_;
+  std::string device_id_ = "default";
   std::uint64_t sequence_ = 0;
   std::atomic<std::uint64_t> next_stream_serial_{1};
   // Serialises Stop against CloseDevice, including the Stop -> CloseDevice

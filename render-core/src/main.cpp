@@ -54,6 +54,7 @@
 #include "ag99/native/motion_scheduler.hpp"
 #include "ag99/native/native_host.hpp"
 #include "ag99/native/native_model.hpp"
+#include "ag99/native/spout_output.hpp"
 #include "ag99/audio/audio_source.hpp"
 #include "ag99/audio/speech_signal.hpp"
 #include "ag99/audio/wav_audio.hpp"
@@ -264,6 +265,21 @@ const std::filesystem::path& ExecutableDirectory() {
   return directory;
 }
 
+std::filesystem::path SpoutSenderPath() {
+  const auto candidates = std::array<std::filesystem::path, 3>{
+      ExecutableDirectory() / "spout" / "AG99liveSpoutSender.exe",
+      ExecutableDirectory()
+          / "../../../frontend/resources/spout/AG99liveSpoutSender.exe",
+      std::filesystem::current_path()
+          / "frontend/resources/spout/AG99liveSpoutSender.exe"};
+  for (const auto& candidate : candidates) {
+    if (std::filesystem::exists(candidate)) {
+      return candidate;
+    }
+  }
+  return candidates.front();
+}
+
 csmByte* LoadFileFromPath(
     const std::filesystem::path& path, csmSizeInt* size) {
   if (path.empty() || !size) {
@@ -390,6 +406,7 @@ int Run(
       .microphone_running = &g_microphone_running,
       .interrupt_turn = &g_interrupt_turn,
       .approve_latest_segment = &g_approve_latest_segment,
+      .reconnect_adapter = &g_reconnect_adapter,
       .click_through = &g_click_through,
       .dragging = &g_dragging,
       .drag_cursor = &g_drag_cursor,
@@ -436,10 +453,25 @@ int Run(
         std::vector<std::uint8_t>& output) {
       return ReadFile(path, output);
     };
-    model_services.audio_runtime = &g_audio_runtime;
+    model_services.audio.update_audio_level = [](float delta_seconds, double now) {
+      g_audio_runtime.UpdateAudioLevel(delta_seconds, now);
+    };
+    model_services.audio.speech_audio_gain = [](std::string_view axis_id) {
+      return g_audio_runtime.SpeechAudioGain(axis_id);
+    };
+    model_services.audio.speech_lip_sync_intensity = [] {
+      return g_audio_runtime.SpeechLipSyncIntensity();
+    };
+    model_services.audio.audio_end_seconds = [] {
+      return g_audio_runtime.AudioEndSeconds();
+    };
+    model_services.audio.set_speech_volume = [](float volume) {
+      g_audio_runtime.SetSpeechVolume(volume);
+    };
     model_services.drag_x = &g_drag_x;
     model_services.drag_y = &g_drag_y;
     NativeModel model(std::move(model_services));
+    ag99::native::SpoutOutput spout(SpoutSenderPath());
     ag99::native::RuntimeCoordinatorServices services;
     services.native_incremental_output_enabled = [] {
       return NativeIncrementalOutputEnabled();
@@ -480,12 +512,6 @@ int Run(
     services.set_runtime_connected = [](bool value) {
       g_runtime_connected.store(value);
     };
-    services.update_audio_level = [](float delta_seconds, double now) {
-      g_audio_runtime.UpdateAudioLevel(delta_seconds, now);
-    };
-    services.speech_audio_gain = [](std::string_view axis_id) {
-      return g_audio_runtime.SpeechAudioGain(axis_id);
-    };
     services.reset_speech_signal = [] {
       g_audio_runtime.ResetSpeechSignal();
     };
@@ -499,17 +525,7 @@ int Run(
     services.stop_incremental_audio = [] {
       g_audio_runtime.StopIncrementalAudio();
     };
-    services.audio_output = &g_audio_runtime.audio_output();
-    services.incremental_audio_output = &g_audio_runtime.incremental_audio_output();
-    services.incremental_audio_output_mutex =
-        &g_audio_runtime.incremental_audio_output_mutex();
-    services.audio_end_seconds = &g_audio_runtime.audio_end_seconds();
-    services.audio_start_seconds = &g_audio_runtime.audio_start_seconds();
-    services.audio_level = &g_audio_runtime.audio_level();
-    services.audio_serial = &g_audio_runtime.audio_serial();
-    services.audio_signal_mutex = &g_audio_runtime.audio_signal_mutex();
-    services.audio_rms = &g_audio_runtime.audio_rms();
-    services.audio_queue = &g_audio_runtime.queue();
+    services.audio_runtime = &g_audio_runtime;
 
     NativeRuntimeCoordinator runtime({
         .on_model_sync = [&model](ag99::runtime::ModelSync sync) {
@@ -541,8 +557,11 @@ int Run(
           model.CancelTurn(turn_id);
           model.ReleaseThinkingSway(turn_id);
         },
-        .on_desktop_settings_query = [&model](
+        .on_desktop_settings_query = [&model, &spout](
             const ag99::runtime::DesktopSettingsQuery& query) {
+          if (query.key == "spout_enabled") {
+            return spout.HandleSetting(query);
+          }
           return model.HandleDesktopSettingsQuery(query);
         }}, std::move(services));
     g_send_text = [&runtime](std::string text) {
@@ -617,6 +636,12 @@ int Run(
             continue;
           }
           model.UpdateAndDraw();
+          if (spout.enabled()) {
+            std::vector<std::uint8_t> frame;
+            if (SUCCEEDED(surface.ReadbackRgba(frame))) {
+              spout.PublishFrame(width, height, std::move(frame));
+            }
+          }
           for (auto& terminal : model.TakeMotionTerminals()) {
             runtime.NotifyMotionTerminal(std::move(terminal));
           }
@@ -641,6 +666,7 @@ int Run(
       }
     }
     runtime.Close();
+    spout.Stop();
     g_send_text = {};
     g_toggle_microphone = {};
     g_microphone_running = {};

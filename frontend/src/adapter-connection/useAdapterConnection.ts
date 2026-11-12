@@ -83,7 +83,7 @@ import {
   type ModelSyncInstance,
 } from "./model-sync/useModelSync.js";
 import { useAdapterHistory } from "./history/useAdapterHistory.js";
-import type { useTurnPlaybackSessionStore } from "../turn-playback/useTurnPlaybackSessionStore.js";
+import type { TurnPlaybackSessionPort } from "../turn-playback/sessionStorePort.js";
 import {
   resetConnectionRuntimeState as resetConnectionRuntime,
 } from "./runtime/connectionRuntimeState.js";
@@ -91,8 +91,9 @@ import { createAdapterConnectionState } from "./state/adapterConnectionState.js"
 import { createAdapterInboundRuntime } from "./inbound/adapterInboundRuntime.js";
 import type { IdleMotionEvent } from "./inbound/idleMotionProtocol.js";
 import type { PreActionEvent } from "./inbound/preActionProtocol.js";
+import { desktopHostPort } from "../desktop-bridge/desktopHostPort.js";
 
-type SessionStore = ReturnType<typeof useTurnPlaybackSessionStore>;
+type SessionStore = TurnPlaybackSessionPort;
 type AdapterHistory = ReturnType<typeof useAdapterHistory>;
 type AdapterMotionTuning = ReturnType<typeof useAdapterMotionTuning>;
 
@@ -303,7 +304,7 @@ export function createAdapterConnection(
     createMessageId,
     setDesktopPttMode: (enabled, binding) => {
       if (typeof window !== "undefined") {
-        window.ag99desktop?.setPttMode?.(enabled, binding ? { ...binding } : binding);
+        desktopHostPort.getApi()?.setPttMode?.(enabled, binding ? { ...binding } : binding);
       }
     },
   });
@@ -569,7 +570,7 @@ export function createAdapterConnection(
     },
     handleDesktopPresenceRequest: (envelope) => {
       const connection = socket;
-      const read = window.ag99desktop?.readDesktopPresence;
+      const read = desktopHostPort.getApi()?.readDesktopPresence;
       const respond = (result: { ok: true; snapshot: import("../types/desktopPresence.js").DesktopPresenceSnapshot }
         | { ok: false; error: string }) => {
         if (socket === connection && connection?.readyState === WebSocket.OPEN) {
@@ -630,9 +631,9 @@ export function createAdapterConnection(
 
   function syncDesktopRuntimeSettings(): void {
     const payload: SystemDesktopRuntimeSettingsPayload = {
-      ...(window.ag99desktop?.readDesktopPresence
+      ...(desktopHostPort.getApi()?.readDesktopPresence
         ? { desktop_presence_schema: "ag99live.desktop_presence.v1" as const } : {}),
-      ...(window.ag99desktop?.captureDesktopScreenshot
+      ...(desktopHostPort.getApi()?.captureDesktopScreenshot
         ? { desktop_observation_schema: "ag99live.desktop_observation.v1" as const } : {}),
       audio_credit_schema: "olv.audio_credit.v1",
       persona_segment_stream_enabled: state.personaSegmentStreamEnabled,
@@ -659,12 +660,12 @@ export function createAdapterConnection(
         }
         void refreshMicrophoneDevices({ requestPermission: false });
         detachPttHookStatusListener?.();
-        detachPttHookStatusListener = window.ag99desktop?.onPttHookStatus?.(applyPttHookStatus) ?? null;
-        void window.ag99desktop?.getPttHookStatus?.().then(applyPttHookStatus).catch((error: unknown) => {
+        detachPttHookStatusListener = desktopHostPort.getApi()?.onPttHookStatus?.(applyPttHookStatus) ?? null;
+        void desktopHostPort.getApi()?.getPttHookStatus?.().then(applyPttHookStatus).catch((error: unknown) => {
           console.warn("[AdapterConnection] failed to read PTT hook status:", error);
         });
         // 同步持久化的 PTT 模式到主进程 hook
-        window.ag99desktop?.setPttMode?.(state.pttModeEnabled, { ...state.pttKeyBinding });
+        desktopHostPort.getApi()?.setPttMode?.(state.pttModeEnabled, { ...state.pttKeyBinding });
         if (state.pttModeEnabled) {
           void preparePttStandby();
         }
@@ -1237,7 +1238,7 @@ export function createAdapterConnection(
           timestampEpochMs: Date.now(),
         };
         console.info("[Connection] audio playback started.", latencyEvent);
-        window.ag99desktop?.reportLatencyEvent?.(latencyEvent);
+        desktopHostPort.getApi()?.reportLatencyEvent?.(latencyEvent);
       },
       reportAudioPlaybackEnded: () => {
         state.isPlayingAudio = false;

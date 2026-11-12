@@ -563,7 +563,7 @@ export function createAdapterMicrophoneRuntime(
               timestampEpochMs: Date.now(),
             };
             console.info("[Connection] audio capture ended.", latencyEvent);
-            window.ag99desktop?.reportLatencyEvent?.(latencyEvent);
+            desktopHostPort.getApi()?.reportLatencyEvent?.(latencyEvent);
           });
         } catch (error) {
           protocolError = error;
@@ -763,3 +763,4 @@ export function createAdapterMicrophoneRuntime(
     dispose,
   };
 }
+import { desktopHostPort } from "../../desktop-bridge/desktopHostPort.js";

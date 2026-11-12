@@ -77,8 +77,9 @@ render-core\build\Release\ag99-render-host.exe `
 
 The tray menu can send the built-in demo text again without restarting the
 host. `开始麦克风` and `停止麦克风` exercise the native capture path. This
-first voice slice is deliberately manual: VAD, device selection, and input
-settings remain outside the native core for now.
+voice slice is deliberately manual: VAD remains outside the native core, while
+device selection and capture lifecycle are owned by `NativeInputRuntime` and
+the existing Adapter desktop-settings path.
 
 ## Native performance sample
 
@@ -97,8 +98,9 @@ are local diagnostics, not a substitute for acceptance on the target machine.
 The current demo uses a fixed-size D3D11 composition swap chain with
 premultiplied alpha, so the model window background is transparent while the
 Live2D textures remain visible. Window resizing and device-loss recovery are
-not implemented. Spout output, microphone VAD/device selection, and production
-audio amplitude analysis remain the next integration slices. The native runtime
+not implemented. Microphone VAD remains the next integration slice. Spout output is implemented as an optional
+backbuffer readback plus the repository's `AG99liveSpoutSender.exe`; it still
+requires paired Spout/OBS acceptance on the target machine. The native runtime
 is not a second settings application: the existing frontend remains the source
 of configuration, while this host consumes the resulting runtime inputs.
 
@@ -138,6 +140,22 @@ required for this configuration path.
 
 Currently supported:
 
+- `speech_volume`: list/set, default `1`, range `0` to `1`, UI step `0.01`.
+  Changes update the active WAV/OLV waveOut device and all subsequent playback.
+- `microphone_device`: list/set. Native enumerates the available WinMM capture
+  devices and restarts an active capture stream after a successful change;
+  `default` uses the Windows mapper.
+- `adapter_address`: list/set, default `ws://127.0.0.1:12396`. The value is
+  used by the Native reconnect path; changing it does not interrupt the
+  current connection until the user selects `重连 Adapter` from the tray.
+- `cursor_gaze_enabled`: list/set, default `true`.
+- `cursor_gaze_poll_interval_ms`: list/set, default `100`, range `50` to `1000`.
+- `cursor_gaze_dwell_ms`: list/set, default `450`, range `100` to `2000`.
+- `cursor_gaze_stationary_distance_px`: list/set, default `14`, range `1` to `100`.
+- `spout_enabled`: list/set, default `false`. Native reads the rendered RGBA
+  backbuffer and streams bounded frames to `AG99liveSpoutSender.exe` on a
+  background worker. The sender is searched beside the executable and under
+  `frontend/resources/spout` in development checkouts.
 - `live2d_physics_response_scale`: list/set, default `1`, range `0.5` to `2`,
   UI step `0.05`. Values are rounded to two decimal places, matching the TS
   presentation settings normalizer; they are not snapped to the UI step.

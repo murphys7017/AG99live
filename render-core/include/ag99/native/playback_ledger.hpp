@@ -9,7 +9,8 @@
 #include <unordered_map>
 #include <utility>
 
-#include "ag99/native/runtime_coordinator.hpp"
+#include "ag99/native/segment_types.hpp"
+#include "ag99/runtime/protocol.hpp"
 
 namespace ag99::native {
 

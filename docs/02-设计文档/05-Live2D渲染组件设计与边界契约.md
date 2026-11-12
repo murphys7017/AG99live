@@ -1,7 +1,7 @@
 # Live2D 渲染组件设计与边界契约
 
 状态:V1 代码基线设计与后续演进边界 · 复核日期:2026-11-12 · 范围:原生侧 Live2D 运行时组件化 + TypeScript/C++ 双实现关系
-性质:**边界契约与迁移方案;D3D11/Cubism、参数混音、语音随动、交互贡献、参数计划执行和增量音频路径已经进入 C++;完整 TypeScript 编译器等价、宿主拆分和真实设备验收仍属后续工作。**
+性质:**边界契约与迁移方案;D3D11/Cubism、参数混音、语音随动、交互贡献、参数计划执行和增量音频路径已经进入 C++;宿主拆分已完成，完整 TypeScript 编译器等价和真实设备验收仍属后续工作。**
 
 当前 Adapter 的 `output.segment.payload.speech` slot 固定为 `absent`；本文对 Native speech cues 的解析与渲染讨论属于协议能力/Native 设计边界，不表示当前 AG99 Persona `segments[].speech` 会作为该 slot 发送。Persona 分段与逐段动作/TTS 关联见[动作生成与 Persona 分段关联](../01-架构与结构/07-动作生成与Persona分段关联.md)。TypeScript 是持续开发实现，C++ 是冻结大版本后的高性能稳定实现。
 
@@ -49,12 +49,12 @@
 
 | 前端源 | C++ 对应 | 核对结论 |
 |---|---|---|
-| `model-engine/planParser.ts` | `render-core/src/main.cpp:ParseParameterPlan` | 字段白名单、curve、关键帧、response、expression 和时长边界已进入 Native 参数计划解析；逐字段黄金样本仍待建立 |
+| `model-engine/planParser.ts` | `render-core/src/motion_compiler.cpp:ParseParameterPlan` | 字段白名单、curve、关键帧、response、expression 和时长边界已进入 Native 参数计划解析；逐字段黄金样本仍待建立 |
 | `speechsignalruntime.ts` | `render-core/src/speech_signal.cpp` | 独立口型/语音能量曲线、语音状态滞回和包络常量已进入 Native；重音输入使用 RMS 上升沿近似 |
-| `parameterpresentation.ts` 轨道解析 | `render-core/src/main.cpp:ParseParameterPlan` | 参数轨道、modulation、response 配置已进入 Native 参数计划路径 |
-| `parameterpresentation.ts` bounded / spring 动力学 | `render-core/src/main.cpp:AdvanceBounded` / `AdvanceSpring` | 当前实现已按稳定规则收敛；逐帧数值等价仍需样本确认 |
-| `lappmodel.ts` physics3.json 输出所有权 | `render-core/src/main.cpp:NativeCubismModel` | 输入/输出 ID 采集、受保护参数排除和响应缩放已实现 |
-| `stages/semanticAxisRelationGraphStage.ts` | `render-core/src/main.cpp:CompileMotionPlan` | 关系图传播、方向冲突和范围约束已实现于 Native 编译子集 |
+| `parameterpresentation.ts` 轨道解析 | `render-core/src/motion_compiler.cpp:ParseParameterPlan` | 参数轨道、modulation、response 配置已进入 Native 参数计划路径 |
+| `parameterpresentation.ts` bounded / spring 动力学 | `render-core/src/motion_scheduler.cpp:AdvanceBounded` / `AdvanceSpring` | 当前实现已按稳定规则收敛；逐帧数值等价仍需样本确认 |
+| `lappmodel.ts` physics3.json 输出所有权 | `render-core/src/native_model.cpp:NativeCubismModel` | 输入/输出 ID 采集、受保护参数排除和响应缩放已实现 |
+| `stages/semanticAxisRelationGraphStage.ts` | `render-core/src/motion_compiler.cpp:CompileMotionPlan` | 关系图传播、方向冲突和范围约束已实现于 Native 编译子集 |
 
 ### 2.2 尚未与 TypeScript 等价的部分
 
@@ -110,9 +110,10 @@ engine.motion_intent.v4
 把它当"可以略过的中间步骤"是错误的。
 
 **C++ 现状的主要依赖缺口**：`compilePerformanceSchedule` 的两个主输入是 `assistantText` 与
-`speechCues`。C++ 的 `protocol.cpp:226-264` **已正确解析** speech cues（含 kind / phrase_index /
-position 校验），但 `main.cpp:2726-2794` 的 `OnSegment` 尚未把 `segment.speech.cues` 接入原生
-动作编译器；`AudioQueueItem`（`main.cpp:1732-1738`）虽然保留完整 segment，当前编译路径仍只消费
+`speechCues`。C++ 的 `runtime-core/src/protocol.cpp` **已正确解析** speech cues（含 kind /
+phrase_index / position 校验），但 `render-core/src/native_runtime_coordinator.cpp` 的
+`OnSegment` 尚未把 `segment.speech.cues` 接入原生动作编译器；`AudioQueueItem` 已移入
+`render-core/include/ag99/native/playback_ledger.hpp` 并保留完整 segment，当前编译路径仍只消费
 动作和播放身份。**数据在协议层被正确送达，在原生表现编译层尚未使用。**
 不先修这一处，`PerformanceSchedule` 层无法按 TypeScript 语义移植；这属于下一阶段编译器一致性工作，不影响当前 C++ 直接消费已编译参数计划的 V1 稳定路径。
 
@@ -124,22 +125,20 @@ position 校验），但 `main.cpp:2726-2794` 的 `OnSegment` 尚未把 `segment
 
 ```
 render-core/
-  include/ag99/live2d/
-    compiler/            # 编译期:纯函数,零 Cubism / 零 D3D / 零音频 / 零墙钟
-      types.hpp          profile.hpp      schedule.hpp
-      pipeline.hpp       plan.hpp         diagnostics.hpp
-    runtime/             # 运行时:依赖 Cubism 模型句柄,不依赖窗口
-      contribution.hpp   mixer.hpp        speech_signal.hpp
-      presentation.hpp   parameter_runtime.hpp
-    host/                # 宿主:D3D11 / DirectComposition / 窗口 / 帧循环
-      device.hpp         window.hpp       render_host.hpp
-  src/{compiler,runtime,host}/...
-  src/main.cpp           # 只做装配:解析参数 → 构造三层 → 跑帧循环
+  include/ag99/native/
+    settings_controller.hpp  motion_compiler.hpp  motion_scheduler.hpp
+    playback_ledger.hpp      audio_runtime.hpp    native_runtime_coordinator.hpp
+    native_model.hpp         native_host.hpp      ...
+  src/
+    settings_controller.cpp  motion_compiler.cpp   motion_scheduler.cpp
+    audio_runtime.cpp        native_runtime_coordinator.cpp
+    native_model.cpp         native_host.cpp
+    main.cpp                 # 启动装配、D3D surface 和消息循环
 ```
 
-拆分的直接收益:`main.cpp` 当前仍是超过 6500 行的单编译单元,内含窗口/托盘/D3D11/DirectComposition/
-WAV 解码/麦克风/协议/两套编译器,`CompileMotionPlan` 是 400 行、6 层嵌套。编译器一旦成为
-独立纯函数库,即可脱离 GPU 与 SDK 做黄金样本比对——这是 §9 验证契约的前提。
+拆分的直接收益：`main.cpp` 现在只保留启动装配、D3D surface 和消息循环，窗口/托盘/输入、
+音频设备与时钟、模型生命周期、动作编译和调度已经位于独立编译单元。动作编译和调度可以
+脱离 GPU 与 SDK 做 smoke/golden 样本比对；跨端样本仍是 §9 验证契约的未完成部分。
 
 ### 3.2 职责边界
 
@@ -303,8 +302,11 @@ C++ 当前已经采用该模型。`UpdateAndDraw` 先更新动作和音频信号
 | `speechEnergyValue` | `(rms - 0.008) * 5.5` 钳位 | 已采用独立曲线 |
 | `speechEmphasisValue` | `getByteFrequencyData` 频谱 | 使用 RMS 上升沿近似，不等价于 FFT，需保留为表现降级和验收项 |
 
+桌面语音音量 `speech_volume` 由 Adapter 的统一配置源提供，Native 在当前 WAV 和 OLV
+waveOut 输出上应用同一倍率；它不改变 RMS/lip-sync 分析输入。
+
 采样率:前端为 30 Hz(`state.yaml:frontend_runtime_occupancy_followup` 记录 60 FPS 渲染 +
-30 Hz 分析);C++ 现状为 WAV RMS 50 Hz 分桶(`main.cpp:373-374`)。两者都必须显式声明并
+30 Hz 分析);C++ 现状为 WAV RMS 50 Hz 分桶(`render-core/src/audio_runtime.cpp:106-109`)。两者都必须显式声明并
 在契约中固定,不得隐式漂移。
 
 ### 5.3 表现动力学契约
@@ -318,7 +320,11 @@ C++ 当前已经采用该模型。`UpdateAndDraw` 先更新动作和音频信号
 
 ## 6. 宿主层契约
 
-- 设备 / 交换链 / DirectComposition / 窗口 / 托盘 / 帧循环从 `main.cpp` 迁出,不改行为。
+- 窗口 / 托盘 / 输入控件和窗口消息由 `NativeHost` 持有；D3D11 surface 仍由 `main.cpp` 在启动阶段装配。
+- 音频设备、PCM 队列、音频时钟和播放终态由 `AudioRuntime` 持有，不改单一时钟和 receipt 行为。
+- `NativePlaybackRuntime` 只负责消费 `AudioRuntime` work batch、完整段/OLV 播放和
+  播放终态回调；`NativeInputRuntime` 只负责麦克风采集与设备生命周期；
+  `NativeTransport` 只封装 WebSocket 连接端口。三者不直接写 Cubism 参数。
 - 帧循环顺序固定为 §3.3 的五步。
 - `delta_seconds` 钳制上限保持 `0.1`，由 Native 帧循环统一执行。
 - 宿主**不得**解释任何协议字段,只消费已解析的结构体。
@@ -362,11 +368,11 @@ runtime-core 的 Native 头文件已经由 CMake 从 manifest 生成，`check_pr
 |---|---|---|
 | R-1 | 建立 schema 生成步骤,`protocol.hpp` 改为生成头 | 已完成 |
 | R-2 | 修 `OnSegment` 文本 / speech cues 丢弃 | 文本已接入；`speech.cues` 仍待进入原生编译器 |
-| R-3 | 抽出 `compiler/` 纯函数库 + 黄金样本比对通过 | 尚未完成；当前保留 `CompileMotionPlan` 稳定子集 |
-| R-4 | 用 `compiler/` 替换 `CompileMotionPlan` | 尚未完成，依赖 R-3 的 TS/C++ 编译器契约 |
+| R-3 | 抽出 `compiler/` 纯函数库 + 黄金样本比对通过 | 已拆出 `motion_compiler.cpp` / `motion_scheduler.cpp`；TS/C++ 黄金样本仍待完成 |
+| R-4 | 用 `compiler/` 替换 `CompileMotionPlan` | 部分完成：`CompileMotionPlan` 已移入 `motion_compiler.cpp`；完整 TS 编译器契约仍待完成 |
 | R-5 | 引入 `runtime/mixer`,改为贡献者模型 + 单次 pre-Physics 写入 | 已完成当前运行时路径 |
 | R-6 | 修 F-1~F-4 与 §2.4 次要校验项 | F-1~F-4 已在代码中修正；跨端轨迹和负例 reason 仍待验证 |
-| R-7 | 抽出 `host/` | 尚未完成，`main.cpp` 仍是大型装配单元 |
+| R-7 | 抽出 `host/` | 已完成，窗口、托盘、输入控件和窗口消息已移入 `native_host.cpp`；D3D surface 保留在启动装配 |
 | R-8 | 接入 interaction sway / gaze 事件 | 已有原生贡献路径；真实设备和跨端行为仍待验收 |
 | R-9 | 依 §10 的双轨决策保留各自实现；只有未来明确替换产品 owner 时才评估删除 | V1 不删除 TS `model-engine/compiler/`，也不删除 C++ 稳定运行时 |
 
@@ -435,7 +441,7 @@ runtime-core 的 Native 头文件已经由 CMake 从 manifest 生成，`check_pr
 | 迁移期两套运行时并存 | 高 | Adapter 当前只允许一个 WebSocket 客户端(`render-core/README.md:91-96`),前端与原生同时直连会争抢会话 | 生产形态必须经本地 IPC 桥;R-3~R-8 期间不得让两者同时连 Adapter |
 | 无法自动验证视觉质量 | 中 | 原生侧无渲染断言 | 已在 §9.4 显式声明为 `evidence_gap` |
 | schema 漂移复发 | 中 | 现无 CI；脚本已经覆盖 manifest、TS 生成文件和 C++ 生成头，但仍需显式执行 | 将检查纳入 CI 或发布前检查 |
-| 单编译单元腐化 | 中 | `main.cpp` 当前超过 6500 行 | R-7 拆分 |
+| 单编译单元腐化 | 低 | `main.cpp` 已收缩为启动装配、D3D surface 和消息循环 | 继续保持 NativeHost、AudioRuntime、NativeModel 和 Coordinator 的边界 |
 | 现有 C++ 成果被误弃 | 低 | 参数混音、语音随动、交互贡献和参数计划执行已经是 V1 稳定路径 | R-3/R-4 复用运行时，不重写已验证路径 |
 
 ---
@@ -445,11 +451,11 @@ runtime-core 的 Native 头文件已经由 CMake 从 manifest 生成，`check_pr
 | 结论 | 证据 |
 |---|---|
 | 翻译到位项 | `ParseParameterPlan`、`render-core/src/speech_signal.cpp`、`NativeCubismModel`、`AdvanceBounded` / `AdvanceSpring`、`CompileMotionPlan` |
-| F-1~F-4 历史失真项 | `render-core/src/speech_signal.cpp`、`main.cpp:4521-4606`、`main.cpp:4610-4643` |
-| 参数混音与回读 | `parametermixer.ts:207-301` ↔ `main.cpp:4743-5127` |
-| sway / gaze | `activeparameterruntime.ts:47-69` ↔ `main.cpp:4657-4741` |
+| F-1~F-4 历史失真项 | `render-core/src/speech_signal.cpp`、`render-core/src/native_model.cpp` |
+| 参数混音与回读 | `parametermixer.ts:207-301` ↔ `render-core/src/native_model.cpp:ApplyParameterFrame` |
+| sway / gaze | `activeparameterruntime.ts:47-69` ↔ `render-core/src/native_model.cpp` |
 | RMS 重音降级 | `lipSyncTimelineSink.ts:191-194`、`speechsignalruntime.ts:208-213` ↔ `render-core/src/speech_signal.cpp` |
-| speech cues 仍未进入原生编译器 | `protocol.cpp:226-264`(已解析)↔ `main.cpp:2726-2794` |
+| speech cues 仍未进入原生编译器 | `runtime-core/src/protocol.cpp`(已解析)↔ `render-core/src/native_runtime_coordinator.cpp:OnSegment` |
 | 编译器拓扑 | `stages.ts:15-29`、`compileSemanticMotion.ts:36-130`、`compileModelParameterPlan.ts:26-60`、`performanceSchedule.ts:131-1176` |
 | schema 生成与检查 | `schema_manifest.json`、`protocol_manifest.hpp`、`scripts/check_protocol_schema_manifest.py` |
 | 双 owner(仓库既有结论) | `docs/codebase-audit.md` P0-1 / P0-2 |

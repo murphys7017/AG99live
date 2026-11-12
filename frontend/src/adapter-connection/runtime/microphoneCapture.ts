@@ -1,3 +1,4 @@
+import { desktopHostPort } from "../../desktop-bridge/desktopHostPort.js";
 import type { DesktopMicrophoneAudioChunk } from "../../types/desktop.js";
 import { float32ToPcm16le } from "./audioStreamFrame.js";
 
@@ -85,7 +86,7 @@ export async function flushMicrophoneCaptureRuntime(): Promise<void> {
   try {
     if (runtime.kind === "native") {
       // Completion is the marker in the PCM channel, not the invoke response.
-      void window.ag99desktop!.flushNativeMicrophoneCapture(runtime.sessionId, flushId).then(
+      void desktopHostPort.getApi()!.flushNativeMicrophoneCapture(runtime.sessionId, flushId).then(
         (accepted) => {
           if (!accepted) microphoneFlushWaiters.get(flushId)?.reject(new Error("microphone_flush_rejected"));
         },
@@ -264,7 +265,7 @@ async function stopMicrophoneCaptureRuntimeInternal(): Promise<void> {
     runtime.detachChunkListener();
     runtime.detachEndedListener();
     runtime.detachErrorListener();
-    const stopped = await window.ag99desktop?.stopNativeMicrophoneCapture?.(runtime.sessionId);
+    const stopped = await desktopHostPort.getApi()?.stopNativeMicrophoneCapture?.(runtime.sessionId);
     if (stopped !== true) {
       throw new Error("native_microphone_stop_failed");
     }
@@ -285,18 +286,18 @@ async function tryStartNativeMicrophoneCaptureRuntime(
   deviceId: string,
   options: StartMicrophoneCaptureOptions,
 ): Promise<boolean> {
-  if (!window.ag99desktop?.startNativeMicrophoneCapture) {
+  if (!desktopHostPort.getApi()?.startNativeMicrophoneCapture) {
     return false;
   }
 
-  const startResult = await window.ag99desktop.startNativeMicrophoneCapture(deviceId);
+  const startResult = await desktopHostPort.getApi()!.startNativeMicrophoneCapture(deviceId);
   if (!startResult.ok) {
     console.warn("[Connection] native microphone capture unavailable.", startResult.error);
     return false;
   }
 
   const sessionId = startResult.sessionId;
-  const detachChunkListener = window.ag99desktop.onNativeMicrophoneChunk?.((
+  const detachChunkListener = desktopHostPort.getApi()!.onNativeMicrophoneChunk?.((
     chunk: DesktopMicrophoneAudioChunk & { sessionId: string },
   ) => {
     if (chunk.sessionId !== sessionId || microphoneRuntime?.kind !== "native") {
@@ -313,14 +314,14 @@ async function tryStartNativeMicrophoneCaptureRuntime(
       channels: chunk.channels,
     });
   }) ?? (() => {});
-  const detachEndedListener = window.ag99desktop.onNativeMicrophoneEnded?.((
+  const detachEndedListener = desktopHostPort.getApi()!.onNativeMicrophoneEnded?.((
     payload: { sessionId: string; reason: string },
   ) => {
     if (payload.sessionId === sessionId) {
       options.onDeviceEnded();
     }
   }) ?? (() => {});
-  const detachErrorListener = window.ag99desktop.onNativeMicrophoneError?.((
+  const detachErrorListener = desktopHostPort.getApi()!.onNativeMicrophoneError?.((
     payload: { sessionId: string; error: string },
   ) => {
     if (payload.sessionId === sessionId) {

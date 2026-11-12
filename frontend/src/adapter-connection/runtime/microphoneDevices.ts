@@ -1,3 +1,5 @@
+import { desktopHostPort } from "../../desktop-bridge/desktopHostPort.js";
+
 export interface MicrophoneDeviceInfo {
   deviceId: string;
   label: string;
@@ -48,7 +50,7 @@ export async function listMicrophoneInputDevices(
 
 async function listNativeMicrophoneInputDevices(): Promise<MicrophoneDeviceInfo[]> {
   try {
-    const devices = await window.ag99desktop?.listNativeMicrophones?.();
+    const devices = await desktopHostPort.getApi()?.listNativeMicrophones?.();
     if (!Array.isArray(devices)) {
       return [];
     }

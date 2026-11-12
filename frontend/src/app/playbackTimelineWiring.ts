@@ -15,7 +15,7 @@ import {
 } from "../playback-timeline/playbackTimelineRuntime.js";
 import type { PlaybackTimelineSegmentMotionSink } from "../playback-timeline/segmentJob.js";
 import type { PlaybackTimelineMotionSink } from "../playback-timeline/motionTypes.js";
-import type { useTurnPlaybackSessionStore } from "../turn-playback/useTurnPlaybackSessionStore.js";
+import type { TurnPlaybackSessionPort } from "../turn-playback/sessionStorePort.js";
 import type { Live2dRuntimePort } from "../live2d/runtimePort.js";
 import {
   createModelEngineMotionTimelineSink,
@@ -46,7 +46,7 @@ export interface PlaybackTimelineMotionEnginePort {
   ): boolean | void;
 }
 
-type SessionStore = ReturnType<typeof useTurnPlaybackSessionStore>;
+type SessionStore = TurnPlaybackSessionPort;
 
 export function createAppPlaybackTimelineRuntime(options: {
   sessionStore: SessionStore;

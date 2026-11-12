@@ -40,6 +40,7 @@ import {
   normalizeBilibiliLiveSettings,
 } from "../../bilibili-live/settings.js";
 import type { BilibiliLiveSettings } from "../../types/bilibili-live.js";
+import { desktopHostPort } from "../../desktop-bridge/desktopHostPort.js";
 import { normalizeAdapterAddressSetting } from "../core/preferences.js";
 import { normalizeAstrbotWebUiUrl } from "../../app/webControlUrl.js";
 import {
@@ -126,7 +127,7 @@ async function microphoneDeviceOptions(): Promise<SystemDesktopSettingOption[]> 
 }
 
 function webControlUrlHandler(): DesktopSettingHandler {
-  const desktop = window.ag99desktop;
+  const desktop = desktopHostPort.getApi();
   if (!desktop) throw new Error("desktop_setting_unsupported");
   return {
     list: async () => ({ value: await desktop.getWebControlUrl(), options: [] }),

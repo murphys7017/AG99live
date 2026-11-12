@@ -2260,9 +2260,132 @@ native_settings_ambient_and_view_20261112:
     whitespace checks passed. Live Web-to-Native setting roundtrip and visible
     motion acceptance remain pending.
   remaining: >-
-    Continue Native settings in bounded slices: audio volume, microphone/device
-    input, and Spout only after each path has a clear Native owner and runtime
-    acceptance.
+    Complete live Native settings acceptance, including microphone/device input
+    and Spout, after paired Adapter and device runs.
+native_settings_speech_volume_20261112:
+  date: '2026-11-12'
+  class: feature
+  risk: medium
+  status: source_updated_locally_validated_pending_native_runtime_acceptance
+  scope: >-
+    Add the shared Web desktop setting speech_volume to Native SettingsController
+    and apply it to both complete WAV and OLV PCM waveOut outputs, including
+    currently open devices and subsequent playback.
+  validation: >-
+    Render-core Release build, all three CTest smoke targets, frontend typecheck,
+    and diff whitespace checks pass. No real waveOut volume perception or live
+    Web-to-Native setting roundtrip has been completed.
+  remaining: >-
+    Complete live Web-to-Native settings and audio-device acceptance.
+native_settings_microphone_device_20261112:
+  date: '2026-11-12'
+  class: feature
+  risk: medium
+  status: source_updated_locally_validated_pending_native_runtime_acceptance
+  scope: >-
+    Add the shared Web desktop setting microphone_device to Native. Enumerate
+    WinMM capture devices as desktop setting options, use the selected device
+    or the Windows mapper for future starts, and restart an active microphone
+    stream when the selected device changes.
+  validation: >-
+    Render-core Release build, all three CTest smoke targets, frontend typecheck,
+    YAML parsing, and diff whitespace checks pass. Physical WinMM device
+    enumeration and live Web-to-Native selection acceptance remain pending.
+  remaining: >-
+    Complete live settings roundtrip and desktop device acceptance, including
+    a real capture device switch.
+native_settings_cursor_gaze_20261112:
+  date: '2026-11-12'
+  class: feature
+  risk: medium
+  status: source_updated_locally_validated_pending_native_runtime_acceptance
+  scope: >-
+    Add the shared Web cursor-gaze settings to Native and use them in the
+    render-thread gaze poll, stationary threshold, dwell delay, and disable
+    path. Preserve the existing profile-driven gaze parameter bindings.
+  validation: >-
+    Render-core Release build and all three CTest smoke targets pass. Live
+    cursor interaction and Web-to-Native setting roundtrip remain unverified.
+  remaining: >-
+    Complete live settings and visible desktop behavior acceptance, including
+    a real Spout receiver.
+native_settings_adapter_address_20261112:
+  date: '2026-11-12'
+  class: feature
+  risk: medium
+  status: source_updated_locally_validated_pending_native_runtime_acceptance
+  scope: >-
+    Make the canonical adapter_address setting update Native's stored reconnect
+    URL while preserving the current connection until an explicit reconnect.
+  validation: >-
+    Render-core Release build, all three CTest smoke targets, YAML parsing, and
+    diff whitespace checks pass. Live canonical replay and reconnect to a
+    non-default Adapter address remain unverified.
+  remaining: >-
+    Complete live settings and reconnect acceptance.
+native_spout_output_20261112:
+  date: '2026-11-12'
+  class: feature
+  risk: high
+  status: source_updated_locally_validated_pending_spout_device_acceptance
+  scope: >-
+    Add an optional Native Spout output path using the repository's existing
+    AG99liveSpoutSender.exe protocol. Read back the D3D11 RGBA backbuffer,
+    stream bounded frames on a worker thread, expose spout_enabled through the
+    unified desktop settings broker, and fail explicitly when the sender is
+    unavailable.
+  validation: >-
+    Render-core Release build, all three CTest smoke targets, Spout setting
+    failure boundary, automatic Release resource copy, YAML parsing, and diff
+    whitespace checks pass. No real Spout/OBS receiver or GPU readback
+    performance acceptance has been run.
+  remaining: >-
+    Run paired Spout/OBS acceptance on the target machine and verify frame
+    cadence, transparency, shutdown and sender recovery.
+native_v1_code_completion_audit_20261112:
+  date: '2026-11-12'
+  class: release
+  risk: high
+  status: code_complete_pending_live_acceptance
+  scope: >-
+    Audit the Native V1 desktop implementation after the architecture and
+    settings slices: unified Adapter-owned settings, coordinator/playback
+    ledger, motion compiler/scheduler subset, model/Cubism path, audio WAV/OLV
+    path, microphone capture, Host/tray/input, Adapter reconnect, and optional
+    Spout output.
+  validation: >-
+    Current source has no known code-level blocker in the V1 stable path.
+    Release render-core build, CTest settings/motion/protocol smoke, frontend
+    renderer/WebSDK/Node typechecks, YAML parsing, diff checks, automatic Spout
+    resource copy, and a real Native host process/window startup observation
+    all pass. Full TypeScript PerformanceSchedule/compiler equivalence remains
+    an explicit reference-implementation boundary, not a V1 replacement gate.
+  evidence_gap: >-
+    Live Web-to-Native canonical settings replay, reconnect/cancel/late-motion
+    behavior, visible model/Physics/motion quality, real waveOut and microphone
+    device behavior, Spout/OBS receiver output, and TS/C++ motion golden samples
+    still require paired runtime/device acceptance.
+  remaining: >-
+    Perform the paired live acceptance pass. Do not claim Native/TS behavioral
+    equivalence from source and smoke validation alone.
+native_live_host_window_smoke_20261112:
+  date: '2026-11-12'
+  class: validation
+  risk: high
+  status: native_process_and_window_observed_pending_visual_device_acceptance
+  scope: >-
+    Launch the current Release ag99-render-host with the Mk6 model and startup
+    text against the local Adapter, confirm the Native process remains
+    responsive and creates the expected render window, then close the test
+    process.
+  validation: >-
+    Release host process 64452 started successfully, remained responsive, and
+    exposed the window title AG99live Native Render Core before controlled
+    shutdown. This proves host startup/window creation only; no screenshot,
+    visual motion, audio-device or settings roundtrip evidence was collected.
+  remaining: >-
+    Capture a real visible model frame and complete paired Adapter, audio,
+    motion, reconnect and settings acceptance.
 native_runtime_architecture_redesign_20261112:
   date: '2026-11-12'
   class: architecture
@@ -2342,3 +2465,56 @@ typescript_runtime_architecture_convergence_20261112:
     Real Electron, AstrBot, TTS, model switching, reconnect, and Live2D model
     acceptance are still required. Further splitting of useAdapterConnection,
     usePetDesktopRuntime, and SessionStore should wait for that runtime check.
+architecture_boundary_followup_20261112:
+  date: '2026-11-12'
+  class: refactor
+  risk: high
+  status: source_updated_pending_review_and_live_acceptance
+  decision: >-
+    Keep the Native audio queue private to AudioRuntime and expose a narrow
+    queue facade to the coordinator. Keep the Cubism model dependent on typed
+    audio callbacks, and route all TS Electron preload access through
+    DesktopHostPort.
+  scope: >-
+    Add shared Native segment types, AudioRuntime queue operations, coordinator
+    queue migration, NativeModel audio port callbacks, and the TS desktop host
+    port. Preserve concurrent Native edits and do not rewrite the remaining
+    large orchestration modules in one pass.
+  validation: >-
+    Frontend renderer/WebSDK/Node typechecks passed. Render-core Release build
+    and all three CTest smoke targets passed. No live Electron, Native reconnect,
+    or visible Live2D acceptance was run.
+  remaining: >-
+    Split the remaining NativeRuntimeCoordinator playback/transport logic and
+    TS composition roots in follow-up slices after reviewing this boundary
+    change against the current Native working tree.
+  progress: >-
+    Added NativeTransport as the WebSocket owner, removed the static NativeHost
+    instance lookup, and introduced an explicit TurnPlaybackSessionPort for the
+    TS composition layers. Render-core Release build, CTest smoke, frontend
+    typecheck, and diff checks remain green.
+architecture_boundary_followup_20261113:
+  date: '2026-11-13'
+  class: refactor
+  risk: high
+  status: source_reviewed_ready_for_live_acceptance
+  decision: >-
+    Keep NativeRuntimeCoordinator as the protocol/ledger coordinator while
+    NativePlaybackRuntime owns the audio worker, NativeInputRuntime owns
+    microphone capture lifecycle, and NativeTransport owns the low-level
+    WebSocket client. Keep the TypeScript desktop root split into a foundation
+    composition module plus application orchestration.
+  scope: >-
+    Extract Native playback execution and input capture boundaries, narrow
+    RuntimeCoordinatorServices, add the TypeScript desktop runtime foundation,
+    and extend the explicit SessionStore port to incremental stream writes.
+    Preserve existing behavior and concurrent Native user changes.
+  validation: >-
+    Render-core Release build and all three CTest smoke targets passed after
+    the Native extraction. Frontend renderer, WebSDK, and Node typechecks passed
+    after the composition and SessionStore port changes.
+  remaining: >-
+    Live Electron/AstrBot/Native reconnect, visible model, device timing,
+    Spout/OBS output, and interruption acceptance remain. The current code is
+    the stable checkpoint for real testing; further splitting should wait for
+    evidence from that run.

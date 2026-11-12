@@ -1,9 +1,12 @@
 #include <windows.h>
 #include <mmsystem.h>
 
+#include <algorithm>
 #include <cstdint>
+#include <charconv>
 #include <exception>
 #include <iostream>
+#include <system_error>
 #include <span>
 #include <string>
 #include <utility>
@@ -65,9 +68,10 @@ bool MicrophoneCapture::Start() {
   format.cbSize = 0;
 
   HWAVEIN device = nullptr;
+  const auto selected_device = SelectedDeviceId();
   const auto open_result = waveInOpen(
       &device,
-      WAVE_MAPPER,
+      selected_device,
       &format,
       reinterpret_cast<DWORD_PTR>(&WaveInCallback),
       reinterpret_cast<DWORD_PTR>(this),
@@ -189,6 +193,61 @@ bool MicrophoneCapture::running() const noexcept {
   return running_.load();
 }
 
+ag99::runtime::DesktopSettingsResult MicrophoneCapture::HandleDeviceSetting(
+    const ag99::runtime::DesktopSettingsQuery& query) {
+  ag99::runtime::DesktopSettingsResult result{
+      query.request_id,
+      query.key,
+      std::nullopt,
+      {}};
+  const auto options = EnumerateDevices();
+  if (query.action == "set") {
+    const auto requested = query.value.value_or("");
+    const bool available = requested == "default"
+        || std::any_of(options.begin(), options.end(), [&](const auto& option) {
+             return option.id == requested;
+           });
+    if (!available) {
+      result.error = "desktop_setting_value_not_available";
+      return result;
+    }
+    const bool was_running = running_.load();
+    std::string previous_device;
+    {
+      std::scoped_lock lock(queue_mutex_);
+      previous_device = device_id_;
+    }
+    if (was_running) {
+      Stop("microphone_device_changed");
+    }
+    {
+      std::scoped_lock lock(queue_mutex_);
+      device_id_ = requested;
+    }
+    if (was_running && !Start()) {
+      {
+        std::scoped_lock lock(queue_mutex_);
+        device_id_ = std::move(previous_device);
+      }
+      Start();
+      result.error = "desktop_setting_failed";
+      return result;
+    }
+  }
+  std::string current;
+  {
+    std::scoped_lock lock(queue_mutex_);
+    current = device_id_;
+  }
+  result.entry = ag99::runtime::DesktopSettingsEntry{
+      current,
+      options,
+      std::nullopt,
+      std::nullopt,
+      std::nullopt};
+  return result;
+}
+
 void CALLBACK MicrophoneCapture::WaveInCallback(
     HWAVEIN,
     UINT message,
@@ -303,6 +362,69 @@ void MicrophoneCapture::CloseDevice() {
     }
   }
   waveInClose(device);
+}
+
+std::vector<ag99::runtime::DesktopSettingOption>
+MicrophoneCapture::EnumerateDevices() {
+  std::vector<ag99::runtime::DesktopSettingOption> options;
+  const auto count = waveInGetNumDevs();
+  options.reserve(count + 1);
+  options.push_back({"default", "系统默认"});
+  for (UINT index = 0; index < count; ++index) {
+    WAVEINCAPSW caps{};
+    if (waveInGetDevCapsW(index, &caps, sizeof(caps)) != MMSYSERR_NOERROR) {
+      continue;
+    }
+    const auto label = WideToUtf8(caps.szPname);
+    options.push_back({std::to_string(index), label.empty()
+        ? "Microphone " + std::to_string(index + 1) : label});
+  }
+  return options;
+}
+
+std::string MicrophoneCapture::WideToUtf8(const wchar_t* value) {
+  if (!value || !*value) {
+    return {};
+  }
+  const int length = WideCharToMultiByte(
+      CP_UTF8,
+      WC_ERR_INVALID_CHARS,
+      value,
+      -1,
+      nullptr,
+      0,
+      nullptr,
+      nullptr);
+  if (length <= 1) {
+    return {};
+  }
+  std::string result(static_cast<std::size_t>(length - 1), '\0');
+  WideCharToMultiByte(
+      CP_UTF8,
+      WC_ERR_INVALID_CHARS,
+      value,
+      -1,
+      result.data(),
+      length - 1,
+      nullptr,
+      nullptr);
+  return result;
+}
+
+UINT MicrophoneCapture::SelectedDeviceId() const {
+  std::string selected;
+  {
+    std::scoped_lock lock(queue_mutex_);
+    selected = device_id_;
+  }
+  if (selected.empty() || selected == "default") {
+    return WAVE_MAPPER;
+  }
+  UINT device = WAVE_MAPPER;
+  const auto parsed = std::from_chars(
+      selected.data(), selected.data() + selected.size(), device);
+  return parsed.ec == std::errc{} && parsed.ptr == selected.data() + selected.size()
+      ? device : WAVE_MAPPER;
 }
 
 std::string MicrophoneCapture::StreamId() const {

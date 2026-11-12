@@ -12,7 +12,7 @@ import type {
   MotionPayloadNormalizer,
   NormalizedMotionPayload,
 } from "../types/motion.js";
-import type { useTurnPlaybackSessionStore } from "../turn-playback/useTurnPlaybackSessionStore.js";
+import type { TurnPlaybackSessionPort } from "../turn-playback/sessionStorePort.js";
 import type { Live2dRuntimePort } from "../live2d/runtimePort.js";
 import {
   createAppPlaybackTimelineRuntime,
@@ -20,7 +20,7 @@ import {
   type PlaybackTimelineWiringPort,
 } from "./playbackTimelineWiring.js";
 
-type SessionStore = ReturnType<typeof useTurnPlaybackSessionStore>;
+type SessionStore = TurnPlaybackSessionPort;
 type PlaybackTimelineMotionRuntime = ReturnType<
   typeof configurePlaybackTimelineMotionRuntime
 >;

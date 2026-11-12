@@ -1,11 +1,8 @@
 #include <windows.h>
 
 #include <algorithm>
-#include <array>
 #include <atomic>
-#include <chrono>
-#include <condition_variable>
-#include <deque>
+#include <cctype>
 #include <functional>
 #include <iostream>
 #include <memory>
@@ -13,12 +10,13 @@
 #include <optional>
 #include <string>
 #include <string_view>
-#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
-#include "ag99/native/microphone_capture.hpp"
+#include "ag99/native/native_input_runtime.hpp"
+#include "ag99/native/native_playback_runtime.hpp"
+#include "ag99/native/native_transport.hpp"
 #include "ag99/native/playback_ledger.hpp"
 #include "ag99/native/runtime_coordinator.hpp"
 #include "ag99/runtime/runtime_session.hpp"
@@ -44,7 +42,7 @@ public:
   explicit Impl(
       RuntimeCoordinatorCallbacks callbacks, RuntimeCoordinatorServices services)
       : services_(std::move(services)),
-        microphone_(websocket_),
+        input_runtime_(transport_.Client()),
         callback_lifetime_(std::make_shared<CallbackLifetime>()),
         on_model_sync_(std::move(callbacks.on_model_sync)),
         on_output_segment_(std::move(callbacks.on_output_segment)),
@@ -95,16 +93,23 @@ public:
               }
             },
             [this](ag99::runtime::DesktopSettingsQuery query) {
-              const auto result = on_desktop_settings_query_
-                  ? on_desktop_settings_query_(query)
+              ag99::runtime::DesktopSettingsResult result;
+              if (query.key == "microphone_device") {
+                result = input_runtime_.HandleDeviceSetting(query);
+              } else if (query.key == "adapter_address") {
+                result = HandleAdapterAddressSetting(query);
+              } else {
+                result = on_desktop_settings_query_
+                    ? on_desktop_settings_query_(query)
                   : ag99::runtime::DesktopSettingsResult{
                         query.request_id, query.key, std::nullopt,
                         "desktop_setting_unsupported"};
+              }
               const auto reply =
                   ag99::runtime::build_system_desktop_settings_result(result);
               // InvalidateConnection takes session_mutex_ before replacing the
               // socket. Do not take transport_mutex_ from a receive callback.
-              if (!websocket_.send_text(reply.dump())) {
+              if (!transport_.SendText(reply.dump())) {
                 std::cerr << "[runtime] failed to send desktop setting result: "
                           << query.key << '\n';
               }
@@ -120,9 +125,79 @@ public:
             },
         }) {
     callback_lifetime_->owner = this;
-    audio_worker_ = std::thread([this] {
-      AudioWorkerLoop();
-    });
+    playback_runtime_ = std::make_unique<NativePlaybackRuntime>(
+        NativePlaybackRuntimeServices{
+            .audio_runtime = services_.audio_runtime,
+            .closing = [this] { return closing_.load(); },
+            .connection_generation = [this] {
+              return connection_generation_.load();
+            },
+            .pending_closed_generation = [this] {
+              return pending_closed_generation_.load();
+            },
+            .now_seconds = services_.now_seconds,
+            .play_audio_url = services_.play_audio_url,
+            .stop_current_audio = services_.stop_current_audio,
+            .stop_incremental_audio = services_.stop_incremental_audio,
+            .reset_speech_signal = services_.reset_speech_signal,
+            .send_incremental_audio_credit = [this](
+                const ag99::runtime::OutputAudioFrame& frame,
+                std::uint64_t released_bytes,
+                std::uint64_t released_frames) {
+              return SendIncrementalAudioCredit(
+                  frame, released_bytes, released_frames);
+            },
+            .fail_incremental_audio = [this](
+                const ag99::runtime::IncrementalIdentity& identity,
+                std::string_view reason) {
+              FailIncrementalAudio(identity, reason);
+            },
+            .complete_incremental_audio = [this](
+                const ag99::runtime::IncrementalIdentity& identity,
+                NativeSegmentClock clock,
+                bool success,
+                std::string_view reason) {
+              CompleteIncrementalAudio(identity, std::move(clock), success, reason);
+            },
+            .is_segment_playback_open = [this](const AudioQueueItem& item) {
+              return IsSegmentPlaybackOpen(item);
+            },
+            .activate_audio_segment = [this](
+                const AudioQueueItem& item,
+                const NativeSegmentClock& clock) {
+              return ActivateAudioSegment(item, clock);
+            },
+            .apply_motion_update = [this](
+                const std::string& turn_id,
+                const std::string& message_id,
+                const NativeSegmentClock& clock,
+                ag99::runtime::MotionSlot motion) {
+              ApplyMotionUpdate(turn_id, message_id, clock, std::move(motion));
+            },
+            .complete_audio_segment = [this](
+                const AudioQueueItem& item,
+                bool success,
+                std::string_view reason) {
+              CompleteAudioSegment(item, success, reason);
+            },
+            .complete_motion_segment = [this](NativeSegmentTerminal terminal) {
+              CompleteMotionSegment(std::move(terminal));
+            },
+            .process_pending_transport_closed = [this] {
+              ProcessPendingTransportClosed();
+            },
+            .dispatch_output_segment = [this](
+                ag99::runtime::OutputSegment segment,
+                NativeSegmentClock clock) {
+              return DispatchPlaybackMotionSegment(
+                  std::move(segment), std::move(clock));
+            },
+            .try_send_playback_acknowledgement = [this](
+                const std::string& turn_id,
+                std::uint64_t generation) {
+              TrySendPlaybackAcknowledgement(turn_id, generation);
+            }});
+    playback_runtime_->Start();
   }
 
   ~Impl() {
@@ -134,17 +209,20 @@ public:
     if (closing_.load()) {
       return false;
     }
-    std::scoped_lock microphone_lock(microphone_operation_mutex_);
+    {
+      std::scoped_lock lock(adapter_url_mutex_);
+      adapter_url_ = url;
+    }
     const auto generation = InvalidateConnection();
 
     // Stop the previous capture before closing the transport so its stream
     // end marker can still be delivered when the old connection is usable.
-    microphone_.Stop("runtime_reconnect");
-    websocket_.close();
+    input_runtime_.Stop("runtime_reconnect");
+    transport_.Close();
     ResetDisconnectedState();
 
     const std::weak_ptr<CallbackLifetime> weak_lifetime = callback_lifetime_;
-    bool connected = websocket_.connect(
+    bool connected = transport_.Connect(
         url,
         {
             [weak_lifetime, generation](std::string text) {
@@ -169,8 +247,8 @@ public:
     if (connected) {
       const auto settings = ag99::runtime::build_system_desktop_runtime_settings(
           services_.native_incremental_output_enabled());
-      if (!websocket_.send_text(settings.dump())) {
-        websocket_.close();
+      if (!transport_.SendText(settings.dump())) {
+        transport_.Close();
         connected = false;
       }
     }
@@ -180,7 +258,37 @@ public:
   }
 
   bool Reconnect() {
-    return Connect("ws://127.0.0.1:12396");
+    std::string url;
+    {
+      std::scoped_lock lock(adapter_url_mutex_);
+      url = adapter_url_;
+    }
+    return Connect(url);
+  }
+
+  ag99::runtime::DesktopSettingsResult HandleAdapterAddressSetting(
+      const ag99::runtime::DesktopSettingsQuery& query) {
+    ag99::runtime::DesktopSettingsResult result{
+        query.request_id,
+        query.key,
+        std::nullopt,
+        {}};
+    std::scoped_lock lock(adapter_url_mutex_);
+    if (query.action == "set") {
+      const auto requested = query.value.value_or("");
+      if (!IsAdapterAddress(requested)) {
+        result.error = "desktop_setting_value_invalid";
+        return result;
+      }
+      adapter_url_ = requested;
+    }
+    result.entry = ag99::runtime::DesktopSettingsEntry{
+        adapter_url_,
+        {},
+        std::nullopt,
+        std::nullopt,
+        std::nullopt};
+    return result;
   }
 
   bool SendText(std::string_view text) {
@@ -191,7 +299,7 @@ public:
     const auto turn_id = "native-demo-" +
         std::to_string(next_turn_id_.fetch_add(1));
     const auto envelope = ag99::runtime::build_input_text(message, {}, turn_id);
-    const bool sent = websocket_.send_text(envelope.dump());
+    const bool sent = transport_.SendText(envelope.dump());
     if (sent) {
       std::scoped_lock lock(playback_mutex_);
       last_input_turn_id_ = turn_id;
@@ -217,7 +325,7 @@ public:
     const auto envelope = ag99::runtime::build_envelope(
         "control.interrupt", ag99::runtime::Json::object(), turn_id,
         "frontend");
-    const bool sent = websocket_.send_text(envelope.dump());
+    const bool sent = transport_.SendText(envelope.dump());
     if (sent) {
       std::scoped_lock lock(playback_mutex_);
       last_input_turn_id_.clear();
@@ -257,7 +365,7 @@ public:
         },
         segment.turn_id,
         "frontend");
-    if (websocket_.send_text(envelope.dump())) {
+    if (transport_.SendText(envelope.dump())) {
       services_.set_feedback_approved(true);
       services_.notify_input_runtime_state_changed();
       return true;
@@ -271,23 +379,14 @@ public:
   }
 
   bool ToggleMicrophone() {
-    std::scoped_lock microphone_lock(microphone_operation_mutex_);
     if (closing_.load()) {
       return false;
     }
-    if (microphone_.running()) {
-      microphone_.Stop("manual_stop");
-      return false;
-    }
-    if (!microphone_.Start()) {
-      std::cerr << "[microphone] failed to start capture\n";
-      return false;
-    }
-    return true;
+    return input_runtime_.ToggleMicrophone();
   }
 
   bool MicrophoneRunning() const noexcept {
-    return microphone_.running();
+    return input_runtime_.Running();
   }
 
   void NotifyMotionTerminal(NativeSegmentTerminal terminal) {
@@ -337,20 +436,16 @@ public:
         callback_lifetime_->owner = nullptr;
       }
       InvalidateConnection();
-      std::scoped_lock microphone_lock(microphone_operation_mutex_);
-      microphone_.Stop("runtime_shutdown");
-      websocket_.close();
+      input_runtime_.Stop("runtime_shutdown");
+      transport_.Close();
       ResetDisconnectedState();
     }
     services_.set_runtime_connected(false);
     services_.notify_input_connection_changed();
-    services_.audio_queue->audio_queue_condition.notify_all();
+    services_.audio_runtime->NotifyQueueAll();
     transport_lock.unlock();
-    {
-      std::scoped_lock join_lock(services_.audio_queue->audio_join_mutex);
-      if (audio_worker_.joinable()) {
-        audio_worker_.join();
-      }
+    if (playback_runtime_) {
+      playback_runtime_->Join();
     }
     if (!was_closing) {
       services_.stop_current_audio(std::nullopt);
@@ -359,6 +454,18 @@ public:
   }
 
 private:
+  static bool IsAdapterAddress(std::string_view value) {
+    if (!(value.starts_with("ws://") || value.starts_with("wss://"))) {
+      return false;
+    }
+    if (value.size() <= 5) {
+      return false;
+    }
+    return std::none_of(value.begin(), value.end(), [](unsigned char character) {
+      return std::isspace(character) != 0;
+    });
+  }
+
   static constexpr std::size_t kIncrementalAudioWindowBytes = 128 * 1024;
   static constexpr std::size_t kIncrementalAudioWindowFrames = 64;
   static constexpr std::size_t kMaxIncrementalAudioJobs = 64 + 256;
@@ -642,7 +749,7 @@ private:
       return;
     }
     if (clock.audio_serial == 0
-        || services_.audio_serial->load() != clock.audio_serial
+        || services_.audio_runtime->AudioSerial() != clock.audio_serial
         || services_.now_seconds() >= clock.started_at_seconds + clock.duration_seconds) {
       CompleteMotionSegment(NativeSegmentTerminal{
           clock, false, "deferred_motion_audio_window_unavailable"});
@@ -798,65 +905,20 @@ private:
       }
     }
     if (cancel_playback) {
-      std::optional<std::uint64_t> audio_serial_to_stop;
-      {
-        std::scoped_lock lock(services_.audio_queue->audio_queue_mutex);
-        for (auto it = services_.audio_queue->audio_queue.begin(); it != services_.audio_queue->audio_queue.end();) {
-          if (it->turn_id == turn_id) {
-            it = services_.audio_queue->audio_queue.erase(it);
-          } else {
-            ++it;
-          }
-        }
-        for (auto it = services_.audio_queue->incremental_audio_queue.begin();
-             it != services_.audio_queue->incremental_audio_queue.end();) {
-          if (it->identity.turn_id == turn_id) {
-            if (it->kind == IncrementalAudioJob::Kind::Frame) {
-              services_.audio_queue->incremental_audio_queued_bytes -= it->frame.pcm.size();
-              services_.audio_queue->incremental_audio_queued_frames -= 1;
-            }
-            it = services_.audio_queue->incremental_audio_queue.erase(it);
-          } else {
-            ++it;
-          }
-        }
-        services_.audio_queue->playback_ack_queue.erase(
-            std::remove_if(
-                services_.audio_queue->playback_ack_queue.begin(),
-                services_.audio_queue->playback_ack_queue.end(),
-                [&turn_id](const PlaybackAcknowledgementItem& item) {
-                  return item.turn_id == turn_id;
-                }),
-            services_.audio_queue->playback_ack_queue.end());
-        if (services_.audio_queue->current_audio_turn_id == turn_id) {
-          audio_serial_to_stop = services_.audio_queue->current_audio_serial;
-          services_.audio_queue->current_audio_turn_id.clear();
-          services_.audio_queue->current_audio_message_id.clear();
-          services_.audio_queue->current_audio_generation = 0;
-          services_.audio_queue->current_audio_serial = 0;
-        }
-      }
+      const auto audio_serial_to_stop = services_.audio_runtime->ClearTurnQueues(turn_id);
       if (audio_serial_to_stop) {
         services_.stop_current_audio(*audio_serial_to_stop);
       }
       services_.stop_incremental_audio();
-      services_.audio_queue->audio_queue_condition.notify_one();
+      services_.audio_runtime->NotifyQueueOne();
     }
   }
 
   void ClearCurrentAudio(
       const AudioQueueItem& item,
       std::uint64_t audio_serial) {
-    std::scoped_lock lock(services_.audio_queue->audio_queue_mutex);
-    if (services_.audio_queue->current_audio_turn_id == item.turn_id
-        && services_.audio_queue->current_audio_message_id == item.message_id
-        && services_.audio_queue->current_audio_generation == item.generation
-        && services_.audio_queue->current_audio_serial == audio_serial) {
-      services_.audio_queue->current_audio_turn_id.clear();
-      services_.audio_queue->current_audio_message_id.clear();
-      services_.audio_queue->current_audio_generation = 0;
-      services_.audio_queue->current_audio_serial = 0;
-    }
+    services_.audio_runtime->ClearCurrentAudioIfMatches(
+        item.turn_id, item.message_id, item.generation, audio_serial);
   }
 
   void QueuePlaybackAcknowledgement(const std::string& turn_id) {
@@ -873,12 +935,8 @@ private:
       turn->second.acknowledgement_queued = true;
       generation = turn->second.generation;
     }
-    {
-      std::scoped_lock lock(services_.audio_queue->audio_queue_mutex);
-      services_.audio_queue->playback_ack_queue.push_back(
-          PlaybackAcknowledgementItem{turn_id, generation});
-    }
-    services_.audio_queue->audio_queue_condition.notify_one();
+    services_.audio_runtime->EnqueueAcknowledgement(
+        PlaybackAcknowledgementItem{turn_id, generation});
   }
 
   void FlushReadyPlaybackAcknowledgements() {
@@ -1141,22 +1199,13 @@ private:
     job.status = event.status;
     job.reason = std::move(event.reason);
     job.generation = connection_generation_.load();
-    bool rejected = false;
-    {
-      std::scoped_lock lock(services_.audio_queue->audio_queue_mutex);
-      if (closing_.load()
-          || services_.audio_queue->incremental_audio_queue.size() >= kMaxIncrementalAudioJobs) {
-        std::cerr << "[runtime] incremental audio job capacity exceeded\n";
-        rejected = true;
-      } else {
-        services_.audio_queue->incremental_audio_queue.push_back(std::move(job));
-      }
-    }
+    const bool rejected = closing_.load()
+        || !services_.audio_runtime->EnqueueIncremental(
+            std::move(job), std::size_t(-1), kMaxIncrementalAudioJobs);
     if (rejected) {
       FailIncrementalAudio(event.identity, "incremental_audio_job_capacity_exceeded");
       return;
     }
-    services_.audio_queue->audio_queue_condition.notify_one();
   }
 
   void OnIncrementalAudioFrame(ag99::runtime::OutputAudioFrame frame) {
@@ -1178,29 +1227,16 @@ private:
     job.identity = frame.identity;
     job.frame = std::move(frame);
     job.generation = connection_generation_.load();
-    bool rejected = false;
-    {
-      std::scoped_lock lock(services_.audio_queue->audio_queue_mutex);
-      const auto next_bytes = services_.audio_queue->incremental_audio_queued_bytes
-          + job.frame.pcm.size();
-      const auto next_frames = services_.audio_queue->incremental_audio_queued_frames + 1;
-      if (closing_.load() || next_bytes > kIncrementalAudioWindowBytes
-          || next_frames > kIncrementalAudioWindowFrames
-          || services_.audio_queue->incremental_audio_queue.size() >= kMaxIncrementalAudioJobs) {
-        std::cerr << "[runtime] incremental audio admission window exceeded\n";
-        rejected = true;
-      } else {
-        services_.audio_queue->incremental_audio_queued_bytes = next_bytes;
-        services_.audio_queue->incremental_audio_queued_frames = next_frames;
-        services_.audio_queue->incremental_audio_queue.push_back(std::move(job));
-      }
-    }
+    const auto job_identity = job.identity;
+    const bool rejected = closing_.load()
+        || !services_.audio_runtime->EnqueueIncremental(
+            std::move(job), kIncrementalAudioWindowBytes,
+            kIncrementalAudioWindowFrames);
     if (rejected) {
       FailIncrementalAudio(
-          job.identity, "incremental_audio_credit_window_exceeded");
+          job_identity, "incremental_audio_credit_window_exceeded");
       return;
     }
-    services_.audio_queue->audio_queue_condition.notify_one();
   }
 
   void FailIncrementalAudio(
@@ -1219,7 +1255,7 @@ private:
         "frontend");
     {
       std::scoped_lock transport_lock(transport_mutex_);
-      if (!closing_.load() && !websocket_.send_text(interrupt.dump())) {
+      if (!closing_.load() && !transport_.SendText(interrupt.dump())) {
         std::cerr << "[runtime] failed to interrupt incremental audio turn: "
                   << identity.turn_id << '\n';
       }
@@ -1250,18 +1286,7 @@ private:
     }
     services_.reset_input_disconnected();
     services_.notify_input_runtime_state_changed();
-    {
-      std::scoped_lock lock(services_.audio_queue->audio_queue_mutex);
-      services_.audio_queue->audio_queue.clear();
-      services_.audio_queue->incremental_audio_queue.clear();
-      services_.audio_queue->incremental_audio_queued_bytes = 0;
-      services_.audio_queue->incremental_audio_queued_frames = 0;
-      services_.audio_queue->playback_ack_queue.clear();
-      services_.audio_queue->current_audio_turn_id.clear();
-      services_.audio_queue->current_audio_message_id.clear();
-      services_.audio_queue->current_audio_generation = 0;
-      services_.audio_queue->current_audio_serial = 0;
-    }
+    services_.audio_runtime->ClearAllQueues();
     services_.stop_current_audio(std::nullopt);
     services_.stop_incremental_audio();
     if (on_output_segment_reset_) {
@@ -1281,7 +1306,7 @@ private:
     pending_closed_generation_.store(generation);
     services_.stop_current_audio(std::nullopt);
     services_.stop_incremental_audio();
-    services_.audio_queue->audio_queue_condition.notify_all();
+    services_.audio_runtime->NotifyQueueAll();
   }
 
   void ProcessPendingTransportClosed() {
@@ -1294,9 +1319,8 @@ private:
       return;
     }
     InvalidateConnection();
-    std::scoped_lock microphone_lock(microphone_operation_mutex_);
-    microphone_.Stop("websocket_closed");
-    websocket_.close();
+    input_runtime_.Stop("websocket_closed");
+    transport_.Close();
     ResetDisconnectedState();
   }
 
@@ -1338,14 +1362,10 @@ private:
       item.message_id = item.segment.envelope.message_id;
       item.sequence = item.segment.sequence;
       item.generation = generation;
-      {
-        std::scoped_lock lock(services_.audio_queue->audio_queue_mutex);
-        if (closing_.load()) {
-          return;
-        }
-        services_.audio_queue->audio_queue.push_back(std::move(item));
+      if (closing_.load()) {
+        return;
       }
-      services_.audio_queue->audio_queue_condition.notify_one();
+      services_.audio_runtime->EnqueueSegment(std::move(item));
       return;
     }
 
@@ -1370,6 +1390,27 @@ private:
     }
   }
 
+  NativePlaybackDispatchResult DispatchPlaybackMotionSegment(
+      ag99::runtime::OutputSegment segment,
+      NativeSegmentClock clock) {
+    std::scoped_lock transport_lock(transport_mutex_);
+    if (closing_.load() || clock.generation != connection_generation_.load()) {
+      return NativePlaybackDispatchResult::Stale;
+    }
+    std::scoped_lock playback_lock(playback_mutex_);
+    const auto turn = playback_turns_.find(clock.turn_id);
+    if (turn == playback_turns_.end()
+        || turn->second.generation != clock.generation
+        || !turn->second.segments.contains(clock.message_id)) {
+      return NativePlaybackDispatchResult::Stale;
+    }
+    if (!on_output_segment_) {
+      return NativePlaybackDispatchResult::Unavailable;
+    }
+    on_output_segment_(std::move(segment), std::move(clock));
+    return NativePlaybackDispatchResult::Dispatched;
+  }
+
   bool SendIncrementalAudioCredit(
       const ag99::runtime::OutputAudioFrame& frame,
       std::uint64_t released_bytes,
@@ -1385,438 +1426,7 @@ private:
          .persona_result_id = frame.identity.persona_result_id,
          .released_bytes = released_bytes,
          .released_frames = released_frames});
-    return websocket_.send_text(credit.dump());
-  }
-
-  void UpdateIncrementalAudioSignal(
-      std::span<const std::uint8_t> pcm,
-      std::uint32_t sample_rate,
-      std::uint32_t channels,
-      IncrementalWorkerState& state) {
-    if (channels != 1 || sample_rate == 0 || pcm.size() % 2 != 0) {
-      return;
-    }
-    if (!state.audio_clock_started) {
-      state.audio_clock_started = true;
-      state.sample_rate = sample_rate;
-      state.audio_start_seconds = services_.now_seconds();
-      state.audio_serial = services_.audio_serial->fetch_add(1) + 1;
-      services_.audio_start_seconds->store(state.audio_start_seconds);
-      services_.audio_end_seconds->store(state.audio_start_seconds);
-      {
-        std::scoped_lock signal_lock((*services_.audio_signal_mutex));
-        services_.audio_rms->clear();
-      }
-    }
-    const auto* samples = reinterpret_cast<const std::int16_t*>(pcm.data());
-    const auto sample_count = pcm.size() / sizeof(std::int16_t);
-    const auto samples_per_bucket = std::max<std::size_t>(1, sample_rate / 50);
-    for (std::size_t index = 0; index < sample_count; ++index) {
-      const auto normalized = static_cast<double>(samples[index]) / 32768.0;
-      state.rms_sum += normalized * normalized;
-      ++state.rms_samples;
-      if (state.rms_samples >= samples_per_bucket) {
-        const auto rms = static_cast<float>(std::sqrt(
-            state.rms_sum / static_cast<double>(state.rms_samples)));
-        std::scoped_lock signal_lock((*services_.audio_signal_mutex));
-        services_.audio_rms->push_back(rms);
-        state.rms_sum = 0.0;
-        state.rms_samples = 0;
-      }
-    }
-    state.samples += sample_count;
-    services_.audio_end_seconds->store(
-        state.audio_start_seconds
-        + static_cast<double>(state.samples) / sample_rate);
-  }
-
-  void ProcessIncrementalAudioJob(
-      IncrementalAudioJob job,
-      IncrementalWorkerState& state) {
-    if (job.generation != connection_generation_.load()
-        || pending_closed_generation_.load() == job.generation) {
-      if (state.generation == job.generation) {
-        services_.stop_incremental_audio();
-        state = IncrementalWorkerState{};
-      }
-      return;
-    }
-    if (state.generation != job.generation) {
-      services_.stop_incremental_audio();
-      state = IncrementalWorkerState{};
-      state.generation = job.generation;
-    }
-    if (job.kind == IncrementalAudioJob::Kind::Frame) {
-      const auto& identity = job.frame.identity;
-      if (state.active
-          && (state.identity.turn_id != identity.turn_id
-              || state.identity.segment_message_id != identity.segment_message_id
-              || state.identity.stream_id != identity.stream_id)) {
-        std::cerr << "[runtime] incremental audio crossed an open segment\n";
-        FailIncrementalAudio(identity, "incremental_audio_crossed_open_segment");
-        services_.stop_incremental_audio();
-        state = IncrementalWorkerState{};
-        state.generation = job.generation;
-        return;
-      }
-      bool accepted = false;
-      bool output_open_failed = false;
-      {
-        std::scoped_lock sink_lock((*services_.incremental_audio_output_mutex));
-        if (!state.active) {
-          if (!services_.incremental_audio_output->Start(
-                  job.frame.sample_rate,
-                  static_cast<std::uint16_t>(job.frame.channels))) {
-            std::cerr << "[runtime] failed to open incremental PCM output\n";
-            output_open_failed = true;
-          } else {
-            state.active = true;
-            state.identity = identity;
-            state.samples = 0;
-            state.sample_rate = 0;
-            state.audio_serial = 0;
-            state.audio_clock_started = false;
-            state.audio_start_seconds = 0.0;
-            state.rms_sum = 0.0;
-            state.rms_samples = 0;
-          }
-        }
-        if (!output_open_failed) {
-          accepted = services_.incremental_audio_output->Append(job.frame.pcm);
-        }
-      }
-      if (output_open_failed) {
-        FailIncrementalAudio(identity, "incremental_audio_output_open_failed");
-        state = IncrementalWorkerState{};
-        state.generation = job.generation;
-        return;
-      }
-      if (!accepted) {
-        std::cerr << "[runtime] failed to accept incremental PCM frame\n";
-        FailIncrementalAudio(identity, "incremental_audio_output_append_failed");
-        services_.stop_incremental_audio();
-        state = IncrementalWorkerState{};
-        state.generation = job.generation;
-        return;
-      }
-      UpdateIncrementalAudioSignal(
-          job.frame.pcm,
-          job.frame.sample_rate,
-          job.frame.channels,
-          state);
-      if (state.audio_clock_started) {
-        std::scoped_lock lock(playback_mutex_);
-        const auto turn = playback_turns_.find(identity.turn_id);
-        if (turn != playback_turns_.end()
-            && turn->second.generation == job.generation) {
-          if (auto* segment = FindIncrementalSegmentLocked(
-                  identity, turn->second)) {
-            segment->clock.turn_id = identity.turn_id;
-            segment->clock.message_id = identity.segment_message_id;
-            segment->clock.sequence = segment->sequence;
-            segment->clock.started_at_seconds = state.audio_start_seconds;
-            segment->clock.duration_seconds =
-                static_cast<double>(state.samples)
-                / std::max<std::uint32_t>(1, state.sample_rate);
-            segment->clock.audio_serial = state.audio_serial;
-            segment->clock.generation = job.generation;
-          }
-        }
-      }
-      auto& credit = state.credits[identity.persona_result_id];
-      credit.first += job.frame.pcm.size();
-      credit.second += 1;
-      if (!SendIncrementalAudioCredit(
-              job.frame, credit.first, credit.second)) {
-        std::cerr << "[runtime] failed to send incremental audio credit\n";
-        FailIncrementalAudio(identity, "incremental_audio_credit_send_failed");
-        state = IncrementalWorkerState{};
-        state.generation = job.generation;
-      }
-      return;
-    }
-
-    if (!state.active) {
-      if (job.status == ag99::runtime::IncrementalOutputStatus::Completed
-          && job.total_samples == 0) {
-        NativeSegmentClock clock;
-        clock.turn_id = job.identity.turn_id;
-        clock.message_id = job.identity.segment_message_id;
-        clock.sequence = static_cast<std::int64_t>(
-            job.identity.segment_index);
-        clock.generation = job.generation;
-        const auto now = services_.now_seconds();
-        clock.audio_serial = services_.audio_serial->fetch_add(1) + 1;
-        services_.audio_start_seconds->store(now);
-        services_.audio_end_seconds->store(now);
-        services_.audio_level->store(0.0f);
-        services_.reset_speech_signal();
-        {
-          std::scoped_lock signal_lock((*services_.audio_signal_mutex));
-          services_.audio_rms->clear();
-        }
-        CompleteIncrementalAudio(job.identity, clock, true);
-      } else if (job.status
-          != ag99::runtime::IncrementalOutputStatus::Completed) {
-        FailIncrementalAudio(
-            job.identity,
-            job.reason.empty()
-                ? "incremental_audio_stream_failed"
-                : job.reason);
-      }
-      return;
-    }
-    if (state.identity.turn_id != job.identity.turn_id
-        || state.identity.segment_message_id != job.identity.segment_message_id
-        || state.identity.stream_id != job.identity.stream_id) {
-      std::cerr << "[runtime] incremental audio end identity mismatch\n";
-      FailIncrementalAudio(
-          job.identity, "incremental_audio_end_identity_mismatch");
-      services_.stop_incremental_audio();
-      state = IncrementalWorkerState{};
-      state.generation = job.generation;
-      return;
-    }
-    if (job.status != ag99::runtime::IncrementalOutputStatus::Completed) {
-      {
-        std::scoped_lock sink_lock((*services_.incremental_audio_output_mutex));
-        services_.incremental_audio_output->WaitForDrain();
-        services_.incremental_audio_output->Stop();
-      }
-      FailIncrementalAudio(
-          job.identity,
-          job.reason.empty()
-              ? "incremental_audio_stream_failed"
-              : job.reason);
-      state = IncrementalWorkerState{};
-      state.generation = job.generation;
-      return;
-    }
-    if (job.total_samples != state.samples) {
-      FailIncrementalAudio(job.identity, "incremental_audio_total_samples_mismatch");
-      services_.stop_incremental_audio();
-      state = IncrementalWorkerState{};
-      state.generation = job.generation;
-      return;
-    }
-    bool drained = false;
-    {
-      std::scoped_lock sink_lock((*services_.incremental_audio_output_mutex));
-      drained = services_.incremental_audio_output->WaitForDrain();
-      services_.incremental_audio_output->Stop();
-    }
-    if (!drained) {
-      std::cerr << "[runtime] incremental PCM drain timed out\n";
-      FailIncrementalAudio(job.identity, "incremental_audio_drain_timeout");
-      state = IncrementalWorkerState{};
-      state.generation = job.generation;
-      return;
-    }
-    NativeSegmentClock clock;
-    clock.turn_id = job.identity.turn_id;
-    clock.message_id = job.identity.segment_message_id;
-    clock.sequence = static_cast<std::int64_t>(job.identity.segment_index);
-    clock.started_at_seconds = state.audio_start_seconds;
-    clock.duration_seconds = static_cast<double>(job.total_samples)
-        / std::max<std::uint32_t>(1, state.sample_rate);
-    clock.audio_serial = state.audio_serial;
-    clock.generation = job.generation;
-    services_.audio_end_seconds->store(
-        state.audio_start_seconds
-        + static_cast<double>(job.total_samples)
-            / std::max<std::uint32_t>(1, state.sample_rate));
-    {
-      std::scoped_lock signal_lock((*services_.audio_signal_mutex));
-      services_.audio_rms->clear();
-    }
-    CompleteIncrementalAudio(job.identity, clock, true);
-    state.active = false;
-    state.identity = {};
-    state.samples = 0;
-    state.sample_rate = 0;
-    state.audio_serial = 0;
-    state.audio_clock_started = false;
-    state.audio_start_seconds = 0.0;
-    state.rms_sum = 0.0;
-    state.rms_samples = 0;
-  }
-
-  void AudioWorkerLoop() {
-    IncrementalWorkerState incremental_state;
-    while (true) {
-      AudioQueueItem item;
-      IncrementalAudioJob incremental_job;
-      std::string acknowledgement_turn_id;
-      std::uint64_t acknowledgement_generation = 0;
-      bool send_acknowledgement = false;
-      bool process_incremental_audio = false;
-      {
-        std::unique_lock lock(services_.audio_queue->audio_queue_mutex);
-        services_.audio_queue->audio_queue_condition.wait(lock, [this] {
-          return closing_.load() || pending_closed_generation_.load() != 0
-              || !services_.audio_queue->playback_ack_queue.empty() || !services_.audio_queue->audio_queue.empty()
-              || !services_.audio_queue->incremental_audio_queue.empty();
-        });
-        if (closing_.load()) {
-          return;
-        }
-        if (pending_closed_generation_.load() != 0) {
-          lock.unlock();
-          ProcessPendingTransportClosed();
-          continue;
-        }
-        if (!services_.audio_queue->playback_ack_queue.empty()) {
-          auto acknowledgement = std::move(services_.audio_queue->playback_ack_queue.front());
-          services_.audio_queue->playback_ack_queue.pop_front();
-          acknowledgement_turn_id = std::move(acknowledgement.turn_id);
-          acknowledgement_generation = acknowledgement.generation;
-          send_acknowledgement = true;
-        } else if (!services_.audio_queue->incremental_audio_queue.empty()) {
-          incremental_job = std::move(services_.audio_queue->incremental_audio_queue.front());
-          services_.audio_queue->incremental_audio_queue.pop_front();
-          if (incremental_job.kind == IncrementalAudioJob::Kind::Frame) {
-            services_.audio_queue->incremental_audio_queued_bytes -= incremental_job.frame.pcm.size();
-            services_.audio_queue->incremental_audio_queued_frames -= 1;
-          }
-          process_incremental_audio = true;
-        } else {
-          item = std::move(services_.audio_queue->audio_queue.front());
-          services_.audio_queue->audio_queue.pop_front();
-        }
-      }
-      if (send_acknowledgement) {
-        TrySendPlaybackAcknowledgement(
-            acknowledgement_turn_id, acknowledgement_generation);
-        continue;
-      }
-
-      if (process_incremental_audio) {
-        ProcessIncrementalAudioJob(std::move(incremental_job), incremental_state);
-        continue;
-      }
-
-      if (item.generation != connection_generation_.load()) {
-        continue;
-      }
-      if (!IsSegmentPlaybackOpen(item)) {
-        continue;
-      }
-
-      std::string playback_failure_reason;
-      const auto playback = services_.play_audio_url(
-          item.segment.audio.url, playback_failure_reason);
-      if (playback) {
-        std::scoped_lock lock(services_.audio_queue->audio_queue_mutex);
-        services_.audio_queue->current_audio_turn_id = item.turn_id;
-        services_.audio_queue->current_audio_message_id = item.message_id;
-        services_.audio_queue->current_audio_generation = item.generation;
-        services_.audio_queue->current_audio_serial = playback->serial;
-      }
-      if (item.generation != connection_generation_.load()
-          || pending_closed_generation_.load() == item.generation) {
-        if (playback) {
-          services_.stop_current_audio(playback->serial);
-          ClearCurrentAudio(item, playback->serial);
-        }
-        ProcessPendingTransportClosed();
-        continue;
-      }
-      if (!playback) {
-        CompleteAudioSegment(item, false, playback_failure_reason);
-        continue;
-      }
-      if (!IsSegmentPlaybackOpen(item)) {
-        services_.stop_current_audio(playback->serial);
-        ClearCurrentAudio(item, playback->serial);
-        continue;
-      }
-
-      NativeSegmentClock playback_clock{
-          item.turn_id,
-          item.message_id,
-          item.sequence,
-          playback->started_at_seconds,
-          playback->duration_seconds,
-          playback->serial,
-          item.generation};
-      const auto deferred_motion = ActivateAudioSegment(item, playback_clock);
-      if (deferred_motion) {
-        ApplyMotionUpdate(
-            item.turn_id,
-            item.message_id,
-            playback_clock,
-            std::move(*deferred_motion));
-      }
-
-      bool motion_dispatch_failed = false;
-      {
-        std::scoped_lock transport_lock(transport_mutex_);
-        if (closing_.load()
-            || item.generation != connection_generation_.load()) {
-          services_.stop_current_audio(playback->serial);
-          ClearCurrentAudio(item, playback->serial);
-          continue;
-        }
-        // Keep the final dispatch ordered before or after turn retirement.
-        std::scoped_lock playback_lock(playback_mutex_);
-        const auto turn = playback_turns_.find(item.turn_id);
-        if (turn == playback_turns_.end()
-            || turn->second.generation != item.generation
-            || !turn->second.segments.contains(item.message_id)) {
-          services_.stop_current_audio(playback->serial);
-          ClearCurrentAudio(item, playback->serial);
-          continue;
-        }
-        if (item.segment.motion.state
-                == ag99::runtime::MotionSlot::State::Present) {
-          NativeSegmentClock clock;
-          clock.turn_id = item.turn_id;
-          clock.message_id = item.message_id;
-          clock.sequence = item.sequence;
-          clock.started_at_seconds = playback->started_at_seconds;
-          clock.duration_seconds = playback->duration_seconds;
-          clock.audio_serial = playback->serial;
-          clock.generation = item.generation;
-          if (on_output_segment_) {
-            on_output_segment_(std::move(item.segment), std::move(clock));
-          } else {
-            motion_dispatch_failed = true;
-          }
-        }
-      }
-      if (motion_dispatch_failed) {
-        CompleteMotionSegment(NativeSegmentTerminal{
-            NativeSegmentClock{
-                .turn_id = item.turn_id,
-                .message_id = item.message_id,
-                .sequence = item.sequence,
-                .started_at_seconds = playback->started_at_seconds,
-                .duration_seconds = playback->duration_seconds,
-                .audio_serial = playback->serial,
-                .generation = item.generation},
-            false,
-            "motion_sink_unavailable"});
-      }
-      const auto deadline = playback->started_at_seconds
-          + playback->duration_seconds;
-      while (!closing_.load()
-             && pending_closed_generation_.load() != item.generation
-             && services_.audio_serial->load() == playback->serial
-             && services_.now_seconds() < deadline) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(25));
-      }
-      if (pending_closed_generation_.load() == item.generation) {
-        ProcessPendingTransportClosed();
-        continue;
-      }
-      if (closing_.load()
-          || services_.audio_serial->load() != playback->serial) {
-        ClearCurrentAudio(item, playback->serial);
-        continue;
-      }
-      ClearCurrentAudio(item, playback->serial);
-      CompleteAudioSegment(item, true);
-    }
+    return transport_.SendText(credit.dump());
   }
 
   PlaybackAckSendResult SendPlaybackFinished(
@@ -1841,15 +1451,16 @@ private:
         turn_id,
         success,
         reason);
-    return websocket_.send_text(finished.dump())
+    return transport_.SendText(finished.dump())
         ? PlaybackAckSendResult::Sent
         : PlaybackAckSendResult::Failed;
   }
 
   RuntimeCoordinatorServices services_;
-  ag99::runtime::WinHttpWebSocketClient websocket_;
-  ag99::native::MicrophoneCapture microphone_;
-  std::mutex microphone_operation_mutex_;
+  NativeTransport transport_;
+  ag99::native::NativeInputRuntime input_runtime_;
+  std::mutex adapter_url_mutex_;
+  std::string adapter_url_ = "ws://127.0.0.1:12396";
   std::shared_ptr<CallbackLifetime> callback_lifetime_;
   std::function<void(ag99::runtime::ModelSync)> on_model_sync_;
   std::function<void(
@@ -1868,7 +1479,7 @@ private:
   std::mutex playback_mutex_;
   std::unordered_map<std::string, TurnPlaybackState> playback_turns_;
   std::atomic<bool> closing_{false};
-  std::thread audio_worker_;
+  std::unique_ptr<NativePlaybackRuntime> playback_runtime_;
   std::atomic<std::uint64_t> next_turn_id_{1};
   std::atomic<std::uint64_t> next_feedback_id_{1};
   std::string last_input_turn_id_;

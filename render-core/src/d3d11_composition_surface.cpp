@@ -5,6 +5,7 @@
 #include <wrl/client.h>
 
 #include <iostream>
+#include <vector>
 
 namespace ag99::live2d {
 
@@ -15,6 +16,9 @@ struct D3D11CompositionSurface::Impl {
   ComPtr<ID3D11DeviceContext> context;
   ComPtr<IDXGISwapChain1> swap_chain;
   ComPtr<ID3D11RenderTargetView> render_target;
+  ComPtr<ID3D11Texture2D> staging_texture;
+  UINT width = 0;
+  UINT height = 0;
   ComPtr<IDCompositionDevice> composition_device;
   ComPtr<IDCompositionTarget> composition_target;
   ComPtr<IDCompositionVisual> composition_visual;
@@ -143,6 +147,8 @@ HRESULT D3D11CompositionSurface::Initialize(
   if (FAILED(result)) {
     return fail("CreateRenderTargetView", result);
   }
+  _impl->width = width;
+  _impl->height = height;
   return S_OK;
 }
 
@@ -167,6 +173,57 @@ HRESULT D3D11CompositionSurface::Present(
   return _impl->swap_chain->Present(sync_interval, flags);
 }
 
+HRESULT D3D11CompositionSurface::ReadbackRgba(
+    std::vector<std::uint8_t>& output) noexcept {
+  if (!_impl->device || !_impl->context || !_impl->swap_chain
+      || !_impl->width || !_impl->height) {
+    return E_UNEXPECTED;
+  }
+  ComPtr<ID3D11Texture2D> source;
+  HRESULT result = _impl->swap_chain->GetBuffer(
+      0, IID_PPV_ARGS(source.GetAddressOf()));
+  if (FAILED(result)) {
+    return result;
+  }
+  D3D11_TEXTURE2D_DESC description{};
+  source->GetDesc(&description);
+  if (!_impl->staging_texture) {
+    description.Usage = D3D11_USAGE_STAGING;
+    description.BindFlags = 0;
+    description.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    description.MiscFlags = 0;
+    result = _impl->device->CreateTexture2D(
+        &description, nullptr, _impl->staging_texture.GetAddressOf());
+    if (FAILED(result)) {
+      return result;
+    }
+  }
+  _impl->context->CopyResource(_impl->staging_texture.Get(), source.Get());
+  D3D11_MAPPED_SUBRESOURCE mapped{};
+  result = _impl->context->Map(
+      _impl->staging_texture.Get(), 0, D3D11_MAP_READ, 0, &mapped);
+  if (FAILED(result)) {
+    return result;
+  }
+  output.resize(static_cast<std::size_t>(_impl->width) * _impl->height * 4);
+  for (UINT row = 0; row < _impl->height; ++row) {
+    const auto* source_row = static_cast<const std::uint8_t*>(mapped.pData)
+        + static_cast<std::size_t>(row) * mapped.RowPitch;
+    auto* target_row = output.data()
+        + static_cast<std::size_t>(row) * _impl->width * 4;
+    for (UINT column = 0; column < _impl->width; ++column) {
+      const auto* pixel = source_row + static_cast<std::size_t>(column) * 4;
+      auto* target = target_row + static_cast<std::size_t>(column) * 4;
+      target[0] = pixel[2];
+      target[1] = pixel[1];
+      target[2] = pixel[0];
+      target[3] = pixel[3];
+    }
+  }
+  _impl->context->Unmap(_impl->staging_texture.Get(), 0);
+  return S_OK;
+}
+
 void D3D11CompositionSurface::Shutdown() noexcept {
   if (!_impl) {
     return;
@@ -176,6 +233,7 @@ void D3D11CompositionSurface::Shutdown() noexcept {
     _impl->context->Flush();
   }
   _impl->render_target.Reset();
+  _impl->staging_texture.Reset();
   if (_impl->composition_visual) {
     const HRESULT result = _impl->composition_visual->SetContent(nullptr);
     if (FAILED(result)) {
@@ -206,6 +264,8 @@ void D3D11CompositionSurface::Shutdown() noexcept {
   _impl->swap_chain.Reset();
   _impl->context.Reset();
   _impl->device.Reset();
+  _impl->width = 0;
+  _impl->height = 0;
 }
 
 ID3D11Device* D3D11CompositionSurface::Device() const noexcept {

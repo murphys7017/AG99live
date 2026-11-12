@@ -1,13 +1,13 @@
 import type { ProtocolEnvelope } from "../../types/protocol.js";
 import { SCHEMA_OUTPUT_SEGMENT_V6 } from "../../types/protocolSchema.generated.js";
 import type { MotionPayloadNormalizer } from "../../types/motion.js";
-import type { useTurnPlaybackSessionStore } from "../../turn-playback/useTurnPlaybackSessionStore.js";
+import type { TurnPlaybackSessionPort } from "../../turn-playback/sessionStorePort.js";
 import { parseSegmentMotionSlot } from "./inboundPayloads.js";
 import { asRecord, validateExactKeys } from "./payloadValidation.js";
 
 export function applyDeferredMotion(
   envelope: ProtocolEnvelope<unknown>,
-  store: ReturnType<typeof useTurnPlaybackSessionStore>,
+  store: TurnPlaybackSessionPort,
   normalize: MotionPayloadNormalizer,
 ): void {
   const payload = asRecord(envelope.payload);

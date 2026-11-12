@@ -6,15 +6,23 @@ TypeScript 是 AG99live 的持续开发实现。当前版本已经把 Live2D 业
 
 ## 组合根与端口
 
-`frontend/src/app/usePetDesktopRuntime.ts` 是桌面运行时组合根。它只装配 SessionStore、PlaybackTimeline、ModelEngine、Adapter 和 Live2D 端口，不再让业务模块直接读取 `window.getLAppAdapter`。
+`frontend/src/app/usePetDesktopRuntime.ts` 是桌面运行时组合根。基础依赖由
+`frontend/src/app/desktopRuntimeFoundation.ts` 先组装：SessionStore、ModelSync、
+Live2D RuntimePort、桌面设置端口和 ConversationPlayback。桌面根只继续装配
+Presence、MotionLab、ModelEngine、桌面命令和 Vue 生命周期，不再让业务模块直接读取
+`window.getLAppAdapter`。
 
 Live2D 运行时能力由 `frontend/src/live2d/runtimePort.ts` 的 `Live2dRuntimePort` 表达。`createWindowLive2dRuntimePort()` 是唯一的 Window Adapter 适配层；动作预览、空闲动作、交互摇摆、鼠标凝视和语音口型通过注入端口调用。渲染器仍可直接使用 Cubism 初始化与画布生命周期，但运行效果设置同样经由该端口。
+
+Electron preload 能力由 `frontend/src/desktop-bridge/desktopHostPort.ts` 的 `DesktopHostPort` 统一读取。截图、麦克风、PTT、Spout、窗口操作、Bilibili、设置窗口和桌面桥接模块不再直接读取 `window.ag99desktop`；全局对象只在端口工厂中出现。
 
 语音口型的音频分析仍由前端音频运行时持有，`Live2dRuntimePort` 只接收外部音频信号。这样可以替换 Live2D 实现、测试播放编排，或在 C++ 运行时接入时保持上层调用形状稳定。
 
 ## 段身份与终态
 
 `frontend/src/turn-playback/identity.ts` 定义共享的 `SegmentIdentity` 和 `MotionRunIdentity`。Timeline、MotionScheduler、MotionSink 和 SessionStore 使用同一套 trim、非空校验与复合键规则；`turnId`、`messageId`、`timelineId` 和 `runId` 不再由各模块自行拼接。
+
+跨层调用通过 `frontend/src/turn-playback/sessionStorePort.ts` 使用显式的 Session/Segment 端口。Timeline、Orchestrator、Completion Coordinator、Adapter 入站运行时和桌面组合根不再依赖 `ReturnType<typeof useTurnPlaybackSessionStore>` 的完整实现形状；增量 text/audio/motion 流也通过同一端口推进。
 
 `frontend/src/turn-playback/terminals.ts` 定义 Turn 与 Sink 的终态谓词以及 Sink 到 Turn 的转换。Timeline Engine 和 Runtime 通过共享谓词识别 `completed`、`failed`、`absent` 与 `interrupted`，避免不同模块把 `started` 或 `idle` 当作终态。
 

@@ -137,6 +137,79 @@ ag99::runtime::DesktopSettingsResult SettingsController::HandleQuery(
     return result;
   }
 
+  if (query.key == "speech_volume") {
+    if (query.action == "set") {
+      const auto parsed = ParseNumber(query.value.value_or(""));
+      if (!parsed) {
+        result.error = "desktop_setting_value_invalid";
+        return result;
+      }
+      if (*parsed < 0.0 || *parsed > 1.0) {
+        result.error = "desktop_setting_value_out_of_range";
+        return result;
+      }
+      snapshot_.speech_volume = std::round(*parsed * 100.0) / 100.0;
+    }
+    result.entry = NumberEntry(snapshot_.speech_volume, 0.0, 1.0, 0.01);
+    return result;
+  }
+
+  if (query.key == "cursor_gaze_enabled") {
+    if (query.action == "set") {
+      const auto value = query.value.value_or("");
+      if (value != "true" && value != "false") {
+        result.error = "desktop_setting_value_invalid";
+        return result;
+      }
+      snapshot_.cursor_gaze_enabled = value == "true";
+    }
+    result.entry = ag99::runtime::DesktopSettingsEntry{
+        snapshot_.cursor_gaze_enabled ? "true" : "false",
+        {},
+        std::nullopt,
+        std::nullopt,
+        std::nullopt};
+    return result;
+  }
+
+  if (query.key == "cursor_gaze_poll_interval_ms"
+      || query.key == "cursor_gaze_dwell_ms"
+      || query.key == "cursor_gaze_stationary_distance_px") {
+    double* target = nullptr;
+    double minimum = 0.0;
+    double maximum = 0.0;
+    double step = 1.0;
+    if (query.key == "cursor_gaze_poll_interval_ms") {
+      target = &snapshot_.cursor_gaze_poll_interval_ms;
+      minimum = 50.0;
+      maximum = 1000.0;
+      step = 10.0;
+    } else if (query.key == "cursor_gaze_dwell_ms") {
+      target = &snapshot_.cursor_gaze_dwell_ms;
+      minimum = 100.0;
+      maximum = 2000.0;
+      step = 50.0;
+    } else {
+      target = &snapshot_.cursor_gaze_stationary_distance_px;
+      minimum = 1.0;
+      maximum = 100.0;
+    }
+    if (query.action == "set") {
+      const auto parsed = ParseNumber(query.value.value_or(""));
+      if (!parsed) {
+        result.error = "desktop_setting_value_invalid";
+        return result;
+      }
+      if (*parsed < minimum || *parsed > maximum) {
+        result.error = "desktop_setting_value_out_of_range";
+        return result;
+      }
+      *target = std::round(*parsed);
+    }
+    result.entry = NumberEntry(*target, minimum, maximum, step);
+    return result;
+  }
+
   if (query.key == "model_view_scale"
       || query.key == "model_view_offset_x"
       || query.key == "model_view_offset_y") {

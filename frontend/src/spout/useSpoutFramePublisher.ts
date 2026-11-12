@@ -70,8 +70,8 @@ export function useSpoutFramePublisher(
     if (next) {
       senderCanPublish = false;
       detachSenderStatus =
-        window.ag99desktop?.onSpoutSenderStatus(applySenderStatus) ?? null;
-      const getStatus = window.ag99desktop?.getSpoutSenderStatus;
+        desktopHostPort.getApi()?.onSpoutSenderStatus(applySenderStatus) ?? null;
+      const getStatus = desktopHostPort.getApi()?.getSpoutSenderStatus;
       if (getStatus) {
         void getStatus().then(applySenderStatus).catch(() => {
           senderCanPublish = false;
@@ -143,7 +143,7 @@ export function useSpoutFramePublisher(
     if (!enabled.value || !senderCanPublish) {
       return;
     }
-    const publish = window.ag99desktop?.publishSpoutFrame;
+    const publish = desktopHostPort.getApi()?.publishSpoutFrame;
     const canvas = canvasRef.value;
     if (!publish || !canvas) {
       return;
@@ -212,7 +212,7 @@ export function useSpoutFramePublisher(
           gl.bindBuffer(gl.PIXEL_PACK_BUFFER, previousPixelPackBuffer);
         }
         const copyDuration = performance.now() - copyStartedAt;
-        const publish = window.ag99desktop?.publishSpoutFrame;
+        const publish = desktopHostPort.getApi()?.publishSpoutFrame;
         if (publish) {
           const ipcStartedAt = performance.now();
           // Keep premultiplied-alpha bytes; the native Sender flips rows for Spout.
@@ -328,3 +328,4 @@ export function useSpoutFramePublisher(
     mounted = false;
   });
 }
+import { desktopHostPort } from "../desktop-bridge/desktopHostPort.js";

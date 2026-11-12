@@ -1,3 +1,5 @@
+import { desktopHostPort } from "../../desktop-bridge/desktopHostPort.js";
+
 export interface DesktopCaptureImagePayload {
   data: string;
   mime_type: "image/jpeg";
@@ -12,7 +14,7 @@ let captureNeedsRecovery = false;
 export async function captureRealtimeDesktopScreenshot(
   purpose: "foreground" | "observation" = "foreground",
 ): Promise<DesktopCaptureImagePayload | null> {
-  const capture = window.ag99desktop?.captureDesktopScreenshot;
+  const capture = desktopHostPort.getApi()?.captureDesktopScreenshot;
   if (!capture) {
     console.warn("[DesktopCapture] Desktop capture bridge is unavailable");
     return null;

@@ -14,6 +14,7 @@ import {
   type Live2dPresentationSettings,
 } from "./settings";
 import { createWindowLive2dRuntimePort } from "../live2d/runtimePort.js";
+import { desktopHostPort } from "../desktop-bridge/desktopHostPort.js";
 
 type RenderStatus = "idle" | "loading" | "ready" | "error";
 
@@ -347,7 +348,7 @@ export function useLive2dRenderer(
     }
 
     disposeForceRedrawListener =
-      window.ag99desktop?.onForceRedraw(() => {
+      desktopHostPort.getApi()?.onForceRedraw(() => {
         void nextTick().then(() => {
           forceLive2DRedraw();
         });

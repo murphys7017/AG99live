@@ -23,6 +23,7 @@ public:
     std::function<bool()>* microphone_running = nullptr;
     std::function<bool()>* interrupt_turn = nullptr;
     std::function<bool()>* approve_latest_segment = nullptr;
+    std::function<bool()>* reconnect_adapter = nullptr;
     bool* click_through = nullptr;
     bool* dragging = nullptr;
     POINT* drag_cursor = nullptr;
@@ -55,7 +56,7 @@ public:
   void NotifyInputRuntimeStateChanged();
 
 private:
-  static NativeHost* active_;
+  static NativeHost* FromWindow(HWND window);
   static LRESULT CALLBACK MainWindowProc(
       HWND window, UINT message, WPARAM wparam, LPARAM lparam);
   static LRESULT CALLBACK InputWindowProc(

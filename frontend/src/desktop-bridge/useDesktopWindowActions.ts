@@ -3,11 +3,11 @@ export function useDesktopWindowActions(): {
   closeWindow: () => void;
 } {
   function minimizeWindow(): void {
-    window.ag99desktop?.minimizeCurrentWindow();
+    desktopHostPort.getApi()?.minimizeCurrentWindow();
   }
 
   function closeWindow(): void {
-    window.ag99desktop?.closeCurrentWindow();
+    desktopHostPort.getApi()?.closeCurrentWindow();
   }
 
   return {
@@ -15,3 +15,4 @@ export function useDesktopWindowActions(): {
     closeWindow,
   };
 }
+import { desktopHostPort } from "./desktopHostPort.js";

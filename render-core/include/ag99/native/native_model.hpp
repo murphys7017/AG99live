@@ -11,10 +11,18 @@
 #include <string_view>
 #include <vector>
 
-#include "ag99/native/audio_runtime.hpp"
-#include "ag99/native/runtime_coordinator.hpp"
+#include "ag99/native/segment_types.hpp"
+#include "ag99/runtime/protocol.hpp"
 
 namespace ag99::native {
+
+struct NativeModelAudioPort {
+  std::function<void(float, double)> update_audio_level;
+  std::function<float(std::string_view)> speech_audio_gain;
+  std::function<float()> speech_lip_sync_intensity;
+  std::function<double()> audio_end_seconds;
+  std::function<void(float)> set_speech_volume;
+};
 
 struct NativeModelServices {
   std::function<double()> now_seconds;
@@ -23,7 +31,7 @@ struct NativeModelServices {
   std::function<std::string(const std::filesystem::path&)> path_to_utf8;
   std::function<bool(
       const std::filesystem::path&, std::vector<std::uint8_t>&)> read_file;
-  AudioRuntime* audio_runtime = nullptr;
+  NativeModelAudioPort audio;
   std::atomic<float>* drag_x = nullptr;
   std::atomic<float>* drag_y = nullptr;
 };

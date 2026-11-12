@@ -26,6 +26,7 @@ constexpr UINT kTrayMicToggle = 1005;
 constexpr UINT kTrayInputWindow = 1006;
 constexpr UINT kTrayClickThrough = 1007;
 constexpr UINT kTrayOpenLog = 1008;
+constexpr UINT kTrayReconnect = 1009;
 constexpr UINT kInputConnectionChanged = WM_APP + 2;
 constexpr UINT kInputRuntimeStateChanged = WM_APP + 3;
 constexpr wchar_t kInputClassName[] = L"AG99liveTextInputWindow";
@@ -37,16 +38,13 @@ constexpr int kInputControlId = 100;
 constexpr int kInputMessageId = 101;
 constexpr int kInputStatusId = 102;
 
-NativeHost* NativeHost::active_ = nullptr;
+NativeHost::NativeHost(Bindings bindings) : bindings_(std::move(bindings)) {}
 
-NativeHost::NativeHost(Bindings bindings) : bindings_(std::move(bindings)) {
-  active_ = this;
-}
+NativeHost::~NativeHost() = default;
 
-NativeHost::~NativeHost() {
-  if (active_ == this) {
-    active_ = nullptr;
-  }
+NativeHost* NativeHost::FromWindow(HWND window) {
+  return reinterpret_cast<NativeHost*>(
+      GetWindowLongPtrW(window, GWLP_USERDATA));
 }
 void NativeHost::AddTrayIcon(HWND window) {
   bindings_.tray->Add(window, kTrayMessage, L"AG99live Native Runtime");
@@ -86,6 +84,7 @@ void NativeHost::ShowTrayMenu(HWND window) {
   AppendMenuW(menu, MF_STRING, kTrayHide, L"隐藏模型");
   AppendMenuW(menu, MF_STRING, kTrayInputWindow, L"打开输入框");
   AppendMenuW(menu, MF_STRING, kTrayDemoText, L"发送演示文本");
+  AppendMenuW(menu, MF_STRING, kTrayReconnect, L"重连 Adapter");
   AppendMenuW(
       menu,
       MF_STRING,
@@ -110,7 +109,13 @@ void NativeHost::ShowTrayMenu(HWND window) {
 }
 
 LRESULT CALLBACK NativeHost::MainWindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
-  auto* host = active_;
+  if (message == WM_NCCREATE) {
+    const auto* create = reinterpret_cast<const CREATESTRUCTW*>(lparam);
+    SetWindowLongPtrW(
+        window, GWLP_USERDATA,
+        reinterpret_cast<LONG_PTR>(create->lpCreateParams));
+  }
+  auto* host = FromWindow(window);
   if (!host) {
     return DefWindowProcW(window, message, wparam, lparam);
   }
@@ -186,6 +191,11 @@ LRESULT CALLBACK NativeHost::MainWindowProc(HWND window, UINT message, WPARAM wp
         case kTrayDemoText:
           if ((*host->bindings_.send_text)) {
             (*host->bindings_.send_text)("你好，这是原生 Live2D 核心演示。");
+          }
+          return 0;
+        case kTrayReconnect:
+          if ((*host->bindings_.reconnect_adapter)) {
+            (*host->bindings_.reconnect_adapter)();
           }
           return 0;
         case kTrayInputWindow:
@@ -321,7 +331,7 @@ void NativeHost::SubmitInputText(HWND window) {
 
 LRESULT CALLBACK NativeHost::InputEditProc(
     HWND edit, UINT message, WPARAM wparam, LPARAM lparam) {
-  auto* active = active_;
+  auto* active = FromWindow(GetParent(edit));
   if (!active) {
     return DefWindowProcW(edit, message, wparam, lparam);
   }
@@ -340,7 +350,7 @@ LRESULT CALLBACK NativeHost::InputEditProc(
           : DefWindowProcW(edit, message, wparam, lparam);
     }
     if (const HWND parent = GetParent(edit)) {
-      active_->SubmitInputText(parent);
+      active->SubmitInputText(parent);
     }
     return 0;
   }
@@ -355,7 +365,13 @@ LRESULT CALLBACK NativeHost::InputEditProc(
 
 LRESULT CALLBACK NativeHost::InputWindowProc(
     HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
-  auto* host = active_;
+  if (message == WM_NCCREATE) {
+    const auto* create = reinterpret_cast<const CREATESTRUCTW*>(lparam);
+    SetWindowLongPtrW(
+        window, GWLP_USERDATA,
+        reinterpret_cast<LONG_PTR>(create->lpCreateParams));
+  }
+  auto* host = FromWindow(window);
   if (!host) {
     return DefWindowProcW(window, message, wparam, lparam);
   }
@@ -491,7 +507,7 @@ void NativeHost::ShowInputWindow(HINSTANCE instance) {
       kInputClassName,
       L"AG99live",
       WS_POPUP,
-      x, y, width, height, nullptr, nullptr, instance, nullptr);
+      x, y, width, height, nullptr, nullptr, instance, this);
   if (!window) {
     AG99_ERROR("input", "failed to create the input window");
     return;
@@ -546,7 +562,6 @@ HWND NativeHost::CreateMainWindow(
   instance_ = instance;
   class_name_ = class_name;
   title_ = title;
-  active_ = this;
   WNDCLASSEXW window_class{
       sizeof(WNDCLASSEXW),
       CS_HREDRAW | CS_VREDRAW,
@@ -576,7 +591,7 @@ HWND NativeHost::CreateMainWindow(
       nullptr,
       nullptr,
       instance,
-      nullptr);
+      this);
   if (!window) {
     return nullptr;
   }

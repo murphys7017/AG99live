@@ -1,5 +1,5 @@
 import { watch, type DeepReadonly } from "vue";
-import type { useTurnPlaybackSessionStore } from "./useTurnPlaybackSessionStore";
+import type { TurnPlaybackSessionPort } from "./sessionStorePort.js";
 import type { NormalizedMotionPayload } from "../types/motion.js";
 import { cloneJson } from "../utils/cloneJson.js";
 import {
@@ -11,7 +11,7 @@ import {
 import type { TurnPlaybackSegment } from "./session.js";
 import type { PlaybackTimelineRuntime } from "../playback-timeline/playbackTimelineRuntime.js";
 
-type SessionStore = ReturnType<typeof useTurnPlaybackSessionStore>;
+type SessionStore = TurnPlaybackSessionPort;
 const MAX_LATE_MOTION_TAIL_MS = 1800;
 
 interface TurnPlaybackOrchestratorOptions {

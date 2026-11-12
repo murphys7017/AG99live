@@ -2,6 +2,7 @@ import { onBeforeUnmount, onMounted, watch, type Ref } from "vue";
 import { buildCursorGazeInput } from "../model-engine/runtime/interactionSway";
 import type { ModelSummary } from "../types/protocol";
 import type { Live2dRuntimePort } from "../live2d/runtimePort.js";
+import { desktopHostPort } from "../desktop-bridge/desktopHostPort.js";
 import { useCursorGazeSettings } from "./cursorGazeSettings";
 
 interface CursorTarget {
@@ -37,7 +38,7 @@ export function useCursorGaze(
       && settings.enabled
       && !document.hidden
       && selectedModel.value !== null
-      && !!window.ag99desktop?.getPetCursorTarget;
+      && !!desktopHostPort.getApi()?.getPetCursorTarget;
   }
 
   function stop(): void {
@@ -60,7 +61,7 @@ export function useCursorGaze(
       return;
     }
     const model = selectedModel.value;
-    const getCursorTarget = window.ag99desktop?.getPetCursorTarget;
+    const getCursorTarget = desktopHostPort.getApi()?.getPetCursorTarget;
     if (!model || !getCursorTarget) {
       return;
     }

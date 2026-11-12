@@ -1,11 +1,11 @@
 import { watch, type DeepReadonly } from "vue";
-import type { useTurnPlaybackSessionStore } from "./useTurnPlaybackSessionStore.js";
+import type { TurnPlaybackSessionPort } from "./sessionStorePort.js";
 import { isPlaybackLocallySettled } from "./selectors.js";
 import type { TurnPlaybackSession } from "./session.js";
 import type { PlaybackAckPort } from "./ports.js";
 import type { PlaybackTimelineRuntime } from "../playback-timeline/playbackTimelineRuntime.js";
 
-type SessionStore = ReturnType<typeof useTurnPlaybackSessionStore>;
+type SessionStore = TurnPlaybackSessionPort;
 
 export interface PlaybackCompletionCoordinatorOptions {
   sessionStore: SessionStore;
