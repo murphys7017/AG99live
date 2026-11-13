@@ -19,6 +19,7 @@ public:
   D3D11CompositionSurface& operator=(const D3D11CompositionSurface&) = delete;
 
   HRESULT Initialize(HWND window, UINT width, UINT height);
+  HRESULT Resize(UINT width, UINT height) noexcept;
   HRESULT BeginFrame() noexcept;
   HRESULT Present(UINT sync_interval = 1, UINT flags = 0) noexcept;
   HRESULT ReadbackRgba(std::vector<std::uint8_t>& output) noexcept;

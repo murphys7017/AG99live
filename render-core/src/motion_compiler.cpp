@@ -339,6 +339,8 @@ std::optional<MotionPlan> CompileMotionPlan(
   std::vector<AxisMap> resolved_steps;
   resolved_steps.reserve(input_steps.size());
   int total_weight = 0;
+  std::unordered_map<std::string, int> previous_directions;
+  std::unordered_map<std::string, int> repeat_counts;
   for (const auto& [values, weight] : input_steps) {
     const auto resolution = ResolveAxisValues(
         *profile,
@@ -348,7 +350,45 @@ std::optional<MotionPlan> CompileMotionPlan(
     if (resolution.invalid_axis_value) {
       invalid_axis_value = true;
     }
-    resolved_steps.push_back(resolution.values);
+    std::vector<std::pair<std::string, double>> active_strengths;
+    for (const auto& [axis_id, axis_value] : resolution.values) {
+      const auto strength = std::abs(axis_value.value - axis_value.neutral);
+      if (strength >= 0.08) {
+        active_strengths.emplace_back(axis_id, strength);
+      }
+    }
+    AxisMap governed_values;
+    if (active_strengths.size() <= 8) {
+      governed_values = resolution.values;
+    } else {
+      std::sort(
+          active_strengths.begin(), active_strengths.end(),
+          [](const auto& left, const auto& right) {
+            return left.second > right.second
+                || (left.second == right.second && left.first < right.first);
+          });
+      active_strengths.resize(8);
+      for (const auto& [axis_id, _] : active_strengths) {
+        governed_values.emplace(axis_id, resolution.values.at(axis_id));
+      }
+    }
+    for (auto& [axis_id, axis_value] : governed_values) {
+      const auto delta = axis_value.value - axis_value.neutral;
+      const int direction = delta > 0.08 ? 1 : delta < -0.08 ? -1 : 0;
+      const auto previous = previous_directions.find(axis_id);
+      if (direction == 0 || previous == previous_directions.end()
+          || previous->second != direction) {
+        repeat_counts[axis_id] = direction == 0 ? 0 : 1;
+      } else {
+        const int repeat = ++repeat_counts[axis_id];
+        const double attenuation = std::max(
+            0.5, std::pow(0.68, std::min(repeat - 1, 3)));
+        axis_value.value = axis_value.neutral
+            + (axis_value.value - axis_value.neutral) * attenuation;
+      }
+      previous_directions[axis_id] = direction;
+    }
+    resolved_steps.push_back(std::move(governed_values));
     total_weight += weight;
   }
   if (total_weight <= 0) {

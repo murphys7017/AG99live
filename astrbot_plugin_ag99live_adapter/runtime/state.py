@@ -225,11 +225,6 @@ class RuntimeState:
         previous_passive_behavior_provider_id = self.passive_behavior_provider_id
         previous_passive_behavior_enabled = self.passive_behavior_enabled
         general_config = get_config_value(self.plugin_config, "general", {})
-        conversation_config = get_config_value(
-            self.plugin_config,
-            "conversation",
-            {},
-        )
         live2d_input_config = get_config_value(self.plugin_config, "live2d_input", {})
         performance_curve_config = get_config_value(
             self.plugin_config,

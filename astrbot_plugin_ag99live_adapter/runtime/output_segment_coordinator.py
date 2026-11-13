@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Mapping
 from typing import Any, Awaitable, Callable
 
 from astrbot.api import logger

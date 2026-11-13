@@ -69,6 +69,7 @@ from .adapters.astrbot.composition import (
     AstrBotProviderBinding,
     build_provider_bridge,
 )
+from .providers.contracts import ConversationInput
 
 PLUGIN_DIR = Path(__file__).resolve().parent
 ASSETS_DIR = PLUGIN_DIR / "assets"
@@ -141,7 +142,7 @@ class OLVPetPlatformAdapter(Platform):
         self.desktop_persona_segment_stream_enabled = False
         self.desktop_audio_credit_enabled = False
         self._event_loop: asyncio.AbstractEventLoop | None = None
-        self._external_conversation_tasks: set[asyncio.Task] = set()
+        self._connection_cleanup_lock = asyncio.Lock()
 
         self._plugin_context = get_plugin_context()
         plugin_config_snapshot = get_plugin_config_snapshot()
@@ -416,15 +417,11 @@ class OLVPetPlatformAdapter(Platform):
             raise
         finally:
             await asyncio.gather(asr_prewarm_task, return_exceptions=True)
-            self.desktop_observation.disconnect()
-            self.desktop_presence.disconnect()
+            try:
+                await self._reset_connection_runtime("adapter_stopped")
+            except Exception:
+                logger.exception("AG99live runtime cleanup failed while run() stopped")
             await self.interaction_orchestrator.close()
-            if self._external_conversation_tasks:
-                await asyncio.gather(
-                    *tuple(self._external_conversation_tasks),
-                    return_exceptions=True,
-                )
-                self._external_conversation_tasks.clear()
             await self.passive_behavior_runtime.stop()
             unregister_control_platform(self.platform_id, self)
             self._event_loop = None
@@ -582,7 +579,6 @@ class OLVPetPlatformAdapter(Platform):
 
     def _refresh_runtime_settings(self) -> None:
         self.runtime_state.refresh()
-        self._retain_conversation_platform_until_restart()
         self._sync_client_profile_from_runtime_state()
 
     async def _refresh_runtime_settings_async(
@@ -593,7 +589,6 @@ class OLVPetPlatformAdapter(Platform):
         await self.runtime_state.refresh_async(
             reload_providers=reload_providers,
         )
-        self._retain_conversation_platform_until_restart()
         self._sync_client_profile_from_runtime_state()
 
     async def _synchronize_desktop_settings(self) -> None:
@@ -716,6 +711,10 @@ class OLVPetPlatformAdapter(Platform):
     async def terminate(self) -> None:
         logger.info("AG99live adapter terminate() called")
         try:
+            try:
+                await self._reset_connection_runtime("adapter_terminated")
+            except Exception:
+                logger.exception("AG99live runtime cleanup failed during terminate()")
             await self.interaction_orchestrator.close()
             await self.passive_behavior_runtime.stop()
             self.desktop_settings_broker.fail_pending("adapter_terminated")
@@ -732,9 +731,19 @@ class OLVPetPlatformAdapter(Platform):
     async def _send_json(self, payload: dict[str, Any]) -> bool:
         return await self.transport.send_json(payload)
 
-    async def _handle_transport_disconnect(self) -> None:
-        """WebSocket 断开时调用的清理钩子。
+    async def _reset_connection_runtime(self, reason: str) -> None:
+        """Reset all connection-owned runtime state exactly once at a time."""
+        cleanup_lock = getattr(self, "_connection_cleanup_lock", None)
+        if cleanup_lock is None:
+            cleanup_lock = asyncio.Lock()
+            self._connection_cleanup_lock = cleanup_lock
+        async with cleanup_lock:
+            await self._reset_connection_runtime_locked(reason)
 
+    async def _reset_connection_runtime_locked(self, reason: str) -> None:
+        """Run connection cleanup while the caller holds the cleanup lock."""
+
+        """
         各连接级所有者按固定顺序释放资源；任一所有者失败都必须留下诊断，但不能阻止
         后续所有者清理。全部尝试结束后再把失败汇总交回 transport。
         """
@@ -749,46 +758,50 @@ class OLVPetPlatformAdapter(Platform):
         self.desktop_audio_credit_enabled = False
 
         try:
-            self.desktop_settings_broker.fail_pending("desktop_client_offline")
+            self.desktop_settings_broker.fail_pending(reason)
         except Exception as exc:
             cleanup_failures.append(("desktop_settings_broker", exc))
-            logger.exception("DesktopSettingsBroker disconnect cleanup failed")
+            logger.exception("DesktopSettingsBroker runtime cleanup failed")
 
         try:
             self.turn_coordinator.reset_turn_tracking()
         except Exception as exc:
             cleanup_failures.append(("turn_coordinator", exc))
-            logger.exception("TurnCoordinator disconnect cleanup failed")
+            logger.exception("TurnCoordinator runtime cleanup failed")
 
         try:
             self.session_state.reset_to_idle()
         except Exception as exc:
             cleanup_failures.append(("session_state", exc))
-            logger.exception("SessionState disconnect cleanup failed")
+            logger.exception("SessionState runtime cleanup failed")
 
         try:
             self.turn_identity_map.clear_all()
         except Exception as exc:
             cleanup_failures.append(("turn_identity_map", exc))
-            logger.exception("TurnIdentityMap disconnect cleanup failed")
+            logger.exception("TurnIdentityMap runtime cleanup failed")
 
         try:
             await self.turn_coordinator.speech_ingress.handle_audio_stream_interrupt()
         except Exception as exc:
             cleanup_failures.append(("speech_ingress", exc))
-            logger.exception("SpeechIngress disconnect cleanup failed")
+            logger.exception("SpeechIngress runtime cleanup failed")
 
         try:
             await self.media_service.clear_audio_buffer()
         except Exception as exc:
             cleanup_failures.append(("media_service", exc))
-            logger.exception("MediaService disconnect cleanup failed")
+            logger.exception("MediaService runtime cleanup failed")
 
         if cleanup_failures:
             failed_owners = ",".join(owner for owner, _exc in cleanup_failures)
             raise RuntimeError(
                 f"disconnect_cleanup_incomplete:{failed_owners}"
             ) from cleanup_failures[0][1]
+
+    async def _handle_transport_disconnect(self) -> None:
+        """WebSocket 断开时调用的连接清理钩子."""
+        await self._reset_connection_runtime("desktop_client_offline")
 
     def _sync_client_profile_from_runtime_state(self) -> None:
         self.client_uid = normalize_client_uid(

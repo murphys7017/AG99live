@@ -35,6 +35,7 @@ public:
       const std::filesystem::path& model_directory,
       UINT width,
       UINT height);
+  void Resize(UINT width, UINT height) noexcept;
   void Draw();
   void Shutdown();
 

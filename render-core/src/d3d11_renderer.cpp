@@ -166,6 +166,13 @@ void D3D11Renderer::Draw() {
   renderer->EndFrame();
 }
 
+void D3D11Renderer::Resize(UINT width, UINT height) noexcept {
+  if (_impl && width > 0 && height > 0) {
+    _impl->width = width;
+    _impl->height = height;
+  }
+}
+
 void D3D11Renderer::Shutdown() {
   if (_impl) {
     _impl->Shutdown();
