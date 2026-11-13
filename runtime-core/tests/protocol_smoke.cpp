@@ -136,6 +136,72 @@ void test_parameter_plan_motion_slot() {
   assert(segment.motion.message_type == "engine.parameter_plan");
 }
 
+void test_pre_action_boundary() {
+  const auto raw = ag99::runtime::build_envelope(
+      "output.pre_action",
+      {
+          {"schema_version", "olv.pre_action.v1"},
+          {"request_id", "pre-1"},
+          {"action", "ready"},
+          {"motion",
+           {
+               {"schema_version", "engine.motion_intent.v4"},
+               {"mode", "expressive"},
+               {"intent_tags", {"greeting"}},
+               {"motion_steps", {{{"axis_values", {{"head_yaw", 62.0}}},
+                                    {"duration_weight", 1}}}},
+           }},
+          {"expires_at_epoch_ms", 1900000000000.0},
+      },
+      "turn-1", "adapter", "pre-envelope",
+      "2026-10-01T00:00:00.000Z");
+  const auto event = ag99::runtime::parse_pre_action(
+      ag99::runtime::parse_envelope(raw));
+  assert(event.action == "ready");
+  assert(event.request_id == "pre-1");
+  assert(event.motion.at("motion_steps").size() == 1);
+
+  const auto cancel = ag99::runtime::build_envelope(
+      "output.pre_action",
+      {
+          {"schema_version", "olv.pre_action.v1"},
+          {"request_id", "pre-1"},
+          {"action", "cancel"},
+          {"motion", nullptr},
+          {"expires_at_epoch_ms", nullptr},
+      },
+      "turn-1", "adapter", "pre-cancel",
+      "2026-10-01T00:00:00.000Z");
+  assert(ag99::runtime::parse_pre_action(
+             ag99::runtime::parse_envelope(cancel)).action
+      == "cancel");
+}
+
+void test_desktop_observation_request_boundary() {
+  const auto raw = ag99::runtime::build_envelope(
+      "system.desktop_observation_request",
+      {
+          {"schema_version", "ag99live.desktop_observation.v1"},
+          {"request_id", "observation-1"},
+      },
+      std::nullopt, "adapter", "observation-request",
+      "2026-10-01T00:00:00.000Z");
+  const auto request = ag99::runtime::parse_desktop_observation_request(
+      ag99::runtime::parse_envelope(raw));
+  assert(request.request_id == "observation-1");
+
+  auto invalid = raw;
+  invalid["turn_id"] = "turn-1";
+  bool rejected = false;
+  try {
+    (void)ag99::runtime::parse_desktop_observation_request(
+        ag99::runtime::parse_envelope(invalid));
+  } catch (const ag99::runtime::ProtocolError&) {
+    rejected = true;
+  }
+  assert(rejected);
+}
+
 void test_pending_and_deferred_motion_slots() {
   auto pending = make_segment("m-pending", 0);
   pending["payload"]["audio"] = {
@@ -838,6 +904,8 @@ int main() {
   test_envelope_and_segment();
   test_segment_rejection_boundaries();
   test_parameter_plan_motion_slot();
+  test_pre_action_boundary();
+  test_desktop_observation_request_boundary();
   test_pending_and_deferred_motion_slots();
   test_binary_audio_round_trip();
   test_incremental_output_protocol();

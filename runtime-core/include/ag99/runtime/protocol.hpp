@@ -105,6 +105,19 @@ struct ModelSync {
   Json payload;
 };
 
+struct PreActionEvent {
+  ProtocolEnvelope envelope;
+  std::string action;
+  std::string request_id;
+  Json motion = Json();
+  std::optional<double> expires_at_epoch_ms;
+};
+
+struct DesktopObservationRequest {
+  ProtocolEnvelope envelope;
+  std::string request_id;
+};
+
 struct DesktopSettingsQuery {
   ProtocolEnvelope envelope;
   std::string request_id;
@@ -197,6 +210,9 @@ OutputSegment parse_output_segment(const ProtocolEnvelope& envelope);
 SegmentMotionUpdate parse_segment_motion_update(
     const ProtocolEnvelope& envelope);
 ModelSync parse_model_sync(const ProtocolEnvelope& envelope);
+PreActionEvent parse_pre_action(const ProtocolEnvelope& envelope);
+DesktopObservationRequest parse_desktop_observation_request(
+    const ProtocolEnvelope& envelope);
 DesktopSettingsQuery parse_desktop_settings_query(
     const ProtocolEnvelope& envelope);
 

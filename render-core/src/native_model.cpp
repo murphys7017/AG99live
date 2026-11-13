@@ -567,6 +567,7 @@ public:
         : 1.0f / 60.0f;
     _last_update_seconds = now;
     _model->UpdateMotion(delta_seconds);
+    ApplyPreActionMotion(now);
     ApplyQueuedMotion(now);
     _model->ApplyDrag(services_.drag_x->load(), services_.drag_y->load());
       services_.audio.update_audio_level(delta_seconds, now);
@@ -579,6 +580,16 @@ public:
     cubism_model->Update();
 
     _renderer.Draw();
+  }
+
+  void Resize(UINT width, UINT height) {
+    std::scoped_lock lock(_motion_mutex);
+    if (width == 0 || height == 0 || !_model) {
+      return;
+    }
+    _width = width;
+    _height = height;
+    _renderer.Resize(width, height);
   }
 
   void SetModelSync(const ag99::runtime::Json& payload) {
@@ -714,6 +725,52 @@ public:
     _motion_scheduler.pending_motion_segment = std::move(segment);
     _motion_scheduler.pending_motion_clock = std::move(clock);
     std::cerr << "[motion] intent queued\n";
+  }
+
+  bool StartPreAction(const ag99::runtime::PreActionEvent& event) {
+    if (event.action != "ready" || !event.envelope.turn_id.has_value()
+        || event.request_id.empty() || event.motion.is_null()) {
+      return false;
+    }
+    std::scoped_lock lock(_motion_mutex);
+    if (!_model || !_model->GetModel()
+        || _motion_scheduler.active_motion
+        || _motion_scheduler.pending_motion_segment
+        || _active_parameter_plan || _pending_parameter_plan) {
+      return false;
+    }
+    ag99::runtime::OutputSegment segment;
+    segment.envelope.turn_id = event.envelope.turn_id;
+    segment.envelope.message_id = event.request_id;
+    segment.motion.state = ag99::runtime::MotionSlot::State::Present;
+    segment.motion.message_type = "engine.motion_intent";
+    segment.motion.payload = event.motion;
+    NativeSegmentClock clock{
+        .turn_id = *event.envelope.turn_id,
+        .message_id = event.request_id,
+        .sequence = 0,
+        .started_at_seconds = services_.now_seconds(),
+        .generation = _connection_generation};
+    const auto plan = CompileMotionPlan(segment, clock);
+    if (!plan) {
+      return false;
+    }
+    _pre_action_motion = *plan;
+    std::cerr << "[motion] pre-action started\n";
+    return true;
+  }
+
+  void CancelPreAction(
+      const std::string& turn_id,
+      const std::string& request_id = {}) {
+    std::scoped_lock lock(_motion_mutex);
+    if (!_pre_action_motion
+        || (!turn_id.empty() && _pre_action_motion->clock.turn_id != turn_id)
+        || (!request_id.empty()
+            && _pre_action_motion->clock.message_id != request_id)) {
+      return;
+    }
+    _pre_action_motion.reset();
   }
 
   std::vector<NativeSegmentTerminal> TakeMotionTerminals() {
@@ -905,6 +962,7 @@ private:
     _pending_parameter_plan.reset();
     _pending_parameter_clock.reset();
     _active_parameter_plan.reset();
+    _pre_action_motion.reset();
   }
 
   enum class ParameterContributionOwner {
@@ -1962,6 +2020,32 @@ private:
     }
   }
 
+  void ApplyPreActionMotion(double now) {
+    std::scoped_lock lock(_motion_mutex);
+    if (!_pre_action_motion || !_model || !_model->GetModel()) {
+      return;
+    }
+    const double elapsed_ms =
+        (now - _pre_action_motion->started_at) * 1000.0;
+    for (const auto& track : _pre_action_motion->tracks) {
+      if (track.keyframes.empty()) {
+        continue;
+      }
+      const double value = motion::EvaluateTrackValue(
+          *_pre_action_motion, track, elapsed_ms);
+      const double minimum = _model->GetModel()->GetParameterMinimumValue(
+          track.parameter_index);
+      const double maximum = _model->GetModel()->GetParameterMaximumValue(
+          track.parameter_index);
+      _model->GetModel()->SetParameterValue(
+          track.parameter_index,
+          static_cast<csmFloat32>(Clamp(value, minimum, maximum)));
+    }
+    if (elapsed_ms >= _pre_action_motion->duration_ms) {
+      _pre_action_motion.reset();
+    }
+  }
+
   NativeModelServices services_;
   NativeCubismModel* _model = nullptr;
   CubismModelSettingJson* _setting = nullptr;
@@ -1977,6 +2061,7 @@ private:
   double _last_update_seconds = 0.0;
   ag99::runtime::Json _model_sync_payload = ag99::runtime::Json::object();
   std::optional<ParameterPlan> _active_parameter_plan;
+  std::optional<MotionPlan> _pre_action_motion;
   std::optional<ag99::runtime::OutputSegment> _pending_parameter_plan;
   std::optional<NativeSegmentClock> _pending_parameter_clock;
   MotionScheduler _motion_scheduler;
@@ -2018,6 +2103,9 @@ bool NativeModel::Load(
 }
 
 void NativeModel::UpdateAndDraw() { impl_->UpdateAndDraw(); }
+void NativeModel::Resize(UINT width, UINT height) {
+  impl_->Resize(width, height);
+}
 void NativeModel::UpdateCursorGaze(HWND window) { impl_->UpdateCursorGaze(window); }
 void NativeModel::QueueOutputSegment(
     ag99::runtime::OutputSegment segment,
@@ -2035,6 +2123,15 @@ void NativeModel::StartThinkingSway(const std::string& turn_id) {
 }
 void NativeModel::ReleaseThinkingSway(const std::string& turn_id) {
   impl_->ReleaseThinkingSway(turn_id);
+}
+bool NativeModel::StartPreAction(
+    const ag99::runtime::PreActionEvent& event) {
+  return impl_->StartPreAction(event);
+}
+void NativeModel::CancelPreAction(
+    const std::string& turn_id,
+    const std::string& request_id) {
+  impl_->CancelPreAction(turn_id, request_id);
 }
 void NativeModel::CancelTurn(const std::string& turn_id) {
   impl_->CancelTurn(turn_id);

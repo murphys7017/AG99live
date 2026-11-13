@@ -66,6 +66,16 @@ The current executable, `ag99-render-host`, verifies:
 - text can be sent through the tray's `发送演示文本` command or `--text=...`;
 - the tray can start and stop a manual 16 kHz mono microphone stream using
   the existing binary PCM protocol;
+- `output.pre_action` can start and cancel a bounded one-step reaction without
+  entering the conversation playback ledger;
+- Native semantic motion applies the same eight-axis budget and repeated
+  direction attenuation used by the TypeScript performance governor;
+- the configured Bilibili live room can be read from the shared Web settings,
+  receive public-room danmaku, and submit bounded batches back as Adapter text;
+- resizing the model window resizes the D3D11 composition surface and model
+  projection together.
+- `system.desktop_observation_request` captures a bounded virtual-desktop JPEG
+  and returns it to the Adapter; comparison and policy remain outside Native.
 
 Run the host with the repository's Mk6 model:
 
@@ -95,18 +105,20 @@ count. It only stops the process that it started. Compare the same model,
 window size, warmup, and sample duration across Native commits; these numbers
 are local diagnostics, not a substitute for acceptance on the target machine.
 
-The current demo uses a fixed-size D3D11 composition swap chain with
-premultiplied alpha, so the model window background is transparent while the
-Live2D textures remain visible. Window resizing and device-loss recovery are
-not implemented. Microphone VAD remains the next integration slice. Spout output is implemented as an optional
+The current demo uses a D3D11 composition swap chain with premultiplied alpha,
+so the model window background is transparent while the Live2D textures remain
+visible. Window resizing is supported; device-loss recovery is not implemented.
+Microphone VAD remains outside the native core. Spout output is implemented as an optional
 backbuffer readback plus the repository's `AG99liveSpoutSender.exe`; it still
 requires paired Spout/OBS acceptance on the target machine. The native runtime
 is not a second settings application: the existing frontend remains the source
 of configuration, while this host consumes the resulting runtime inputs.
 
 The current Adapter still emits `engine.motion_intent.v4`. The native host also
-accepts `engine.parameter_plan.v3` segments directly; translating the remaining
-TypeScript compiler and runtime behavior remains separate migration work.
+accepts `engine.parameter_plan.v3` segments directly. The Native motion compiler
+now enforces the same bounded-axis and repeated-direction rules as the TS
+performance governor; phrase-level schedule and continuity diagnostics remain
+attached to the parameter-plan path.
 
 The Native OLV path owns bounded audio admission, device sink teardown, the
 existing 50 Hz RMS/lip-sync signal, incremental text preview, and final motion
@@ -169,6 +181,11 @@ Currently supported:
 - `motion_engine_intensity_scale`: list/set, default `1.35`, range `0.5` to
   `2.5`, UI step `0.05`. Native applies the scale only to expressive semantic
   motion values before relation-graph range constraints.
+- `bilibili_live_enabled`, `bilibili_live_room_id`,
+  `bilibili_live_cookie`, and `bilibili_live_response_interval`: list/set from
+  the same Adapter Web settings. Native uses the configured room to receive
+  public danmaku and submits bounded batches through the current Adapter
+  connection. Cookie values are masked when listed.
 
 Accepted changes are queued under the model runtime mutex and applied by the
 render thread before the next Physics update. They remain in memory for this
@@ -183,6 +200,13 @@ The TS desktop remains the stable reference implementation for new features
 and testing. The C++ desktop is a separate high-performance implementation of
 the same protocol and runtime behavior. Configuration continues to use the
 existing Web pages; Native migrates supported settings incrementally.
+
+There is no Native settings window. The Adapter Web page is the only settings
+entry point; Native only consumes and applies the canonical runtime snapshot.
+History, Action Lab, Profile Editor, auxiliary Electron windows and ESP32
+display remain outside the Native target. Native parity targets the model
+window and runtime capabilities needed for conversation, audio, motion,
+screenshot capture, Bilibili input and Spout output.
 
 The Adapter currently permits one WebSocket client. The user manually chooses
 which desktop to run: TS or C++. Neither client requires the other to run.

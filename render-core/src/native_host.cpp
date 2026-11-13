@@ -128,8 +128,22 @@ LRESULT CALLBACK NativeHost::MainWindowProc(HWND window, UINT message, WPARAM wp
         return HTTRANSPARENT;
       }
       return DefWindowProcW(window, message, wparam, lparam);
+    case WM_GETMINMAXINFO: {
+      auto* limits = reinterpret_cast<MINMAXINFO*>(lparam);
+      limits->ptMinTrackSize = {320, 480};
+      limits->ptMaxTrackSize = {4096, 4096};
+      return 0;
+    }
     case WM_ERASEBKGND:
       return 1;
+    case WM_SIZE:
+      if (host->bindings_.resize_window && *host->bindings_.resize_window
+          && LOWORD(lparam) > 0 && HIWORD(lparam) > 0) {
+        (*host->bindings_.resize_window)(
+            static_cast<UINT>(LOWORD(lparam)),
+            static_cast<UINT>(HIWORD(lparam)));
+      }
+      return 0;
     case WM_LBUTTONDOWN: {
       *host->bindings_.dragging = true;
       *host->bindings_.drag_cursor = {GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
@@ -583,7 +597,7 @@ HWND NativeHost::CreateMainWindow(
           | WS_EX_LAYERED,
       class_name,
       title,
-      WS_POPUP,
+      WS_POPUP | WS_THICKFRAME,
       CW_USEDEFAULT,
       CW_USEDEFAULT,
       static_cast<int>(width),

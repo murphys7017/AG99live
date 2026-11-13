@@ -54,6 +54,7 @@
 #include "ag99/native/motion_scheduler.hpp"
 #include "ag99/native/native_host.hpp"
 #include "ag99/native/native_model.hpp"
+#include "ag99/native/desktop_capture.hpp"
 #include "ag99/native/spout_output.hpp"
 #include "ag99/audio/audio_source.hpp"
 #include "ag99/audio/speech_signal.hpp"
@@ -109,6 +110,7 @@ std::function<bool(std::string)> g_send_text;
 std::function<void()> g_toggle_microphone;
 std::function<bool()> g_microphone_running;
 std::function<bool()> g_reconnect_adapter;
+std::function<void(UINT, UINT)> g_resize_window;
 std::function<bool()> g_interrupt_turn;
 std::function<bool()> g_approve_latest_segment;
 std::atomic<bool> g_runtime_connected{false};
@@ -397,8 +399,8 @@ int Run(
     HINSTANCE instance,
     const std::filesystem::path& model_json,
     const std::string& startup_text) {
-  constexpr UINT width = 640;
-  constexpr UINT height = 820;
+  UINT width = 640;
+  UINT height = 820;
   ag99::native::NativeHost host({
       .tray = &g_tray_controller,
       .send_text = &g_send_text,
@@ -418,6 +420,7 @@ int Run(
       .input_state = &g_input_state,
       .input_resources = &g_input_resources,
       .runtime_connected = [] { return g_runtime_connected.load(); },
+      .resize_window = &g_resize_window,
   });
   HWND window = host.CreateMainWindow(
       instance, width, height, kWindowClassName, kWindowTitle);
@@ -471,6 +474,18 @@ int Run(
     model_services.drag_x = &g_drag_x;
     model_services.drag_y = &g_drag_y;
     NativeModel model(std::move(model_services));
+    g_resize_window = [&](UINT next_width, UINT next_height) {
+      if (next_width < 320 || next_height < 480
+          || next_width > 4096 || next_height > 4096) {
+        return;
+      }
+      if (FAILED(surface.Resize(next_width, next_height))) {
+        return;
+      }
+      width = next_width;
+      height = next_height;
+      model.Resize(width, height);
+    };
     ag99::native::SpoutOutput spout(SpoutSenderPath());
     ag99::native::RuntimeCoordinatorServices services;
     services.native_incremental_output_enabled = [] {
@@ -525,11 +540,25 @@ int Run(
     services.stop_incremental_audio = [] {
       g_audio_runtime.StopIncrementalAudio();
     };
+    services.capture_desktop_jpeg = [](
+        std::string& error) {
+      return ag99::native::CaptureDesktopJpeg(error);
+    };
     services.audio_runtime = &g_audio_runtime;
 
     NativeRuntimeCoordinator runtime({
         .on_model_sync = [&model](ag99::runtime::ModelSync sync) {
           model.SetModelSync(sync.payload);
+        },
+        .on_pre_action = [&model](ag99::runtime::PreActionEvent event) {
+          if (event.action == "ready") {
+            if (!model.StartPreAction(event)) {
+              std::cerr << "[motion] pre-action rejected by Native model\n";
+            }
+          } else {
+            model.CancelPreAction(
+                event.envelope.turn_id.value_or(""), event.request_id);
+          }
         },
         .on_output_segment = [&model](
             ag99::runtime::OutputSegment segment,
@@ -540,6 +569,7 @@ int Run(
           model.ResetRuntimeSegments(generation);
         },
         .on_turn_started = [&model](const std::string& turn_id) {
+          model.CancelPreAction(turn_id);
           model.StartThinkingSway(turn_id);
         },
         .on_turn_finished = [&model](
@@ -551,9 +581,11 @@ int Run(
                       << (reason.empty() ? "unspecified" : reason) << '\n';
             model.CancelTurn(turn_id);
           }
+          model.CancelPreAction(turn_id);
           model.ReleaseThinkingSway(turn_id);
         },
         .on_turn_interrupted = [&model](const std::string& turn_id) {
+          model.CancelPreAction(turn_id);
           model.CancelTurn(turn_id);
           model.ReleaseThinkingSway(turn_id);
         },
@@ -671,6 +703,7 @@ int Run(
     g_toggle_microphone = {};
     g_microphone_running = {};
     g_reconnect_adapter = {};
+    g_resize_window = {};
     g_interrupt_turn = {};
     g_approve_latest_segment = {};
   }

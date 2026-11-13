@@ -43,8 +43,14 @@ public:
       RuntimeCoordinatorCallbacks callbacks, RuntimeCoordinatorServices services)
       : services_(std::move(services)),
         input_runtime_(transport_.Client()),
+        bilibili_([this](std::string text) {
+          return transport_.SendText(text);
+        }),
         callback_lifetime_(std::make_shared<CallbackLifetime>()),
         on_model_sync_(std::move(callbacks.on_model_sync)),
+        on_pre_action_(std::move(callbacks.on_pre_action)),
+        on_desktop_observation_request_(
+            std::move(callbacks.on_desktop_observation_request)),
         on_output_segment_(std::move(callbacks.on_output_segment)),
         on_output_segment_reset_(std::move(callbacks.on_output_segment_reset)),
         on_turn_started_(std::move(callbacks.on_turn_started)),
@@ -70,6 +76,14 @@ public:
               if (on_model_sync_) {
                 on_model_sync_(std::move(sync));
               }
+            },
+            [this](ag99::runtime::PreActionEvent event) {
+              if (on_pre_action_) {
+                on_pre_action_(std::move(event));
+              }
+            },
+            [this](ag99::runtime::DesktopObservationRequest request) {
+              HandleDesktopObservationRequest(std::move(request));
             },
             [this](std::string turn_id) {
               BeginTurn(turn_id);
@@ -98,6 +112,11 @@ public:
                 result = input_runtime_.HandleDeviceSetting(query);
               } else if (query.key == "adapter_address") {
                 result = HandleAdapterAddressSetting(query);
+              } else if (query.key == "bilibili_live_enabled"
+                  || query.key == "bilibili_live_room_id"
+                  || query.key == "bilibili_live_cookie"
+                  || query.key == "bilibili_live_response_interval") {
+                result = bilibili_.HandleSetting(query);
               } else {
                 result = on_desktop_settings_query_
                     ? on_desktop_settings_query_(query)
@@ -252,7 +271,10 @@ public:
     if (connected) {
       const auto settings = ag99::runtime::build_system_desktop_runtime_settings(
           services_.native_incremental_output_enabled());
-      if (!transport_.SendText(settings.dump())) {
+      auto settings_with_capabilities = settings;
+      settings_with_capabilities["payload"]["desktop_observation_schema"] =
+          "ag99live.desktop_observation.v1";
+      if (!transport_.SendText(settings_with_capabilities.dump())) {
         transport_.Close();
         connected = false;
       }
@@ -269,6 +291,32 @@ public:
       url = adapter_url_;
     }
     return Connect(url);
+  }
+
+  void HandleDesktopObservationRequest(
+      ag99::runtime::DesktopObservationRequest request) {
+    std::string error;
+    const auto image = services_.capture_desktop_jpeg
+        ? services_.capture_desktop_jpeg(error)
+        : std::nullopt;
+    ag99::runtime::Json payload = {
+        {"schema_version", "ag99live.desktop_observation.v1"},
+        {"request_id", request.request_id},
+        {"ok", image.has_value()},
+    };
+    if (image) {
+      payload["mime_type"] = "image/jpeg";
+      payload["data"] = *image;
+    } else {
+      payload["error"] = error.empty()
+          ? "desktop_capture_unavailable" : error;
+    }
+    const auto response = ag99::runtime::build_envelope(
+        "system.desktop_observation_result", payload, std::nullopt,
+        "frontend");
+    if (!transport_.SendText(response.dump())) {
+      std::cerr << "[runtime] failed to send desktop observation result\n";
+    }
   }
 
   ag99::runtime::DesktopSettingsResult HandleAdapterAddressSetting(
@@ -442,6 +490,7 @@ public:
       }
       InvalidateConnection();
       input_runtime_.Stop("runtime_shutdown");
+      bilibili_.Close();
       transport_.Close();
       ResetDisconnectedState();
     }
@@ -1478,10 +1527,14 @@ private:
   RuntimeCoordinatorServices services_;
   NativeTransport transport_;
   ag99::native::NativeInputRuntime input_runtime_;
+  ag99::native::BilibiliLiveRuntime bilibili_;
   std::mutex adapter_url_mutex_;
   std::string adapter_url_ = "ws://127.0.0.1:12396";
   std::shared_ptr<CallbackLifetime> callback_lifetime_;
   std::function<void(ag99::runtime::ModelSync)> on_model_sync_;
+  std::function<void(ag99::runtime::PreActionEvent)> on_pre_action_;
+  std::function<void(ag99::runtime::DesktopObservationRequest)>
+      on_desktop_observation_request_;
   std::function<void(
       ag99::runtime::OutputSegment,
       std::optional<NativeSegmentClock>)> on_output_segment_;
