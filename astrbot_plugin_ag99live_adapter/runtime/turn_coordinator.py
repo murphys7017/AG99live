@@ -124,7 +124,6 @@ class TurnCoordinator:
         commit_event: Callable[[Any], None],
         create_vad_engine: Callable[[], Any],
         input_preparation=None,
-        external_conversation_submitter: Callable[[ConversationInput], Awaitable[None]] | None = None,
     ) -> None:
         self.session_state = session_state
         self.turn_identity_map = turn_identity_map
@@ -144,7 +143,6 @@ class TurnCoordinator:
         self._commit_event = commit_event
         self._create_vad_engine = create_vad_engine
         self._input_preparation = input_preparation
-        self._external_conversation_submitter = external_conversation_submitter
         self._active_speech_capture_turns: set[str] = set()
         self._pre_action_input_id: str | None = None
         self.pre_action = PreActionRuntime(
@@ -966,13 +964,9 @@ class TurnCoordinator:
             await self._abort_active_frontend_turn_before_new_input(
                 next_turn_id=normalized_turn_id,
             )
-            backend_turn_id = (
-                normalized_turn_id
-                if self._external_conversation_submitter is not None
-                else self._resolve_backend_turn_id(
-                    message_obj,
-                    frontend_turn_id=normalized_turn_id,
-                )
+            backend_turn_id = self._resolve_backend_turn_id(
+                message_obj,
+                frontend_turn_id=normalized_turn_id,
             )
             turn_identity_map = self.turn_identity_map
             turn_identity_map.register_bound_turn(
@@ -1015,43 +1009,6 @@ class TurnCoordinator:
                     message_obj,
                     turn_id=current_turn_id,
                 )
-
-                if self._external_conversation_submitter is not None:
-                    if orchestrator is not None:
-                        await orchestrator.publish_conversation_event(
-                            ConversationEvent(
-                                kind=ConversationEventKind.TURN_STARTED,
-                                turn_id=current_turn_id,
-                                provider_event_id=f"turn-started:{current_turn_id}",
-                                metadata={
-                                    "frontend_turn_id": normalized_turn_id,
-                                    "backend_turn_id": backend_turn_id,
-                                    "platform": "dsh",
-                                },
-                            )
-                        )
-                    await self._external_conversation_submitter(
-                        ConversationInput(
-                            turn_id=current_turn_id,
-                            message_id=getattr(message_obj, "message_id", None),
-                            text=message_obj.message_str,
-                            metadata={
-                                "images": getattr(message_obj, "raw_message", {}).get(
-                                    "resolved_images", []
-                                )
-                                if isinstance(getattr(message_obj, "raw_message", None), dict)
-                                else [],
-                                "dsh_session_id": (
-                                    f"ag99live:{self.session_state.client_uid}"
-                                    if self.session_state.client_uid
-                                    else "ag99live:default"
-                                ),
-                            },
-                        )
-                    )
-                    self.chat_buffer.add("user", message_obj.message_str)
-                    self._mark_turn_timing(current_turn_id, "event_committed_at")
-                    return
 
                 event = self._build_platform_event(message_obj)
                 set_extra = getattr(event, "set_extra", None)

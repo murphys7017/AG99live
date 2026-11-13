@@ -57,8 +57,6 @@ from .transport.websocket_server import WebSocketTransport
 from .runtime.turn_coordinator import TurnCoordinator
 from .runtime.passive_behavior import PassiveBehaviorRuntime
 from .runtime.interaction_orchestrator import InteractionOrchestrator, ProviderEvent
-from .runtime.conversation_event_assembler import TextConversationEventAssembler
-from .adapters.dsh import DshHarnessConfig, DshHarnessConversationProvider
 from .platform_event import OLVPetPlatformEvent
 from .transport.static_resources import StaticResourceServer
 from .adapters.astrbot.provider_bridge import (
@@ -70,9 +68,6 @@ from .adapters.astrbot.provider_registry import AstrBotProviderRegistry
 from .adapters.astrbot.composition import (
     AstrBotProviderBinding,
     build_provider_bridge,
-)
-from .providers.contracts import (
-    ConversationInput,
 )
 
 PLUGIN_DIR = Path(__file__).resolve().parent
@@ -257,68 +252,6 @@ class OLVPetPlatformAdapter(Platform):
         self.avatar_output_port = AstrBotAvatarOutputPort(
             send_json=self.transport.send_json,
         )
-        conversation_config = get_config_value(
-            self._plugin_config,
-            "conversation",
-            {},
-        )
-        selected_conversation_platform = str(
-            get_config_value(conversation_config, "platform", "astrbot")
-            or "astrbot"
-        ).strip().lower()
-        self.conversation_platform = (
-            selected_conversation_platform
-            if selected_conversation_platform in {"astrbot", "dsh"}
-            else "astrbot"
-        )
-        self.dsh_provider = None
-        if self.conversation_platform == "dsh":
-            self.dsh_provider = DshHarnessConversationProvider(
-                DshHarnessConfig(
-                    dsh_bin=str(get_config_value(conversation_config, "dsh_bin", "") or "").strip(),
-                    dsh_home=str(get_config_value(conversation_config, "dsh_home", "") or "").strip(),
-                    profile=str(get_config_value(conversation_config, "profile", "sdk") or "sdk").strip(),
-                    workspace=str(get_config_value(conversation_config, "workspace", "") or "").strip(),
-                    provider=str(
-                        get_config_value(
-                            conversation_config,
-                            "provider",
-                            "deepseek-official",
-                        )
-                        or "deepseek-official"
-                    ).strip(),
-                    model=str(
-                        get_config_value(
-                            conversation_config,
-                            "model",
-                            "deepseek-v4-flash",
-                        )
-                        or "deepseek-v4-flash"
-                    ).strip(),
-                    reasoning_effort=(
-                        str(
-                            get_config_value(conversation_config, "reasoning_effort", "")
-                            or ""
-                        ).strip()
-                        or None
-                    ),
-                    max_tokens=(
-                        int(get_config_value(conversation_config, "max_tokens", 0) or 0)
-                        or None
-                    ),
-                    request_timeout_seconds=(
-                        float(
-                            get_config_value(
-                                conversation_config,
-                                "request_timeout_seconds",
-                                0.0,
-                            )
-                            or 0.0
-                        )
-                        or None
-                    ),
-                )
-            )
         self.turn_coordinator = TurnCoordinator(
             input_preparation=InputPreparation(
                 plugin_context=self._plugin_context,
@@ -345,11 +278,6 @@ class OLVPetPlatformAdapter(Platform):
                 engine_type="silero_vad",
                 kwargs=self.runtime_state.vad_config,
             ),
-            external_conversation_submitter=(
-                self._submit_external_conversation
-                if self.conversation_platform == "dsh"
-                else None
-            ),
         )
         self.astrbot_capabilities = AstrBotCapabilityBinding(
             plugin_context=self._plugin_context,
@@ -371,9 +299,8 @@ class OLVPetPlatformAdapter(Platform):
                 avatar_output=self.avatar_output_port,
             )
         )
-        conversation_provider = self.dsh_provider or self.provider_bridge.conversation
         self.interaction_orchestrator = InteractionOrchestrator(
-            conversation_provider=conversation_provider,
+            conversation_provider=self.provider_bridge.conversation,
             stt_provider=self.provider_bridge.stt,
             tts_provider=self.provider_bridge.tts,
             motion_provider=self.provider_bridge.motion,
@@ -394,18 +321,6 @@ class OLVPetPlatformAdapter(Platform):
         self.interaction_orchestrator.attach_segment_assembler(
             self.turn_coordinator.output_segments
         )
-        if self.dsh_provider is not None:
-            self.interaction_orchestrator.attach_conversation_event_assembler(
-                TextConversationEventAssembler(
-                    self.avatar_output_port,
-                    publish_segment=self.turn_coordinator.output_segments.publish_external_segment,
-                    close_turn=lambda turn_id, reason: self.turn_coordinator.close_turn_output_queue(
-                        turn_id=turn_id,
-                        failure_reason=reason,
-                    ),
-                    publish_turn_started=False,
-                )
-            )
         self.passive_behavior_runtime = PassiveBehaviorRuntime(
             runtime_state=self.runtime_state,
             session_state=self.session_state,
@@ -426,37 +341,6 @@ class OLVPetPlatformAdapter(Platform):
 
     async def _submit_provider_conversation(self, request: ConversationInput) -> None:
         await self.turn_coordinator.submit_provider_message(request)
-
-    async def _submit_external_conversation(self, request: ConversationInput) -> None:
-        """Start one DSH request without constructing an AstrBot event."""
-
-        task = asyncio.create_task(
-            self.interaction_orchestrator.send_message(request),
-            name=f"ag99live-dsh-turn-{request.turn_id[:16]}",
-        )
-        self._external_conversation_tasks.add(task)
-
-        def _finished(completed: asyncio.Task) -> None:
-            self._external_conversation_tasks.discard(completed)
-            if completed.cancelled():
-                return
-            try:
-                completed.result()
-            except Exception as exc:  # noqa: BLE001 - terminal failure is routed to the turn owner.
-                logger.error(
-                    "DSH conversation request failed turn_id=%s error=%s",
-                    request.turn_id,
-                    exc,
-                    exc_info=True,
-                )
-                asyncio.create_task(
-                    self.turn_coordinator.abort_turn_from_backend(
-                        turn_id=request.turn_id,
-                        reason="dsh_conversation_failed",
-                    )
-                )
-
-        task.add_done_callback(_finished)
 
     async def _interrupt_provider_conversation(self, turn_id: str | None) -> None:
         normalized_turn_id = str(
@@ -724,18 +608,6 @@ class OLVPetPlatformAdapter(Platform):
         from .web_control import DESKTOP_SETTINGS_SPEC
 
         return any(setting.key == key for setting in DESKTOP_SETTINGS_SPEC)
-
-    def _retain_conversation_platform_until_restart(self) -> None:
-        configured = getattr(self.runtime_state, "conversation_platform", "astrbot")
-        if configured == self.conversation_platform:
-            return
-        logger.warning(
-            "Conversation platform setting changed from %s to %s; restart the "
-            "AG99live adapter to apply the new provider composition.",
-            self.conversation_platform,
-            configured,
-        )
-        self.runtime_state.conversation_platform = self.conversation_platform
 
     async def _send_current_model_and_conf(self, *, force: bool = False) -> bool:
         payload = self.runtime_state.build_current_model_payload()

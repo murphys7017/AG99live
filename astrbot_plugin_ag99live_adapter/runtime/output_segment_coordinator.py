@@ -448,42 +448,6 @@ class OutputSegmentCoordinator:
             if motion_candidate is not None:
                 segment.merge_motion(**motion_candidate)
 
-    async def publish_external_segment(self, segment: OutputSegmentEnvelope) -> None:
-        """Publish a text/provider-owned segment through the normal output owner.
-
-        DSH does not create an AstrBot message chain. This entry point keeps its
-        segments inside the same queue, sequence, playback-close and terminal
-        bookkeeping used by the AstrBot path.
-        """
-
-        normalized_turn_id = _require_turn_id_value(segment.turn_id)
-        normalized_message_id = _require_message_id_value(segment.message_id)
-        payload = segment.payload
-        async with self._get_turn_lock(normalized_turn_id):
-            self._require_output_queue_open(normalized_turn_id)
-            self._register_segment_sequence(
-                turn_id=normalized_turn_id,
-                message_id=normalized_message_id,
-                sequence=segment.sequence,
-            )
-            key = self._segment_key(normalized_turn_id, normalized_message_id)
-            if key in self._flushed_segment_keys:
-                return
-            pending = self._get_pending_segment(
-                normalized_turn_id,
-                normalized_message_id,
-            )
-            pending.merge_sequence(segment.sequence)
-            text_slot = payload.get("text") if isinstance(payload, Mapping) else None
-            if isinstance(text_slot, Mapping) and text_slot.get("state") == "present":
-                pending.merge_text(str(text_slot.get("content") or ""))
-                pending.merge_semantic_text(str(text_slot.get("content") or ""))
-            images = payload.get("images") if isinstance(payload, Mapping) else None
-            if isinstance(images, list):
-                pending.merge_images([str(item) for item in images])
-            pending.finalize()
-            await self._flush_finalized_segments_in_order(normalized_turn_id)
-
     async def finalize_output_segment(self, *, turn_id: str, message_id: str) -> None:
         """Publish a completed logical message without closing its Turn."""
         normalized_turn_id = _require_turn_id_value(turn_id)
