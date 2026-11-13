@@ -35,7 +35,6 @@ public:
     ag99::platform::InputOverlayState* input_state = nullptr;
     ag99::platform::InputOverlayResources* input_resources = nullptr;
     std::function<bool()> runtime_connected;
-    std::function<void(UINT, UINT)>* resize_window = nullptr;
   };
 
   explicit NativeHost(Bindings bindings);

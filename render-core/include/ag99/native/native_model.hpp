@@ -51,7 +51,6 @@ public:
       ID3D11Device* device,
       ID3D11DeviceContext* context);
   void UpdateAndDraw();
-  void Resize(UINT width, UINT height);
   void UpdateCursorGaze(HWND window);
   void QueueOutputSegment(
       ag99::runtime::OutputSegment segment,
@@ -60,11 +59,6 @@ public:
   void ResetRuntimeSegments(std::uint64_t generation);
   void StartThinkingSway(const std::string& turn_id);
   void ReleaseThinkingSway(const std::string& turn_id);
-  bool StartPreAction(
-      const ag99::runtime::PreActionEvent& event);
-  void CancelPreAction(
-      const std::string& turn_id,
-      const std::string& request_id = {});
   void CancelTurn(const std::string& turn_id);
   void SetModelSync(const ag99::runtime::Json& payload);
   ag99::runtime::DesktopSettingsResult HandleDesktopSettingsQuery(

@@ -164,33 +164,6 @@ HRESULT D3D11CompositionSurface::BeginFrame() noexcept {
   return S_OK;
 }
 
-HRESULT D3D11CompositionSurface::Resize(UINT width, UINT height) noexcept {
-  if (!_impl->swap_chain || !_impl->context || width == 0 || height == 0) {
-    return E_INVALIDARG;
-  }
-  if (_impl->width == width && _impl->height == height) {
-    return S_OK;
-  }
-  _impl->context->OMSetRenderTargets(0, nullptr, nullptr);
-  _impl->render_target.Reset();
-  _impl->staging_texture.Reset();
-  const HRESULT result = _impl->swap_chain->ResizeBuffers(
-      0, width, height, DXGI_FORMAT_UNKNOWN, 0);
-  if (FAILED(result)) {
-    return result;
-  }
-  const HRESULT target_result = _impl->CreateRenderTarget();
-  if (FAILED(target_result)) {
-    return target_result;
-  }
-  _impl->width = width;
-  _impl->height = height;
-  if (_impl->composition_device) {
-    return _impl->composition_device->Commit();
-  }
-  return S_OK;
-}
-
 HRESULT D3D11CompositionSurface::Present(
     UINT sync_interval,
     UINT flags) noexcept {

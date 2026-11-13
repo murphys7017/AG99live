@@ -131,13 +131,6 @@ void RuntimeProtocolSession::ingest_text(std::string_view text_frame) {
       }
       return;
     }
-    if (envelope.type == "output.pre_action") {
-      auto event = parse_pre_action(envelope);
-      if (callbacks_.on_pre_action) {
-        callbacks_.on_pre_action(std::move(event));
-      }
-      return;
-    }
     if (envelope.type == "system.desktop_settings_query") {
       auto query = parse_desktop_settings_query(envelope);
       if (callbacks_.on_desktop_settings_query) {

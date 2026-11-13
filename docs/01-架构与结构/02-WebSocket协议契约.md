@@ -36,7 +36,7 @@ Adapter 在 `desktop_runtime_settings` 中保存该选项的 canonical 值，默
 
 桌面端主动保存其他本机设置时使用独立的 `system.desktop_settings_update`，payload 为 `update_id`、`key` 和字符串 `value`。它不是 `system.desktop_settings_result` 的无请求变体；后者只用于响应 Adapter 发出的查询。Adapter 收到 update 后才更新 canonical snapshot，并按平台实例持久化。
 
-Adapter 完成连接初始化期间的 canonical settings 回放后发送一次 `system.desktop_settings_sync_complete`，payload 为空对象。TS 客户端只有收到该事件后才将 `desktopSettingsSyncReady` 置为 true，并启动依赖本机配置的 Push-to-Talk、Bilibili Live 等功能；Native 通过同一批设置查询直接维护对应运行时。断线或重连会清除该状态。
+Adapter 完成连接初始化期间的 canonical settings 回放后发送一次 `system.desktop_settings_sync_complete`，payload 为空对象。TS 客户端只有收到该事件后才将 `desktopSettingsSyncReady` 置为 true，并启动依赖本机配置的 Push-to-Talk、Bilibili Live 等功能；断线或重连会清除该状态。
 
 ## 原子输出段
 

@@ -19,7 +19,6 @@ struct RuntimeSessionCallbacks {
   std::function<void(std::string)> on_ignored_type;
   std::function<void(std::string)> on_protocol_error;
   std::function<void(ModelSync)> on_model_sync;
-  std::function<void(PreActionEvent)> on_pre_action;
   std::function<void(std::string)> on_turn_started;
   std::function<void(std::string)> on_synth_finished;
   std::function<void(std::string, bool, std::string)> on_turn_finished;

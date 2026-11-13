@@ -70,7 +70,6 @@ add_executable(ag99-render-host WIN32
   src/motion_scheduler.cpp
   src/microphone_capture.cpp
   src/native_input_runtime.cpp
-  src/bilibili_live_runtime.cpp
   src/audio_runtime.cpp
   src/native_playback_runtime.cpp
   src/native_runtime_coordinator.cpp
@@ -183,7 +182,6 @@ target_link_libraries(ag99-render-host PRIVATE
   shell32
   imm32
   winmm
-  winhttp
 )
 
 set(AG99_SPOUT_RESOURCE_DIR

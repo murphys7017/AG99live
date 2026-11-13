@@ -1,6 +1,6 @@
 state_meta:
   schema_version: 3
-  updated_at: '2026-11-14'
+  updated_at: '2026-11-13'
   purpose: 当前架构计划、所有权边界、不变量和验收缺口。历史里程碑保留在 Git 历史，不在此重复。
   baseline: AG99live 1.0.0
   code_checkpoint: 337aa0b5
@@ -121,10 +121,6 @@ architecture:
     architecture: Phase 1-4 source migration complete; boundary follow-up committed
     native_runtime: coordinator, transport, input, playback and model boundaries present
     typescript_runtime: foundation, desktop host port and SessionStore port present
-    motion_compiler: Native semantic-axis budget, repeated-direction attenuation and parameter-plan execution present
-    pre_action: output.pre_action protocol and isolated Native reaction slot present
-    bilibili: Native public-room danmaku bridge and shared settings path present; live acceptance pending
-    window_management: Native resize updates D3D11 surface and model projection; device-loss recovery pending
     spout: source and Release resource copy present; receiver acceptance pending
     local_validation:
       - render-core Release build
@@ -137,8 +133,8 @@ architecture:
   explicit_boundaries:
     - full TypeScript PerformanceSchedule/compiler equivalence remains a reference-implementation migration, not a V1 replacement gate
     - Native microphone VAD and FFT speech emphasis remain outside the current stable slice
-    - D3D device-loss recovery is not implemented
-    - screenshot/PTT/ESP32 remain TS/Electron-owned features unless a Native owner is added deliberately
+    - window resize and D3D device-loss recovery are not implemented
+    - screenshot/PTT/Bilibili/ESP32 remain TS/Electron-owned features unless a Native owner is added deliberately
 
 live_acceptance:
   required:
@@ -148,8 +144,6 @@ live_acceptance:
     - real microphone enumeration, switching and capture
     - cancel, reconnect, late motion and unique receipt behavior
     - Spout/OBS frame output, transparency, cadence and shutdown
-    - Bilibili public-room connection, danmaku parsing, batching and reconnect
-    - Native window resize with model projection and Spout dimensions
     - TS/C++ motion golden samples
   rule: local smoke/build evidence must not be reported as TS/Native behavioral equivalence
 

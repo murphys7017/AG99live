@@ -11,7 +11,6 @@
 #include <vector>
 
 #include "ag99/native/audio_runtime.hpp"
-#include "ag99/native/bilibili_live_runtime.hpp"
 #include "ag99/native/segment_types.hpp"
 #include "ag99/runtime/protocol.hpp"
 
@@ -22,7 +21,6 @@ namespace ag99::native {
 // or a direct Cubism object.
 struct RuntimeCoordinatorCallbacks {
   std::function<void(ag99::runtime::ModelSync)> on_model_sync;
-  std::function<void(ag99::runtime::PreActionEvent)> on_pre_action;
   std::function<void(
       ag99::runtime::OutputSegment,
       std::optional<NativeSegmentClock>)> on_output_segment;
