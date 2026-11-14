@@ -27,6 +27,7 @@ from ..live2d.semantic_axis_profile import (
     save_semantic_axis_profile,
 )
 from ..motion.performance_curve import PerformanceCurveRuntime
+from ..motion.material_catalog import build_motion_material_catalog
 from ..prompts.motion_selector import (
     MotionReferenceExamplesResolution,
     resolve_motion_reference_examples,
@@ -470,12 +471,13 @@ class RuntimeState:
                 base_url=base_url,
                 selected_model_name=selected_model_name,
             )
+        profiles_changed = self._attach_semantic_axis_profiles()
+        if cached_model_info is None or profiles_changed:
             self._store_model_info_in_scan_cache(
                 live2d_dir_md5=live2d_dir_md5,
                 base_url=base_url,
                 model_info=self.model_info,
             )
-        self._attach_semantic_axis_profiles()
         self._refresh_motion_tuning_reference_examples_from_samples()
 
         logger.info(
@@ -743,6 +745,16 @@ class RuntimeState:
             bindable_parameter_ids=collect_bindable_parameter_ids(model),
         )
         model["semantic_axis_profile"] = deepcopy(saved_profile)
+        constraints = model.get("constraints")
+        motions = constraints.get("motions") if isinstance(constraints, dict) else []
+        model["motion_material_catalog"] = build_motion_material_catalog(
+            model_id=model_name,
+            motions=motions,
+            parameter_action_library=model.get("parameter_action_library"),
+            semantic_axis_profile=saved_profile,
+            source_hash=str(saved_profile.get("source_hash") or "").strip(),
+        )
+        self._persist_runtime_cache_payload()
         self._refresh_motion_tuning_reference_examples_from_samples()
         return saved_profile
 
@@ -896,21 +908,41 @@ class RuntimeState:
             self._runtime_cache_payload["scan_cache"] = {}
         self._persist_runtime_cache_payload()
 
-    def _attach_semantic_axis_profiles(self) -> None:
+    def _attach_semantic_axis_profiles(self) -> bool:
         models = self.model_info.get("models", [])
         if not isinstance(models, list):
-            return
+            return False
+        changed = False
         for model in models:
             if not isinstance(model, dict):
                 continue
             model_name = str(model.get("name") or "").strip()
             if not model_name:
                 continue
+            previous_profile = model.get("semantic_axis_profile")
+            previous_catalog = model.get("motion_material_catalog")
             profile = ensure_semantic_axis_profile(
                 model_dir=self._resolve_model_dir(model_name),
                 model_payload=model,
             )
             model["semantic_axis_profile"] = deepcopy(profile)
+            constraints = model.get("constraints")
+            motions = constraints.get("motions") if isinstance(constraints, dict) else []
+            model["motion_material_catalog"] = build_motion_material_catalog(
+                model_id=model_name,
+                motions=motions,
+                parameter_action_library=model.get("parameter_action_library"),
+                semantic_axis_profile=profile,
+                source_hash=str(profile.get("source_hash") or "").strip(),
+            )
+            if not _same_material_catalog_identity(
+                previous_profile,
+                profile,
+                previous_catalog,
+                model["motion_material_catalog"],
+            ):
+                changed = True
+        return changed
 
     def _get_model_payload_by_name(self, model_name: str) -> dict[str, Any]:
         normalized_name = str(model_name or "").strip()
@@ -1017,6 +1049,29 @@ class RuntimeState:
             path=latest_config.path,
             mtime_ns=latest_config.mtime_ns,
         )
+
+
+def _same_material_catalog_identity(
+    previous_profile: Any,
+    current_profile: Any,
+    previous_catalog: Any,
+    current_catalog: Any,
+) -> bool:
+    if not isinstance(previous_profile, dict) or not isinstance(current_profile, dict):
+        return False
+    profile_keys = ("profile_id", "revision", "source_hash")
+    if any(previous_profile.get(key) != current_profile.get(key) for key in profile_keys):
+        return False
+    if not isinstance(previous_catalog, dict) or not isinstance(current_catalog, dict):
+        return False
+    catalog_keys = (
+        "schema_version",
+        "model_id",
+        "profile_id",
+        "profile_revision",
+        "source_hash",
+    )
+    return all(previous_catalog.get(key) == current_catalog.get(key) for key in catalog_keys)
 
 
 def _project_frontend_model_info(model_info: dict[str, Any]) -> dict[str, Any]:

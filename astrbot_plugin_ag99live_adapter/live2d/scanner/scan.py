@@ -9,6 +9,7 @@ from typing import Any
 from astrbot.api import logger
 
 from .motion_scan import build_motion_resource_pool, decompose_motion
+from ...motion.material_catalog import build_motion_material_catalog
 from ...protocol.schema_versions import (
     MODEL_INFO_SCHEMA_VERSION,
     PARAMETER_ACTION_LIBRARY_SCHEMA_VERSION,
@@ -300,6 +301,11 @@ def _scan_single_model(model_dir: Path, *, base_url: str) -> dict[str, Any] | No
         parameter_scan=parameter_scan,
     )
     motion_resource_pool = build_motion_resource_pool(motions=motions)
+    motion_material_catalog = build_motion_material_catalog(
+        model_id=model_dir.name,
+        motions=motions,
+        parameter_action_library=parameter_action_library,
+    )
     for motion in motions:
         motion.pop("components", None)
 
@@ -312,6 +318,7 @@ def _scan_single_model(model_dir: Path, *, base_url: str) -> dict[str, Any] | No
         "icon_url": _to_static_url(base_url, model_dir, selected_icon) if selected_icon else "",
         "parameter_scan": parameter_scan,
         "parameter_action_library": parameter_action_library,
+        "motion_material_catalog": motion_material_catalog,
         "calibration_profile": calibration_profile,
         "voice_following_profile": voice_following_profile,
         "motion_resource_pool": motion_resource_pool,
