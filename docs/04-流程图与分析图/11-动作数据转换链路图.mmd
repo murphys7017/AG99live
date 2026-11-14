@@ -70,6 +70,10 @@ flowchart TD
     end
 
     subgraph SEMANTIC[5. 第一阶段：语义动作编译]
+        MATERIAL_CATALOG[ModelSummary.motion_material_catalog<br/>只读片段 / 原子索引]:::runtime
+        MATERIAL_RECIPE[MaterialCompositionRecipe<br/>模型无关配方]:::contract
+        MATERIAL_COMPOSER[composeMaterialMotion<br/>固定种子 / 冲突过滤 / 生成短计划]:::engine
+        MATERIAL_INTENT[engine.motion_intent.v4<br/>本地 motion_steps]:::contract
         ID[IntentValidator order 10<br/>schema / model / profile revision]:::engine
         AXIS[AxisResolver order 20<br/>等级锚点 + 确定性有界采样<br/>segment seed + per-axis seed]:::engine
         INTENSITY[IntensityStage order 30<br/>整体与单轴强度]:::engine
@@ -81,6 +85,8 @@ flowchart TD
         CFAIL[MotionFeedback<br/>编译失败，不启动播放器]:::failure
 
         NORMAL --> ID --> AXIS --> INTENSITY --> GRAPH --> MODE --> TIMING --> COMPILED
+        MATERIAL_CATALOG --> MATERIAL_COMPOSER
+        MATERIAL_RECIPE --> MATERIAL_COMPOSER --> MATERIAL_INTENT --> ID
         ID -.失败.-> CFAIL
         AXIS -.空/非法/全中性.-> CFAIL
         AXIS -.profile anchor 缺失.-> CFAIL

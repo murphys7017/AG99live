@@ -24,6 +24,8 @@ motion intent
 
 ModelEngine 不接收原始 Persona 文本，不修改后端输出，不读取 WebSocket 消息，也不创建第二个播放时钟。
 
+前端素材组合器是 ModelEngine 之前的本地动作意图生成层。它读取 Adapter 同步的 `motion_material_catalog.v1`、`parameter_action_library.v2` 和当前 Profile，输出现有 `engine.motion_intent.v4` 的 `motion_steps`。组合器不直接写入参数，也不绕过 ModelEngine 的范围、关系图和资源校验。
+
 ## 编译职责
 
 1. 验证 schema、模型、profile revision、轴名、具体数值和执行形态。
@@ -44,6 +46,8 @@ ModelEngine 在 Timeline 已建立段时钟后开始动作。Live2D runtime 的 
 ## 本地交互动作
 
 思考摇摆和 speech-only 动作也通过 ModelEngine 形成受控贡献。它们使用已有参数融合和释放边界，在正式回复动作、终态或中断时交还控制权，不能替代语义动作或建立独立的播放器。
+
+素材组合动作沿用相同的编译和释放路径。当前五个第一版配方只生成三步短计划，`AmbientActionDirector` 已收口环境候选的基础准入和取消，自动来源调度接入前不会抢占待机或对话表现。
 
 ## 不变量
 

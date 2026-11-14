@@ -429,17 +429,23 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     return accepted;
   }
 
-  function startIdleMotion(payload: NormalizedMotionPayload, expiresAt: number): boolean {
+  function startIdleMotion(
+    payload: NormalizedMotionPayload,
+    expiresAt: number,
+    options: { motionSource?: string | null } = {},
+  ): boolean {
     if (activePlaybackRun || thinkingSwayTurnId || state.pendingCount > 0
       || Date.now() >= expiresAt || payload.kind !== "semantic_intent") return false;
     if (!payload.intent.motion_steps
-      || payload.intent.motion_steps.length !== 1
+      || payload.intent.motion_steps.length < 1
+      || payload.intent.motion_steps.length > 4
       || payload.intent.motion_resource_id
       || payload.intent.expression_resource_id) return false;
     const model = dependencies.getSelectedModel();
     if (!model) return false;
     const result = compileParameterMotionIntent(payload.intent, {
-      model, source: "idle_motion", motionSource: "neurobrain_passive_stream",
+      model, source: "idle_motion",
+      motionSource: options.motionSource ?? "neurobrain_passive_stream",
       speechActive: false, settings: dependencies.getSettings(),
     });
     if (!result.ok || !result.plan || Date.now() >= expiresAt) return false;

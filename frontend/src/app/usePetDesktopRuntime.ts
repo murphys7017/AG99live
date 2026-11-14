@@ -15,6 +15,7 @@ import type { createModelSync } from "../adapter-connection/model-sync/useModelS
 import { createPetRuntimeSnapshotPublisher } from "../desktop-bridge/usePetRuntimeSnapshotPublisher";
 import { usePreviewMotionPlayer } from "../live2d-renderer/usePreviewMotionPlayer";
 import { useModelEngine } from "../model-engine/useModelEngine";
+import { createAmbientActionDirector } from "../model-engine/ambient/ambientActionDirector";
 import { reportLatencyStage } from "../adapter-connection/runtime/latency.js";
 import {
   applyModelEngineSettings,
@@ -225,12 +226,14 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     },
     { immediate: true },
   );
+  let reconcileAmbientAction: () => void = () => {};
   function reportRendererStatus(status: PresenceRendererStatus): void {
     presenceStateStore.dispatch({
       source: "live2d_renderer",
       type: "model.renderer_status.changed",
       status,
     });
+    reconcileAmbientAction();
   }
   const motionPlayer = usePreviewMotionPlayer(live2dRuntime);
   const manualPreviewText = ref("");
@@ -516,6 +519,47 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       }, event.turnId);
     },
   });
+  const getAmbientActionContext = () => {
+    const s = adapter.state;
+    const presence = presenceStateStore.getSnapshot();
+    return {
+      connectionReady: s.status === "connected"
+        && presence.connectionStatus === "connected",
+      modelReady: presence.model.selection === "selected"
+        && presence.model.rendererStatus === "ready"
+        && selectedModel.value !== null,
+      ambientMotionEnabled: live2dPresentationSettings.ambientMotionEnabled,
+      audioPlaying: s.isPlayingAudio,
+      microphoneCapturing: s.micCapturing && !s.microphoneStandby,
+      conversationActive: Boolean(
+        (s.currentTurnId && s.turnFinishedTurnId !== s.currentTurnId)
+        || sessionStore.getSessions().some((session) => !isTerminalPhase(session.phase)),
+      ),
+      manualPreviewActive: Boolean(manualPreviewText.value),
+    };
+  };
+  const ambientActionDirector = createAmbientActionDirector({
+    getContext: getAmbientActionContext,
+    start: (candidate) => modelEngine.startIdleMotion(
+      candidate.motion,
+      candidate.expiresAt,
+      {
+        motionSource: candidate.source === "model_passive"
+          ? "neurobrain_passive_stream"
+          : candidate.source,
+      },
+    ),
+    stop: (reason) => {
+      console.info("[AmbientActionDirector] idle action cancelled.", { reason });
+      modelEngine.cancelIdleMotion();
+    },
+    onDecision: (decision) => {
+      if (!decision.accepted) {
+        console.debug("[AmbientActionDirector] candidate rejected.", decision);
+      }
+    },
+  });
+  reconcileAmbientAction = ambientActionDirector.reconcile;
   const playbackTimelineMotionRuntime = configurePlaybackTimelineMotionRuntime({
     playbackTimeline,
     motionEngine: modelEngine,
@@ -664,7 +708,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
         phase: "thinking",
       });
       clearPresencePreparation(event.turnId);
-      modelEngine.cancelIdleMotion();
+      ambientActionDirector.cancel("conversation_started");
       modelEngine.startThinkingSway(event.turnId);
       return;
     }
@@ -673,7 +717,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     modelEngine.cancelPreAction(event.turnId);
   });
   adapter.setPreActionObserver((event) => {
-    modelEngine.cancelIdleMotion();
+    ambientActionDirector.cancel("pre_action_event");
     if (event.action === "ready") {
       const started = modelEngine.startPreAction(event.motion, event.turnId, event.requestId);
       if (started) {
@@ -699,30 +743,46 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       modelEngine.cancelPreAction(event.turnId, event.requestId);
     }
   });
-  const idleMotionAllowed = computed(() => {
-    const s = adapter.state;
-    return s.status === "connected" && !s.isPlayingAudio
-      && !(s.micCapturing && !s.microphoneStandby) && !manualPreviewText.value
-      && (!s.currentTurnId || s.turnFinishedTurnId === s.currentTurnId)
-      && !sessionStore.getSessions().some((session) => !isTerminalPhase(session.phase));
-  });
   adapter.setIdleMotionObserver((event) => {
-    if (!idleMotionAllowed.value) return;
     try {
-      modelEngine.startIdleMotion(event.motion, event.expiresAt);
+      ambientActionDirector.admit({
+        id: event.messageId,
+        source: "model_passive",
+        motion: event.motion,
+        expiresAt: event.expiresAt,
+      });
     } catch (error) {
       console.warn("[IdleMotion] optional playback failed.", error);
     }
   });
-  watch(idleMotionAllowed, (allowed) => {
-    if (!allowed) modelEngine.cancelIdleMotion();
+  watch(() => {
+    const s = adapter.state;
+    return [
+      s.status,
+      s.isPlayingAudio,
+      s.micCapturing,
+      s.microphoneStandby,
+      s.currentTurnId,
+      s.turnFinishedTurnId,
+      manualPreviewText.value,
+      live2dPresentationSettings.ambientMotionEnabled,
+      presenceStateStore.getSnapshot().revision,
+      selectedModel.value?.model_path ?? "",
+      selectedModel.value?.semantic_axis_profile?.profile_id ?? "",
+      selectedModel.value?.semantic_axis_profile?.revision ?? 0,
+      sessionStore.getSessions()
+        .map((session) => `${session.id}:${session.phase}:${session.interrupted}`)
+        .join("|"),
+    ].join("\u0000");
+  }, () => {
+    ambientActionDirector.reconcile();
   }, { flush: "sync" });
   watch(() => {
     const model = selectedModel.value;
     const profile = model?.semantic_axis_profile;
     return [model?.model_path, profile?.profile_id, profile?.revision, profile?.source_hash].join(":");
   }, () => {
-    modelEngine.cancelIdleMotion();
+    ambientActionDirector.cancel("model_profile_changed");
     modelEngine.cancelPreAction();
     clearPresencePreparation();
   });
@@ -799,6 +859,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
         adapter.setTurnLifecycleObserver(null);
         modelEngine.releaseThinkingSway();
       }],
+      ["Ambient action director dispose", () => ambientActionDirector.dispose()],
       ["pre-action observer detach", () => adapter.setPreActionObserver(null)],
       ["presence state store dispose", () => presenceStateStore.dispose()],
       ["MotionLab reconnect watch stop", stopMotionLabReconnectWatch],
