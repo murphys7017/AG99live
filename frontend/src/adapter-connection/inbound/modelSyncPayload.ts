@@ -1,6 +1,7 @@
 import type {
   ExpressionConstraint,
   ModelSummary,
+  MotionMaterialCatalog,
   MotionConstraint,
   ParameterActionLibrary,
   ParameterScanPayload,
@@ -9,6 +10,7 @@ import type {
   SystemModelSyncPayload,
   VoiceFollowingProfile,
 } from "../../types/protocol.js";
+import { MOTION_MATERIAL_CATALOG_SCHEMA_VERSION } from "../../types/protocol.js";
 import type {
   SemanticAxisProfile,
   SemanticAxisRelationRule,
@@ -162,6 +164,7 @@ function parseModelSummary(
     "icon_url",
     "parameter_scan",
     "parameter_action_library",
+    "motion_material_catalog",
     "constraints",
     "semantic_axis_profile",
     "voice_following_profile",
@@ -191,6 +194,12 @@ function parseModelSummary(
     `${path}.parameter_action_library`,
   );
   if (!parameterActionLibrary.ok) return parameterActionLibrary;
+  const motionMaterialCatalog = parseOptionalMotionMaterialCatalog(
+    type,
+    record.motion_material_catalog,
+    `${path}.motion_material_catalog`,
+  );
+  if (!motionMaterialCatalog.ok) return motionMaterialCatalog;
   const constraints = parseModelConstraints(type, record.constraints, `${path}.constraints`);
   if (!constraints.ok) return constraints;
 
@@ -232,6 +241,7 @@ function parseModelSummary(
       icon_url: strings.icon_url,
       parameter_scan: parameterScan.payload,
       parameter_action_library: parameterActionLibrary.payload,
+      motion_material_catalog: motionMaterialCatalog.payload,
       constraints: constraints.payload,
       semantic_axis_profile: semanticProfile.payload,
       voice_following_profile: voiceProfile.payload,
@@ -437,6 +447,8 @@ function parseParameterActionAtoms(
       "id",
       "name",
       "label",
+      "parameter_id",
+      "parameter_name",
       "kind",
       "domain",
       "primary_channel",
@@ -457,6 +469,9 @@ function parseParameterActionAtoms(
     if (!strings.id.trim()) return invalidPayload(type, `${itemPath}.id`, "non-empty string");
     if (!strings.name.trim()) return invalidPayload(type, `${itemPath}.name`, "non-empty string");
     if (!strings.label.trim()) return invalidPayload(type, `${itemPath}.label`, "non-empty string");
+    if (!strings.parameter_id.trim()) {
+      return invalidPayload(type, `${itemPath}.parameter_id`, "non-empty string");
+    }
     const channels = parseStringArray(type, record.channels, `${itemPath}.channels`);
     if (!channels.ok) return channels;
     const sourceTags = parseStringArray(type, record.source_tags, `${itemPath}.source_tags`);
@@ -477,6 +492,8 @@ function parseParameterActionAtoms(
       id: strings.id,
       name: strings.name,
       label: strings.label,
+      parameter_id: strings.parameter_id,
+      parameter_name: strings.parameter_name,
       kind: strings.kind,
       domain: strings.domain,
       channels: channels.payload,
@@ -499,6 +516,222 @@ function parseParameterActionAtoms(
     });
   }
   return { ok: true, payload: result };
+}
+
+function parseOptionalMotionMaterialCatalog(
+  type: string,
+  value: unknown,
+  path: string,
+): PayloadParseResult<MotionMaterialCatalog | null> {
+  if (value === undefined || value === null) {
+    return { ok: true, payload: null };
+  }
+  return parseMotionMaterialCatalog(type, value, path);
+}
+
+function parseMotionMaterialCatalog(
+  type: string,
+  value: unknown,
+  path: string,
+): PayloadParseResult<MotionMaterialCatalog> {
+  const record = asRecord(value);
+  if (!record) return invalidPayload(type, path, "object");
+  const keys = validateExactKeys(type, path, record, [
+    "schema_version",
+    "model_id",
+    "profile_id",
+    "profile_revision",
+    "source_hash",
+    "summary",
+    "fragments",
+    "atoms",
+    "diagnostics",
+  ]);
+  if (!keys.ok) return keys;
+  const shape = validateFields(type, record, path, {
+    schema_version: "string",
+    model_id: "string",
+    profile_id: "string",
+    profile_revision: "number",
+    source_hash: "string",
+    summary: "record",
+    fragments: "array",
+    atoms: "array",
+    diagnostics: "record",
+  });
+  if (!shape.ok) return shape;
+  if (record.schema_version !== MOTION_MATERIAL_CATALOG_SCHEMA_VERSION) {
+    return invalidPayload(
+      type,
+      `${path}.schema_version`,
+      MOTION_MATERIAL_CATALOG_SCHEMA_VERSION,
+    );
+  }
+  const revision = parseNonNegativeInteger(type, record.profile_revision, `${path}.profile_revision`);
+  if (!revision.ok) return revision;
+  const summary = parseMotionMaterialSummary(type, record.summary, `${path}.summary`);
+  if (!summary.ok) return summary;
+  const fragments = parseMotionMaterialRecords(
+    type,
+    record.fragments,
+    `${path}.fragments`,
+    [
+      "id", "source_motion", "source_file", "duration_ms", "channels", "domains",
+      "parameter_ids", "axis_ids", "component_ids", "intensity", "trait", "tags",
+      "recommended_scenarios", "compatibility_groups", "status", "status_reasons",
+    ],
+    {
+      id: "string", source_motion: "string", source_file: "string", duration_ms: "number",
+      channels: "array", domains: "array", parameter_ids: "array", axis_ids: "array",
+      component_ids: "array", intensity: "string", trait: "string", tags: "array",
+      recommended_scenarios: "array", compatibility_groups: "array", status: "string",
+      status_reasons: "array",
+    },
+    [
+      "channels", "domains", "parameter_ids", "axis_ids", "component_ids", "tags",
+      "recommended_scenarios", "compatibility_groups", "status_reasons",
+    ],
+  );
+  if (!fragments.ok) return fragments;
+  const atoms = parseMotionMaterialRecords(
+    type,
+    record.atoms,
+    `${path}.atoms`,
+    [
+      "id", "parameter_id", "axis_ids", "primary_channel", "polarity", "semantic_polarity",
+      "trait", "strength", "score", "duration_ms", "active_window", "source_fragment_id",
+      "compatibility_groups", "status", "status_reasons",
+    ],
+    {
+      id: "string", parameter_id: "string", axis_ids: "array", primary_channel: "string",
+      polarity: "string", semantic_polarity: "string", trait: "string", strength: "string",
+      score: "number", duration_ms: "number", active_window: "record",
+      source_fragment_id: "string", compatibility_groups: "array", status: "string",
+      status_reasons: "array",
+    },
+    ["axis_ids", "compatibility_groups", "status_reasons"],
+  );
+  if (!atoms.ok) return atoms;
+  const diagnostics = parseMotionMaterialDiagnostics(type, record.diagnostics, `${path}.diagnostics`);
+  if (!diagnostics.ok) return diagnostics;
+  return { ok: true, payload: record as unknown as MotionMaterialCatalog };
+}
+
+function parseMotionMaterialSummary(
+  type: string,
+  value: unknown,
+  path: string,
+): PayloadParseResult<null> {
+  const record = asRecord(value);
+  if (!record) return invalidPayload(type, path, "object");
+  const keys = validateExactKeys(type, path, record, [
+    "fragment_count", "atom_count", "ambient_fragment_count", "ambient_atom_count",
+    "compatible_fragment_count", "compatible_atom_count", "status_counts", "reason_counts",
+  ]);
+  if (!keys.ok) return keys;
+  const shape = validateFields(type, record, path, {
+    fragment_count: "number", atom_count: "number", ambient_fragment_count: "number",
+    ambient_atom_count: "number", compatible_fragment_count: "number",
+    compatible_atom_count: "number", status_counts: "array", reason_counts: "array",
+  });
+  if (!shape.ok) return shape;
+  for (const key of [
+    "fragment_count", "atom_count", "ambient_fragment_count", "ambient_atom_count",
+    "compatible_fragment_count", "compatible_atom_count",
+  ] as const) {
+    const count = parseNonNegativeInteger(type, record[key], `${path}.${key}`);
+    if (!count.ok) return count;
+  }
+  const statusCounts = parseMotionMaterialCounters(type, record.status_counts, `${path}.status_counts`);
+  if (!statusCounts.ok) return statusCounts;
+  return parseMotionMaterialCounters(type, record.reason_counts, `${path}.reason_counts`);
+}
+
+function parseMotionMaterialDiagnostics(
+  type: string,
+  value: unknown,
+  path: string,
+): PayloadParseResult<null> {
+  const record = asRecord(value);
+  if (!record) return invalidPayload(type, path, "object");
+  const keys = validateExactKeys(type, path, record, ["profile_ready", "status_counts", "reason_counts"]);
+  if (!keys.ok) return keys;
+  const shape = validateFields(type, record, path, {
+    profile_ready: "boolean", status_counts: "array", reason_counts: "array",
+  });
+  if (!shape.ok) return shape;
+  const statusCounts = parseMotionMaterialCounters(type, record.status_counts, `${path}.status_counts`);
+  if (!statusCounts.ok) return statusCounts;
+  return parseMotionMaterialCounters(type, record.reason_counts, `${path}.reason_counts`);
+}
+
+function parseMotionMaterialRecords(
+  type: string,
+  value: unknown,
+  path: string,
+  fields: readonly string[],
+  shape: Record<string, FieldKind>,
+  stringArrayKeys: readonly string[],
+): PayloadParseResult<Record<string, unknown>[]> {
+  if (!Array.isArray(value)) return invalidPayload(type, path, "array");
+  const result: Record<string, unknown>[] = [];
+  for (const [index, item] of value.entries()) {
+    const itemPath = `${path}[${index}]`;
+    const record = asRecord(item);
+    if (!record) return invalidPayload(type, itemPath, "object");
+    const keys = validateExactKeys(type, itemPath, record, fields);
+    if (!keys.ok) return keys;
+    const shapeResult = validateFields(type, record, itemPath, shape);
+    if (!shapeResult.ok) return shapeResult;
+    for (const key of stringArrayKeys) {
+      const strings = parseStringArray(type, record[key], `${itemPath}.${key}`);
+      if (!strings.ok) return strings;
+    }
+    if (record.duration_ms !== undefined) {
+      const duration = parseNonNegativeInteger(type, record.duration_ms, `${itemPath}.duration_ms`);
+      if (!duration.ok) return duration;
+    }
+    if (record.score !== undefined) {
+      const score = parseFiniteNumber(type, record.score, `${itemPath}.score`);
+      if (!score.ok) return score;
+    }
+    if (record.active_window !== undefined) {
+      const window = asRecord(record.active_window);
+      if (!window) return invalidPayload(type, `${itemPath}.active_window`, "object");
+      const windowShape = validateFields(type, window, `${itemPath}.active_window`, {
+        start_ratio: "number", end_ratio: "number",
+      });
+      if (!windowShape.ok) return windowShape;
+      for (const key of ["start_ratio", "end_ratio"] as const) {
+        const ratio = parseFiniteNumber(type, window[key], `${itemPath}.active_window.${key}`);
+        if (!ratio.ok || ratio.payload < 0 || ratio.payload > 1) {
+          return invalidPayload(type, `${itemPath}.active_window.${key}`, "ratio between 0 and 1");
+        }
+      }
+    }
+    result.push(record);
+  }
+  return { ok: true, payload: result };
+}
+
+function parseMotionMaterialCounters(
+  type: string,
+  value: unknown,
+  path: string,
+): PayloadParseResult<null> {
+  if (!Array.isArray(value)) return invalidPayload(type, path, "array");
+  for (const [index, item] of value.entries()) {
+    const itemPath = `${path}[${index}]`;
+    const record = asRecord(item);
+    if (!record) return invalidPayload(type, itemPath, "object");
+    const keys = validateExactKeys(type, itemPath, record, ["name", "count"]);
+    if (!keys.ok) return keys;
+    const shape = validateFields(type, record, itemPath, { name: "string", count: "number" });
+    if (!shape.ok) return shape;
+    const count = parseNonNegativeInteger(type, record.count, `${itemPath}.count`);
+    if (!count.ok) return count;
+  }
+  return { ok: true, payload: null };
 }
 
 function parseModelConstraints(

@@ -1118,6 +1118,10 @@ def _project_frontend_model_info(model_info: dict[str, Any]) -> dict[str, Any]:
                 + ",".join(missing)
             )
         projected_model = {field: deepcopy(model[field]) for field in model_fields}
+        if "motion_material_catalog" in model:
+            projected_model["motion_material_catalog"] = _project_frontend_motion_material_catalog(
+                model["motion_material_catalog"]
+            )
         projected_model["constraints"] = _project_frontend_resource_constraints(
             model["constraints"]
         )
@@ -1178,4 +1182,139 @@ def _project_frontend_resource_constraints(value: Any) -> dict[str, Any]:
             {field: deepcopy(item[field]) for field in motion_fields}
             for item in motions
         ],
+    }
+
+
+def _project_frontend_motion_material_catalog(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise RuntimeError("live2d_motion_material_catalog_invalid")
+
+    root_fields = (
+        "schema_version",
+        "model_id",
+        "profile_id",
+        "profile_revision",
+        "source_hash",
+        "summary",
+        "fragments",
+        "atoms",
+        "diagnostics",
+    )
+    missing_root_fields = [field for field in root_fields if field not in value]
+    if missing_root_fields:
+        raise RuntimeError(
+            "live2d_motion_material_catalog_missing_fields:"
+            + ",".join(missing_root_fields)
+        )
+
+    summary = value["summary"]
+    if not isinstance(summary, dict):
+        raise RuntimeError("live2d_motion_material_catalog_summary_invalid")
+    summary_fields = (
+        "fragment_count",
+        "atom_count",
+        "ambient_fragment_count",
+        "ambient_atom_count",
+        "compatible_fragment_count",
+        "compatible_atom_count",
+        "status_counts",
+        "reason_counts",
+    )
+    missing_summary_fields = [field for field in summary_fields if field not in summary]
+    if missing_summary_fields:
+        raise RuntimeError(
+            "live2d_motion_material_catalog_summary_missing_fields:"
+            + ",".join(missing_summary_fields)
+        )
+
+    diagnostics = value["diagnostics"]
+    if not isinstance(diagnostics, dict):
+        raise RuntimeError("live2d_motion_material_catalog_diagnostics_invalid")
+    diagnostics_fields = ("profile_ready", "status_counts", "reason_counts")
+    missing_diagnostic_fields = [
+        field for field in diagnostics_fields if field not in diagnostics
+    ]
+    if missing_diagnostic_fields:
+        raise RuntimeError(
+            "live2d_motion_material_catalog_diagnostics_missing_fields:"
+            + ",".join(missing_diagnostic_fields)
+        )
+
+    compact_fragments: list[dict[str, Any]] = []
+    fragment_fields = (
+        "id",
+        "source_motion",
+        "source_file",
+        "duration_ms",
+        "channels",
+        "domains",
+        "parameter_ids",
+        "axis_ids",
+        "component_ids",
+        "intensity",
+        "trait",
+        "tags",
+        "recommended_scenarios",
+        "compatibility_groups",
+        "status",
+        "status_reasons",
+    )
+    fragments = value["fragments"]
+    if not isinstance(fragments, list):
+        raise RuntimeError("live2d_motion_material_catalog_fragments_invalid")
+    for index, item in enumerate(fragments):
+        if not isinstance(item, dict):
+            raise RuntimeError(f"live2d_motion_material_fragment_invalid:{index}")
+        missing = [field for field in fragment_fields if field not in item]
+        if missing:
+            raise RuntimeError(
+                f"live2d_motion_material_fragment_missing_fields:{index}:"
+                + ",".join(missing)
+            )
+        compact_fragments.append({field: deepcopy(item[field]) for field in fragment_fields})
+
+    compact_atoms: list[dict[str, Any]] = []
+    atom_fields = (
+        "id",
+        "parameter_id",
+        "axis_ids",
+        "primary_channel",
+        "polarity",
+        "semantic_polarity",
+        "trait",
+        "strength",
+        "score",
+        "duration_ms",
+        "active_window",
+        "source_fragment_id",
+        "compatibility_groups",
+        "status",
+        "status_reasons",
+    )
+    atoms = value["atoms"]
+    if not isinstance(atoms, list):
+        raise RuntimeError("live2d_motion_material_catalog_atoms_invalid")
+    for index, item in enumerate(atoms):
+        if not isinstance(item, dict):
+            raise RuntimeError(f"live2d_motion_material_atom_invalid:{index}")
+        missing = [field for field in atom_fields if field not in item]
+        if missing:
+            raise RuntimeError(
+                f"live2d_motion_material_atom_missing_fields:{index}:"
+                + ",".join(missing)
+            )
+        compact_atoms.append({field: deepcopy(item[field]) for field in atom_fields})
+
+    return {
+        "schema_version": str(value["schema_version"] or "").strip(),
+        "model_id": str(value["model_id"] or "").strip(),
+        "profile_id": str(value["profile_id"] or "").strip(),
+        "profile_revision": int(value["profile_revision"] or 0),
+        "source_hash": str(value["source_hash"] or "").strip(),
+        "summary": {field: deepcopy(summary[field]) for field in summary_fields},
+        "fragments": compact_fragments,
+        "atoms": compact_atoms,
+        "diagnostics": {
+            field: deepcopy(diagnostics[field]) for field in diagnostics_fields
+        },
     }

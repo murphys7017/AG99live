@@ -1,5 +1,7 @@
 import type { SemanticAxisProfile } from "./semantic-axis-profile";
 
+export const MOTION_MATERIAL_CATALOG_SCHEMA_VERSION = "motion_material_catalog.v1" as const;
+
 export {
   PROTOCOL_SCHEMA_MANIFEST,
   PROTOCOL_SCHEMAS,
@@ -308,6 +310,8 @@ export interface ParameterActionAtom {
   id: string;
   name: string;
   label: string;
+  parameter_id: string;
+  parameter_name: string;
   kind: string;
   domain: string;
   channels: string[];
@@ -343,6 +347,78 @@ export interface ParameterActionLibrary {
   channels: ParameterActionCounterEntry[];
   parameters: ParameterActionParameterEntry[];
   atoms: ParameterActionAtom[];
+}
+
+export interface MotionMaterialCounterEntry {
+  name: string;
+  count: number;
+}
+
+export interface MotionMaterialActiveWindow {
+  start_ratio: number;
+  end_ratio: number;
+}
+
+export interface MotionMaterialFragment {
+  id: string;
+  source_motion: string;
+  source_file: string;
+  duration_ms: number;
+  channels: string[];
+  domains: string[];
+  parameter_ids: string[];
+  axis_ids: string[];
+  component_ids: string[];
+  intensity: string;
+  trait: string;
+  tags: string[];
+  recommended_scenarios: string[];
+  compatibility_groups: string[];
+  status: string;
+  status_reasons: string[];
+}
+
+export interface MotionMaterialAtom {
+  id: string;
+  parameter_id: string;
+  axis_ids: string[];
+  primary_channel: string;
+  polarity: string;
+  semantic_polarity: string;
+  trait: string;
+  strength: string;
+  score: number;
+  duration_ms: number;
+  active_window: MotionMaterialActiveWindow;
+  source_fragment_id: string;
+  compatibility_groups: string[];
+  status: string;
+  status_reasons: string[];
+}
+
+export interface MotionMaterialCatalog {
+  schema_version: typeof MOTION_MATERIAL_CATALOG_SCHEMA_VERSION;
+  model_id: string;
+  profile_id: string;
+  profile_revision: number;
+  source_hash: string;
+  summary: {
+    fragment_count: number;
+    atom_count: number;
+    ambient_fragment_count: number;
+    ambient_atom_count: number;
+    compatible_fragment_count: number;
+    compatible_atom_count: number;
+    status_counts: MotionMaterialCounterEntry[];
+    reason_counts: MotionMaterialCounterEntry[];
+  };
+  fragments: MotionMaterialFragment[];
+  atoms: MotionMaterialAtom[];
+  diagnostics: {
+    profile_ready: boolean;
+    status_counts: MotionMaterialCounterEntry[];
+    reason_counts: MotionMaterialCounterEntry[];
+  };
 }
 
 export interface PerformanceCurveHint {
@@ -576,6 +652,7 @@ export interface ModelSummary {
   icon_url: string;
   parameter_scan: ParameterScanPayload;
   parameter_action_library: ParameterActionLibrary;
+  motion_material_catalog?: MotionMaterialCatalog | null;
   constraints: {
     expressions: ExpressionConstraint[];
     motions: MotionConstraint[];
