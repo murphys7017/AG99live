@@ -31,12 +31,14 @@ class MessageFactory:
         nickname: str = DEFAULT_CLIENT_NICKNAME,
         media_service,
         image_cooldown_seconds_getter: Callable[[], int],
+        latest_desktop_frame_getter: Callable[[], Any] | None = None,
     ) -> None:
         self.self_id = self_id
         self.client_uid = client_uid
         self.nickname = normalize_client_nickname(nickname)
         self.media_service = media_service
         self._image_cooldown_seconds_getter = image_cooldown_seconds_getter
+        self._latest_desktop_frame_getter = latest_desktop_frame_getter
         self._last_accepted_image_at_monotonic: float | None = None
 
     def set_client_profile(self, client_uid: str, nickname: str) -> None:
@@ -106,7 +108,7 @@ class MessageFactory:
             )
             if image_component is not None:
                 if self._is_desktop_snapshot(image_payload):
-                    image_component = self.media_service.cache_desktop_snapshot(
+                    image_component = self.media_service.materialize_desktop_input(
                         client_uid=self.client_uid,
                         image_component=image_component,
                     )
@@ -126,9 +128,16 @@ class MessageFactory:
 
         reused_desktop_snapshot = False
         if desktop_snapshot_requested and not images:
-            cached_snapshot = self.media_service.get_latest_desktop_snapshot_component(
-                client_uid=self.client_uid,
+            latest_frame = (
+                self._latest_desktop_frame_getter()
+                if self._latest_desktop_frame_getter is not None
+                else None
             )
+            cached_snapshot = None
+            if latest_frame is not None:
+                cached_snapshot, _ = self.media_service.convert_image_component_with_diagnostic(
+                    latest_frame.image
+                )
             if cached_snapshot is not None:
                 desktop_snapshot_component_indexes.append(len(abm.message))
                 abm.message.append(cached_snapshot)
@@ -139,7 +148,7 @@ class MessageFactory:
                     )
                 reused_desktop_snapshot = True
                 logger.info(
-                    "Reused latest desktop snapshot after frontend capture was unavailable: "
+                    "Reused current Core desktop frame after frontend capture was unavailable: "
                     "client_uid=%s",
                     self.client_uid,
                 )

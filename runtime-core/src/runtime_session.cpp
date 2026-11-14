@@ -12,6 +12,10 @@ RuntimeProtocolSession::RuntimeProtocolSession(
 void RuntimeProtocolSession::ingest_text(std::string_view text_frame) {
   try {
     const auto envelope = parse_envelope_json(text_frame);
+    if (!handshake_complete_ && envelope.type != "system.server_info") {
+      throw ProtocolError(
+          "handshake:not_complete; expected system.server_info");
+    }
     if (envelope.type == "control.turn_started") {
       if (envelope.source != "adapter") {
         throw ProtocolError("control.turn_started.source must be adapter");
@@ -59,6 +63,21 @@ void RuntimeProtocolSession::ingest_text(std::string_view text_frame) {
       }
       if (callbacks_.on_synth_finished) {
         callbacks_.on_synth_finished(*envelope.turn_id);
+      }
+      return;
+    }
+    if (envelope.type == "control.start_mic") {
+      if (envelope.source != "adapter") {
+        throw ProtocolError("control.start_mic.source must be adapter");
+      }
+      if (envelope.turn_id.has_value()) {
+        throw ProtocolError("control.start_mic must not have turn_id");
+      }
+      if (!envelope.payload.empty()) {
+        throw ProtocolError("control.start_mic payload must be empty");
+      }
+      if (callbacks_.on_start_mic) {
+        callbacks_.on_start_mic();
       }
       return;
     }
@@ -131,6 +150,21 @@ void RuntimeProtocolSession::ingest_text(std::string_view text_frame) {
       }
       return;
     }
+    if (envelope.type == "system.server_info") {
+      auto info = parse_server_info(envelope);
+      handshake_complete_ = true;
+      if (callbacks_.on_server_info) {
+        callbacks_.on_server_info(std::move(info));
+      }
+      return;
+    }
+    if (envelope.type == "system.desktop_settings_sync_complete") {
+      auto complete = parse_desktop_settings_sync_complete(envelope);
+      if (callbacks_.on_desktop_settings_sync_complete) {
+        callbacks_.on_desktop_settings_sync_complete(std::move(complete));
+      }
+      return;
+    }
     if (envelope.type == "output.pre_action") {
       auto event = parse_pre_action(envelope);
       if (callbacks_.on_pre_action) {
@@ -142,6 +176,20 @@ void RuntimeProtocolSession::ingest_text(std::string_view text_frame) {
       auto request = parse_desktop_observation_request(envelope);
       if (callbacks_.on_desktop_observation_request) {
         callbacks_.on_desktop_observation_request(std::move(request));
+      }
+      return;
+    }
+    if (envelope.type == "output.idle_motion") {
+      auto event = parse_idle_motion(envelope);
+      if (callbacks_.on_idle_motion) {
+        callbacks_.on_idle_motion(std::move(event));
+      }
+      return;
+    }
+    if (envelope.type == "system.desktop_presence_request") {
+      auto request = parse_desktop_presence_request(envelope);
+      if (callbacks_.on_desktop_presence_request) {
+        callbacks_.on_desktop_presence_request(std::move(request));
       }
       return;
     }
@@ -197,6 +245,10 @@ void RuntimeProtocolSession::ingest_text(std::string_view text_frame) {
 void RuntimeProtocolSession::ingest_binary(
     std::span<const std::uint8_t> binary_frame) {
   try {
+    if (!handshake_complete_) {
+      throw ProtocolError(
+          "handshake:not_complete; expected system.server_info");
+    }
     const bool is_incremental_audio = binary_frame.size() >= 6
         && binary_frame[0] == static_cast<std::uint8_t>('A')
         && binary_frame[1] == static_cast<std::uint8_t>('G')
@@ -227,6 +279,7 @@ void RuntimeProtocolSession::ingest_binary(
 void RuntimeProtocolSession::reset() {
   assembler_.clear_all();
   incremental_assembler_.clear_all();
+  handshake_complete_ = false;
 }
 
 void RuntimeProtocolSession::report_error(std::string message) {

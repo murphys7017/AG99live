@@ -100,9 +100,10 @@ TypeScript 的 `usePetDesktopRuntime` 是 Vue 进程内的组合根，负责组�
 
 ## 6. 待设计的纵向切片：桌面主动性分层
 
-主动表达策略已在 AG99；桌面事实到主动观察的入口尚未接入 AG99live。当前桌面主要接收 AG99 的主动输出：`send_by_session()` 建立桌面 Turn 并发送播放内容。现有链路有输出运输，没有桌面场景输入。
+主动表达策略已在 AG99；桌面事实的采集和 Observation 提交入口已经接入 AG99live。当前桌面仍主要接收 AG99 的主动输出：`send_by_session()` 建立桌面 Turn 并发送播放内容。桌面观察通过 Core SnapshotHub 共享帧和状态，观察比较与主动策略仍由 AG99 负责。
 
-AG99 的 `Context.register_runtime_observation_sensor()` 可注册受限的事实来源，返回的 `RuntimeObservationSensorHandle.submit()` 可向现有 Personal Runtime Inbox 推送事实。但它只是提交句柄，不会采集桌面信息；AG99live 当前没有注册该 sensor。`personal_action` 和 `proactive_output` 是被校验器拒绝的保留 kind，不能作为插件 Observation 提交。
+AG99 的 `Context.register_runtime_observation_sensor()` 可注册受限的事实来源，返回的 `RuntimeObservationSensorHandle.submit()` 可向现有 Personal Runtime Inbox 推送事实。`astrbot_plugin_ag99_desktop_awareness` 注册桌面变化 sensor，并通过 Core SnapshotHub 读取 AG99live 提供的帧和状态。`personal_action` 和 `proactive_output` 是被校验器拒绝的保留 kind，不能作为插件 Observation 提交。
+桌面变化 Observation 只传递短期帧引用、修订号和连接代际；Personal 在构建支持视觉的策略请求时按当前 `SnapshotScope` 解析图片并放入本次 `ProviderRequest`，状态订阅、普通对话和历史记录都不直接携带原始截图。
 
 当前桌面→Adapter 已有文本/可选截图、麦克风流、打断与播放回执、设置和历史操作、Profile/动作调校及 Motion Lab 等消息；其中没有“用户回来”“触摸宠物”“桌面忙闲”等场景事实。因此以下是候选事件，不是当前实现：
 

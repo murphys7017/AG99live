@@ -176,14 +176,13 @@ class MyPlugin(Star):
             )
 
     async def initialize(self) -> None:
-        from .runtime.desktop_observation import DesktopObservationRuntime
+        from .runtime.desktop_capture import DesktopCaptureRuntime
+        from .runtime.desktop_presence_capture import DesktopPresenceCaptureRuntime
 
-        self._desktop_observation = DesktopObservationRuntime(self.context)
-        self._desktop_observation.start()
-        from .runtime.desktop_presence import DesktopPresenceRuntime
-
-        self._desktop_presence = DesktopPresenceRuntime(self.context)
-        self._desktop_presence.start()
+        self._desktop_capture = DesktopCaptureRuntime(self.context)
+        self._desktop_capture.start()
+        self._desktop_presence_capture = DesktopPresenceCaptureRuntime(self.context)
+        self._desktop_presence_capture.start()
 
     @_optional_decorating_result_hook()
     async def sanitize_hidden_output_markup(
@@ -1518,12 +1517,12 @@ class MyPlugin(Star):
                 return
 
     async def terminate(self) -> None:
-        presence = getattr(self, "_desktop_presence", None)
-        if presence is not None:
-            await presence.stop()
-        observer = getattr(self, "_desktop_observation", None)
-        if observer is not None:
-            await observer.stop()
+        capture = getattr(self, "_desktop_capture", None)
+        if capture is not None:
+            await capture.stop()
+        presence_capture = getattr(self, "_desktop_presence_capture", None)
+        if presence_capture is not None:
+            await presence_capture.stop()
         tasks = list(self._independent_motion_tasks)
         self._independent_motion_tasks.clear()
         for task in tasks:

@@ -48,8 +48,10 @@ from .protocol.constants import (
     TYPE_SYSTEM_DESKTOP_SETTINGS_UPDATE,
 )
 from .runtime.desktop_settings_broker import DesktopSettingsBroker
-from .runtime.desktop_observation import DesktopFrameBroker, SCHEMA
-from .runtime.desktop_presence import DesktopPresenceBroker
+from .runtime.desktop_capture_broker import DesktopFrameBroker, SCHEMA
+from .runtime.desktop_presence_broker import DesktopPresenceBroker
+from .runtime.desktop_state import DesktopStateStore
+from .runtime.desktop_snapshot_reader import read_latest_desktop_frame
 from .protocol.desktop_presence import SCHEMA as PRESENCE_SCHEMA
 from .runtime.session_state import SessionState
 from .runtime.turn_identity_map import TurnIdentityMap
@@ -162,13 +164,14 @@ class OLVPetPlatformAdapter(Platform):
             DEFAULT_CLIENT_NICKNAME,
         )
 
+        self.provider_registry = AstrBotProviderRegistry(
+            self._plugin_context,
+            platform_id=self.platform_id,
+        )
         self.runtime_state = RuntimeState(
             platform_config=self.config,
             plugin_context=self._plugin_context,
-            provider_registry=AstrBotProviderRegistry(
-                self._plugin_context,
-                platform_id=self.platform_id,
-            ),
+            provider_registry=self.provider_registry,
             plugin_config=self._plugin_config,
             plugin_config_loader=get_plugin_config_snapshot,
             host=self.host,
@@ -181,6 +184,13 @@ class OLVPetPlatformAdapter(Platform):
         )
         self.session_state = SessionState(client_uid=self.client_uid)
         self.turn_identity_map = TurnIdentityMap()
+        get_snapshot_hub = getattr(self._plugin_context, "get_snapshot_hub", None)
+        snapshot_hub = get_snapshot_hub() if callable(get_snapshot_hub) else None
+        self.desktop_state_store = DesktopStateStore(
+            client_uid=self.client_uid,
+            scope_id=self.platform_id,
+            snapshot_hub=snapshot_hub,
+        )
 
         self._static_server = StaticResourceServer(
             host=self.host,
@@ -206,6 +216,7 @@ class OLVPetPlatformAdapter(Platform):
             nickname=self.client_nickname,
             media_service=self.media_service,
             image_cooldown_seconds_getter=lambda: self.runtime_state.image_cooldown_seconds,
+            latest_desktop_frame_getter=self._read_latest_desktop_frame,
         )
         self.chat_buffer = ChatBuffer(
             maxlen=int(get_config_value(general_config, "chat_buffer_size", 10))
@@ -235,8 +246,14 @@ class OLVPetPlatformAdapter(Platform):
             synchronize_desktop_settings=self._synchronize_desktop_settings,
             on_disconnect=self._handle_transport_disconnect,
         )
-        self.desktop_observation = DesktopFrameBroker(self.transport.send_json)
-        self.desktop_presence = DesktopPresenceBroker(self.transport.send_json)
+        self.desktop_observation = DesktopFrameBroker(
+            self.transport.send_json,
+            self.desktop_state_store,
+        )
+        self.desktop_presence = DesktopPresenceBroker(
+            self.transport.send_json,
+            self.desktop_state_store,
+        )
         self.desktop_settings_broker = DesktopSettingsBroker(
             send_json=self.transport.send_json,
             is_connected=lambda: self.transport._ws_client is not None,
@@ -283,6 +300,7 @@ class OLVPetPlatformAdapter(Platform):
         self.astrbot_capabilities = AstrBotCapabilityBinding(
             plugin_context=self._plugin_context,
             recognize_audio=self._recognize_provider_audio,
+            resolve_tts_provider=self.provider_registry.get_tts_provider,
         )
         self.provider_bridge = build_provider_bridge(
             AstrBotProviderBinding(
@@ -495,7 +513,35 @@ class OLVPetPlatformAdapter(Platform):
         )
 
     async def handle_msg(self, message: dict[str, Any]):
+        self._record_desktop_frame_from_message(message)
         await self.turn_coordinator.handle_msg(message)
+
+    def _record_desktop_frame_from_message(self, message: dict[str, Any]) -> None:
+        """Cache a foreground desktop snapshot already carried by an input message."""
+        if not isinstance(message, dict):
+            return
+        payload = message.get("payload")
+        if not isinstance(payload, dict):
+            return
+        images = payload.get("images")
+        if not isinstance(images, list):
+            return
+        for item in images:
+            if not isinstance(item, dict):
+                continue
+            data = item.get("data")
+            if isinstance(data, str) and data.startswith("data:image/jpeg;base64,"):
+                self.desktop_state_store.update_frame(data)
+                return
+
+    def _read_latest_desktop_frame(self):
+        get_snapshot_hub = getattr(self._plugin_context, "get_snapshot_hub", None)
+        if not callable(get_snapshot_hub):
+            return None
+        return read_latest_desktop_frame(
+            get_snapshot_hub(),
+            platform_id=self.platform_id,
+        )
 
     async def handle_binary_msg(self, message: bytes):
         await self.turn_coordinator.handle_binary_msg(message)
@@ -680,8 +726,13 @@ class OLVPetPlatformAdapter(Platform):
             self.desktop_observation.resolve(message.payload)
             return
         if message.type == TYPE_SYSTEM_DESKTOP_RUNTIME_SETTINGS:
+            self.desktop_state_store.mark_connected(client_uid=self.client_uid)
             self.desktop_presence.supported = message.payload.get("desktop_presence_schema") == PRESENCE_SCHEMA
             self.desktop_observation.supported = message.payload.get("desktop_observation_schema") == SCHEMA
+            self.desktop_state_store.update_capabilities(
+                observation_supported=self.desktop_observation.supported,
+                presence_supported=self.desktop_presence.supported,
+            )
             self.desktop_audio_credit_enabled = message.payload.get("audio_credit_schema") == "olv.audio_credit.v1"
             self.desktop_persona_segment_stream_enabled = message.payload[
                 "persona_segment_stream_enabled"
@@ -753,6 +804,9 @@ class OLVPetPlatformAdapter(Platform):
         desktop_presence = getattr(self, "desktop_presence", None)
         if desktop_presence is not None:
             desktop_presence.disconnect()
+        desktop_state_store = getattr(self, "desktop_state_store", None)
+        if desktop_state_store is not None:
+            desktop_state_store.disconnect()
         cleanup_failures: list[tuple[str, Exception]] = []
         self.desktop_persona_segment_stream_enabled = False
         self.desktop_audio_credit_enabled = False
@@ -817,4 +871,7 @@ class OLVPetPlatformAdapter(Platform):
             self.client_uid,
             self.client_nickname,
         )
+        desktop_state_store = getattr(self, "desktop_state_store", None)
+        if desktop_state_store is not None:
+            desktop_state_store.set_client_uid(self.client_uid)
         self.history_bridge.set_client_uid(self.client_uid)

@@ -1,7 +1,9 @@
-"""后端轮次编排中枢。
+"""后端前端协议编排器。
 
-TurnCoordinator 把"前端协议消息 ↔ AstrBot 事件总线 ↔ 出站回放"绑在一起，
-是这条链路上唯一同时持有协议侧轮次身份与业务侧轮次生命周期的对象。
+TurnCoordinator 把"前端协议消息 ↔ AstrBot 事件总线 ↔ 出站回放"接在一起，
+负责连接级协议路由、输入接纳和输出回执。业务侧 Turn 生命周期状态由已经挂载的
+InteractionOrchestrator 统一持有；在没有挂载中枢的隔离测试构造中，本类才使用本地
+兼容存储。
 
 入站
     1. 接收 transport 解码出的 JSON dict / 二进制帧，并在本层完成协议解析。
@@ -99,9 +101,10 @@ def _resolve_motion_work_turn_id(event: Any, fallback_turn_id: str) -> str:
 class TurnCoordinator:
     """后端单连接的协议+轮次编排器。
 
-    一个 WebSocket 会话对应一个 TurnCoordinator 实例：内部以 _turn_lock 串行化轮次
-    生命周期事件，避免"上一轮没收口就被下一轮覆盖"。它只持有 Turn 身份、终态、事件
-    和连接级清理状态；输出段、观察与可选曲线状态由各自协调器持有，跨连接不共享。
+    一个 WebSocket 会话对应一个 TurnCoordinator 实例：内部以 _turn_lock 串行化协议侧
+    轮次操作，避免"上一轮没收口就被下一轮覆盖"。InteractionOrchestrator 持有业务
+    Turn 的终态、活动事件和计时；输出段、观察与可选曲线状态由各自协调器持有，跨连接
+    不共享。
     """
 
     def __init__(
@@ -165,8 +168,12 @@ class TurnCoordinator:
         )
 
         self._turn_lock = asyncio.Lock()
-        self._turn_timings: dict[str, dict[str, Any]] = {}
-        self._events_by_turn_id: dict[str, Any] = {}
+        # The neutral InteractionOrchestrator is the lifecycle owner in the
+        # production path.  These local stores are only a compatibility
+        # fallback for isolated/unit construction before an orchestrator is
+        # attached; they are never copied into a second owner.
+        self._local_turn_timings: dict[str, dict[str, Any]] = {}
+        self._local_events_by_turn_id: dict[str, Any] = {}
         self.motion_observations = MotionObservationRecorder(
             runtime_state=self.runtime_state,
             session_state=self.session_state,
@@ -177,11 +184,13 @@ class TurnCoordinator:
             is_enabled=lambda: self.runtime_state.enable_performance_curve,
             observations=self.motion_observations,
         )
-        self._turn_terminal_results: dict[str, tuple[bool, str | None] | None] = {}
-        self._turn_terminal_waiters: dict[
+        self._local_turn_terminal_results: dict[
+            str, tuple[bool, str | None] | None
+        ] = {}
+        self._local_turn_terminal_waiters: dict[
             str, list[asyncio.Future[tuple[bool, str | None]]]
         ] = {}
-        self._terminating_turn_ids: set[str] = set()
+        self._local_terminating_turn_ids: set[str] = set()
         self._active_vad_turn_by_capture_turn: dict[str, str] = {}
         self._preparing_inputs: set[str] = set()
         self.observation_window = ConversationObservationWindow(
@@ -209,19 +218,63 @@ class TurnCoordinator:
         )
 
     def attach_interaction_orchestrator(self, orchestrator) -> None:
-        """Attach the neutral state owner without changing protocol behavior."""
+        """Attach the sole neutral lifecycle owner without changing behavior."""
 
         self._interaction_orchestrator = orchestrator
-        self._turn_terminal_results = orchestrator.terminal_results
-        self._turn_terminal_waiters = orchestrator.terminal_waiters
-        self._terminating_turn_ids = orchestrator.terminating_turn_ids
-        self._turn_timings = orchestrator.turn_timings
-        self._events_by_turn_id = orchestrator.active_events
         self.output_segments.set_interaction_orchestrator(orchestrator)
         orchestrator.attach_turn_lifecycle(
             cleanup_terminal_turn=self._cleanup_after_terminal,
             mark_event_stop_requested=self._mark_event_stop_requested,
             control_sender=self._send_control_event,
+        )
+
+    @property
+    def _turn_timings(self) -> dict[str, dict[str, Any]]:
+        owner = self._interaction_orchestrator
+        return (
+            owner.turn_timings
+            if owner is not None
+            else self._local_turn_timings
+        )
+
+    @property
+    def _events_by_turn_id(self) -> dict[str, Any]:
+        owner = self._interaction_orchestrator
+        return (
+            owner.active_events
+            if owner is not None
+            else self._local_events_by_turn_id
+        )
+
+    @property
+    def _turn_terminal_results(
+        self,
+    ) -> dict[str, tuple[bool, str | None] | None]:
+        owner = self._interaction_orchestrator
+        return (
+            owner.terminal_results
+            if owner is not None
+            else self._local_turn_terminal_results
+        )
+
+    @property
+    def _turn_terminal_waiters(
+        self,
+    ) -> dict[str, list[asyncio.Future[tuple[bool, str | None]]]]:
+        owner = self._interaction_orchestrator
+        return (
+            owner.terminal_waiters
+            if owner is not None
+            else self._local_turn_terminal_waiters
+        )
+
+    @property
+    def _terminating_turn_ids(self) -> set[str]:
+        owner = self._interaction_orchestrator
+        return (
+            owner.terminating_turn_ids
+            if owner is not None
+            else self._local_terminating_turn_ids
         )
 
     @staticmethod

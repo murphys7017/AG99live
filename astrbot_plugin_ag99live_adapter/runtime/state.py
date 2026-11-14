@@ -572,9 +572,11 @@ class RuntimeState:
 
     def load_selected_providers(self) -> None:
         if self.provider_registry is None:
-            raise RuntimeStateConfigurationError(
-                "Provider registry is unavailable while loading provider bindings."
+            logger.debug(
+                "Provider registry is not attached; optional provider bindings "
+                "remain unresolved until the next runtime refresh."
             )
+            return
 
         if self.enable_performance_curve:
             if not self.performance_curve_provider_id:

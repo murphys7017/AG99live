@@ -125,7 +125,6 @@ class InteractionOrchestrator:
         self._closed = False
         self._turns: dict[str, _TurnState] = {}
         self._segment_assembler: Any | None = None
-        self._conversation_event_assembler: Any | None = None
         self.active_events: dict[str, Any] = {}
         self.turn_timings: dict[str, dict[str, Any]] = {}
         self._sink_tasks: set[asyncio.Task] = set()
@@ -274,11 +273,6 @@ class InteractionOrchestrator:
 
     def attach_segment_assembler(self, assembler: Any) -> None:
         self._segment_assembler = assembler
-
-    def attach_conversation_event_assembler(self, assembler: Any | None) -> None:
-        """Attach an optional text-stream assembler for non-AstrBot providers."""
-
-        self._conversation_event_assembler = assembler
 
     def attach_turn_lifecycle(
         self,
@@ -500,10 +494,6 @@ class InteractionOrchestrator:
             await asyncio.gather(*sink_tasks, return_exceptions=True)
         self._sink_tasks.clear()
         await self.conversation_provider.close()
-        if self._conversation_event_assembler is not None:
-            close_assembler = getattr(self._conversation_event_assembler, "close", None)
-            if callable(close_assembler):
-                await _await_handler(close_assembler())
         for provider in (
             self.stt_provider,
             self.tts_provider,
@@ -788,24 +778,15 @@ class InteractionOrchestrator:
     def _route(self, source: str, value: object) -> asyncio.Future | None:
         self._record_provider_event(source, value)
         sink = self._event_sink
-        event_assembler = (
-            self._conversation_event_assembler
-            if source == "conversation" and isinstance(value, ConversationEvent)
-            else None
-        )
         execution_publisher = (
             getattr(self.output_port, "publish_execution", None)
             if source == "execution" and isinstance(value, ExecutionEvent)
             else None
         )
-        if sink is None and event_assembler is None and not callable(execution_publisher):
+        if sink is None and not callable(execution_publisher):
             return None
 
         async def deliver() -> None:
-            if event_assembler is not None:
-                handle_event = getattr(event_assembler, "handle_event", None)
-                if callable(handle_event):
-                    await _await_handler(handle_event(value))
             if callable(execution_publisher):
                 await _await_handler(execution_publisher(value))
             if sink is not None:

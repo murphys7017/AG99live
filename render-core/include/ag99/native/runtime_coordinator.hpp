@@ -12,6 +12,7 @@
 
 #include "ag99/native/audio_runtime.hpp"
 #include "ag99/native/bilibili_live_runtime.hpp"
+#include "ag99/native/desktop_presence_runtime.hpp"
 #include "ag99/native/segment_types.hpp"
 #include "ag99/runtime/protocol.hpp"
 
@@ -23,8 +24,11 @@ namespace ag99::native {
 struct RuntimeCoordinatorCallbacks {
   std::function<void(ag99::runtime::ModelSync)> on_model_sync;
   std::function<void(ag99::runtime::PreActionEvent)> on_pre_action;
+  std::function<void(ag99::runtime::IdleMotionEvent)> on_idle_motion;
   std::function<void(ag99::runtime::DesktopObservationRequest)>
       on_desktop_observation_request;
+  std::function<void(ag99::runtime::DesktopPresenceRequest)>
+      on_desktop_presence_request;
   std::function<void(
       ag99::runtime::OutputSegment,
       std::optional<NativeSegmentClock>)> on_output_segment;

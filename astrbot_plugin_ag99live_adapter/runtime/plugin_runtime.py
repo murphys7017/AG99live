@@ -27,6 +27,13 @@ DEFAULT_PRE_ACTION_PROVIDER_ID = "ollama/qwen3:1.7b"
 DESKTOP_SETTINGS_CONFIG_KEY = "desktop_runtime_settings"
 _RETIRED_PLUGIN_CONFIG_PATHS = {
     "independent_motion": ("per_speech_segment", "segment_stream_enabled"),
+    "desktop_return": (
+        "enabled",
+        "idle_after_seconds",
+        "minimum_away_seconds",
+        "confirmation_seconds",
+        "cooldown_seconds",
+    ),
     "desktop_observation": ("provider_id", "timeout_seconds"),
     "remote_operator": (
         "default_computer",
@@ -220,6 +227,66 @@ def set_plugin_config(config: Mapping[str, Any] | None) -> None:
         _plugin_config_path = config_path if isinstance(config_path, str) and config_path else None
 
 
+def _write_plugin_config_locked(config: Mapping[str, Any]) -> None:
+    """Write one complete plugin snapshot while holding ``_state_lock``."""
+    global _plugin_config, _plugin_config_object
+
+    normalized = deepcopy(dict(config))
+    _plugin_config = normalized
+    save_config = getattr(_plugin_config_object, "save_config", None)
+    if callable(save_config):
+        _plugin_config_object.clear()
+        _plugin_config_object.update(normalized)
+        save_config()
+        return
+
+    path = _plugin_config_path or _default_plugin_config_paths[0]
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    temporary_path = f"{path}.tmp"
+    with open(temporary_path, "w", encoding="utf-8") as handle:
+        json.dump(normalized, handle, ensure_ascii=False, indent=2)
+        handle.write("\n")
+    os.replace(temporary_path, path)
+
+
+def apply_plugin_config_patch(
+    patch: Mapping[str, Mapping[str, Any]],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Atomically merge and persist a section patch.
+
+    The returned pair is ``(previous, current)``. Callers can use the current
+    snapshot for a conditional rollback without overwriting a newer desktop
+    setting update that arrived while runtime refresh was in progress.
+    """
+    with _state_lock:
+        previous = deepcopy(get_plugin_config_snapshot().config)
+        merged = deepcopy(previous)
+        for section, fields in patch.items():
+            current = merged.get(section)
+            if not isinstance(current, dict):
+                current = {}
+            merged[section] = {
+                **current,
+                **deepcopy(dict(fields)),
+            }
+        _write_plugin_config_locked(merged)
+        return previous, deepcopy(merged)
+
+
+def restore_plugin_config_if_current(
+    *,
+    expected: Mapping[str, Any],
+    replacement: Mapping[str, Any],
+) -> bool:
+    """Restore a snapshot only when no newer writer changed the config."""
+    with _state_lock:
+        current = get_plugin_config_snapshot().config
+        if current != dict(expected):
+            return False
+        _write_plugin_config_locked(replacement)
+        return True
+
+
 def get_plugin_config_snapshot() -> PluginConfigSnapshot:
     with _state_lock:
         disk_snapshot = _load_plugin_config_from_disk(
@@ -288,22 +355,7 @@ def persist_desktop_setting(
             root[platform_key] = values
         values[setting_key] = deepcopy(dict(entry))
 
-        global _plugin_config, _plugin_config_object
-        _plugin_config = config
-        save_config = getattr(_plugin_config_object, "save_config", None)
-        if callable(save_config):
-            _plugin_config_object.clear()
-            _plugin_config_object.update(config)
-            save_config()
-            return
-
-        path = _plugin_config_path or _default_plugin_config_paths[0]
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        temporary_path = f"{path}.tmp"
-        with open(temporary_path, "w", encoding="utf-8") as handle:
-            json.dump(config, handle, ensure_ascii=False, indent=2)
-            handle.write("\n")
-        os.replace(temporary_path, path)
+        _write_plugin_config_locked(config)
 
 
 def _load_plugin_config_from_disk(

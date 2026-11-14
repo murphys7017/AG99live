@@ -698,6 +698,57 @@ ModelSync parse_model_sync(const ProtocolEnvelope& envelope) {
   return ModelSync{envelope, envelope.payload};
 }
 
+ServerInfo parse_server_info(const ProtocolEnvelope& envelope) {
+  if (envelope.type != "system.server_info") {
+    throw ProtocolError("expected system.server_info envelope");
+  }
+  if (envelope.source != "adapter" || envelope.turn_id.has_value()) {
+    throw ProtocolError("system.server_info envelope identity is invalid");
+  }
+  require_object(envelope.payload, "payload");
+  const auto ws_url = require_string(envelope.payload, "ws_url", "payload");
+  const auto http_url = require_string(
+      envelope.payload, "http_base_url", "payload");
+  const auto auto_start = envelope.payload.find("auto_start_mic");
+  if (ws_url.empty() || http_url.empty() || auto_start == envelope.payload.end()
+      || !auto_start->is_boolean()) {
+    throw ProtocolError("system.server_info payload is invalid");
+  }
+  const auto product = envelope.payload.find("product_version");
+  if (product != envelope.payload.end() && !product->is_string()) {
+    throw ProtocolError("system.server_info.product_version must be string");
+  }
+  const auto manifest = envelope.payload.find("schema_manifest");
+  if (manifest == envelope.payload.end() || !manifest->is_object()
+      || manifest->value("protocol_version", "")
+          != std::string(kProtocolVersion)
+      || !manifest->contains("schemas")
+      || !manifest->at("schemas").is_object()) {
+    throw ProtocolError("system.server_info.schema_manifest is invalid");
+  }
+  return ServerInfo{
+      envelope,
+      ws_url,
+      http_url,
+      auto_start->get<bool>(),
+      product == envelope.payload.end() ? "unknown" : product->get<std::string>(),
+      *manifest};
+}
+
+DesktopSettingsSyncComplete parse_desktop_settings_sync_complete(
+    const ProtocolEnvelope& envelope) {
+  if (envelope.type != "system.desktop_settings_sync_complete") {
+    throw ProtocolError(
+        "expected system.desktop_settings_sync_complete envelope");
+  }
+  if (envelope.source != "adapter" || envelope.turn_id.has_value()
+      || !envelope.payload.empty()) {
+    throw ProtocolError(
+        "system.desktop_settings_sync_complete envelope is invalid");
+  }
+  return DesktopSettingsSyncComplete{envelope};
+}
+
 PreActionEvent parse_pre_action(const ProtocolEnvelope& envelope) {
   if (envelope.type != "output.pre_action") {
     throw ProtocolError("expected output.pre_action envelope");
@@ -815,6 +866,109 @@ DesktopObservationRequest parse_desktop_observation_request(
     throw ProtocolError("desktop observation request_id must be 1..128 characters");
   }
   return DesktopObservationRequest{envelope, request_id};
+}
+
+DesktopPresenceRequest parse_desktop_presence_request(
+    const ProtocolEnvelope& envelope) {
+  if (envelope.type != "system.desktop_presence_request") {
+    throw ProtocolError(
+        "expected system.desktop_presence_request envelope");
+  }
+  if (envelope.source != "adapter" || envelope.turn_id.has_value()) {
+    throw ProtocolError(
+        "system.desktop_presence_request envelope identity is invalid");
+  }
+  require_object(envelope.payload, "payload");
+  constexpr std::array<std::string_view, 4> keys = {
+      "schema_version", "request_id", "monitor_id", "settings"};
+  if (envelope.payload.size() != keys.size()) {
+    throw ProtocolError("desktop presence request payload shape is invalid");
+  }
+  for (const auto key : keys) {
+    if (!envelope.payload.contains(key)) {
+      throw ProtocolError(
+          "desktop presence request payload is missing " + std::string(key));
+    }
+  }
+  if (envelope.payload.at("schema_version")
+      != std::string(kDesktopPresenceSchema)) {
+    throw ProtocolError("desktop presence request schema is unsupported");
+  }
+  const auto request_id = trim_protocol_identifier(
+      require_string(envelope.payload, "request_id", "payload"));
+  const auto monitor_id = trim_protocol_identifier(
+      require_string(envelope.payload, "monitor_id", "payload"));
+  if (request_id.empty() || request_id.size() > 128
+      || monitor_id.empty() || monitor_id.size() > 128) {
+    throw ProtocolError(
+        "desktop presence request identifiers must be 1..128 characters");
+  }
+  const auto& settings = envelope.payload.at("settings");
+  require_object(settings, "payload.settings");
+  constexpr std::array<std::string_view, 3> setting_keys = {
+      "idle_after_seconds", "minimum_away_seconds", "confirmation_seconds"};
+  if (settings.size() != setting_keys.size()) {
+    throw ProtocolError("desktop presence settings shape is invalid");
+  }
+  for (const auto key : setting_keys) {
+    if (!settings.contains(key) || !settings.at(key).is_number_integer()) {
+      throw ProtocolError(
+          "desktop presence setting must be an integer: " + std::string(key));
+    }
+  }
+  const auto idle_after = settings.at("idle_after_seconds").get<int>();
+  const auto minimum_away = settings.at("minimum_away_seconds").get<int>();
+  const auto confirmation = settings.at("confirmation_seconds").get<int>();
+  if (idle_after < 30 || idle_after > 3600
+      || minimum_away < 10 || minimum_away > 3600
+      || confirmation < 3 || confirmation > 10) {
+    throw ProtocolError("desktop presence settings are out of range");
+  }
+  return DesktopPresenceRequest{
+      envelope,
+      request_id,
+      monitor_id,
+      idle_after,
+      minimum_away,
+      confirmation};
+}
+
+IdleMotionEvent parse_idle_motion(const ProtocolEnvelope& envelope) {
+  if (envelope.type != "output.idle_motion") {
+    throw ProtocolError("expected output.idle_motion envelope");
+  }
+  if (envelope.source != "adapter" || envelope.turn_id.has_value()) {
+    throw ProtocolError("output.idle_motion envelope identity is invalid");
+  }
+  require_object(envelope.payload, "payload");
+  if (envelope.payload.size() != 2
+      || !envelope.payload.contains("motion")
+      || !envelope.payload.contains("expires_at_epoch_ms")) {
+    throw ProtocolError("output.idle_motion payload shape is invalid");
+  }
+  const auto& motion = envelope.payload.at("motion");
+  const auto& expires = envelope.payload.at("expires_at_epoch_ms");
+  if (!motion.is_object() || !expires.is_number()
+      || !std::isfinite(expires.get<double>())) {
+    throw ProtocolError("output.idle_motion payload values are invalid");
+  }
+  const auto schema = motion.find("schema_version");
+  const auto steps = motion.find("motion_steps");
+  if (schema == motion.end()
+      || *schema != std::string(protocol_manifest::kMotionIntentSchema)
+      || steps == motion.end() || !steps->is_array() || steps->size() != 1) {
+    throw ProtocolError("output.idle_motion motion shape is invalid");
+  }
+  if (motion.contains("motion_resource_id")
+      && !motion.at("motion_resource_id").is_null()) {
+    throw ProtocolError("output.idle_motion motion resources are unsupported");
+  }
+  if (motion.contains("expression_resource_id")
+      && !motion.at("expression_resource_id").is_null()) {
+    throw ProtocolError("output.idle_motion expression resources are unsupported");
+  }
+  return IdleMotionEvent{
+      envelope, motion, expires.get<double>()};
 }
 
 DesktopSettingsQuery parse_desktop_settings_query(

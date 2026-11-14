@@ -560,6 +560,11 @@ int Run(
                 event.envelope.turn_id.value_or(""), event.request_id);
           }
         },
+        .on_idle_motion = [&model](ag99::runtime::IdleMotionEvent event) {
+          if (!model.StartIdleMotion(event)) {
+            std::cerr << "[motion] idle motion rejected by Native model\n";
+          }
+        },
         .on_output_segment = [&model](
             ag99::runtime::OutputSegment segment,
             std::optional<NativeSegmentClock> clock) {
@@ -569,6 +574,7 @@ int Run(
           model.ResetRuntimeSegments(generation);
         },
         .on_turn_started = [&model](const std::string& turn_id) {
+          model.CancelIdleMotion();
           model.CancelPreAction(turn_id);
           model.StartThinkingSway(turn_id);
         },

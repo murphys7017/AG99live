@@ -76,6 +76,9 @@ The current executable, `ag99-render-host`, verifies:
   projection together.
 - `system.desktop_observation_request` captures a bounded virtual-desktop JPEG
   and returns it to the Adapter; comparison and policy remain outside Native.
+- `system.desktop_presence_request` reads bounded input-idle presence state and
+  returns the same active/inactive/confirming/returned snapshot contract as the
+  TypeScript desktop runtime.
 
 Run the host with the repository's Mk6 model:
 

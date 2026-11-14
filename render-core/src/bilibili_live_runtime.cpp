@@ -8,6 +8,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
+#include <iterator>
 #include <mutex>
 #include <nlohmann/json.hpp>
 #include <optional>
@@ -24,6 +25,8 @@ namespace {
 using Json = nlohmann::json;
 
 constexpr char kDefaultHost[] = "broadcastlv.chat.bilibili.com";
+constexpr std::size_t kMaxBatchSize = 8;
+constexpr std::size_t kMaxBufferSize = 80;
 
 std::wstring Widen(std::string_view value) {
   if (value.empty()) return {};
@@ -94,6 +97,12 @@ std::uint32_t ReadBe32(const std::uint8_t* value) {
       | (static_cast<std::uint32_t>(value[1]) << 16)
       | (static_cast<std::uint32_t>(value[2]) << 8)
       | static_cast<std::uint32_t>(value[3]);
+}
+
+std::uint16_t ReadBe16(const std::uint8_t* value) {
+  return static_cast<std::uint16_t>(
+      (static_cast<std::uint16_t>(value[0]) << 8)
+      | static_cast<std::uint16_t>(value[1]));
 }
 
 void WriteBe32(std::vector<std::uint8_t>& output, std::size_t offset,
@@ -327,9 +336,17 @@ private:
       const auto length = ReadBe32(frame.data() + offset);
       const auto header = static_cast<std::size_t>(
           (frame[offset + 4] << 8) | frame[offset + 5]);
+      const auto protocol_version = ReadBe16(frame.data() + offset + 6);
       const auto operation = ReadBe32(frame.data() + offset + 10);
-      if (length < header || offset + length > frame.size()) return;
-      if (operation == 5 && frame[offset + 7] == 0) {
+      if (length < 16 || header < 16 || length < header
+          || offset + length > frame.size()) {
+        return;
+      }
+      // Native auth requests protocol version 0, so the server returns the
+      // uncompressed JSON form (header versions 0 or 1). Compressed v2/v3
+      // packets are intentionally ignored until a native decompressor is
+      // added; they must never be mistaken for JSON.
+      if (operation == 5 && protocol_version <= 1) {
         const std::string body(
             reinterpret_cast<const char*>(frame.data() + offset + header),
             length - header);
@@ -342,6 +359,9 @@ private:
             const auto name = info.at(2).at(1).get<std::string>();
             std::scoped_lock lock(mutex_);
             if (!text.empty()) {
+              if (pending_.size() >= kMaxBufferSize) {
+                pending_.erase(pending_.begin());
+              }
               pending_.push_back("- " + name + "（UID "
                   + std::to_string(uid) + "）：" + text.substr(0, 180));
             }
@@ -376,8 +396,13 @@ private:
         }
         continue;
       }
-      const auto batch = std::move(pending_);
-      pending_.clear();
+      const auto batch_size = std::min(kMaxBatchSize, pending_.size());
+      std::vector<std::string> batch;
+      batch.reserve(batch_size);
+      for (std::size_t index = 0; index < batch_size; ++index) {
+        batch.push_back(std::move(pending_[index]));
+      }
+      pending_.erase(pending_.begin(), pending_.begin() + batch_size);
       last_flush = now;
       lock.unlock();
       if (send_heartbeat) {
@@ -387,7 +412,18 @@ private:
       text << "[直播弹幕输入]\n直播间观众刚刚说：\n";
       for (const auto& item : batch) text << item << '\n';
       text << "\n请自然回应适合互动的内容，保持简短。";
-      if (send_text_) send_text_(text.str());
+      const auto sent = send_text_ && send_text_(text.str());
+      if (!sent) {
+        std::scoped_lock retry_lock(mutex_);
+        pending_.insert(
+            pending_.begin(),
+            std::make_move_iterator(batch.begin()),
+            std::make_move_iterator(batch.end()));
+        if (pending_.size() > kMaxBufferSize) {
+          pending_.erase(
+              pending_.begin() + kMaxBufferSize, pending_.end());
+        }
+      }
     }
   }
 

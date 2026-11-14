@@ -19,8 +19,12 @@ struct RuntimeSessionCallbacks {
   std::function<void(std::string)> on_ignored_type;
   std::function<void(std::string)> on_protocol_error;
   std::function<void(ModelSync)> on_model_sync;
+  std::function<void(ServerInfo)> on_server_info;
+  std::function<void(DesktopSettingsSyncComplete)>
+      on_desktop_settings_sync_complete;
   std::function<void(PreActionEvent)> on_pre_action;
   std::function<void(DesktopObservationRequest)> on_desktop_observation_request;
+  std::function<void(IdleMotionEvent)> on_idle_motion;
   std::function<void(std::string)> on_turn_started;
   std::function<void(std::string)> on_synth_finished;
   std::function<void(std::string, bool, std::string)> on_turn_finished;
@@ -29,6 +33,8 @@ struct RuntimeSessionCallbacks {
   std::function<void(SegmentMotionUpdate)> on_segment_motion_ready;
   std::function<void(IncrementalOutputEvent)> on_incremental_output_event;
   std::function<void(OutputAudioFrame)> on_incremental_audio_frame;
+  std::function<void()> on_start_mic;
+  std::function<void(DesktopPresenceRequest)> on_desktop_presence_request;
 };
 
 class RuntimeProtocolSession final {
@@ -48,6 +54,7 @@ class RuntimeProtocolSession final {
   RuntimeSessionCallbacks callbacks_;
   SegmentAssembler assembler_;
   IncrementalOutputAssembler incremental_assembler_;
+  bool handshake_complete_ = false;
 };
 
 }  // namespace ag99::runtime

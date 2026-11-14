@@ -66,6 +66,26 @@ ag99::runtime::Json make_model_sync() {
   };
 }
 
+ag99::runtime::Json make_server_info() {
+  return ag99::runtime::build_envelope(
+      "system.server_info",
+      {
+          {"ws_url", "ws://127.0.0.1:12396"},
+          {"http_base_url", "http://127.0.0.1:12397"},
+          {"auto_start_mic", false},
+          {"product_version", "1.0.0"},
+          {"schema_manifest",
+           {{"protocol_version", "v2"},
+            {"schemas", ag99::runtime::Json::object()}}},
+      },
+      std::nullopt, "adapter", "server-1",
+      "2026-10-01T00:00:00.000Z");
+}
+
+void complete_handshake(ag99::runtime::RuntimeProtocolSession& session) {
+  session.ingest_text(make_server_info().dump());
+}
+
 void test_envelope_and_segment() {
   const auto envelope = ag99::runtime::parse_envelope(make_segment("m-1", 0));
   const auto segment = ag99::runtime::parse_output_segment(envelope);
@@ -200,6 +220,103 @@ void test_desktop_observation_request_boundary() {
     rejected = true;
   }
   assert(rejected);
+}
+
+void test_desktop_presence_request_boundary() {
+  const auto raw = ag99::runtime::build_envelope(
+      "system.desktop_presence_request",
+      {
+          {"schema_version", "ag99live.desktop_presence.v1"},
+          {"request_id", "presence-1"},
+          {"monitor_id", "monitor-1"},
+          {"settings",
+           {{"idle_after_seconds", 300},
+            {"minimum_away_seconds", 60},
+            {"confirmation_seconds", 3}}},
+      },
+      std::nullopt, "adapter", "presence-1",
+      "2026-10-01T00:00:00.000Z");
+  const auto request = ag99::runtime::parse_desktop_presence_request(
+      ag99::runtime::parse_envelope(raw));
+  assert(request.monitor_id == "monitor-1");
+  assert(request.confirmation_seconds == 3);
+
+  auto invalid = raw;
+  invalid["payload"]["settings"]["confirmation_seconds"] = 2;
+  bool rejected = false;
+  try {
+    (void)ag99::runtime::parse_desktop_presence_request(
+        ag99::runtime::parse_envelope(invalid));
+  } catch (const ag99::runtime::ProtocolError&) {
+    rejected = true;
+  }
+  assert(rejected);
+}
+
+void test_idle_motion_boundary() {
+  const auto raw = ag99::runtime::build_envelope(
+      "output.idle_motion",
+      {
+          {"motion",
+           {
+               {"schema_version", "engine.motion_intent.v4"},
+               {"mode", "expressive"},
+               {"intent_tags", {"idle"}},
+               {"motion_steps", {{{"axis_values", {{"head_yaw", 58.0}}},
+                                    {"duration_weight", 1}}}},
+           }},
+          {"expires_at_epoch_ms", 1900000000000.0},
+      },
+      std::nullopt, "adapter", "idle-1",
+      "2026-10-01T00:00:00.000Z");
+  const auto event = ag99::runtime::parse_idle_motion(
+      ag99::runtime::parse_envelope(raw));
+  assert(event.envelope.message_id == "idle-1");
+  assert(event.motion.at("motion_steps").size() == 1);
+}
+
+void test_start_mic_boundary() {
+  int starts = 0;
+  std::string error;
+  ag99::runtime::RuntimeProtocolSession session({
+      .on_protocol_error = [&](std::string value) { error = std::move(value); },
+      .on_start_mic = [&] { ++starts; },
+  });
+  complete_handshake(session);
+  session.ingest_text(ag99::runtime::build_envelope(
+      "control.start_mic", ag99::runtime::Json::object(), std::nullopt,
+      "adapter", "mic-1",
+      "2026-10-01T00:00:00.000Z").dump());
+  assert(starts == 1);
+  session.ingest_text(ag99::runtime::build_envelope(
+      "control.start_mic", {{"unexpected", true}}, std::nullopt, "adapter",
+      "mic-2", "2026-10-01T00:00:01.000Z").dump());
+  assert(!error.empty());
+}
+
+void test_handshake_gate() {
+  int starts = 0;
+  int errors = 0;
+  ag99::runtime::RuntimeProtocolSession session({
+      .on_protocol_error = [&](std::string) { ++errors; },
+      .on_start_mic = [&] { ++starts; },
+  });
+  const auto start_mic = [] {
+    return ag99::runtime::build_envelope(
+        "control.start_mic", ag99::runtime::Json::object(), std::nullopt,
+        "adapter", "mic-gate",
+        "2026-10-01T00:00:00.000Z").dump();
+  };
+  session.ingest_text(start_mic());
+  assert(starts == 0);
+  assert(errors == 1);
+  complete_handshake(session);
+  session.ingest_text(start_mic());
+  assert(starts == 1);
+  session.reset();
+  session.ingest_text(start_mic());
+  assert(starts == 1);
+  assert(errors == 2);
 }
 
 void test_pending_and_deferred_motion_slots() {
@@ -422,6 +539,7 @@ void test_incremental_runtime_dispatch() {
         audio_frames.push_back(std::move(frame));
       },
   });
+  complete_handshake(session);
   session.ingest_text(ag99::runtime::Json{
       {"type", "control.turn_started"},
       {"version", "v2"},
@@ -474,6 +592,7 @@ void test_incremental_synthesis_boundary() {
         synthesized.push_back(std::move(turn_id));
       },
   });
+  complete_handshake(session);
   session.ingest_text(ag99::runtime::Json{
       {"type", "control.turn_started"},
       {"version", "v2"},
@@ -597,27 +716,35 @@ void test_runtime_session_dispatch() {
   std::vector<std::string> finished_reasons;
   std::vector<std::string> interrupted_turns;
   std::vector<std::string> errors;
-  ag99::runtime::RuntimeProtocolSession session({
-      [&](ag99::runtime::OutputSegment segment) {
-        ready_messages.push_back(segment.envelope.message_id);
-      },
-      {},
-      {},
-      [&](std::string message) { errors.push_back(std::move(message)); },
-      [&](ag99::runtime::ModelSync sync) {
-        synced_models.push_back(
-            sync.payload.at("model_info").at("selected_model").get<std::string>());
-      },
-      [&](std::string turn_id) { started_turns.push_back(std::move(turn_id)); },
-      [&](std::string turn_id) { synthesized_turns.push_back(std::move(turn_id)); },
-      [&](std::string turn_id, bool success, std::string reason) {
-        finished_turns.push_back(std::move(turn_id));
-        finished_successes.push_back(success);
-        finished_reasons.push_back(std::move(reason));
-      },
-      [&](std::string turn_id) { interrupted_turns.push_back(std::move(turn_id)); },
-  });
+  ag99::runtime::RuntimeSessionCallbacks callbacks;
+  callbacks.on_segment_ready = [&](ag99::runtime::OutputSegment segment) {
+    ready_messages.push_back(segment.envelope.message_id);
+  };
+  callbacks.on_protocol_error = [&](std::string message) {
+    errors.push_back(std::move(message));
+  };
+  callbacks.on_model_sync = [&](ag99::runtime::ModelSync sync) {
+    synced_models.push_back(
+        sync.payload.at("model_info").at("selected_model").get<std::string>());
+  };
+  callbacks.on_turn_started = [&](std::string turn_id) {
+    started_turns.push_back(std::move(turn_id));
+  };
+  callbacks.on_synth_finished = [&](std::string turn_id) {
+    synthesized_turns.push_back(std::move(turn_id));
+  };
+  callbacks.on_turn_finished = [&](std::string turn_id, bool success,
+                                   std::string reason) {
+    finished_turns.push_back(std::move(turn_id));
+    finished_successes.push_back(success);
+    finished_reasons.push_back(std::move(reason));
+  };
+  callbacks.on_turn_interrupted = [&](std::string turn_id) {
+    interrupted_turns.push_back(std::move(turn_id));
+  };
+  ag99::runtime::RuntimeProtocolSession session(std::move(callbacks));
 
+  complete_handshake(session);
   session.ingest_text(make_model_sync().dump());
   assert((synced_models == std::vector<std::string>{"Demo"}));
   session.ingest_text(ag99::runtime::Json{
@@ -847,6 +974,7 @@ void test_desktop_settings_boundary() {
         queries.push_back(std::move(query));
       },
   });
+  complete_handshake(session);
   auto request = ag99::runtime::build_envelope(
       "system.desktop_settings_query",
       {{"request_id", " request-1 "},
@@ -906,6 +1034,10 @@ int main() {
   test_parameter_plan_motion_slot();
   test_pre_action_boundary();
   test_desktop_observation_request_boundary();
+  test_desktop_presence_request_boundary();
+  test_idle_motion_boundary();
+  test_start_mic_boundary();
+  test_handshake_gate();
   test_pending_and_deferred_motion_slots();
   test_binary_audio_round_trip();
   test_incremental_output_protocol();

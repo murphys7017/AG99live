@@ -26,11 +26,12 @@ from .runtime.plugin_runtime import (
     ADAPTER_DISPLAY_NAME,
     ADAPTER_PLATFORM_NAME,
     DEFAULT_PRE_ACTION_PROVIDER_ID,
+    apply_plugin_config_patch,
     get_live_control_platform,
     get_plugin_context,
     get_persisted_desktop_settings,
     reconcile_control_platforms,
-    set_plugin_config,
+    restore_plugin_config_if_current,
 )
 from .services.history_service import HistoryNotFoundError
 
@@ -433,63 +434,9 @@ CONFIG_SCHEMA: tuple[ConfigSection, ...] = (
         ),
     ),
     ConfigSection(
-        key="desktop_return",
-        label="返回电脑互动",
-        description="检测锁屏/休眠及长时间空闲后的恢复操作，并提交一次主动互动机会。",
-        fields=(
-            ConfigField(
-                key="enabled",
-                kind="bool",
-                label="启用返回互动",
-                description="只读取空闲时长和锁屏/休眠状态，不采集按键内容或截图。",
-                default=False,
-            ),
-            ConfigField(
-                key="idle_after_seconds",
-                kind="int",
-                label="空闲阈值（秒）",
-                description="桌面输入空闲达到此时长后，恢复操作可形成互动机会。",
-                default=300,
-                minimum=30,
-                maximum=3600,
-                step=10,
-            ),
-            ConfigField(
-                key="minimum_away_seconds",
-                kind="int",
-                label="离开最短时长（秒）",
-                description="锁屏或休眠需持续达到此时长才形成返回机会。",
-                default=60,
-                minimum=10,
-                maximum=3600,
-                step=10,
-            ),
-            ConfigField(
-                key="confirmation_seconds",
-                kind="int",
-                label="恢复操作确认时间（秒）",
-                description="恢复后需要在此窗口内再次出现输入。",
-                default=3,
-                minimum=3,
-                maximum=10,
-                step=1,
-            ),
-            ConfigField(
-                key="cooldown_seconds",
-                kind="int",
-                label="互动机会冷却（秒）",
-                description="两次返回互动机会之间的最短间隔。",
-                default=900,
-                minimum=0,
-                maximum=86400,
-                step=60,
-            ),
-        ),
-    ),
-    ConfigSection(
         key="desktop_observation",
         label="桌面变化观察",
-        description="按间隔截取桌面画面并用本地数学方法判断大范围变化，不识别文字或语义。",
+        description="按间隔为桌面感知插件提供最新截图，不在 Adapter 内判断画面语义。",
         fields=(
             ConfigField(
                 key="enabled",
@@ -508,35 +455,59 @@ CONFIG_SCHEMA: tuple[ConfigSection, ...] = (
                 maximum=3600,
                 step=5,
             ),
+        ),
+    ),
+    ConfigSection(
+        key="desktop_presence_capture",
+        label="桌面 Presence 采集",
+        description="按间隔读取桌面端 Presence 并发布到 Core 状态，不在 Adapter 内提交主动事实。",
+        fields=(
             ConfigField(
-                key="conversation_quiet_seconds",
-                kind="int",
-                label="对话后等待（秒）",
-                description="对话和播放结束后等待多久再恢复观察；0 仍会避开活动轮次。",
-                default=60,
-                minimum=0,
-                maximum=3600,
-                step=5,
+                key="enabled",
+                kind="bool",
+                label="启用 Presence 采集",
+                description="需要配套桌面端支持 Presence 协议；返回事实由桌面感知插件决定。",
+                default=False,
             ),
             ConfigField(
-                key="event_ttl_seconds",
-                kind="int",
-                label="变化事件有效期（秒）",
-                description="从截图请求开始计算；超时的变化事件不会提交。",
-                default=60,
-                minimum=5,
-                maximum=300,
-                step=5,
-            ),
-            ConfigField(
-                key="changed_area_threshold_percent",
+                key="poll_interval_seconds",
                 kind="float",
-                label="变化面积阈值（%）",
-                description="变化区域达到此比例后提交桌面变化事实。",
-                default=15.0,
+                label="Presence 采样间隔（秒）",
+                description="两次 Presence 读取之间的等待时间。",
+                default=1.0,
                 minimum=1.0,
-                maximum=100.0,
-                step=1.0,
+                maximum=10.0,
+                step=0.5,
+            ),
+            ConfigField(
+                key="idle_after_seconds",
+                kind="int",
+                label="输入空闲阈值（秒）",
+                description="传给桌面端状态机，用于形成普通输入空闲候选。",
+                default=300,
+                minimum=30,
+                maximum=3600,
+                step=10,
+            ),
+            ConfigField(
+                key="minimum_away_seconds",
+                kind="int",
+                label="锁屏/休眠最短时长（秒）",
+                description="传给桌面端状态机，用于确认锁屏或休眠返回。",
+                default=60,
+                minimum=10,
+                maximum=3600,
+                step=10,
+            ),
+            ConfigField(
+                key="confirmation_seconds",
+                kind="int",
+                label="返回确认窗口（秒）",
+                description="传给桌面端状态机，用于确认恢复输入。",
+                default=3,
+                minimum=3,
+                maximum=10,
+                step=1,
             ),
         ),
     ),
@@ -1450,32 +1421,34 @@ class WebControlPageApi:
         if not callable(save_config):
             return _error("plugin_config_persistence_unavailable", 503)
 
-        async with self._settings_lock:
-            previous = deepcopy(dict(self._plugin.config))
-            merged = deepcopy(previous)
-            for section, fields in patch.items():
-                current = merged.get(section)
-                if not isinstance(current, dict):
-                    current = {}
-                merged[section] = {**current, **fields}
+        previous: dict[str, Any] = {}
+        current: dict[str, Any] = {}
+        try:
+            async with self._settings_lock:
+                previous, current = apply_plugin_config_patch(patch)
+            for platform in _live_control_platforms():
+                await platform._refresh_runtime_settings_async(reload_providers=True)
+                await platform._send_current_model_and_conf(force=True)
+        except Exception as exc:
+            logger.exception("AG99live web settings update failed")
             try:
-                self._replace_plugin_config(merged)
-                save_config()
-                set_plugin_config(self._plugin.config)
-                for platform in _live_control_platforms():
-                    await platform._refresh_runtime_settings_async(reload_providers=True)
-                    await platform._send_current_model_and_conf(force=True)
-            except Exception as exc:
-                logger.exception("AG99live web settings update failed")
-                try:
-                    self._replace_plugin_config(previous)
-                    save_config()
-                    set_plugin_config(self._plugin.config)
+                restored = restore_plugin_config_if_current(
+                    expected=current,
+                    replacement=previous,
+                )
+                if restored:
                     for platform in _live_control_platforms():
-                        await platform._refresh_runtime_settings_async(reload_providers=True)
-                except Exception:
-                    logger.exception("AG99live web settings rollback failed")
-                return _error("settings_save_failed", 500, detail=str(exc))
+                        await platform._refresh_runtime_settings_async(
+                            reload_providers=True,
+                        )
+                else:
+                    logger.warning(
+                        "AG99live web settings rollback skipped because a newer "
+                        "desktop or web configuration update is already present."
+                    )
+            except Exception:
+                logger.exception("AG99live web settings rollback failed")
+            return _error("settings_save_failed", 500, detail=str(exc))
         return jsonify({"ok": True, "settings": _project_settings(self._plugin.config)})
 
     async def get_profile(self):
@@ -1586,11 +1559,6 @@ class WebControlPageApi:
             return _error("motion_tuning_sample_delete_failed", 400, detail=str(exc))
         await platform._send_motion_tuning_samples_state()
         return _samples_response(platform)
-
-    def _replace_plugin_config(self, value: dict[str, Any]) -> None:
-        self._plugin.config.clear()
-        self._plugin.config.update(value)
-
 
 def _require_dashboard_user():
     if not str(getattr(g, "username", "") or "").strip():

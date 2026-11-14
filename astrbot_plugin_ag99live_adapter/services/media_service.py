@@ -239,8 +239,13 @@ class MediaService:
             return None, diagnostic or _build_image_diagnostic("unsupported_image_payload")
         return None, _build_image_diagnostic("unsupported_image_payload")
 
-    def cache_desktop_snapshot(self, *, client_uid: str, image_component):
-        """Persist one captured desktop image and return the private cached component."""
+    def materialize_desktop_input(self, *, client_uid: str, image_component):
+        """Materialize one explicitly supplied desktop image for this message.
+
+        This is a message-input media artifact.  It never becomes the source
+        of the current desktop state; consumers that need the current frame
+        must resolve it through Core's DesktopStateStore/SnapshotHub.
+        """
         image_ref = str(getattr(image_component, "file", "") or "").strip()
         if image_ref.startswith("file:"):
             image_ref = _file_uri_to_local_path(image_ref)
@@ -269,18 +274,6 @@ class MediaService:
         self._cleanup_desktop_snapshot_cache(snapshot_dir)
         logger.debug("Persisted desktop snapshot to private cache: %s", snapshot_path)
         return Image.fromFileSystem(path=str(snapshot_path.resolve()))
-
-    def get_latest_desktop_snapshot_component(self, *, client_uid: str):
-        """Return the newest still-valid desktop snapshot for this desktop client."""
-        snapshot_dir = self._desktop_snapshot_dir(client_uid)
-        if not snapshot_dir.is_dir():
-            return None
-
-        self._cleanup_desktop_snapshot_cache(snapshot_dir)
-        candidates = self._desktop_snapshot_files(snapshot_dir)
-        if not candidates:
-            return None
-        return Image.fromFileSystem(path=str(candidates[0][0]))
 
     def save_audio_buffer_to_temp_wav(
         self,

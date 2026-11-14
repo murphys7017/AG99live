@@ -2,11 +2,10 @@
 
 > **状态：设计/计划**
 >
-> **复核日期：2026-11-13**
+> **复核日期：2026-11-14**
 >
-> **当前进度：Phase 0/1 的中立契约、黄金事件序列、AstrBot callback bridge、TTS/Motion 生命周期事件适配和首条文本/Avatar Output 垂直切片已建立；Interaction Orchestrator 已承接 Provider 事件订阅、STT/TTS/Motion 主动请求入口、前端协议解析与 Turn 行为分发、活动事件 owner、连接清理、AstrBot event stop 调度、SegmentAssembler 与增量输出入口、Turn/Segment 事实快照、Conversation 事实回流、取消注册、terminal registry、终态提交/回滚、`control.turn_started`/`control.turn_finished` 和 timing 状态；`output.segment.v6` 与 `control.synth_finished` 已统一通过 AvatarOutputPort 发布。AstrBot TTS/Motion/STT capability binding、生命周期事实转换、Provider Registry 和 Provider 组合根已收敛到 `adapters/astrbot`。Phase 5 已增加 DSH ConversationProvider、共享文本段装配器、DSH runtime composition 和本地 Harness JSON-RPC 进程桥；设置中可选择 AstrBot 或 DSH。工具/代码执行通过独立 Execution 事件流和 `output.execution` 发送，不再伪装成普通对话文本。AstrBot 4.14.6 的本地 Adapter import 和平台/hook 聚焦测试已通过；真实 DSH profile、TTS/Live2D 联合运行和目标环境验收仍待接入。**
+> **当前进度：Phase 0/1 的中立契约、黄金事件序列、AstrBot callback bridge、TTS/Motion 生命周期事件适配和首条文本/Avatar Output 垂直切片已建立；Interaction Orchestrator 已承接 Provider 事件订阅、STT/TTS/Motion 主动请求入口、前端协议解析与 Turn 行为分发、活动事件 owner、连接清理、AstrBot event stop 调度、SegmentAssembler 与增量输出入口、Turn/Segment 事实快照、Conversation 事实回流、取消注册、terminal registry、终态提交/回滚、`control.turn_started`/`control.turn_finished` 和 timing 状态；`output.segment.v6` 与 `control.synth_finished` 已统一通过 AvatarOutputPort 发布。AstrBot TTS/Motion/STT capability binding、生命周期事实转换、Provider Registry 和 Provider 组合根已收敛到 `adapters/astrbot`。**
 >
-> 本文基于当前 AG99live 源码、协议清单和前端播放链路整理。它描述目标边界与实施顺序；当前已存在中立 Conversation/Execution 契约、AstrBot 实现和 DSH Harness 适配骨架，但真实 DSH profile 与目标环境联合验收仍属于接入工作。
 
 ## 1. 目标
 
@@ -22,7 +21,6 @@ Platform Adapter
 Capability Providers
 ```
 
-目标是让 AG99live 保留统一的 Turn、Segment、输出协议和 Avatar 表现能力，同时可以接入 AstrBot、DSH、独立 Agent 或本地模型，而不把对话、STT、TTS 和动作逻辑复制到每个 Adapter 中。
 
 最终职责分层如下：
 
@@ -61,7 +59,7 @@ WebSocketTransport
 | 位置 | 当前问题 | 目标归属 |
 | --- | --- | --- |
 | `platform_adapter.py` | 组装 RuntimeState、媒体、WebSocket、历史、语音和 TurnCoordinator，既是平台类又是组合根 | 保留为平台组合根，逐步只负责注入 Adapter 与运行时能力 |
-| `runtime/turn_coordinator.py` | 同时处理协议路由、Turn 生命周期、AstrBot 事件提交、VAD、媒体和输出编排 | 拆出与宿主无关的 Orchestrator；AstrBot 提交和事件转换留在 Adapter |
+| `runtime/turn_coordinator.py` | 仍处理协议路由、AstrBot 事件提交、VAD、媒体和输出回执；业务 Turn 终态、活动事件和计时已由 `InteractionOrchestrator` 持有 | 继续收窄为连接级协议/输入/回执 Adapter；AstrBot 提交和事件转换留在 Adapter |
 | `main.py` | 约束 AstrBot hooks、TTS 状态、Persona 生命周期、动作生成和插件注册 | 迁移到 AstrBot Adapter/Provider bridge |
 | `platform_event.py` | 继承 `AstrMessageEvent`，处理 Persona 分段、TTS 身份和输出投递 | 保留为 AstrBot Conversation Adapter 的实现细节 |
 | `runtime/state.py` | 直接解析 AstrBot `Provider`、`STTProvider` 并管理平台配置和模型资料 | 拆成运行配置、Provider Registry、模型资料和诊断几个边界 |
@@ -70,19 +68,6 @@ WebSocketTransport
 | `protocol/` | 已提供 envelope、二进制帧、版本和输出段 DTO | 继续作为跨 Adapter 和前端的稳定边界 |
 
 当前代码中没有发现活动的 `<@anim>` 生成或解析路径。生产动作已经走结构化 Motion 和 `output.segment.v6`；残留样例属于文本清洗/透传回归测试，历史审计文档中的旧描述不作为当前实现规范。
-
-### DSH 当前实现范围
-
-当前生产组合中的 DSH 是 **Conversation-only 实验路径**：
-
-- `platform_adapter.py` 根据配置选择 `DshHarnessConversationProvider` 或 AstrBot Conversation Provider；
-- 两者都接入同一个 `InteractionOrchestrator`、`OutputSegmentCoordinator`、`AvatarOutputPort` 和前端播放链；
-- DSH 当前只替换 Conversation Provider，STT、TTS 和 Motion 仍来自 AstrBot capability bridge；
-- DSH 事件通过 `TextConversationEventAssembler` 汇入现有输出段队列，不创建第二个 WebSocket、Turn、PlaybackTimeline 或播放时钟；
-- `DshConversationRuntime` 已提供中立组合辅助，但当前平台生产路径仍在 `platform_adapter.py` 中手工完成相同装配。
-- `conversation.platform` 只在适配器创建时选择 Provider；运行中的实例不会热切换，修改后需要重启适配器（通常随 AstrBot 一起重启）才能生效。
-
-因此，当前 DSH 模式不能视为独立的 AG99live 对话运行时。后续若要支持独立 DSH，应先把 Provider 选择和组合移出平台类，再分别定义 DSH 的 STT、TTS、Motion 能力来源；在此之前保持它作为 Conversation-only 实验路径。
 
 ## 3. 不变的架构约束
 
@@ -124,7 +109,6 @@ turn_completed / turn_failed / interrupted
 
 `segment_boundary` 只表示上游认为这里可能形成新的逻辑消息段；它不能直接生成 `OutputSegment` 或 `output.segment.v6`。最终的段身份、段聚合和发布只能由 Interaction Orchestrator 完成。
 
-AstrBot 实现通过现有事件总线、Persona hooks 和回复回调提供这些事件；DSH 实现通过 DSH 会话和回复流提供同一组语义事件。Conversation Provider 不负责音频或动作结果，TTS 和 Motion 结果通过独立 Provider 回到 Orchestrator。
 
 Platform Adapter 与 Conversation Provider 是两个不同的接口：
 
@@ -136,7 +120,6 @@ Conversation Provider
   send_message、回复流、会话中断、对话事件
 ```
 
-同一个 DSH 实现可以同时实现两个接口，但 Orchestrator 只能依赖 `ConversationProvider`，不能依赖 `DshPlatformAdapter` 或其他平台具体类。
 
 ### 4.2 STT Provider
 
@@ -187,7 +170,6 @@ Provider 可以在内存中生成音频，也可以先写入缓存，但返回 O
 
 `artifact` 与 `phoneme_cues` 至多各有一个结果形态；如果 Provider 同时拥有内存数据和 URL，必须在适配层选定一个 artifact，不能把两种存储语义继续暴露给 Orchestrator。`duration_ms` 可以由 Provider 提供，也可以由 Media 层补齐，但来源必须可诊断。
 
-第一阶段不要求 AG99live 自己重写 TTS。应先把 AstrBot TTS 生命周期适配成该契约，明确请求、成功、失败、取消和音频身份，再决定 DSH 模式使用本地、远程还是宿主 TTS。第一阶段只实现一次性 `synthesize`；流式 TTS 留到真实首段延迟证明需要时再增加。
 
 ### 4.4 Motion Provider
 
@@ -240,7 +222,6 @@ class AvatarOutputPort(Protocol):
     async def publish_error(self, error: ProtocolError) -> None: ...
 ```
 
-当前 `protocol.builder` 和 `WebSocketTransport` 组合成这个端口的实现。未来 DSH 或 Native 入口不能绕过该端口直接拼接前端消息。
 
 ## 5. 目标模块边界
 
@@ -257,7 +238,6 @@ providers/
   conversation、stt、tts、motion 的 Port 和实现
 
 adapters/
-  astrbot、dsh、standalone 的平台转换
 
 transport/
   WebSocket、静态资源和未来其他连接方式
@@ -307,7 +287,7 @@ frontend/
 
 工作内容：
 
-- 从 `TurnCoordinator` 中抽出与平台无关的 Turn/Segment 状态机。
+- 已从 `TurnCoordinator` 中抽出并由 `InteractionOrchestrator` 持有与平台无关的 Turn/Segment 事实和终态注册表；后续继续减少协议编排器对这些事实的直接读写。
 - 保留 `turn_id`、`message_id`、`sequence`、Persona 分段索引和 TTS 身份绑定规则。
 - 将 `build_platform_event`、`commit_event`、AstrBot-specific hook 调用移到 AstrBot Adapter。
 - 将 `OutputSegmentCoordinator` 改为消费 Provider 事件和中立 DTO；它或其后继 `SegmentAssembler` 是唯一创建最终 Segment 和 `output.segment.v6` 的组件。
@@ -345,47 +325,13 @@ Phase 2 稳定后，先做一个只处理文本的 `AstrBotConversationProvider`
 
 完成标准：没有 AstrBot 的纯协议/Turn/Segment 测试可以运行；AstrBot Adapter 只提供平台转换和能力绑定。
 
-### Phase 5：新增最小 DSH Adapter
-
-先实现文本链路：
-
-```text
-AG99live 文本输入
-  → DSH ConversationProvider
-  → DSH 回复流
-  → Interaction Orchestrator
-  → output.segment.v6
-  → 前端 PlaybackTimeline
-```
-
-第一版 DSH Adapter 只负责：
-
-- 建立或选择 DSH 会话；
-- 发送文本输入；
-- 接收流式文本；
-- 映射 Turn 和消息身份；
-- 处理 DSH 中断、失败和会话关闭。
-
-随后再按独立阶段接入：
-
-- AG99live 本地 STT；
-- TTS Provider；
-- Motion Provider；
-- 会话切换和 DSH 状态同步；
-- 断连恢复和取消。
-
-DSH Adapter 不复制 `TurnCoordinator`、`OutputSegmentCoordinator`、PlaybackTimeline 或 ModelEngine。
-
-当前代码已提供 `adapters/dsh/DshConversationProvider`、`DshConversationRuntime` 和 `DshHarnessConversationProvider`。后者通过 DSH profile 的 stdio JSON-RPC 运行时建立或复用会话，把 `assistant/message`、`turn/end` 映射到中立 Conversation 事件，把 `tool/call`、`tool/result` 和 PTC 执行事件映射到独立 Execution 事件；文本事件由 `TextConversationEventAssembler` 经现有输出队列生成 `output.segment.v6` 和 `control.synth_finished`，执行事件由 AvatarOutputPort 发布为 `output.execution`。它不创建第二套 Turn 或 WebSocket 路径。具体 DSH profile、凭据和工作区仍由设置提供。
-
-### Phase 6：按真实约束决定进程化
+### Phase 5：按真实约束决定进程化
 
 只有逻辑接口稳定并有真实延迟、资源和部署数据后，才评估：
 
 - sherpa-onnx 是否继续作为 Python 服务；
 - TTS 是否独立进程；
 - Motion Provider 是否切换到本地小模型服务；
-- DSH Adapter 是否作为 DSH 原生插件；
 - Standalone/LocalModel Provider 是否需要独立部署。
 
 进程化不是本计划的前置条件，也不能改变唯一的 Turn/Segment 和播放终态规则。
@@ -431,7 +377,6 @@ DSH Adapter 不复制 `TurnCoordinator`、`OutputSegmentCoordinator`、PlaybackT
 - 文本、音频、字幕、口型和动作的同步；
 - 打断、重连和迟到 Provider 结果；
 - 多轮会话和会话切换；
-- DSH 流式回复的完成与取消；
 - Web 控制台和 Motion Lab 的诊断是否仍能定位同一身份。
 
 如果没有真实运行条件，只能报告源码和边界 smoke check 结果，不能以更多 mock 测试替代。
@@ -442,16 +387,13 @@ DSH Adapter 不复制 `TurnCoordinator`、`OutputSegmentCoordinator`、PlaybackT
 | --- | --- | --- |
 | Turn 身份在 Provider 之间重新生成 | 段顺序、打断和播放完成错乱 | Orchestrator 统一生成并绑定身份，Provider 只携带关联 ID |
 | Conversation Provider 直接生成 Segment | 段重复发布、TTS/Motion 无法汇合 | Provider 只报告文本和 `segment_boundary`，Segment 只能由 Orchestrator 收口 |
-| Platform Adapter 与 Conversation Provider 混成一个具体依赖 | DSH 或其他平台变化会侵入 Orchestrator | 两个接口分开；同一实现可以同时提供，但 Orchestrator 只依赖 Conversation Port |
 | STT 没有流标识或消费背压 | 迟到音频、并行流和重连造成串流或内存增长 | 所有音频操作带 `stream_id`，内部使用有界队列并定义过载策略 |
-| TTS 仍然隐藏在 AstrBot hook 中 | DSH 无法复用音频链路 | 先定义 TTS 事件和结果，再把 AstrBot hook 作为实现 |
 | 音频资源没有唯一 owner | 缓存泄漏、重复删除或播放期间文件失效 | Provider/Media 创建 `AudioArtifact`，由明确的 artifact owner 管理 URI 生命周期 |
 | Motion Provider 直接写前端 | 破坏 ModelEngine 和播放时钟边界 | Motion 只返回语义 payload，统一经输出段发布 |
 | 被动动作混入 Turn 生命周期 | idle 动作影响对话终态或无法被 PTT 打断 | 使用独立 PassiveBehaviorProvider 或显式 `origin=passive`，不创建正式 Turn |
 | 迁移时保留两套输出路径 | 结果重复、终态不确定 | 每迁移一个能力就统一调用者，删除旧内部路径 |
 | 过早拆成多个进程 | 延迟、取消和诊断复杂化 | 先逻辑分离，后基于真实数据决定进程边界 |
 | 文档把计划写成现状 | 后续实现误判 | 本文标记为“设计/计划”，当前事实仍以源码和实现文档为准 |
-| DSH 会话语义与 AstrBot 不同 | 误把平台状态映射为通用状态 | 只映射 Conversation Provider 契约，平台特有状态留在 Adapter |
 
 ## 10. 暂不做的事
 
@@ -459,23 +401,19 @@ DSH Adapter 不复制 `TurnCoordinator`、`OutputSegmentCoordinator`、PlaybackT
 - 不立即升级 `output.segment.v6`；
 - 不建立新的 AG99live PluginManager、ConversationManager 或认证系统；
 - 不把所有 Provider 拆成独立服务；
-- 不让 DSH Adapter 复制 Turn、TTS、Motion 或播放逻辑；
 - 不把模型动作语义编译搬到后端或 Platform Adapter；
 - 不恢复 `<@anim>` 或任何文本动作标记；
-- 不在本计划中实现 DSH API 的具体认证、端点或部署细节。
 
 ## 11. 完成定义
 
 当以下条件全部满足时，才认为这次重构目标达成：
 
-1. AstrBot、DSH 或其他 Conversation Provider 可以驱动同一套 Orchestrator 和 `output.segment` 发布链路。
-2. Orchestrator 不依赖 AstrBot 的事件类、Provider 基类或 WebSocket 实现。
-3. STT、TTS、Motion 都有明确输入、输出、取消和失败契约。
-4. Platform Adapter 只负责平台连接、会话转换和 Provider 绑定。
-5. 前端仍然是唯一播放时钟和 Live2D 执行者。
-6. `<@anim>` 不再出现在活动协议、Prompt、解析器或 fallback 中。
-7. 当前 AstrBot 模式和至少一个 DSH 文本模式通过同一组 Turn/Segment/打断验收。
-8. 真实运行日志可以用同一组身份解释输入、Provider 结果、输出段和播放终态。
+1. Orchestrator 不依赖 AstrBot 的事件类、Provider 基类或 WebSocket 实现。
+2. STT、TTS、Motion 都有明确输入、输出、取消和失败契约。
+3. Platform Adapter 只负责平台连接、会话转换和 Provider 绑定。
+4. 前端仍然是唯一播放时钟和 Live2D 执行者。
+5. `<@anim>` 不再出现在活动协议、Prompt、解析器或 fallback 中。
+6. 真实运行日志可以用同一组身份解释输入、Provider 结果、输出段和播放终态。
 
 ## 12. 当前下一步
 
@@ -483,8 +421,7 @@ DSH Adapter 不复制 `TurnCoordinator`、`OutputSegmentCoordinator`、PlaybackT
 
 1. 在真实 AstrBot 配置中验证主动 TTS、主动 Motion、STT stream 和取消顺序；
 2. 将 `main.py` 的宿主 hooks 继续收窄到 `adapters/astrbot`，保持现有生命周期事实和输出协议；
-3. 接入一个真实 DSH 会话回调，完成文本、流式回复、打断和关闭验收；
-4. 保持 `output.segment.v6`、前端和现有 AstrBot 行为不变，并记录真实延迟与迟到 Provider 结果；
-5. 只有真实验收完成后，才评估是否需要移动 `runtime/state.py` 或进程化 Provider。
+3. 保持 `output.segment.v6`、前端和现有 AstrBot 行为不变，并记录真实延迟与迟到 Provider 结果；
+4. 只有真实验收完成后，才评估是否需要移动 `runtime/state.py` 或进程化 Provider。
 
 只有这一步稳定后，才开始移动 `main.py`、`platform_event.py` 和 `runtime/state.py` 中的 AstrBot 专属逻辑。

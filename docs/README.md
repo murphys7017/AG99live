@@ -2,7 +2,7 @@
 
 AG99 是以桌面体验为中心的智能体主应用；AG99live 是 AG99 的身体运行时，负责感知、即时反应、Live2D 表现、音频播放和设备交互。AstrBot 是 AG99 的上游框架与兼容生态来源。
 
-本文档集描述当前源码和运行边界；主文不堆叠被替代方案与逐批日志，历史变更通过 Git 查阅。文档索引最近复核：**2026 年 11 月 13 日**；各专项计划和当前状态页仍以页面内标明的代码状态和验收证据为准。
+本文档集描述当前源码和运行边界；主文不堆叠被替代方案与逐批日志，历史变更通过 Git 查阅。文档索引最近复核：**2026 年 11 月 14 日**；各专项计划和当前状态页仍以页面内标明的代码状态和验收证据为准。
 
 ## 当前代码基线
 
@@ -13,6 +13,7 @@ AG99 是以桌面体验为中心的智能体主应用；AG99live 是 AG99 的身
 | AG99live 产品 | 根目录 `VERSION` | `1.0.0` |
 | Desktop 前端 | `package.json`、`frontend/package.json` | `1.0.0` |
 | AG99live Adapter | `astrbot_plugin_ag99live_adapter/metadata.yaml` | `1.0.0` |
+| Desktop Awareness 插件 | `astrbot_plugin_ag99_desktop_awareness/metadata.yaml` | `1.0.0` |
 | Runtime Core | `runtime-core/CMakeLists.txt` 读取根目录 `VERSION` | `1.0.0` |
 | Render Core | `render-core/CMakeLists.txt` 读取根目录 `VERSION` | `1.0.0` |
 | WebSocket 协议封套 | `astrbot_plugin_ag99live_adapter/protocol/schema_manifest.json` | `v2` |
@@ -53,7 +54,7 @@ TypeScript 是持续开发和表现迭代实现。C++ 是冻结大版本后的�
 | OLV 增量事件、音频信用、动作期限与终态 | [OLV 增量输出事件与生命周期契约](02-设计文档/13-OLV增量输出事件与生命周期契约.md) |
 | 轻量预动作的上下文、ASR 触发、参数接管与验收 | [轻量预动作 Prompt 与接入说明](02-设计文档/14-轻量预动作Prompt与接入.md) |
 | 桌面大范围变化观察的算法、优先级与撤销 | [桌面变化观察计划](desktop-observation-plan.md) |
-| 返回电脑后的主动互动检测、准入与现场验收 | [返回电脑互动计划](desktop-return-plan.md) |
+| AG99 插件负责的返回电脑检测、准入与现场验收 | [返回电脑互动计划](desktop-return-plan.md) |
 | `turn_id`、`message_id`、`sequence` 与播放身份 | [协议身份与顺序](02-设计文档/03-协议身份与顺序.md) |
 | 动作语义、稀疏序列、参数计划和关系图 | [动作语义与参数编译](02-设计文档/04-动作语义与参数编译.md) |
 | N.E.K.O 功能方向和优先级 | [N.E.K.O 功能学习与 AG99live 边界扩展](02-设计文档/06-N.E.K.O功能学习与AG99live边界扩展.md) |

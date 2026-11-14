@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from astrbot.api.provider import Provider, STTProvider
+from astrbot.core.provider.provider import TTSProvider
 from astrbot.core.platform.message_session import MessageSession
 from astrbot.core.platform.message_type import MessageType
 
@@ -31,6 +32,12 @@ class AstrBotProviderRegistry:
             )
         )
         return provider if isinstance(provider, STTProvider) else None
+
+    def get_tts_provider(self, *, umo: str):
+        if self._context is None:
+            return None
+        provider = self._context.get_using_tts_provider(umo=umo or None)
+        return provider if isinstance(provider, TTSProvider) else None
 
 
 __all__ = ["AstrBotProviderRegistry"]

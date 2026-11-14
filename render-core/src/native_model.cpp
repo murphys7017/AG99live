@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <chrono>
 #include <filesystem>
 #include <functional>
 #include <iostream>
@@ -42,6 +43,12 @@
 namespace ag99::native {
 using namespace Live2D::Cubism::Framework;
 using namespace ag99::native::motion;
+
+double CurrentEpochMilliseconds() {
+  return std::chrono::duration<double, std::milli>(
+      std::chrono::system_clock::now().time_since_epoch()).count();
+}
+
 class NativeCubismModel final : public CubismUserModel {
 public:
   explicit NativeCubismModel(const NativeModelServices& services)
@@ -567,6 +574,7 @@ public:
         : 1.0f / 60.0f;
     _last_update_seconds = now;
     _model->UpdateMotion(delta_seconds);
+    ApplyIdleMotion(now);
     ApplyPreActionMotion(now);
     ApplyQueuedMotion(now);
     _model->ApplyDrag(services_.drag_x->load(), services_.drag_y->load());
@@ -590,6 +598,42 @@ public:
     _width = width;
     _height = height;
     _renderer.Resize(width, height);
+  }
+
+  bool StartIdleMotion(const ag99::runtime::IdleMotionEvent& event) {
+    if (event.expires_at_epoch_ms <= CurrentEpochMilliseconds()) {
+      return false;
+    }
+    std::scoped_lock lock(_motion_mutex);
+    if (!_model || !_model->GetModel()
+        || _motion_scheduler.active_motion
+        || _motion_scheduler.pending_motion_segment
+        || _active_parameter_plan || _pending_parameter_plan
+        || _pre_action_motion) {
+      return false;
+    }
+    ag99::runtime::OutputSegment segment;
+    segment.envelope.message_id = event.envelope.message_id;
+    segment.motion.state = ag99::runtime::MotionSlot::State::Present;
+    segment.motion.message_type = "engine.motion_intent";
+    segment.motion.payload = event.motion;
+    NativeSegmentClock clock{
+        .message_id = event.envelope.message_id,
+        .started_at_seconds = services_.now_seconds(),
+        .generation = _connection_generation};
+    const auto plan = CompileMotionPlan(segment, clock);
+    if (!plan) {
+      return false;
+    }
+    _idle_motion = *plan;
+    _idle_expires_at_epoch_ms = event.expires_at_epoch_ms;
+    return true;
+  }
+
+  void CancelIdleMotion() {
+    std::scoped_lock lock(_motion_mutex);
+    _idle_motion.reset();
+    _idle_expires_at_epoch_ms.reset();
   }
 
   void SetModelSync(const ag99::runtime::Json& payload) {
@@ -729,16 +773,27 @@ public:
 
   bool StartPreAction(const ag99::runtime::PreActionEvent& event) {
     if (event.action != "ready" || !event.envelope.turn_id.has_value()
-        || event.request_id.empty() || event.motion.is_null()) {
+        || event.request_id.empty() || event.motion.is_null()
+        || !event.expires_at_epoch_ms
+        || *event.expires_at_epoch_ms <= CurrentEpochMilliseconds()) {
       return false;
     }
     std::scoped_lock lock(_motion_mutex);
     if (!_model || !_model->GetModel()
         || _motion_scheduler.active_motion
         || _motion_scheduler.pending_motion_segment
-        || _active_parameter_plan || _pending_parameter_plan) {
+        || _active_parameter_plan || _pending_parameter_plan
+        || _pre_action_motion) {
       return false;
     }
+    const auto request_key = *event.envelope.turn_id + "\n" + event.request_id;
+    if (_pre_action_request_ids.contains(request_key)) {
+      return false;
+    }
+    if (_pre_action_request_ids.size() >= 256) {
+      _pre_action_request_ids.clear();
+    }
+    _pre_action_request_ids.insert(request_key);
     ag99::runtime::OutputSegment segment;
     segment.envelope.turn_id = event.envelope.turn_id;
     segment.envelope.message_id = event.request_id;
@@ -756,6 +811,7 @@ public:
       return false;
     }
     _pre_action_motion = *plan;
+    _pre_action_expires_at_epoch_ms = *event.expires_at_epoch_ms;
     std::cerr << "[motion] pre-action started\n";
     return true;
   }
@@ -771,6 +827,7 @@ public:
       return;
     }
     _pre_action_motion.reset();
+    _pre_action_expires_at_epoch_ms.reset();
   }
 
   std::vector<NativeSegmentTerminal> TakeMotionTerminals() {
@@ -804,6 +861,10 @@ public:
         && _active_parameter_plan->clock.turn_id == turn_id) {
       _active_parameter_plan.reset();
     }
+    if (_pre_action_motion && _pre_action_motion->clock.turn_id == turn_id) {
+      _pre_action_motion.reset();
+      _pre_action_expires_at_epoch_ms.reset();
+    }
   }
 
   void ResetRuntimeSegments(std::uint64_t generation) {
@@ -815,6 +876,11 @@ public:
     _pending_parameter_plan.reset();
     _pending_parameter_clock.reset();
     _active_parameter_plan.reset();
+    _pre_action_motion.reset();
+    _pre_action_expires_at_epoch_ms.reset();
+    _idle_motion.reset();
+    _idle_expires_at_epoch_ms.reset();
+    _pre_action_request_ids.clear();
     _motion_scheduler.segment_terminals.clear();
   }
 
@@ -962,7 +1028,10 @@ private:
     _pending_parameter_plan.reset();
     _pending_parameter_clock.reset();
     _active_parameter_plan.reset();
+    _idle_motion.reset();
+    _idle_expires_at_epoch_ms.reset();
     _pre_action_motion.reset();
+    _pre_action_expires_at_epoch_ms.reset();
   }
 
   enum class ParameterContributionOwner {
@@ -2025,6 +2094,12 @@ private:
     if (!_pre_action_motion || !_model || !_model->GetModel()) {
       return;
     }
+    if (_pre_action_expires_at_epoch_ms
+        && CurrentEpochMilliseconds() >= *_pre_action_expires_at_epoch_ms) {
+      _pre_action_motion.reset();
+      _pre_action_expires_at_epoch_ms.reset();
+      return;
+    }
     const double elapsed_ms =
         (now - _pre_action_motion->started_at) * 1000.0;
     for (const auto& track : _pre_action_motion->tracks) {
@@ -2043,6 +2118,39 @@ private:
     }
     if (elapsed_ms >= _pre_action_motion->duration_ms) {
       _pre_action_motion.reset();
+      _pre_action_expires_at_epoch_ms.reset();
+    }
+  }
+
+  void ApplyIdleMotion(double now) {
+    std::scoped_lock lock(_motion_mutex);
+    if (!_idle_motion || !_model || !_model->GetModel()) {
+      return;
+    }
+    if (_idle_expires_at_epoch_ms
+        && CurrentEpochMilliseconds() >= *_idle_expires_at_epoch_ms) {
+      _idle_motion.reset();
+      _idle_expires_at_epoch_ms.reset();
+      return;
+    }
+    const double elapsed_ms = (now - _idle_motion->started_at) * 1000.0;
+    for (const auto& track : _idle_motion->tracks) {
+      if (track.keyframes.empty()) {
+        continue;
+      }
+      const auto value = motion::EvaluateTrackValue(
+          *_idle_motion, track, elapsed_ms);
+      const auto minimum = _model->GetModel()->GetParameterMinimumValue(
+          track.parameter_index);
+      const auto maximum = _model->GetModel()->GetParameterMaximumValue(
+          track.parameter_index);
+      _model->GetModel()->SetParameterValue(
+          track.parameter_index,
+          static_cast<csmFloat32>(Clamp(value, minimum, maximum)));
+    }
+    if (elapsed_ms >= _idle_motion->duration_ms) {
+      _idle_motion.reset();
+      _idle_expires_at_epoch_ms.reset();
     }
   }
 
@@ -2062,6 +2170,10 @@ private:
   ag99::runtime::Json _model_sync_payload = ag99::runtime::Json::object();
   std::optional<ParameterPlan> _active_parameter_plan;
   std::optional<MotionPlan> _pre_action_motion;
+  std::optional<double> _pre_action_expires_at_epoch_ms;
+  std::optional<MotionPlan> _idle_motion;
+  std::optional<double> _idle_expires_at_epoch_ms;
+  std::unordered_set<std::string> _pre_action_request_ids;
   std::optional<ag99::runtime::OutputSegment> _pending_parameter_plan;
   std::optional<NativeSegmentClock> _pending_parameter_clock;
   MotionScheduler _motion_scheduler;
@@ -2133,6 +2245,11 @@ void NativeModel::CancelPreAction(
     const std::string& request_id) {
   impl_->CancelPreAction(turn_id, request_id);
 }
+bool NativeModel::StartIdleMotion(
+    const ag99::runtime::IdleMotionEvent& event) {
+  return impl_->StartIdleMotion(event);
+}
+void NativeModel::CancelIdleMotion() { impl_->CancelIdleMotion(); }
 void NativeModel::CancelTurn(const std::string& turn_id) {
   impl_->CancelTurn(turn_id);
 }

@@ -18,6 +18,7 @@ public:
   NativeInputRuntime& operator=(const NativeInputRuntime&) = delete;
 
   bool ToggleMicrophone();
+  bool StartMicrophone();
   bool Running() const noexcept;
   void Stop(std::string_view reason);
   ag99::runtime::DesktopSettingsResult HandleDeviceSetting(

@@ -29,6 +29,10 @@ inline constexpr std::string_view kParameterPlanSchema =
     protocol_manifest::kParameterPlanSchema;
 inline constexpr std::string_view kModelInfoSchema =
     protocol_manifest::kModelInfoSchema;
+inline constexpr std::string_view kDesktopPresenceSchema =
+    "ag99live.desktop_presence.v1";
+inline constexpr std::string_view kDesktopObservationSchema =
+    "ag99live.desktop_observation.v1";
 
 class ProtocolError final : public std::runtime_error {
  public:
@@ -105,6 +109,19 @@ struct ModelSync {
   Json payload;
 };
 
+struct ServerInfo {
+  ProtocolEnvelope envelope;
+  std::string ws_url;
+  std::string http_base_url;
+  bool auto_start_mic = false;
+  std::string product_version;
+  Json schema_manifest = Json::object();
+};
+
+struct DesktopSettingsSyncComplete {
+  ProtocolEnvelope envelope;
+};
+
 struct PreActionEvent {
   ProtocolEnvelope envelope;
   std::string action;
@@ -116,6 +133,21 @@ struct PreActionEvent {
 struct DesktopObservationRequest {
   ProtocolEnvelope envelope;
   std::string request_id;
+};
+
+struct DesktopPresenceRequest {
+  ProtocolEnvelope envelope;
+  std::string request_id;
+  std::string monitor_id;
+  int idle_after_seconds = 300;
+  int minimum_away_seconds = 60;
+  int confirmation_seconds = 3;
+};
+
+struct IdleMotionEvent {
+  ProtocolEnvelope envelope;
+  Json motion = Json();
+  double expires_at_epoch_ms = 0.0;
 };
 
 struct DesktopSettingsQuery {
@@ -210,9 +242,15 @@ OutputSegment parse_output_segment(const ProtocolEnvelope& envelope);
 SegmentMotionUpdate parse_segment_motion_update(
     const ProtocolEnvelope& envelope);
 ModelSync parse_model_sync(const ProtocolEnvelope& envelope);
+ServerInfo parse_server_info(const ProtocolEnvelope& envelope);
+DesktopSettingsSyncComplete parse_desktop_settings_sync_complete(
+    const ProtocolEnvelope& envelope);
 PreActionEvent parse_pre_action(const ProtocolEnvelope& envelope);
 DesktopObservationRequest parse_desktop_observation_request(
     const ProtocolEnvelope& envelope);
+DesktopPresenceRequest parse_desktop_presence_request(
+    const ProtocolEnvelope& envelope);
+IdleMotionEvent parse_idle_motion(const ProtocolEnvelope& envelope);
 DesktopSettingsQuery parse_desktop_settings_query(
     const ProtocolEnvelope& envelope);
 

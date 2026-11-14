@@ -49,8 +49,11 @@ public:
         callback_lifetime_(std::make_shared<CallbackLifetime>()),
         on_model_sync_(std::move(callbacks.on_model_sync)),
         on_pre_action_(std::move(callbacks.on_pre_action)),
+        on_idle_motion_(std::move(callbacks.on_idle_motion)),
         on_desktop_observation_request_(
             std::move(callbacks.on_desktop_observation_request)),
+        on_desktop_presence_request_(
+            std::move(callbacks.on_desktop_presence_request)),
         on_output_segment_(std::move(callbacks.on_output_segment)),
         on_output_segment_reset_(std::move(callbacks.on_output_segment_reset)),
         on_turn_started_(std::move(callbacks.on_turn_started)),
@@ -77,6 +80,13 @@ public:
                 on_model_sync_(std::move(sync));
               }
             },
+            [this](ag99::runtime::ServerInfo info) {
+              std::cerr << "[runtime] Adapter server_info product_version="
+                        << info.product_version << '\n';
+            },
+            [](ag99::runtime::DesktopSettingsSyncComplete) {
+              std::cerr << "[runtime] desktop settings sync complete\n";
+            },
             [this](ag99::runtime::PreActionEvent event) {
               if (on_pre_action_) {
                 on_pre_action_(std::move(event));
@@ -84,6 +94,11 @@ public:
             },
             [this](ag99::runtime::DesktopObservationRequest request) {
               HandleDesktopObservationRequest(std::move(request));
+            },
+            [this](ag99::runtime::IdleMotionEvent event) {
+              if (on_idle_motion_) {
+                on_idle_motion_(std::move(event));
+              }
             },
             [this](std::string turn_id) {
               BeginTurn(turn_id);
@@ -141,6 +156,18 @@ public:
             },
             [this](ag99::runtime::OutputAudioFrame frame) {
               OnIncrementalAudioFrame(std::move(frame));
+            },
+            [this] {
+              if (!input_runtime_.StartMicrophone()) {
+                std::cerr << "[microphone] adapter start request failed\n";
+              }
+            },
+            [this](ag99::runtime::DesktopPresenceRequest request) {
+              if (on_desktop_presence_request_) {
+                on_desktop_presence_request_(std::move(request));
+              } else {
+                HandleDesktopPresenceRequest(std::move(request));
+              }
             },
         }) {
     callback_lifetime_->owner = this;
@@ -273,7 +300,9 @@ public:
           services_.native_incremental_output_enabled());
       auto settings_with_capabilities = settings;
       settings_with_capabilities["payload"]["desktop_observation_schema"] =
-          "ag99live.desktop_observation.v1";
+          std::string(ag99::runtime::kDesktopObservationSchema);
+      settings_with_capabilities["payload"]["desktop_presence_schema"] =
+          std::string(ag99::runtime::kDesktopPresenceSchema);
       if (!transport_.SendText(settings_with_capabilities.dump())) {
         transport_.Close();
         connected = false;
@@ -316,6 +345,29 @@ public:
         "frontend");
     if (!transport_.SendText(response.dump())) {
       std::cerr << "[runtime] failed to send desktop observation result\n";
+    }
+  }
+
+  void HandleDesktopPresenceRequest(
+      ag99::runtime::DesktopPresenceRequest request) {
+    std::string error;
+    const auto snapshot = desktop_presence_.Read(request, error);
+    ag99::runtime::Json payload = {
+        {"schema_version", ag99::runtime::kDesktopPresenceSchema},
+        {"request_id", request.request_id},
+        {"ok", snapshot.has_value()},
+    };
+    if (snapshot) {
+      payload["snapshot"] = *snapshot;
+    } else {
+      payload["error"] = error.empty()
+          ? "desktop_presence_unavailable" : error;
+    }
+    const auto response = ag99::runtime::build_envelope(
+        "system.desktop_presence_result", payload, std::nullopt,
+        "frontend");
+    if (!transport_.SendText(response.dump())) {
+      std::cerr << "[runtime] failed to send desktop presence result\n";
     }
   }
 
@@ -1533,8 +1585,12 @@ private:
   std::shared_ptr<CallbackLifetime> callback_lifetime_;
   std::function<void(ag99::runtime::ModelSync)> on_model_sync_;
   std::function<void(ag99::runtime::PreActionEvent)> on_pre_action_;
+  std::function<void(ag99::runtime::IdleMotionEvent)> on_idle_motion_;
   std::function<void(ag99::runtime::DesktopObservationRequest)>
       on_desktop_observation_request_;
+  std::function<void(ag99::runtime::DesktopPresenceRequest)>
+      on_desktop_presence_request_;
+  DesktopPresenceRuntime desktop_presence_;
   std::function<void(
       ag99::runtime::OutputSegment,
       std::optional<NativeSegmentClock>)> on_output_segment_;

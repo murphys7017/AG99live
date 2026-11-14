@@ -1,7 +1,11 @@
 # 返回电脑后的主动互动
 
+状态：已迁移到 `astrbot_plugin_ag99_desktop_awareness`。返回检测和主动互动由独立插件负责；AG99live 只负责 Presence 采集、状态发布和连接能力。
+
 ## 目标与边界
-AG99live只观察系统锁屏/休眠与输入空闲时长，形成一次返回机会，复用AstrBot RuntimeObservationSensor、Gate、Personal Policy、Persona、TTS和Live2D动作链路。无按键内容、截图、桌面分析或独立模型请求。默认关闭，不调整用户的安静时段、模型或已有桌面变化阈值。
+返回电脑检测由 `astrbot_plugin_ag99_desktop_awareness` 负责。AG99live 的 `desktop_presence_capture` 读取 Presence 并通过 `DesktopStateStore` 写入 AstrBot Core `SnapshotHub`；锁屏/休眠、输入空闲和确认参数属于采集端状态机，返回事实和 Observation Sensor 由桌面感知插件决定，Gate、Personal Policy、Persona、TTS 和动作策略继续由 Core 负责。桌面端不因返回检测新增本地模型请求。
+返回检测和其他消费者通过 AstrBot Core 的 `Context.get_snapshot_hub()` 读取同一份
+`desktop_state` 快照与帧引用，不重复向桌面端请求截图。
 
 ## 检测规则
 Electron主进程使用powerMonitor的lock/unlock、suspend/resume及系统空闲时间。状态机保留在主进程，渲染窗口不拥有离开状态。活动样本首次读取只建立基线；初次就已空闲/锁屏的周期不补欢迎。新的连接监视身份或检测参数变更会重建基线，旧返回不重放。
@@ -16,7 +20,7 @@ Electron主进程使用powerMonitor的lock/unlock、suspend/resume及系统空�
 每个已确认周期递增序号，形成唯一事件。unlock、resume和input_resumed三种依据保留区分。监视快照只保留当前状态及最近一次返回，内存存储，不写用户历史。
 
 ## 传输与会话
-配套前端协商ag99live.desktop_presence.v1能力；AG99live独立请求/结果消息无chat turn。启用且会话插件准入允许时，每个连接串行约每秒读取一次；5秒逻辑截止，前端限制一个在途IPC，迟到旧连接结果不发送给新连接。
+配套前端协商 `ag99live.desktop_presence.v1` 能力；Adapter 的 `desktop_presence_capture.enabled` 开启后，独立请求/结果消息无 chat turn，每个连接按 `poll_interval_seconds` 串行读取；5秒逻辑截止，前端限制一个在途 IPC，迟到旧连接结果不发送给新连接。桌面感知插件只订阅 Core `desktop_state`，不再向 Adapter 发起 Presence 请求。
 身份包含连接代次、client_uid和主进程boot_id；断连、配置变化或插件卸载取消任务，接收侧首个快照只对齐序号，之后只消费递增的新事件，不因WebSocket重连产生欢迎。检测监视身份在同一已启用平台/客户端配置下跨普通断线保留，因此Electron主进程已记录的休眠可以在唤醒重连后继续等待新的实际输入确认；不会重放先前已经确认的返回。禁用来源、改变配置、客户端或插件重新加载会创建新监视身份，重建基线。
 准入使用基础AstrMessageEvent检查同一会话权限，不创建交互轮次，也不每秒运行适配器输出配置或动作接线。失败/未知状态不按返回处理，并撤销尚未完成的旧机会。
 

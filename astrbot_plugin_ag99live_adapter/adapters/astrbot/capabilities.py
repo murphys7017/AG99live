@@ -30,9 +30,11 @@ class AstrBotCapabilityBinding:
         *,
         plugin_context: Any,
         recognize_audio: RecognizeAudio,
+        resolve_tts_provider: Callable[[str], Any] | None = None,
     ) -> None:
         self._plugin_context = plugin_context
         self._recognize_audio = recognize_audio
+        self._resolve_tts_provider = resolve_tts_provider
 
     async def recognize_audio(
         self,
@@ -45,26 +47,29 @@ class AstrBotCapabilityBinding:
     async def synthesize_tts(self, request: TtsRequest) -> AudioArtifact:
         event = request.metadata.get("event")
         umo = str(getattr(event, "unified_msg_origin", "") or "").strip()
-        get_provider = getattr(self._plugin_context, "get_using_tts_provider", None)
-        if not callable(get_provider):
-            raise ProviderBridgeError(
-                ProviderFailure(
-                    provider="astrbot.tts",
-                    request_id=request.request_id,
-                    code="tts_provider_registry_unavailable",
-                    message="AstrBot TTS provider registry is unavailable.",
-                    turn_id=request.turn_id,
-                    message_id=request.message_id,
-                )
-            )
-        provider = get_provider(umo=umo or None)
+        provider = (
+            self._resolve_tts_provider(umo)
+            if self._resolve_tts_provider is not None
+            else None
+        )
+        if self._resolve_tts_provider is None:
+            get_provider = getattr(self._plugin_context, "get_using_tts_provider", None)
+            provider = get_provider(umo=umo or None) if callable(get_provider) else None
         if provider is None:
             raise ProviderBridgeError(
                 ProviderFailure(
                     provider="astrbot.tts",
                     request_id=request.request_id,
-                    code="tts_provider_unavailable",
-                    message="No AstrBot TTS provider is configured for this session.",
+                    code=(
+                        "tts_provider_unavailable"
+                        if self._resolve_tts_provider is not None
+                        else "tts_provider_registry_unavailable"
+                    ),
+                    message=(
+                        "No AstrBot TTS provider is configured for this session."
+                        if self._resolve_tts_provider is not None
+                        else "AstrBot TTS provider registry is unavailable."
+                    ),
                     turn_id=request.turn_id,
                     message_id=request.message_id,
                 )

@@ -27,6 +27,18 @@ bool NativeInputRuntime::ToggleMicrophone() {
   return true;
 }
 
+bool NativeInputRuntime::StartMicrophone() {
+  std::scoped_lock lock(mutex_);
+  if (microphone_.running()) {
+    return true;
+  }
+  if (!microphone_.Start()) {
+    std::cerr << "[microphone] failed to start capture\n";
+    return false;
+  }
+  return true;
+}
+
 bool NativeInputRuntime::Running() const noexcept {
   return microphone_.running();
 }

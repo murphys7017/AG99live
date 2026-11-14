@@ -83,6 +83,8 @@ class WebSocketTransport:
         self._outbound_queue: asyncio.Queue[_OutboundItem] | None = None
         self._outbound_writer_task: asyncio.Task | None = None
         self._outbound_sequence = 0
+        self._disconnect_lock = asyncio.Lock()
+        self._disconnect_notified_client = None
 
     async def start(self) -> None:
         """启动静态资源 + WebSocket 监听；直到 ws_server.wait_closed()。
@@ -122,14 +124,17 @@ class WebSocketTransport:
             raise
 
     async def stop(self) -> None:
-        if self._ws_client is not None:
+        client = self._ws_client
+        if client is not None:
             try:
-                await self._ws_client.close()
+                await client.close()
             except Exception as exc:
                 if _is_expected_disconnect_error(exc):
                     logger.debug("Desktop websocket client was already disconnected: %s", exc)
                 else:
                     logger.exception("Failed to close desktop websocket client cleanly")
+
+            await self._notify_disconnect(client)
 
         await self._stop_outbound_writer()
 
@@ -355,7 +360,7 @@ class WebSocketTransport:
               其它  → 调 handle_message；handle_message 抛错时同样回 control.error
             而不断连（只丢这一条消息）。
           - 退出时无论是 CancelledError / ConnectionClosedOK / ConnectionClosedError
-            / 其它，都先清 _ws_client、跑 on_disconnect 钩子再 return。
+            / 其它，都等待一次 on_disconnect 清理完成后再清 _ws_client。
         """
         if self._ws_client is not None:
             await websocket.send(
@@ -370,6 +375,7 @@ class WebSocketTransport:
             return
 
         self._ws_client = websocket
+        self._disconnect_notified_client = None
         self._start_outbound_writer(websocket)
         logger.debug("Desktop frontend connected to adapter transport")
         try:
@@ -435,12 +441,22 @@ class WebSocketTransport:
         finally:
             if self._ws_client is websocket:
                 await self._stop_outbound_writer(websocket)
-                self._ws_client = None
-                try:
-                    await self._on_disconnect()
-                except Exception:
-                    logger.exception("Failed to run disconnect cleanup")
+                await self._notify_disconnect(websocket)
             logger.debug("Desktop frontend disconnected from adapter transport")
+
+    async def _notify_disconnect(self, websocket) -> None:
+        """Run the disconnect callback once and wait for its cleanup to finish."""
+        async with self._disconnect_lock:
+            if self._disconnect_notified_client is websocket:
+                return
+            self._disconnect_notified_client = websocket
+            try:
+                await self._on_disconnect()
+            except Exception:
+                logger.exception("Failed to run disconnect cleanup")
+            finally:
+                if self._ws_client is websocket:
+                    self._ws_client = None
 
     async def _handle_binary_payload(self, raw_message: bytes) -> None:
         if self._handle_binary_message is None:

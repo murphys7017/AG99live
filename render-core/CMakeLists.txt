@@ -71,6 +71,7 @@ add_executable(ag99-render-host WIN32
   src/microphone_capture.cpp
   src/native_input_runtime.cpp
   src/desktop_capture.cpp
+  src/desktop_presence_runtime.cpp
   src/bilibili_live_runtime.cpp
   src/audio_runtime.cpp
   src/native_playback_runtime.cpp

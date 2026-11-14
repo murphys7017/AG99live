@@ -1,6 +1,6 @@
 state_meta:
   schema_version: 3
-  updated_at: '2026-11-13'
+  updated_at: '2026-11-14'
   purpose: 当前架构计划、所有权边界、不变量和验收缺口。历史里程碑保留在 Git 历史，不在此重复。
   baseline: AG99live 1.0.0
   code_checkpoint: 337aa0b5
@@ -17,7 +17,19 @@ architecture:
       owns:
         - desktop_runtime_settings canonical snapshot
         - protocol session and single-client admission
+        - DesktopStateStore connection and capture-side protocol state
+        - desktop frame and presence inputs submitted to AstrBot Core SnapshotHub
         - conversation, provider, TTS and media production
+    interaction_orchestrator:
+      owns:
+        - neutral Turn admission and terminal registry
+        - active AstrBot event registry and turn timing facts
+        - provider event routing and lifecycle cleanup coordination
+    desktop_awareness_plugin:
+      owns:
+        - desktop frame comparison and baseline
+        - desktop return detection from Presence snapshots
+        - desktop_changed and desktop_returned Runtime Observation submission
     runtime_core:
       owns:
         - wire schema validation
@@ -29,6 +41,7 @@ architecture:
         - connection generation
         - terminal and playback_finished coordination
         - settings application result
+        - Adapter handshake and idempotent start_mic control
     native_transport:
       owns:
         - Native Adapter WebSocket lifetime
@@ -59,6 +72,8 @@ architecture:
         - HWND, tray, input window and drag/click-through
         - D3D11 composition surface and frame loop
         - Native reconnect command
+        - bounded desktop screenshot capture for AG99 observation requests
+        - bounded desktop presence sampling for AG99 presence requests
     spout:
       owns:
         - optional D3D11 backbuffer readback
@@ -74,6 +89,7 @@ architecture:
 
   config:
     source_of_truth: Adapter desktop_runtime_settings
+    native_ui: none; all supported runtime settings are configured through the Adapter Web page
     native_behavior:
       - receive canonical values during connection replay
       - keep effective values in memory
@@ -94,6 +110,10 @@ architecture:
       - cursor_gaze_stationary_distance_px
       - adapter_address
       - spout_enabled
+      - bilibili_live_enabled
+      - bilibili_live_room_id
+      - bilibili_live_cookie
+      - bilibili_live_response_interval
 
   versioning:
     source_of_truth: VERSION
@@ -121,6 +141,14 @@ architecture:
     architecture: Phase 1-4 source migration complete; boundary follow-up committed
     native_runtime: coordinator, transport, input, playback and model boundaries present
     typescript_runtime: foundation, desktop host port and SessionStore port present
+    motion_compiler: Native semantic-axis budget, repeated-direction attenuation and parameter-plan execution present
+    pre_action: output.pre_action protocol and isolated Native reaction slot present
+    idle_motion: output.idle_motion protocol, expiry enforcement and isolated Native idle slot present
+    handshake: server_info and desktop_settings_sync_complete validation present
+    desktop_presence: Native input-idle presence snapshot and return confirmation path present
+    bilibili: Native public-room danmaku bridge and shared settings path present; live acceptance pending
+    window_management: Native resize updates D3D11 surface and model projection; device-loss recovery pending
+    desktop_capture: Native screenshot request/result protocol and bounded JPEG capture present; live acceptance pending
     spout: source and Release resource copy present; receiver acceptance pending
     local_validation:
       - render-core Release build
@@ -133,8 +161,10 @@ architecture:
   explicit_boundaries:
     - full TypeScript PerformanceSchedule/compiler equivalence remains a reference-implementation migration, not a V1 replacement gate
     - Native microphone VAD and FFT speech emphasis remain outside the current stable slice
-    - window resize and D3D device-loss recovery are not implemented
-    - screenshot/PTT/Bilibili/ESP32 remain TS/Electron-owned features unless a Native owner is added deliberately
+    - D3D device-loss recovery is not implemented
+    - desktop screenshot and Presence capture remain AG99live capabilities; desktop-change comparison, returned-event admission, Observation submission and Personal Policy remain AG99 plugin/Core responsibilities
+    - settings/history/Action Lab/Profile Editor and their auxiliary windows are outside Native; runtime settings are configured through the Adapter Web page
+    - PTT/ESP32 remain TS/Electron-owned features unless a Native owner is added deliberately
 
 live_acceptance:
   required:
@@ -144,6 +174,9 @@ live_acceptance:
     - real microphone enumeration, switching and capture
     - cancel, reconnect, late motion and unique receipt behavior
     - Spout/OBS frame output, transparency, cadence and shutdown
+    - Bilibili public-room connection, danmaku parsing, batching and reconnect
+    - Native screenshot request/result capability with bounded JPEG capture
+    - Native window resize with model projection and Spout dimensions
     - TS/C++ motion golden samples
   rule: local smoke/build evidence must not be reported as TS/Native behavioral equivalence
 

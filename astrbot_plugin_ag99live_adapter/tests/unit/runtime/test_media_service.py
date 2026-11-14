@@ -157,7 +157,7 @@ def test_cache_audio_file_converts_pcm_wav_with_streaming_lengths(
     assert importlib.import_module("pathlib").Path(cached_path).read_bytes() == b"normalized-wav"
 
 
-def test_desktop_snapshot_cache_reuses_latest_snapshot_for_same_client(
+def test_desktop_input_is_materialized_for_message_lifetime(
     install_fake_astrbot,
     monkeypatch,
     tmp_path,
@@ -166,7 +166,7 @@ def test_desktop_snapshot_cache_reuses_latest_snapshot_for_same_client(
     source_path = tmp_path / "desktop.jpg"
     source_path.write_bytes(b"desktop-snapshot")
 
-    cached = media_service.cache_desktop_snapshot(
+    cached = media_service.materialize_desktop_input(
         client_uid="desktop-client",
         image_component=SimpleNamespace(file=str(source_path)),
     )
@@ -175,13 +175,9 @@ def test_desktop_snapshot_cache_reuses_latest_snapshot_for_same_client(
     assert cached_path.read_bytes() == b"desktop-snapshot"
     assert "input_images" in cached_path.parts
     assert cached_path != source_path
-    latest = media_service.get_latest_desktop_snapshot_component(
-        client_uid="desktop-client"
-    )
-    assert importlib.import_module("pathlib").Path(latest["path"]).resolve() == cached_path
 
 
-def test_desktop_snapshot_cache_accepts_file_uri_components(
+def test_desktop_input_materialization_accepts_file_uri_components(
     install_fake_astrbot,
     monkeypatch,
     tmp_path,
@@ -190,7 +186,7 @@ def test_desktop_snapshot_cache_accepts_file_uri_components(
     source_path = tmp_path / "desktop.jpg"
     source_path.write_bytes(b"desktop-snapshot")
 
-    cached = media_service.cache_desktop_snapshot(
+    cached = media_service.materialize_desktop_input(
         client_uid="desktop-client",
         image_component=SimpleNamespace(file=source_path.as_uri()),
     )
@@ -198,7 +194,3 @@ def test_desktop_snapshot_cache_accepts_file_uri_components(
 
     assert cached_path.read_bytes() == b"desktop-snapshot"
     assert cached_path != source_path
-    latest = media_service.get_latest_desktop_snapshot_component(
-        client_uid="desktop-client"
-    )
-    assert importlib.import_module("pathlib").Path(latest["path"]).resolve() == cached_path

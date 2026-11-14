@@ -140,7 +140,7 @@ python -m pip install -r astrbot_plugin_ag99live_adapter/requirements.txt
 
 ## 返回电脑后的主动互动
 
-在 AG99live Web 控制台的“返回电脑互动”中启用 `desktop_return.enabled`（默认关闭）。需加载本轮配套的 Electron 主进程、预加载和前端，再重载适配器。复用已有 Personal Policy、Persona、TTS 与 Live2D 动作输出，不另选模型，不强制每次开口。
+返回检测由 `astrbot_plugin_ag99_desktop_awareness` 负责。AG99live Adapter 的 `desktop_presence_capture` 只读取 Presence 并把结果写入 `desktop_state`，桌面感知插件订阅 Presence 快照后提交 `desktop_returned`。配置和事实准入位于独立插件中，Personal Policy、Persona、TTS 与 Live2D 输出继续由 AG99 Core 负责。
 
 - 锁屏/休眠默认至少60秒；解锁或唤醒后，必须恢复实际输入操作。普通长时间无操作默认300秒，其恢复仅表述为“恢复操作”，不推断用户身体离开。
 - 恢复候选默认确认3秒，期间需再次出现输入；仅自动唤醒或碰一下鼠标不会直接欢迎。15秒未确认就丢弃该候选。
@@ -148,33 +148,33 @@ python -m pip install -r astrbot_plugin_ag99live_adapter/requirements.txt
 - 用户已在说话/对话时丢弃本次机会；提交后用户先开口、再次进入无操作状态、关闭来源或断连，会撤销旧事实及相关策略/表达工作。本次欢迎不自动追问用户为何未回应。
 - 仅在启用且会话准入通过时读取系统空闲时长与锁屏/休眠状态，不读取按键内容、不截图、不分析桌面。检测状态在Electron主进程；启动/重连/配置变更先建立基线，旧返回事件不补发。
 
-日志查看 `desktop_return.state`（active/inactive/confirming/unknown）、`candidate` 的准入原因及 `submitted` 的入队结果，再检查 Personal Policy 的 Gate/表达日志。数学桌面变化观察是独立来源；返回互动不等待它的60秒对话后观察窗口，但会避开活动对话并在新输入到来时撤销。
+Presence 采集日志查看 Adapter 的 Presence 采样和 `desktop_state` 更新，事实提交日志查看桌面感知插件的 `desktop_returned` 结果，再检查 Personal Policy 的 Gate/表达日志。数学桌面变化观察是同一插件的独立来源；返回互动不等待画面观察间隔，但会避开活动对话并在新输入到来时撤销。
 
 设计与真实验收步骤见 `docs/desktop-return-plan.md`。当前只有“策略决定是否通过普通语音/动作链路表达”；尚未新增独立的“只挥手、不说话”策略动作。
 
 ## 桌面变化观察
 
-在 AG99live Web 控制台的“桌面变化观察”中启用 `desktop_observation.enabled`。默认关闭；间隔默认30秒，变化事件有效期60秒。画面比较完全使用数学方法，不需要配置视觉模型，也不调用0.8B模型。
+AG99live Web 控制台的 `desktop_observation.enabled` 只控制截图采集和 Core 状态发布。画面比较、变化阈值、事件有效期和 Observation 提交由 `astrbot_plugin_ag99_desktop_awareness` 配置。画面比较完全使用数学方法，不需要配置视觉模型，也不调用额外模型。
 
-桌面观察服从对话优先级：用户文字输入、PTT或VAD实际语音、正在处理的轮次和播放期间暂停截图与比较。常驻麦克风的静音收音不算对话。用户输入及AI播放完成后，等待 `conversation_quiet_seconds`（默认60秒，可配置0～3600秒）再观察；设为0仍会避开活动轮次。启动/重连也先等待；恢复时首帧仅建立新基准，不比较对话前的旧截图。
+截图采集由 Adapter 按 `interval_seconds` 更新 Core 当前帧。桌面感知插件读取快照并建立基准，Personal Runtime 负责事实准入和对话优先级。启动、重连和代际变化时首帧仅建立新基准，不比较旧连接的截图。
 
-新输入会撤销之前采样的桌面事件：Intake/Inbox丢弃失效事实，正在等待或执行的策略与表达任务会被取消，避免对话后补播旧事件。检测在截图前、采样后、数学比对后再次校验活动窗口；AI播放完成会刷新基准版本，但不撤销正在确认播放完成的自身动作。
+新输入会通过 Core 的撤销信号丢弃之前采样的桌面事件，避免对话后补播旧事件。桌面感知插件更新基准并提交短期事实，Personal Runtime 负责撤销等待中的策略与表达任务。
 
-仅关注大范围画面变化：将192×108的RGB画面分为144个12×12区域，分别计算结构相似度（SSIM）及平均颜色差。区域平均SSIM低于0.85且平均颜色差达到12/255时，才计入变化面积。变化区域占比达到 `changed_area_threshold_percent`（默认15%，可配置）便提交变化事实；这是分块面积估计，不是精确的变化像素比例。现有用户阈值保留，新算法需重新实测校准。小通知、小弹窗、眨眼和轻微动作允许忽略；不识别文字、不分析桌面内容、不遮罩桌宠。Windows通知另作事件源，本功能不接入。
+仅关注大范围画面变化：将192×108的RGB画面分为144个12×12区域，分别计算结构相似度（SSIM）及平均颜色差。区域平均SSIM低于0.85且平均颜色差达到12/255时，才计入变化面积。变化区域占比达到桌面感知插件的 `changed_area_threshold_percent`（默认15%）便提交变化事实；这是分块面积估计，不是精确的变化像素比例。小通知、小弹窗、眨眼和轻微动作允许忽略；不识别文字、不分析桌面内容、不遮罩桌宠。Windows通知另作事件源，本功能不接入。
 
-需要完整重启 AstrBot 同时加载新版适配器和本体可撤销Sensor接口，不能只热重载插件。本轮不改前端，已有配套截图协议及超时恢复的桌面端无需重新构建。仅 Electron 声明采集能力后才请求截图，首帧建立基准不发事件。图片不落盘、不写入聊天历史；无大范围变化不提交事件。功能关闭、断连或卸载后停止比较。
+需要加载新版 Adapter 和桌面感知插件。前端截图协议及超时恢复无需因为语义观察插件重建。仅 Electron 声明采集能力后才请求截图，首帧建立基准不发事件。语义观察帧不写入聊天历史，也不进入消息介质缓存；明确的用户输入截图仍可由 `MediaService` 物化为消息输入临时文件。无大范围变化不提交事件。功能关闭、断连或卸载后停止比较。
 
 截图超时会释放逻辑请求槽位，后台暂停自动重试，防止堆积原生 IPC；用户主动截图仍可重新尝试。前台成功或原生迟到完成后允许重新采样，迟到图片不复用。底层 IPC 没有强制取消接口，不宣称已取消仍未完成的系统采集。
 
-有效期从本机截图请求开始计算，覆盖采样、数学比对和提交等待，旧画面过期不发事件。已入队事件继续由本体已有 TTL/策略管理，关闭采样不撤回历史事实。
+事件有效期由桌面感知插件从当前帧附件剩余时间和事件 TTL 中取较小值。旧画面过期不发事件。已入队事件继续由 Core Inbox、撤销信号和 Policy 管理，关闭采集不撤回已经提交的事实。
 
-变化事实通过已有 RuntimeObservationSensor 接入 Personal Policy；是否说话由本体决定，策略模型仍在本体设置（可选择 MiniMax 3.1）。安静时段、冷却及预算继续生效，检测到变化不保证立即说话。真实识别准确率及主动语音/Live2D效果须配套加载后验收。
+变化事实通过桌面感知插件的 RuntimeObservationSensor 接入 Personal Policy；是否说话由 Core 决定，策略模型仍在本体设置。安静时段、冷却及预算继续生效，检测到变化不保证立即说话。真实识别准确率及主动语音/Live2D效果须配套加载后验收。
 
 ### 排查与性能
 
-这条链路必须同时满足四个条件：适配器配置中的 `desktop_observation.enabled` 为 true、桌面端声明 `ag99live.desktop_observation.v1` 截图能力、当前会话在 `platform_settings.personal_runtime_observation_targets` 中、实际命中的 AstrBot 配置启用了 `personal_policy_enabled`。前两个条件只决定能否采样和提交 `desktop_changed`；Personal Policy 关闭时，事实仍会被检测并进入 Gate，但不会形成 Persona 主动表达。配置按 AstrBot 配置档命中，不要只检查 `data/cmd_config.json`。
+这条链路必须同时满足五个条件：Adapter 配置中的 `desktop_observation.enabled` 为 true、桌面端声明 `ag99live.desktop_observation.v1` 截图能力、桌面感知插件启用、当前会话在 `platform_settings.personal_runtime_observation_targets` 中、实际命中的 AstrBot 配置启用了 `personal_policy_enabled`。前三个条件决定采集和事实生成，Personal Policy 关闭时事实会在策略入口结束，不会形成 Persona 主动表达。配置按 AstrBot 配置档命中，不要只检查 `data/cmd_config.json`。
 
-建议按顺序查看日志：`desktop_observation.baseline` → `desktop_observation.area` → `desktop_observation.changed` → `Personal Runtime observation admitted` → `observation gate resolved` → `Personal Policy evaluation`。如果停在前两步，检查桌面端截图能力或对话安静窗口；如果 Gate 已 `evaluate` 但没有 Policy 日志，检查实际配置档的 `personal_policy_enabled` 和策略 Provider。
+建议按顺序查看日志：Adapter 的截图能力同步 → 桌面感知插件的比较/提交日志 → `Personal Runtime observation admitted` → `observation gate resolved` → `Personal Policy evaluation`。如果停在截图能力同步，检查 Adapter 和桌面端；如果 Gate 已 `evaluate` 但没有 Policy 日志，检查实际配置档的 `personal_policy_enabled` 和策略 Provider。
 
 比较过程不调用模型，也不把截图发送给模型。每个连接串行保留一张基准图，分块比较在线程中执行；本机一次数学比较通常只需毫秒级时间。主要成本来自截图 IPC、配置/连接轮询和 Personal Policy 的模型调用，而不是 SSIM 计算。降低 `interval_seconds` 会增加截图 IPC 次数，降低 `changed_area_threshold_percent` 会增加事件和后续策略调用，应先用日志校准再调整。
 
