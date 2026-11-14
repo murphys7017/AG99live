@@ -11,7 +11,7 @@ const SCHEDULE_LEAD_SECONDS = 0.005;
 const INITIAL_PREBUFFER_SAMPLES = Math.round(SAMPLE_RATE * 0.08);
 const INITIAL_PREBUFFER_MAX_WAIT_MS = 120;
 const MIN_SCHEDULE_GAP_SAMPLES = 2;
-const BOUNDARY_RAMP_SAMPLES = 32; // 1 ms at 32 kHz; never drop a speech sample.
+const BOUNDARY_GUARD_SAMPLES = 32; // 1 ms at 32 kHz; appended only after speech.
 
 export interface PcmOutputSession extends SpeechOutputSession {
   readonly clock: AudioPlaybackClock;
@@ -263,12 +263,9 @@ export function createPcmOutputSession(
         const buffer = context.createBuffer(1, count, SAMPLE_RATE);
         const target = buffer.getChannelData(0);
         target.set(pcm);
-        // Remove only the initial step, rather than fading the entire onset.
-        // Carry the correction across short wire frames, not across segments.
-        for (let index = 0; index < target.length && acceptedSamples + index < BOUNDARY_RAMP_SAMPLES; index++) {
-          const at = acceptedSamples + index;
-          target[index] *= at / BOUNDARY_RAMP_SAMPLES;
-        }
+        // Preserve every received speech sample exactly. The output graph has
+        // already completed its gain ramp during the silent scheduling lead;
+        // modifying the first samples here can erase a short initial phoneme.
         previousSample = target[target.length - 1];
         pendingChunks.push({ buffer, samples: count });
         acceptedSamples += count;
@@ -299,7 +296,7 @@ export function createPcmOutputSession(
       // Schedule the final sample's return to zero before the next segment.
       // All received samples remain present; only this 1 ms guard is appended.
       if (acceptedSamples > 0 && previousSample !== 0) {
-        const buffer = context.createBuffer(1, BOUNDARY_RAMP_SAMPLES, SAMPLE_RATE);
+        const buffer = context.createBuffer(1, BOUNDARY_GUARD_SAMPLES, SAMPLE_RATE);
         const values = buffer.getChannelData(0);
         for (let index = 0; index < values.length; index++) {
           values[index] = previousSample * (1 - (index + 1) / values.length);

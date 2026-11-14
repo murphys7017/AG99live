@@ -49,6 +49,7 @@ export function createIncrementalOutputRuntime(options: {
   let releasedBytes = 0;
   let releasedFrames = 0;
   let textObserved = false;
+  const firstPcmMessages = new Set<string>();
   const resultCredits = new Map<string, { bytes: number; frames: number }>();
 
   function isLive(id: IncrementalIdentity, production = true): boolean {
@@ -138,7 +139,11 @@ export function createIncrementalOutputRuntime(options: {
       throw new Error("incremental_audio_credit_window_exceeded");
     }
     options.getStore().acceptIncrementalAudio(id, metadata.sample_offset, pcm.byteLength);
-    if (receivedFrames === 0) reportLatencyStage("incremental_pcm_first", id.turnId, id.streamId, id.messageId);
+    const pcmMessageKey = `${id.turnId}\u0000${id.messageId}`;
+    if (!firstPcmMessages.has(pcmMessageKey)) {
+      firstPcmMessages.add(pcmMessageKey);
+      reportLatencyStage("incremental_pcm_first", id.turnId, id.streamId, id.messageId);
+    }
     receivedBytes += pcm.byteLength;
     receivedFrames += 1;
     // Decode on admission, including the next segment while the current one
@@ -192,6 +197,7 @@ export function createIncrementalOutputRuntime(options: {
     scope = null;
     receivedBytes = receivedFrames = releasedBytes = releasedFrames = 0;
     textObserved = false;
+    firstPcmMessages.clear();
     resultCredits.clear();
   }
   return { handleAudio, handleEvent, beginTurn, cancelTurn, reset };
