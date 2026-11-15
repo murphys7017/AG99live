@@ -23,7 +23,7 @@ Windows · Live2D Cubism · AI Motion Generation · AstrBot Ecosystem
 
 **AG99live 想做得更进一步：让 AI 不仅决定“说什么”，也参与决定“怎样表达”。**
 
-我们希望角色能够理解对话语义，结合当前交互与角色状态，实时组织表情、视线、头部姿态等动作；在一次次相处中，通过记忆和共同经历形成更连贯的陪伴体验。当前 TypeScript 运行时已经把动作素材目录、纯本地组合器和环境动作准入收口到同一条 ModelEngine 路径。
+我们希望角色能够理解对话语义，结合当前交互与角色状态，实时组织表情、视线、头部姿态等动作；在一次次相处中，通过记忆和共同经历形成更连贯的陪伴体验。当前 TypeScript 运行时已经把动作素材目录、纯本地组合器和环境动作自动调度收口到同一条 ModelEngine 路径。
 
 
 ![AG99live 实时交互演示](docs/assets/readme/AG99live-readme-preview.gif)

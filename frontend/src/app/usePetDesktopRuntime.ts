@@ -16,6 +16,7 @@ import { createPetRuntimeSnapshotPublisher } from "../desktop-bridge/usePetRunti
 import { usePreviewMotionPlayer } from "../live2d-renderer/usePreviewMotionPlayer";
 import { useModelEngine } from "../model-engine/useModelEngine";
 import { createAmbientActionDirector } from "../model-engine/ambient/ambientActionDirector";
+import { createAmbientActionScheduler } from "../model-engine/ambient/ambientActionScheduler";
 import { reportLatencyStage } from "../adapter-connection/runtime/latency.js";
 import {
   applyModelEngineSettings,
@@ -421,8 +422,9 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     }
   }
   const modelEngine = useModelEngine({
-    startIdlePlan: (plan) => live2dRuntime.startIdleParameterPlan(plan),
-    stopIdlePlan: () => live2dRuntime.stopIdleParameterPlan(),
+    startIdlePlan: (plan, actionId, source) =>
+      live2dRuntime.startIdleParameterPlan(plan, actionId, source),
+    releaseIdlePlan: (actionId) => live2dRuntime.releaseIdleParameterPlan(actionId),
     getSelectedModel: () => selectedModel.value,
     getSettings: () => cloneModelEngineSettings(motionEngineSettings),
     playPlan: (plan, model, options) => motionPlayer.playPlan(plan, model, {
@@ -531,6 +533,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       ambientMotionEnabled: live2dPresentationSettings.ambientMotionEnabled,
       audioPlaying: s.isPlayingAudio,
       microphoneCapturing: s.micCapturing && !s.microphoneStandby,
+      conversationPreparing: presence.conversationPhase === "preparing",
       conversationActive: Boolean(
         (s.currentTurnId && s.turnFinishedTurnId !== s.currentTurnId)
         || sessionStore.getSessions().some((session) => !isTerminalPhase(session.phase)),
@@ -544,14 +547,19 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       candidate.motion,
       candidate.expiresAt,
       {
+        actionId: candidate.id,
+        actionSource: candidate.source,
         motionSource: candidate.source === "model_passive"
           ? "neurobrain_passive_stream"
           : candidate.source,
       },
     ),
-    stop: (reason) => {
-      console.info("[AmbientActionDirector] idle action cancelled.", { reason });
-      modelEngine.cancelIdleMotion();
+    release: (candidateId, reason) => {
+      console.info("[AmbientActionDirector] idle action released.", {
+        candidateId,
+        reason,
+      });
+      modelEngine.releaseIdleMotion(candidateId);
     },
     onDecision: (decision) => {
       if (!decision.accepted) {
@@ -559,7 +567,15 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       }
     },
   });
-  reconcileAmbientAction = ambientActionDirector.reconcile;
+  const ambientActionScheduler = createAmbientActionScheduler({
+    getContext: getAmbientActionContext,
+    getModel: () => selectedModel.value,
+    director: ambientActionDirector,
+  });
+  reconcileAmbientAction = () => {
+    ambientActionDirector.reconcile();
+    ambientActionScheduler.nudge();
+  };
   const playbackTimelineMotionRuntime = configurePlaybackTimelineMotionRuntime({
     playbackTimeline,
     motionEngine: modelEngine,
@@ -708,7 +724,6 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
         phase: "thinking",
       });
       clearPresencePreparation(event.turnId);
-      ambientActionDirector.cancel("conversation_started");
       modelEngine.startThinkingSway(event.turnId);
       return;
     }
@@ -717,7 +732,6 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     modelEngine.cancelPreAction(event.turnId);
   });
   adapter.setPreActionObserver((event) => {
-    ambientActionDirector.cancel("pre_action_event");
     if (event.action === "ready") {
       const started = modelEngine.startPreAction(event.motion, event.turnId, event.requestId);
       if (started) {
@@ -775,14 +789,15 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
         .join("|"),
     ].join("\u0000");
   }, () => {
-    ambientActionDirector.reconcile();
+    reconcileAmbientAction();
   }, { flush: "sync" });
   watch(() => {
     const model = selectedModel.value;
     const profile = model?.semantic_axis_profile;
     return [model?.model_path, profile?.profile_id, profile?.revision, profile?.source_hash].join(":");
   }, () => {
-    ambientActionDirector.cancel("model_profile_changed");
+    ambientActionDirector.releaseAll("model_profile_changed");
+    ambientActionScheduler.nudge();
     modelEngine.cancelPreAction();
     clearPresencePreparation();
   });
@@ -848,6 +863,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     await adapter.initialize();
     await adapter.connect();
     await adapter.waitUntilDesktopSettingsReady();
+    ambientActionScheduler.start();
     pushToTalk.install();
     bilibiliLive.start();
   });
@@ -859,6 +875,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
         adapter.setTurnLifecycleObserver(null);
         modelEngine.releaseThinkingSway();
       }],
+      ["Ambient action scheduler dispose", () => ambientActionScheduler.dispose()],
       ["Ambient action director dispose", () => ambientActionDirector.dispose()],
       ["pre-action observer detach", () => adapter.setPreActionObserver(null)],
       ["presence state store dispose", () => presenceStateStore.dispose()],

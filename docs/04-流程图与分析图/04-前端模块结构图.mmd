@@ -62,7 +62,8 @@ flowchart TB
 
     subgraph ENGINE[model-engine：动作编译]
         ENTRY[useModelEngine<br/>ingress / prepare / start]:::engine
-        AMBIENT[ambient/ambientActionDirector<br/>admission / cancel / source]:::engine
+        AMBIENT[ambient/ambientActionDirector<br/>admission / release-all / source]:::engine
+        AMBIENT_SCHED[ambient/ambientActionScheduler<br/>local/material scheduling / cooldown]:::engine
         COMPOSER[composer/materialMotionComposer<br/>catalog + recipe -> motion_steps]:::engine
         NORMAL[normalize + strict contracts]:::engine
         SEMANTIC[semantic phase<br/>validate / sample / intensity / relation graph / timing]:::engine
@@ -73,6 +74,7 @@ flowchart TB
         SCHED[motionRuntimeScheduler<br/>segment pending ownership]:::engine
         ENTRY --> NORMAL --> SEMANTIC --> SCHEDULE --> PARAMETER --> TRACK --> PLAN
         AMBIENT --> SEMANTIC
+        AMBIENT_SCHED --> AMBIENT
         COMPOSER --> NORMAL
         ENTRY --> SCHED
     end
@@ -122,6 +124,7 @@ flowchart TB
     MSYNC --> ENTRY
     IDLE --> AMBIENT
     MSYNC --> COMPOSER
+    MSYNC --> AMBIENT_SCHED
     ACTION --> ENTRY
     DESKTOP --> SETTINGS
     BILI --> CONN

@@ -63,7 +63,7 @@
 | 差异项 | TypeScript 参考 | 当前 C++ 状态 |
 |---|---|---|
 | `parametermixer.ts` 多贡献者混音器 | 757 行 | 已有 `ApplyParameterFrame`、贡献者分组、单次 pre-Physics 写入和回读校验；TS/C++ 逐帧轨迹等价尚未用黄金样本证明 |
-| 交互摇摆 + 视线跟随 | `activeparameterruntime.ts` | 已有 interaction sway/gaze 贡献路径；真实输入、打断释放和跨端轨迹仍待验收 |
+| 交互摇摆 + 视线跟随 | `activeparameterruntime.ts` | 已有 interaction sway/gaze 贡献路径，与前景动作通过参数优先级混合；真实输入、打断释放和跨端轨迹仍待验收 |
 | 语音随动与重音 | `speechsignalruntime.ts` / `lipSyncTimelineSink.ts` | 已恢复独立口型/语音能量曲线，并使用 RMS 上升沿生成重音；它不是 WebSDK 的 FFT 频谱输入，属于明确的表现降级 |
 | `PerformanceSchedule` 与 `parameterTrackGraphCompiler.ts` | `performanceSchedule.ts` / `parameterTrackGraphCompiler.ts` | 尚未移植完整调度总线和序列轨迹合并；当前稳定路径优先消费已编译的 `engine.parameter_plan.v3` |
 | semantic / parameter stages | `stages.ts` 及其 stage 实现 | `CompileMotionPlan` 是受限的原生编译子集，不是完整 TypeScript pipeline |

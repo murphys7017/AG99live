@@ -3,6 +3,8 @@ import type { CubismModel } from "@framework/model/cubismmodel";
 import type { csmVector } from "@framework/type/csmvector";
 import {
   ActiveParameterMixer,
+  resolveIdlePlanPriority,
+  type ActiveIdlePlan,
   type ActiveDirectParameterFrameState,
   type ActiveInteractionGazeState,
   type ActiveInteractionSwayState,
@@ -17,6 +19,11 @@ import type { ResolvedParameterFrameEntry } from "./parametermixer";
 
 export type { ExternalAudioSignalSourceOptions, ExternalAudioSignalValues };
 
+// The director admits at most three concurrent sources. Keep a small release
+// overlap budget so repeated model/profile changes cannot grow the runtime map
+// without bound while old parameter plans fade out.
+const MAX_IDLE_PLAN_INSTANCES = 6;
+
 export interface ActiveParameterFrameFailure {
   owner: ParameterFrameOwner;
   reason: string;
@@ -30,7 +37,8 @@ export interface ActiveParameterFrameResult {
 
 /**
  * Owns AG99's active parameter sources. Cubism lifecycle, Physics, and draw
- * remain in LAppModel; this runtime resolves exactly one pre-Physics write.
+ * remain in LAppModel; this runtime resolves multiple ambient plans and all
+ * foreground sources into exactly one pre-Physics write.
  */
 export class ActiveParameterRuntime {
   private readonly mixer = new ActiveParameterMixer();
@@ -39,17 +47,43 @@ export class ActiveParameterRuntime {
     this.speechSignals.getSpeechAudioGain(axisId);
   private interactionSway: ActiveInteractionSwayState | null = null;
   private interactionGaze: ActiveInteractionGazeState | null = null;
-  private idlePlan: ActiveDirectParameterFrameState | null = null;
+  private readonly idlePlans = new Map<string, ActiveIdlePlan>();
+  private idlePlanSequence = 0;
 
-  public startIdlePlan(state: ActiveDirectParameterFrameState): boolean {
-    if (this.idlePlan) return false;
-    this.idlePlan = state;
+  public startIdlePlan(
+    state: ActiveDirectParameterFrameState,
+    actionId?: string,
+    source?: string,
+  ): boolean {
+    const normalizedActionId = actionId?.trim()
+      || `ambient:${++this.idlePlanSequence}`;
+    const hasActiveDuplicate = [...this.idlePlans.values()].some(
+      (plan) => plan.actionId === normalizedActionId
+        && plan.state.releaseStartedAtMs === null,
+    );
+    if (hasActiveDuplicate) return false;
+    if (this.idlePlans.size >= MAX_IDLE_PLAN_INSTANCES) return false;
+    const instanceId = `${normalizedActionId}:${++this.idlePlanSequence}`;
+    const normalizedSource = source?.trim() || "ambient";
+    this.idlePlans.set(instanceId, {
+      actionId: normalizedActionId,
+      state,
+      source: normalizedSource,
+      priority: resolveIdlePlanPriority(normalizedSource),
+    });
     return true;
   }
 
-  public stopIdlePlan(): void {
-    if (this.idlePlan && this.idlePlan.releaseStartedAtMs === null) {
-      this.idlePlan.releaseStartedAtMs = this.idlePlan.presentationElapsedMs;
+  /** Marks one or all ambient plans for parameter-level release. */
+  public releaseIdlePlan(actionId?: string): void {
+    const normalizedActionId = actionId?.trim() ?? "";
+    const states = normalizedActionId
+      ? [...this.idlePlans.values()].filter((plan) => plan.actionId === normalizedActionId)
+      : [...this.idlePlans.values()];
+    for (const plan of states) {
+      if (plan.state.releaseStartedAtMs === null) {
+        plan.state.releaseStartedAtMs = plan.state.presentationElapsedMs;
+      }
     }
   }
 
@@ -57,7 +91,7 @@ export class ActiveParameterRuntime {
     this.speechSignals.reset();
     this.interactionSway = null;
     this.interactionGaze = null;
-    this.idlePlan = null;
+    this.idlePlans.clear();
     this.mixer.reset();
   }
 
@@ -134,17 +168,23 @@ export class ActiveParameterRuntime {
     }
     let execution = this.mixer.resolveActiveFrame({
       ...input,
-      idlePlan: this.idlePlan,
+      idlePlans: [...this.idlePlans.values()],
       interactionSway: this.interactionSway,
       interactionGaze: this.interactionGaze,
       getSpeechAudioGain: this.getSpeechAudioGain,
     });
     if (execution.ok === false && execution.owner === "idle_motion") {
       console.warn("[IdleMotion] mixer source rejected.", execution.reason);
-      this.idlePlan = null;
+      for (const state of execution.failedIdlePlans ?? []) {
+        this.removeIdlePlanState(state);
+      }
       execution = this.mixer.resolveActiveFrame({
-        ...input, deltaTimeSeconds: 0, idlePlan: null, interactionSway: this.interactionSway,
-        interactionGaze: this.interactionGaze, getSpeechAudioGain: this.getSpeechAudioGain,
+        ...input,
+        deltaTimeSeconds: 0,
+        idlePlans: [...this.idlePlans.values()],
+        interactionSway: this.interactionSway,
+        interactionGaze: this.interactionGaze,
+        getSpeechAudioGain: this.getSpeechAudioGain,
       });
     }
     if (execution.ok === false) {
@@ -157,7 +197,9 @@ export class ActiveParameterRuntime {
         parameters: [],
       };
     }
-    if (execution.idlePlan.released) this.idlePlan = null;
+    for (const state of execution.releasedIdlePlans) {
+      this.removeIdlePlanState(state);
+    }
 
     const planState = input.directPlan;
     const lipSyncDiagnosticSourceId = execution.directPlan.contributions.length === 0
@@ -204,6 +246,15 @@ export class ActiveParameterRuntime {
       directPlanReleased: execution.directPlan.released && planState !== null,
       parameters: execution.parameters,
     };
+  }
+
+  private removeIdlePlanState(state: ActiveDirectParameterFrameState): void {
+    for (const [instanceId, current] of this.idlePlans) {
+      if (current.state === state) {
+        this.idlePlans.delete(instanceId);
+        return;
+      }
+    }
   }
 
   public disableLipSync(reason: string): void {

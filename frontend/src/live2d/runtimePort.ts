@@ -22,8 +22,12 @@ export interface Live2dRuntimePort {
     status?: DirectParameterPlanTerminalStatus,
   ): void;
   getDirectParameterPlanError(): string;
-  startIdleParameterPlan(plan: DirectParameterPlanInput): boolean;
-  stopIdleParameterPlan(): void;
+  startIdleParameterPlan(
+    plan: DirectParameterPlanInput,
+    actionId?: string,
+    source?: string | null,
+  ): boolean;
+  releaseIdleParameterPlan(actionId?: string): void;
   startMotion(
     group: string,
     no: number,
@@ -75,11 +79,11 @@ export function createWindowLive2dRuntimePort(): Live2dRuntimePort {
     getDirectParameterPlanError() {
       return getAdapter()?.getDirectParameterPlanError?.().trim() ?? "";
     },
-    startIdleParameterPlan(plan) {
-      return getAdapter()?.startIdleParameterPlan?.(plan) ?? false;
+    startIdleParameterPlan(plan, actionId, source) {
+      return getAdapter()?.startIdleParameterPlan?.(plan, actionId, source) ?? false;
     },
-    stopIdleParameterPlan() {
-      getAdapter()?.stopIdleParameterPlan?.();
+    releaseIdleParameterPlan(actionId) {
+      getAdapter()?.releaseIdleParameterPlan?.(actionId);
     },
     startMotion(group, no, priority, callbacks) {
       return getAdapter()?.startMotion?.(group, no, priority, callbacks);

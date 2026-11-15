@@ -1756,18 +1756,22 @@ export class LAppModel extends CubismUserModel {
     }
   }
 
-  public startIdleParameterPlan(plan: DirectParameterPlanInput): boolean {
+  public startIdleParameterPlan(
+    plan: DirectParameterPlanInput,
+    actionId?: string,
+    source?: string | null,
+  ): boolean {
     if (!this._model || this._state !== LoadStep.CompleteSetup || plan.resource) return false;
     const candidate = this.buildDirectParameterPlanState(
       prepareDirectParameterExecution(plan), "idle", undefined,
       { getElapsedMs: () => null },
     );
     if (!candidate.ok) return false;
-    return this._activeParameterRuntime.startIdlePlan(candidate.state);
+    return this._activeParameterRuntime.startIdlePlan(candidate.state, actionId, source ?? undefined);
   }
 
-  public stopIdleParameterPlan(): void {
-    this._activeParameterRuntime.stopIdlePlan();
+  public releaseIdleParameterPlan(actionId?: string): void {
+    this._activeParameterRuntime.releaseIdlePlan(actionId);
   }
 
   public startDirectParameterPlan(

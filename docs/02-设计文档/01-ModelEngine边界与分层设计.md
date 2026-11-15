@@ -39,15 +39,15 @@ ModelEngine 不接收原始 Persona 文本，不修改后端输出，不读取 W
 
 ## 运行与参数融合
 
-ModelEngine 在 Timeline 已建立段时钟后开始动作。Live2D runtime 的 `ActiveParameterMixer` 以 Cubism 当前基值为基础融合 Direct Plan、语音随动和合法运行贡献；`ParameterPresentation` 对结果应用响应策略。口型保持高优先级，不被动作收势延迟。
+ModelEngine 在 Timeline 已建立段时钟后开始动作。Live2D runtime 的 `ActiveParameterMixer` 以 Cubism 当前基值为基础融合 Direct Plan、思考随动、语音随动和合法运行贡献；`ParameterPresentation` 对结果应用响应策略。前景动作只接管重叠参数，口型保持最高优先级，不通过启动动作时清空其他贡献来完成切换。
 
 计划自然结束时，Direct Plan 的所有权按既有收束规则回到当前 Cubism 基值。这个过程不冻结环境动作，也不依赖额外 timeout。
 
 ## 本地交互动作
 
-思考摇摆和 speech-only 动作也通过 ModelEngine 形成受控贡献。它们使用已有参数融合和释放边界，在正式回复动作、终态或中断时交还控制权，不能替代语义动作或建立独立的播放器。
+思考摇摆和 speech-only 动作也通过 ModelEngine 形成受控贡献。正式回复动作通过参数优先级接管重叠通道，思考摇摆在 Turn 终态或中断时进入释放，不能替代语义动作或建立独立的播放器。
 
-素材组合动作沿用相同的编译和释放路径。当前五个第一版配方只生成三步短计划，`AmbientActionDirector` 已收口环境候选的基础准入和取消，自动来源调度接入前不会抢占待机或对话表现。
+素材组合动作沿用相同的编译和释放路径。当前五个第一版配方只生成三步短计划，`AmbientActionScheduler` 负责空闲窗口的来源选择和冷却，`AmbientActionDirector` 收口环境候选的基础准入和渐出释放，`ActiveParameterMixer` 负责多个环境计划与对话表现的参数级融合。
 
 ## 不变量
 

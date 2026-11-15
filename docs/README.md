@@ -22,7 +22,7 @@ AG99 是以桌面体验为中心的智能体主应用；AG99live 是 AG99 的身
 | 参数计划 | Schema manifest | `engine.parameter_plan.v3` |
 | 动作模型基线 | Hugging Face 模型标签 | `v7-20261102` |
 
-当前动作素材阶段已经完成 Adapter 侧 `motion_material_catalog.v1` 索引同步、前端第一版纯 TypeScript 组合器和环境动作准入基线。组合器只生成经过 Profile 约束的 `engine.motion_intent.v4`，自动来源调度和小模型配方选择仍属于后续阶段。
+当前动作素材阶段已经完成 Adapter 侧 `motion_material_catalog.v1` 索引同步、前端第一版纯 TypeScript 组合器和环境动作自动调度基线。组合器只生成经过 Profile 约束的 `engine.motion_intent.v4`，小模型配方选择和曲线重放仍属于后续阶段。
 
 TypeScript 是持续开发和表现迭代实现。C++ 是冻结大版本后的高性能稳定实现。两者共享协议、Profile、编译规则和验证样本，一次运行只选择一个实现。
 

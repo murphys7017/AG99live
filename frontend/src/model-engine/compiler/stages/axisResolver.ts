@@ -19,6 +19,7 @@ import {
 import { resolveAxisSamplingGroup } from "../semanticGroupTaxonomy.js";
 
 const ALLOWED_LLM_ROLES = new Set(["primary", "hint"]);
+const ALLOWED_SYSTEM_AMBIENT_SOURCES = new Set(["local", "material_composition"]);
 
 // Reads:
 // - context.intent.axis_values
@@ -62,7 +63,7 @@ export function runAxisResolver(
   }
 
   const roleAxisIds = buildRoleAxisBuckets(profile);
-  const resolvedAxes = resolveAllowedLlmAxisValues(context);
+  const resolvedAxes = resolveAllowedAxisValues(context);
   const axisErrorCount =
     resolvedAxes.invalidAxes.length + resolvedAxes.forbiddenAxes.length;
 
@@ -128,7 +129,7 @@ function buildRoleAxisBuckets(
   };
 }
 
-function resolveAllowedLlmAxisValues(
+function resolveAllowedAxisValues(
   context: MotionCompileContext,
 ): {
   controlledValues: DynamicAxisValues;
@@ -143,6 +144,14 @@ function resolveAllowedLlmAxisValues(
   // `axis_values` carries continuous values already in axis space, so it skips
   // the level-to-anchor lookup and is validated against `value_range` below.
   context.state.axisSampling = null;
+  const allowedRoles = new Set(ALLOWED_LLM_ROLES);
+  if (
+    context.options.source === "idle_motion"
+    && context.options.motionSource
+    && ALLOWED_SYSTEM_AMBIENT_SOURCES.has(context.options.motionSource)
+  ) {
+    allowedRoles.add("ambient");
+  }
   const inputEntries = Object.entries(
     context.intent.axis_values ?? {},
   );
@@ -158,7 +167,7 @@ function resolveAllowedLlmAxisValues(
       warnings.push(`semantic_axis_rejected_unknown:${axisId}`);
       continue;
     }
-    if (!ALLOWED_LLM_ROLES.has(axis.control_role)) {
+    if (!allowedRoles.has(axis.control_role)) {
       forbiddenAxes.push(axisId);
       warnings.push(
         `semantic_axis_rejected_forbidden_role:${axisId}:${axis.control_role}`,

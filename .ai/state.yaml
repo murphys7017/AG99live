@@ -1,6 +1,6 @@
 state_meta:
   schema_version: 3
-  updated_at: '2026-11-14'
+  updated_at: '2026-11-15'
   purpose: 当前架构计划、所有权边界、不变量和验收缺口。历史里程碑保留在 Git 历史，不在此重复。
   baseline: AG99live 1.0.0
   code_checkpoint: 337aa0b5
@@ -138,12 +138,12 @@ architecture:
     - unsupported settings remain canonical and are not silently accepted
 
   code_status:
-    architecture: Phase 1-4 source migration complete; boundary follow-up committed
+    architecture: Phase 1-4 source migration complete; ambient action mixing follow-up is in the working tree
     native_runtime: coordinator, transport, input, playback and model boundaries present
-    typescript_runtime: foundation, desktop host port and SessionStore port present
+    typescript_runtime: foundation, desktop host port and SessionStore port present; AmbientActionDirector/Scheduler, multi-source idle plans, bounded release overlap and foreground/thinking parameter mixing present
     motion_compiler: Native semantic-axis budget, repeated-direction attenuation and parameter-plan execution present
     pre_action: output.pre_action protocol and isolated Native reaction slot present
-    idle_motion: output.idle_motion protocol, expiry enforcement and isolated Native idle slot present
+    idle_motion: output.idle_motion protocol, expiry enforcement and multi-source TypeScript idle parameter plans with gradual release present
     handshake: server_info and desktop_settings_sync_complete validation present
     desktop_presence: Native input-idle presence snapshot and return confirmation path present
     bilibili: Native public-room danmaku bridge and shared settings path present; live acceptance pending
@@ -154,6 +154,7 @@ architecture:
       - render-core Release build
       - 3/3 CTest smoke targets
       - frontend renderer/WebSDK/Node typecheck
+      - TypeScript ambient multi-source mixing source review
       - product version consistency check across Desktop, Adapter and CMake
       - YAML parse and git diff check
       - Native host process/window startup observation

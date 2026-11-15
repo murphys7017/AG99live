@@ -59,6 +59,10 @@ function buildSpeechCueKey(cues: readonly OutputSegmentSpeechCue[]): string {
 const MAX_PREPARED_SEMANTIC_MOTIONS = 64;
 const PREPARED_SEMANTIC_MOTION_TTL_MS = 30_000;
 
+export interface IdleMotionStartResult {
+  durationMs: number;
+}
+
 interface PreparedSemanticMotionEntry {
   durationMs: number;
   assistantText: string;
@@ -223,7 +227,6 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     getSelectedModel: dependencies.getSelectedModel,
     getSettings: dependencies.getSettings,
     playPlan: (plan, model, options) => {
-      cancelIdleMotion();
       if (!activePlaybackPlan) {
         return dependencies.playPlan(plan, model, options);
       }
@@ -240,11 +243,9 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
       );
     },
     playMotionResource: (motion, model, options) => {
-      cancelIdleMotion();
       return dependencies.playMotionResource(motion, model, options);
     },
     getPlayerMessage: dependencies.getPlayerMessage,
-    stopInteractionSway: dependencies.stopInteractionSway,
     getContinuityEnvelope: () => continuityEnvelope,
     onPlanStarted: (event) => {
       activePlaybackPlan = event.executionKind === "parameter_plan"
@@ -432,29 +433,43 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
   function startIdleMotion(
     payload: NormalizedMotionPayload,
     expiresAt: number,
-    options: { motionSource?: string | null } = {},
-  ): boolean {
+    options: {
+      motionSource?: string | null;
+      actionId?: string | null;
+      actionSource?: string | null;
+    } = {},
+  ): IdleMotionStartResult | null {
     if (activePlaybackRun || thinkingSwayTurnId || state.pendingCount > 0
-      || Date.now() >= expiresAt || payload.kind !== "semantic_intent") return false;
+      || Date.now() >= expiresAt || payload.kind !== "semantic_intent") return null;
     if (!payload.intent.motion_steps
       || payload.intent.motion_steps.length < 1
       || payload.intent.motion_steps.length > 4
       || payload.intent.motion_resource_id
-      || payload.intent.expression_resource_id) return false;
+      || payload.intent.expression_resource_id) return null;
     const model = dependencies.getSelectedModel();
-    if (!model) return false;
+    if (!model) return null;
+    const actionId = options.actionId?.trim()
+      || `ambient:${Date.now()}:${Math.random().toString(36).slice(2)}`;
     const result = compileParameterMotionIntent(payload.intent, {
       model, source: "idle_motion",
       motionSource: options.motionSource ?? "neurobrain_passive_stream",
-      speechActive: false, settings: dependencies.getSettings(),
+      speechActive: false,
+      settings: dependencies.getSettings(),
+      samplingIdentity: {
+        turnId: "ambient",
+        messageId: actionId,
+      },
     });
-    if (!result.ok || !result.plan || Date.now() >= expiresAt) return false;
+    if (!result.ok || !result.plan || Date.now() >= expiresAt) return null;
     // Idle playback owns no Turn, public engine state, history or timeline.
-    return dependencies.startIdlePlan?.(result.plan) ?? false;
+    if (!dependencies.startIdlePlan?.(result.plan, actionId, options.actionSource ?? undefined)) {
+      return null;
+    }
+    return { durationMs: result.plan.timing.duration_ms };
   }
 
-  function cancelIdleMotion(): void {
-    dependencies.stopIdlePlan?.();
+  function releaseIdleMotion(actionId?: string): void {
+    dependencies.releaseIdlePlan?.(actionId);
   }
 
   function startPreAction(payload: NormalizedMotionPayload, turnId: string, requestId: string): boolean {
@@ -850,7 +865,6 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
   }
 
   function startThinkingSway(turnId: string): boolean {
-    cancelIdleMotion();
     if (activePlaybackRun?.origin === "pre_action") return false;
     const normalizedTurnId = normalizeTurnId(turnId);
     if (!normalizedTurnId) {
@@ -953,7 +967,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
   }
 
   function stop(reason = "stopped"): void {
-    cancelIdleMotion();
+    releaseIdleMotion();
     runtimeScheduler.clearAllPendingPayloads();
     clearPreparedSemanticMotions();
     releaseThinkingSway();
@@ -986,7 +1000,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     state: readonly(state),
     ingestNormalizedPayload,
     startIdleMotion,
-    cancelIdleMotion,
+    releaseIdleMotion,
     startPreAction,
     cancelPreAction,
     preparePlaybackTimeline,

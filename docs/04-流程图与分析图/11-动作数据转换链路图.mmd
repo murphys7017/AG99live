@@ -70,6 +70,8 @@ flowchart TD
     end
 
     subgraph SEMANTIC[5. 第一阶段：语义动作编译]
+        AMBIENT_SCHED[AmbientActionScheduler<br/>空闲唤醒 / 来源选择 / 冷却]:::runtime
+        LOCAL_INTENT[LocalActionSource<br/>固定低强度姿态模板]:::contract
         MATERIAL_CATALOG[ModelSummary.motion_material_catalog<br/>只读片段 / 原子索引]:::runtime
         MATERIAL_RECIPE[MaterialCompositionRecipe<br/>模型无关配方]:::contract
         MATERIAL_COMPOSER[composeMaterialMotion<br/>固定种子 / 冲突过滤 / 生成短计划]:::engine
@@ -85,6 +87,7 @@ flowchart TD
         CFAIL[MotionFeedback<br/>编译失败，不启动播放器]:::failure
 
         NORMAL --> ID --> AXIS --> INTENSITY --> GRAPH --> MODE --> TIMING --> COMPILED
+        AMBIENT_SCHED --> LOCAL_INTENT --> ID
         MATERIAL_CATALOG --> MATERIAL_COMPOSER
         MATERIAL_RECIPE --> MATERIAL_COMPOSER --> MATERIAL_INTENT --> ID
         ID -.失败.-> CFAIL

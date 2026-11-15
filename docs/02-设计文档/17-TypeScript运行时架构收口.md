@@ -4,7 +4,7 @@
 
 TypeScript 是 AG99live 的持续开发实现。当前版本已经把 Live2D 业务调用、播放身份和连接就绪状态收口到明确的组合根与端口边界；C++ 仍作为冻结大版本后的高性能稳定实现，继续遵循独立的原生架构拆分。
 
-动作素材组合器属于 ModelEngine 侧的纯计划生成模块。`motion_material_catalog.v1` 由 Adapter 扫描并以紧凑只读索引同步到 `ModelSummary`，`materialMotionComposer.ts` 只读取素材索引、`parameter_action_library.v2` 和 `SemanticAxisProfile`，输出现有 `engine.motion_intent.v4` 的 `motion_steps`。组合器不持有 Vue 状态、不直接写入 Cubism 参数，也不创建第二个播放时钟。`AmbientActionDirector` 已经收口环境候选的准入和取消，自动来源调度、冷却和小模型选择仍属于后续边界。
+动作素材组合器属于 ModelEngine 侧的纯计划生成模块。`motion_material_catalog.v1` 由 Adapter 扫描并以紧凑只读索引同步到 `ModelSummary`，`materialMotionComposer.ts` 只读取素材索引、`parameter_action_library.v2` 和 `SemanticAxisProfile`，输出现有 `engine.motion_intent.v4` 的 `motion_steps`。组合器不持有 Vue 状态、不直接写入 Cubism 参数，也不创建第二个播放时钟。`AmbientActionDirector` 收口环境候选的准入和渐出释放，`AmbientActionScheduler` 负责低频唤醒、来源选择和冷却，`ActiveParameterMixer` 负责环境计划、思考随动和前景动作的参数级融合。Live2D runtime 以外部动作 ID 关联释放，以内部实例 ID 避免渐出期间的重入冲突，并限制释放重叠实例数量。
 
 ## 组合根与端口
 
@@ -42,7 +42,7 @@ Adapter 在 WebSocket 初始化期间先回放 canonical desktop settings，完�
 - `usePetDesktopRuntime.ts` 仍负责较多跨域观察器和桌面桥接回调，后续可提取 `DesktopRuntimeObservers`，不应重新引入全局 Live2D 访问。
 - SessionStore、Timeline Runtime 和 ModelEngine 的状态写入仍有跨层回调；下一阶段应先用显式 `SegmentRuntimeState` port 收口，再考虑更大范围 reducer 化。
 - Live2D 端口目前是 Window Adapter 的适配层，真实 Cubism/C++ 双实现等价仍需要模型、音频和设备上的运行验收。
-- 素材组合器和 `AmbientActionDirector` 准入基线已经进入源码，但尚未连接环境动作自动触发；真实模型上的配方选择、回中、重复度和打断行为仍需运行验收。
+- 素材组合器、`AmbientActionDirector` 准入基线和 `AmbientActionScheduler` 自动来源基线已经进入源码；真实模型上的配方选择、回中、重复度、打断行为和调度间隔仍需运行验收。
 
 ## 验证
 

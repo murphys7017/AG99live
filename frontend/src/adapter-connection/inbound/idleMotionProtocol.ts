@@ -23,6 +23,6 @@ export function parseIdleMotion(
   const steps = motion.payload.intent.motion_steps;
   if (motion.payload.kind !== "semantic_intent"
     || motion.payload.intent.motion_resource_id || motion.payload.intent.expression_resource_id
-    || !steps || steps.length !== 1) throw new Error("idle_motion_shape_invalid");
+    || !steps || steps.length < 1 || steps.length > 4) throw new Error("idle_motion_shape_invalid");
   return { messageId: envelope.message_id, motion: motion.payload, expiresAt: p.expires_at_epoch_ms };
 }

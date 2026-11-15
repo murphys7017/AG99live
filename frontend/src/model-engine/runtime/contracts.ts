@@ -123,7 +123,6 @@ export interface MotionStartDependencies {
     options: PlayMotionResourceOptions,
   ) => MotionPlaybackStartResult;
   getPlayerMessage?: () => string;
-  stopInteractionSway: () => void;
   getContinuityEnvelope?: () => ContinuityEnvelope | null;
   onPlanStarted: (event: ModelEnginePlanStartedEvent) => void;
   onMotionRejected: (event: {
@@ -173,10 +172,11 @@ export interface MotionRuntimeStateController {
 }
 
 export interface ModelEngineDependencies extends MotionStartDependencies {
-  startIdlePlan?: (plan: MotionPlanPayload) => boolean;
-  stopIdlePlan?: () => void;
+  startIdlePlan?: (plan: MotionPlanPayload, actionId?: string, source?: string) => boolean;
+  releaseIdlePlan?: (actionId?: string) => void;
   stopPlan: (reason?: string) => void;
   startInteractionSway: (input: InteractionSwayInput) => boolean;
+  stopInteractionSway: () => void;
   canStartSpeechOnlyMotion: (
     turnId: string | null,
     messageId: string,

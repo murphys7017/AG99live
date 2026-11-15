@@ -8,6 +8,7 @@ export interface AmbientActionContext {
   ambientMotionEnabled: boolean;
   audioPlaying: boolean;
   microphoneCapturing: boolean;
+  conversationPreparing: boolean;
   conversationActive: boolean;
   manualPreviewActive: boolean;
 }
@@ -30,6 +31,7 @@ export type AmbientActionRejectionReason =
   | "ambient_action_disabled"
   | "ambient_action_audio_active"
   | "ambient_action_microphone_active"
+  | "ambient_action_conversation_preparing"
   | "ambient_action_conversation_active"
   | "ambient_action_manual_preview_active"
   | "ambient_action_already_active"
@@ -50,8 +52,8 @@ export type AmbientActionDecision =
 
 export interface AmbientActionDirectorDependencies {
   getContext: () => AmbientActionContext;
-  start: (candidate: AmbientActionCandidate) => boolean;
-  stop: (reason: string) => void;
+  start: (candidate: AmbientActionCandidate) => { durationMs: number } | null;
+  release: (candidateId: string, reason: string) => void;
   now?: () => number;
   onDecision?: (decision: AmbientActionDecision) => void;
 }
@@ -59,8 +61,7 @@ export interface AmbientActionDirectorDependencies {
 export interface AmbientActionDirector {
   admit(candidate: AmbientActionCandidate): AmbientActionDecision;
   reconcile(): void;
-  cancel(reason: string): void;
-  getActiveCandidate(): Readonly<AmbientActionCandidate> | null;
+  releaseAll(reason: string): void;
   dispose(): void;
 }
 
@@ -73,13 +74,14 @@ const AMBIENT_ACTION_MIN_DURATION_MS = 300;
 const AMBIENT_ACTION_DEFAULT_DURATION_MS = 3_000;
 const AMBIENT_ACTION_MAX_DURATION_MS = 10_000;
 const AMBIENT_ACTION_RELEASE_GRACE_MS = 750;
+// Keep the contribution graph bounded while allowing one active plan per source.
+const MAX_ACTIVE_AMBIENT_ACTIONS = 3;
 
 export function createAmbientActionDirector(
   dependencies: AmbientActionDirectorDependencies,
 ): AmbientActionDirector {
   const now = dependencies.now ?? (() => Date.now());
-  let active: ActiveAmbientAction | null = null;
-  let lastContextAdmissible: boolean | null = null;
+  const active = new Map<string, ActiveAmbientAction>();
   let disposed = false;
 
   function emit(decision: AmbientActionDecision): AmbientActionDecision {
@@ -103,28 +105,48 @@ export function createAmbientActionDirector(
     });
   }
 
+  function releaseAll(reason: string): void {
+    const candidateIds = [...active.keys()];
+    active.clear();
+    for (const candidateId of candidateIds) {
+      try {
+        dependencies.release(candidateId, reason);
+      } catch (error) {
+        console.warn("[AmbientActionDirector] release observer failed.", {
+          candidateId,
+          reason,
+          error,
+        });
+      }
+    }
+  }
+
   function reconcile(): void {
     if (disposed) {
       return;
     }
 
-    const contextAdmissible = isContextAdmissible(dependencies.getContext());
-    if (!contextAdmissible) {
-      if (active || lastContextAdmissible !== false) {
-        dependencies.stop("ambient_context_changed");
+    const context = dependencies.getContext();
+    const contextReason = getContextRejectionReason(context);
+    // Conversation, audio, microphone, and preview states block new plans but
+    // leave existing contributions available for priority mixing and natural release.
+    if (shouldReleaseForContext(contextReason) && active.size > 0) {
+      releaseAll("ambient_context_changed");
+    }
+    const currentTime = now();
+    for (const [candidateId, entry] of active) {
+      if (currentTime < entry.releaseAt) {
+        continue;
       }
-      active = null;
-      lastContextAdmissible = false;
-      return;
-    }
-
-    lastContextAdmissible = true;
-    if (!active) {
-      return;
-    }
-
-    if (now() >= active.releaseAt) {
-      active = null;
+      active.delete(candidateId);
+      try {
+        dependencies.release(candidateId, "ambient_action_completed");
+      } catch (error) {
+        console.warn("[AmbientActionDirector] completion release failed.", {
+          candidateId,
+          error,
+        });
+      }
     }
   }
 
@@ -152,29 +174,43 @@ export function createAmbientActionDirector(
     if (!intent.motion_steps || intent.motion_steps.length < 1 || intent.motion_steps.length > 4) {
       return reject(candidate, "ambient_action_steps_invalid");
     }
-    if (active) {
-      return reject(candidate, "ambient_action_already_active");
-    }
 
     const contextReason = getContextRejectionReason(dependencies.getContext());
     if (contextReason) {
       return reject(candidate, contextReason);
     }
-    lastContextAdmissible = true;
+
+    if (
+      active.has(candidateId)
+      || active.size >= MAX_ACTIVE_AMBIENT_ACTIONS
+      || [...active.values()].some((entry) => entry.candidate.source === candidate.source)
+    ) {
+      return reject(candidate, "ambient_action_already_active");
+    }
 
     const normalizedCandidate: AmbientActionCandidate = {
       ...candidate,
       id: candidateId,
     };
-    if (!dependencies.start(normalizedCandidate)) {
+    let started: { durationMs: number } | null = null;
+    try {
+      started = dependencies.start(normalizedCandidate);
+    } catch (error) {
+      console.warn("[AmbientActionDirector] candidate start failed.", {
+        candidateId,
+        source: candidate.source,
+        error,
+      });
+    }
+    if (!started || !Number.isFinite(started.durationMs) || started.durationMs <= 0) {
       return reject(normalizedCandidate, "ambient_action_start_failed");
     }
 
-    const durationMs = clampDuration(intent.duration_hint_ms);
-    active = {
+    const durationMs = clampDuration(started.durationMs);
+    active.set(candidateId, {
       candidate: normalizedCandidate,
       releaseAt: now() + durationMs + AMBIENT_ACTION_RELEASE_GRACE_MS,
-    };
+    });
     return emit({
       accepted: true,
       candidateId,
@@ -182,38 +218,43 @@ export function createAmbientActionDirector(
     });
   }
 
-  function cancel(reason: string): void {
+  function releaseAllActiveActions(reason: string): void {
     if (disposed) {
       return;
     }
-    active = null;
-    lastContextAdmissible = null;
-    dependencies.stop(reason);
-  }
-
-  function getActiveCandidate(): Readonly<AmbientActionCandidate> | null {
-    return active?.candidate ?? null;
+    releaseAll(reason);
   }
 
   function dispose(): void {
     if (disposed) {
       return;
     }
-    cancel("ambient_director_disposed");
+    releaseAllActiveActions("ambient_director_disposed");
     disposed = true;
   }
 
   return {
     admit,
     reconcile,
-    cancel,
-    getActiveCandidate,
+    releaseAll: releaseAllActiveActions,
     dispose,
   };
 }
 
 function isContextAdmissible(context: AmbientActionContext): boolean {
   return getContextRejectionReason(context) === null;
+}
+
+function shouldReleaseForContext(
+  reason: AmbientActionRejectionReason | null,
+): boolean {
+  return reason === "ambient_action_disconnected"
+    || reason === "ambient_action_model_unavailable"
+    || reason === "ambient_action_disabled";
+}
+
+export function isAmbientActionContextAdmissible(context: AmbientActionContext): boolean {
+  return isContextAdmissible(context);
 }
 
 function getContextRejectionReason(
@@ -233,6 +274,9 @@ function getContextRejectionReason(
   }
   if (context.microphoneCapturing) {
     return "ambient_action_microphone_active";
+  }
+  if (context.conversationPreparing) {
+    return "ambient_action_conversation_preparing";
   }
   if (context.conversationActive) {
     return "ambient_action_conversation_active";
