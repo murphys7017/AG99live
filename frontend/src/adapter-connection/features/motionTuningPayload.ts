@@ -6,6 +6,7 @@ import type {
 } from "../../types/desktop.js";
 import type { MotionTuningSampleProtocolPayload } from "../../types/protocol.js";
 import { cloneCompiledSemanticMotion } from "../../model-engine/compiler/compiledSemanticMotionParser.js";
+import { MAX_MOTION_SEQUENCE_STEPS } from "../../model-engine/constants.js";
 import { SCHEMA_MOTION_TUNING_SAMPLE_V2 } from "../../types/protocolSchema.generated.js";
 import { isObject, isPresent, normalizeText } from "../../utils/guards.js";
 
@@ -244,7 +245,7 @@ export function normalizeMotionTuningEffectiveExamplePayload(
 function normalizeMotionTuningMotionSteps(
   value: unknown,
 ): DesktopMotionTuningEffectiveExample["output"]["motionSteps"] {
-  if (!Array.isArray(value) || value.length < 1 || value.length > 4) {
+  if (!Array.isArray(value) || value.length < 1 || value.length > MAX_MOTION_SEQUENCE_STEPS) {
     return undefined;
   }
   const steps = value.map((item) => {

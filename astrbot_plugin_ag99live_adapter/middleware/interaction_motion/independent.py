@@ -19,6 +19,7 @@ from ...motion.observation import (
     resolve_persona_core_turn_id,
     resolve_persona_delivery_mode,
 )
+from ...motion.motion_intent import MAX_MOTION_STEPS
 from ...motion.output_sanitizer import sanitize_assistant_output_text
 from ...motion.payload_validation import (
     normalize_motion_arguments_payload,
@@ -1564,10 +1565,10 @@ def _build_independent_system_prompt(
         "优先落实 actions，以 tendency 调整情绪强度，只描述角色本段应该呈现的动作。"
         "这是长期陪伴中的身体表达，不是独立的舞台表演；动作要自然亲近，并服务于同一人格的语气和关系。"
         "动作幅度跟随当前语气和 tendency：普通确认、轻声安慰或停顿思考保持克制；"
-        "所有动作都必须使用 motion_steps，按播放顺序表达 1 到 4 个关键姿态；"
+        f"所有动作都必须使用 motion_steps，按播放顺序表达 1 到 {MAX_MOTION_STEPS} 个关键姿态；"
         "单一稳定姿态也必须使用只包含一个步骤的 motion_steps。"
         "用户要求或当前 segment 的 speech 明确包含连续、重复、往返或有先后顺序的可见动作时，"
-        "使用 2 到 4 个步骤，不要压成一个平均姿态；"
+        f"通常使用 2 到 4 个步骤，只有持续时间较长且存在明确动作阶段时才使用 5 到 {MAX_MOTION_STEPS} 个步骤，不要压成一个平均姿态；"
         "例如连续点头、左右摇摆、先转向再回正。"
         "只有明确动作意图、强烈情绪或用户明确要求时才提高动作幅度。"
         "若当前内容没有清晰动作信号，可以保持中性或不控制无关轴；不要把每条回复都演成明显动作。"
@@ -1581,7 +1582,7 @@ def _build_independent_system_prompt(
         "axis_values 的值必须是具体数值，落在能力数据里对应轴的 value_range 内，"
         "可以是小数；不要输出 -4 到 4 的分级整数。中性使用该轴的 neutral。"
         "motion_steps 采用稀疏语义：每一步只写新开始控制或需要改变的轴，后续步骤可以新增或省略轴；"
-        "motion_steps 长度为 1 到 4，每个轴 ID 都必须来自能力数据，数值必须在 value_range 内。"
+        f"motion_steps 长度为 1 到 {MAX_MOTION_STEPS}，每个轴 ID 都必须来自能力数据，数值必须在 value_range 内。"
         "可选字段只有 duration_hint_ms、expression_resource_id、motion_resource_id；"
         "motion_resource_id 不得和 motion_steps 或 duration_hint_ms 同时使用；"
         "expression_resource_id 不得和 motion_resource_id 同时使用。"

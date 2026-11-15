@@ -11,6 +11,7 @@ from uuid import uuid4
 from astrbot.api import logger
 
 from ..motion.motion_intent import (
+    MAX_IDLE_MOTION_STEPS,
     MOTION_INTENT_V4_SCHEMA_VERSION,
     normalize_motion_intent_v4_payload,
     resolve_selected_semantic_axis_profile,
@@ -482,6 +483,8 @@ def _normalize_motion_action(
     }
     contract_payload["duration_hint_ms"] = action.get("duration_hint_ms", 4000)
     normalized = normalize_motion_intent_v4_payload(contract_payload)
+    if len(normalized.get("motion_steps") or []) > MAX_IDLE_MOTION_STEPS:
+        raise ValueError("motion_steps_count_invalid_for_idle")
     normalized["duration_hint_ms"] = max(3000, normalized["duration_hint_ms"])
     if not any(
         value != 0

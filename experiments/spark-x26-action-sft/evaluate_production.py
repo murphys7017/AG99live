@@ -71,7 +71,7 @@ def validate(value: Any, capability: dict[str, Any]) -> list[str]:
                 errors.append("axis_value_range")
 
     steps = value.get("motion_steps")
-    if not isinstance(steps, list) or not 1 <= len(steps) <= 4:
+    if not isinstance(steps, list) or not 1 <= len(steps) <= 8:
         errors.append("motion_steps_shape")
     else:
         for step in steps:

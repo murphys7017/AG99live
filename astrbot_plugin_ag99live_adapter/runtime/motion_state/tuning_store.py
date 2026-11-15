@@ -5,6 +5,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, Callable
 
+from ...motion.motion_intent import MAX_MOTION_STEPS
 from ...prompts.semantic_axis_prompt import profile_prompt_axes
 from ...protocol.schema_versions import (
     MOTION_TUNING_SAMPLE_SCHEMA_VERSION,
@@ -364,7 +365,7 @@ class MotionTuningStore:
         allowed_axis_ids: set[str],
     ) -> tuple[list[dict[str, Any]], str]:
         raw_steps = compiled_motion.get("steps")
-        if not isinstance(raw_steps, list) or not 1 <= len(raw_steps) <= 4:
+        if not isinstance(raw_steps, list) or not 1 <= len(raw_steps) <= MAX_MOTION_STEPS:
             return [], "sequence_steps_invalid"
         projected_steps: list[dict[str, Any]] = []
         for step in raw_steps:
@@ -653,7 +654,7 @@ class MotionTuningStore:
             self._validate_compiled_motion_axes(motion_payload.get("axes"))
         else:
             steps = motion_payload.get("steps")
-            if not isinstance(steps, list) or not 2 <= len(steps) <= 4:
+            if not isinstance(steps, list) or not 2 <= len(steps) <= MAX_MOTION_STEPS:
                 raise ValueError("motion_tuning_sample_compiled_semantic_motion_steps_invalid")
             for step in steps:
                 if not isinstance(step, dict):

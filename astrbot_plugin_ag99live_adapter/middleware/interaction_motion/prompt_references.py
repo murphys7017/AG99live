@@ -9,6 +9,7 @@ from ...motion.payload_validation import (
     describe_axis_descriptors,
     build_prompt_axis_lookup,
 )
+from ...motion.motion_intent import MAX_MOTION_STEPS
 from ...motion.resource_catalog import validate_motion_resource_id
 
 
@@ -120,7 +121,7 @@ def _project_reference_examples_for_prompt(
             projected_steps = [{"axis_values": axis_values, "duration_weight": 1}]
         elif has_motion_steps:
             motion_steps = output.get("motion_steps")
-            if isinstance(motion_steps, list) and 1 <= len(motion_steps) <= 4:
+            if isinstance(motion_steps, list) and 1 <= len(motion_steps) <= MAX_MOTION_STEPS:
                 for step in motion_steps:
                     if not isinstance(step, dict):
                         raise ValueError("motion_reference_example_step_invalid")

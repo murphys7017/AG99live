@@ -10,7 +10,9 @@ import {
 } from "../types/protocol.js";
 import {
   MAX_MOTION_DURATION_MS,
+  MAX_MOTION_SEQUENCE_STEPS,
   MIN_MOTION_DURATION_MS,
+  MIN_MOTION_SEQUENCE_STEPS,
 } from "./constants.js";
 import type {
   MotionPayloadNormalizationResult,
@@ -40,7 +42,11 @@ function normalizeAxisValuesV4(value: unknown): MotionAxisValueMap | null {
 }
 
 function normalizeMotionStepsV4(value: unknown): MotionAxisValueStep[] | null {
-  if (!Array.isArray(value) || value.length < 1 || value.length > 4) {
+  if (
+    !Array.isArray(value)
+    || value.length < MIN_MOTION_SEQUENCE_STEPS
+    || value.length > MAX_MOTION_SEQUENCE_STEPS
+  ) {
     return null;
   }
   const steps: MotionAxisValueStep[] = [];

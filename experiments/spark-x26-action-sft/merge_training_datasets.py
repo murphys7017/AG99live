@@ -43,7 +43,7 @@ def _validate_training_record(record: dict[str, Any], *, source: str, index: int
     if type(duration) is not int or not 320 <= duration <= 15000:
         raise ValueError(f"{source}[{index}] duration_hint_ms is invalid")
     steps = target["motion_steps"]
-    if not isinstance(steps, list) or not 1 <= len(steps) <= 4:
+    if not isinstance(steps, list) or not 1 <= len(steps) <= 8:
         raise ValueError(f"{source}[{index}] motion_steps length is invalid")
     for step in steps:
         if not isinstance(step, dict) or set(step) != {"axis_values", "duration_weight"}:

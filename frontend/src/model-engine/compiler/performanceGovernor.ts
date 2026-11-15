@@ -5,11 +5,12 @@ import type {
   PerformanceCompositionDirection,
 } from "../../types/compiledSemanticMotion.js";
 import type { MotionPlanPayload } from "../../types/protocol.js";
+import { MAX_MOTION_SEQUENCE_STEPS } from "../constants.js";
 
 const GOVERNOR_VERSION = "performance_governor.v1" as const;
 const ACTIVE_AXIS_THRESHOLD = 0.08;
 const DEFAULT_MAX_ACTIVE_AXES = 8;
-const DEFAULT_MAX_SEQUENCE_STEPS = 4;
+const DEFAULT_MAX_SEQUENCE_STEPS = MAX_MOTION_SEQUENCE_STEPS;
 const DEFAULT_REPEAT_DIRECTION_ATTENUATION = 0.68;
 const MIN_REPEAT_DIRECTION_ATTENUATION = 0.5;
 

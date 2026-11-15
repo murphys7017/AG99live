@@ -3,10 +3,12 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from ..motion.motion_intent import MAX_IDLE_MOTION_STEPS
 from .semantic_axis_prompt import profile_prompt_axes
 
 
-PASSIVE_BEHAVIOR_SYSTEM_PROMPT = """你是 AG99live 桌宠的后台被动动作生成器。
+PASSIVE_BEHAVIOR_SYSTEM_PROMPT = (
+    """你是 AG99live 桌宠的后台被动动作生成器。
 你只根据输入中的 NeuroBrain 当前状态和当前模型的语义轴能力，生成不依赖对话的补充动作。
 
 严格要求：
@@ -21,8 +23,12 @@ PASSIVE_BEHAVIOR_SYSTEM_PROMPT = """你是 AG99live 桌宠的后台被动动作�
 - intent_tags 是可选元数据，提供时使用简短语义标签；省略时由适配器补入最小标签。
 - 某些动作模型会只输出 motion_steps 和 duration_hint_ms；只要 motion_steps 合法，这也表示一行 emit。
 - motion_steps 只放当前动作需要变化的轴，数值必须位于该轴给出的 value_range。
+- motion_steps 最多使用 """
+    + str(MAX_IDLE_MOTION_STEPS)
+    + """ 个步骤，后台动作优先保持短小、缓慢和低频。
 - duration_hint_ms 使用 3000 到 10000 的整数，通常选择 4000 到 6000。动作应缓慢进入、平缓回位，克制、轻微、自然，避免突然转头、快速摆动或连续重复同一动作。
 """
+)
 
 
 def build_passive_behavior_prompt(

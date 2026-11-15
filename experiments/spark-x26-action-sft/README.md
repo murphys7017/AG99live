@@ -13,7 +13,7 @@
 }
 ```
 
-`motion_steps` 为 1–4 步，单一姿态也必须使用 1 步；轴值是能力数据中对应 `value_range` 内的具体数值；`duration_hint_ms` 必须存在且为 320–15000 的整数。训练输入会去掉 `motion_guidance` 和 `neurobrain_state`，保留当前用户、Persona segment 与有界纯文本历史。
+`motion_steps` 为 1–8 步，普通动作通常使用 2–4 步，持续时间较长且存在明确动作阶段时才使用 5–8 步；单一姿态也必须使用 1 步。轴值是能力数据中对应 `value_range` 内的具体数值；`duration_hint_ms` 必须存在且为 320–15000 的整数。训练输入会去掉 `motion_guidance` 和 `neurobrain_state`，保留当前用户、Persona segment 与有界纯文本历史。
 
 ## 准备环境
 

@@ -4,6 +4,7 @@ import type {
   DesktopMotionTuningSamplesStatus,
 } from "../../types/desktop.js";
 import { cloneCompiledSemanticMotion } from "../../model-engine/compiler/compiledSemanticMotionParser.js";
+import { MAX_MOTION_SEQUENCE_STEPS } from "../../model-engine/constants.js";
 import {
   cloneNumericRecord,
   isObject,
@@ -77,7 +78,7 @@ export function cloneMotionTuningEffectiveExample(
 function cloneMotionTuningMotionSteps(
   value: unknown,
 ): DesktopMotionTuningEffectiveExample["output"]["motionSteps"] {
-  if (!Array.isArray(value) || value.length < 1 || value.length > 4) {
+  if (!Array.isArray(value) || value.length < 1 || value.length > MAX_MOTION_SEQUENCE_STEPS) {
     return undefined;
   }
   const steps = value.map((item) => {

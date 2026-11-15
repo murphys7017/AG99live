@@ -48,11 +48,11 @@ AG99 Persona
 
 动作生成依赖 AG99 Persona 扩展或兼容的 Persona 生命周期能力；官方 Core 不支持这些扩展时，Adapter 仍可转发对话和 TTS，但不生成动作。
 
-参数动作统一使用稀疏 `motion_steps`，长度为 1 到 4；即使只有一个稳定姿态也必须使用一个 step。每个 step 只包含 `axis_values` 和 `duration_weight`，轴值是对应 `value_range` 内的具体数值。完整动作资源仍单独使用 `motion_resource_id`。未知轴、越界数值、空 step、形态冲突和无效资源会明确失败；Adapter 不补轴、不改名、不生成 neutral pose。
+参数动作统一使用稀疏 `motion_steps`，长度为 1 到 8；即使只有一个稳定姿态也必须使用一个 step。普通动作通常使用 2 到 4 步，持续时间较长且存在明确动作阶段时才使用 5 到 8 步。每个 step 只包含 `axis_values` 和 `duration_weight`，轴值是对应 `value_range` 内的具体数值。完整动作资源仍单独使用 `motion_resource_id`。未知轴、越界数值、空 step、形态冲突和无效资源会明确失败；Adapter 不补轴、不改名、不生成 neutral pose。
 
 ### 动作生成模式
 
-动作提示始终把参数动作写成 `motion_steps`；单一稳定姿态使用 1 个 step，用户要求或本段文本明确包含连续、重复、往返或有顺序的动作时，按播放顺序表达 2 到 4 个关键姿态变化，不按词语、停顿或语音节奏拆分。
+动作提示始终把参数动作写成 `motion_steps`；单一稳定姿态使用 1 个 step，用户要求或本段文本明确包含连续、重复、往返或有顺序的动作时，通常按播放顺序表达 2 到 4 个关键姿态变化。只有持续时间较长且存在明确动作阶段时才使用 5 到 8 步，不按词语、停顿或语音节奏拆分。
 
 `independent_motion.enabled` 默认关闭。关闭时由 Persona Effect 为 Persona 回复段生成动作。开启后停用 Persona Effect，改由单独选择的聊天 Provider 为每个非空 `segments[].speech` 分别生成动作，并绑定到同索引的 TTS/输出段。独立动作没有整回复生成模式；旧配置中的 `per_speech_segment` 会在启动时清除，不再决定动作粒度。
 

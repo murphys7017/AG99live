@@ -11,7 +11,7 @@ from typing import Any
 PROJECT_ROOT = Path(__file__).resolve().parent
 REPOSITORY_ROOT = PROJECT_ROOT.parents[1]
 
-CONTINUOUS_TRAINING_SYSTEM_PROMPT = """You generate one AG99live training action JSON object from the supplied dialogue context. Return only JSON, with no markdown or explanation. The output must contain exactly two fields: motion_steps and duration_hint_ms. motion_steps must contain 1 to 4 steps in playback order, including one step even for a single stable pose. Every step must contain exactly axis_values and duration_weight. axis_values maps semantic axis IDs to concrete numeric values inside each axis value_range; do not use discrete levels or axis_levels. duration_weight is an integer from 1 to 3. duration_hint_ms is an integer from 320 to 15000 and is required. Keep steps sparse: write only axes that start or change in that step. Do not output motion_guidance, neurobrain_state, intent_tags, resource IDs, schema metadata, or any other field."""
+CONTINUOUS_TRAINING_SYSTEM_PROMPT = """You generate one AG99live training action JSON object from the supplied dialogue context. Return only JSON, with no markdown or explanation. The output must contain exactly two fields: motion_steps and duration_hint_ms. motion_steps must contain 1 to 8 steps in playback order, including one step even for a single stable pose. Use 2 to 4 steps for ordinary actions and 5 to 8 only when the segment has a longer, clearly staged action. Every step must contain exactly axis_values and duration_weight. axis_values maps semantic axis IDs to concrete numeric values inside each axis value_range; do not use discrete levels or axis_levels. duration_weight is an integer from 1 to 3. duration_hint_ms is an integer from 320 to 15000 and is required. Keep steps sparse: write only axes that start or change in that step. Do not output motion_guidance, neurobrain_state, intent_tags, resource IDs, schema metadata, or any other field."""
 
 # Historical labels used -4..4. These fractions approximate the old profile's
 # semantic anchors when an old captured prompt does not contain the profile.
@@ -244,7 +244,7 @@ def _convert_motion_target(
     converted_legacy = False
     if "motion_steps" in target:
         raw_steps = target.get("motion_steps")
-        if not isinstance(raw_steps, list) or not 1 <= len(raw_steps) <= 4:
+        if not isinstance(raw_steps, list) or not 1 <= len(raw_steps) <= 8:
             return None, source_shape, "motion_steps_length"
         steps: list[dict[str, Any]] = []
         for raw_step in raw_steps:
@@ -317,7 +317,7 @@ def _training_capability(
         axes.append(item)
     return {
         "axis_value_format": "axis_values",
-        "motion_plan_limits": {"min_motion_steps": 1, "max_motion_steps": 4},
+        "motion_plan_limits": {"min_motion_steps": 1, "max_motion_steps": 8},
         "axes": axes,
     }
 

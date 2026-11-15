@@ -213,7 +213,7 @@ host.draw_and_present();
 | 4 | 阈值 `0.0001` | `semanticAxisRelationGraphStage.ts` ×3 | "受约束但相等"判定 |
 | 5 | 中立容差 | `0.001`(`axisResolver` 全中立门)、`0.0001`(关系图) | 两个不同容差,勿合并 |
 | 6 | `MIN/MAX/DEFAULT_MOTION_DURATION_MS` = 320 / 15000 / 1000 | `constants.ts` → `timing` | C++ 参数计划解析已使用 320/15000；原生 `motion_intent` 子集仍使用独立的 250/5000 窗口，必须作为能力边界固定并纳入样本 |
-| 7 | `MIN/MAX_PARAMETER_KEYFRAME_COUNT` = 2 / 4 | `constants.ts` → `parameterTrackGraphStage` | C++ 参数计划与 motion intent 子集的限制不同，需由黄金样本固定拒绝行为 |
+| 7 | `MIN/MAX_PARAMETER_KEYFRAME_COUNT` = 2 / 8 | `constants.ts` → `parameterTrackGraphStage` | TypeScript 前景动作序列最多 8 步；C++ 参数计划与 motion intent 子集的限制不同，需由黄金样本固定拒绝行为 |
 
 ### 4.3 十个 stage 契约
 

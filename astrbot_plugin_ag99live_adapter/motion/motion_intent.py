@@ -13,6 +13,11 @@ from .performance_curve import normalize_performance_curve_hint
 from .resource_catalog import ModelInfoRuntimeContext
 
 DEFAULT_MOTION_INTENT_DURATION_MS = 1000
+# Foreground semantic actions may use up to eight sparse steps. Idle and
+# pre-action paths apply their smaller limits at their own ingress points.
+MIN_MOTION_STEPS = 1
+MAX_MOTION_STEPS = 8
+MAX_IDLE_MOTION_STEPS = 4
 
 
 def resolve_selected_semantic_axis_profile(
@@ -255,7 +260,11 @@ def _normalize_motion_steps(value: Any) -> list[dict[str, Any]]:
 def normalize_motion_steps(
     value: Any,
 ) -> tuple[list[dict[str, Any]] | None, str]:
-    if not isinstance(value, list) or len(value) < 1 or len(value) > 4:
+    if (
+        not isinstance(value, list)
+        or len(value) < MIN_MOTION_STEPS
+        or len(value) > MAX_MOTION_STEPS
+    ):
         return None, "motion_steps_count_invalid"
     normalized_steps: list[dict[str, Any]] = []
     for index, step in enumerate(value):

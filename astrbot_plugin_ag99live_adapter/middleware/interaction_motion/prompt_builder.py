@@ -13,6 +13,7 @@ from .prompt_references import (
 )
 from ...motion.pose_reference import build_pose_reference_candidates
 from ...motion.resource_catalog import build_motion_resource_candidates
+from ...motion.motion_intent import MAX_MOTION_STEPS
 
 def _build_motion_static_capability_payload(runtime_state: Any) -> dict[str, Any]:
     capability_payload: dict[str, Any] = {}
@@ -67,7 +68,8 @@ def _build_motion_decision_contract_text(capability_payload: dict[str, Any]) -> 
         if has_motion_resources
         else ""
     ) + (
-        "所有动作都必须使用 motion_steps；单一稳定姿态使用 1 步，连续、重复、往返或有先后顺序的可见动作使用 2 到 4 步。"
+        f"所有动作都必须使用 motion_steps；单一稳定姿态使用 1 步，连续、重复、往返或有先后顺序的可见动作通常使用 2 到 4 步；"
+        f"只有持续时间较长且存在明确动作阶段时才使用 5 到 {MAX_MOTION_STEPS} 步。"
         "例如连续点头、左右摇摆、先转向再回正，按播放顺序表达关键姿态变化，不要压成一个平均姿态。"
         "不要按词语、停顿或语音节奏拆分 motion_steps。"
     )
@@ -116,7 +118,7 @@ def _build_motion_capability_prompt_payload(
             "0 表示中性；不需要控制的轴直接省略。不要输出 -4 到 4 的分级整数。"
         ),
         "motion_plan_limits": {
-            "max_motion_steps": 4,
+            "max_motion_steps": MAX_MOTION_STEPS,
             "axis_count_scope": "sparse controlled-axis union; no fixed total axis-count cap",
         },
     }

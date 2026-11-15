@@ -9,6 +9,10 @@ import type {
   PerformanceSpeechPhraseGroup,
 } from "./performanceScheduleTypes.js";
 import type { OutputSegmentSpeechCue } from "../../types/protocol.js";
+import {
+  MAX_MOTION_SEQUENCE_STEPS,
+  MIN_MOTION_SEQUENCE_STEPS,
+} from "../constants.js";
 
 interface PerformancePhraseDraft {
   sourcePhraseIndex: number;
@@ -113,8 +117,8 @@ export function compileSemanticStepSlots(
     return { ok: true, semanticSteps: [] };
   }
   if (
-    durationWeights.length < 1
-    || durationWeights.length > 4
+    durationWeights.length < MIN_MOTION_SEQUENCE_STEPS
+    || durationWeights.length > MAX_MOTION_SEQUENCE_STEPS
     || durationWeights.some(
       (weight) => !Number.isInteger(weight) || weight < 1 || weight > 3,
     )

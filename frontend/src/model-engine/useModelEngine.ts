@@ -49,6 +49,7 @@ import {
   mergeContinuityHandoff,
   type ContinuityEnvelope,
 } from "./compiler/performanceGovernor.js";
+import { MAX_IDLE_MOTION_STEPS } from "./constants.js";
 
 function buildSpeechCueKey(cues: readonly OutputSegmentSpeechCue[]): string {
   return cues
@@ -443,7 +444,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
       || Date.now() >= expiresAt || payload.kind !== "semantic_intent") return null;
     if (!payload.intent.motion_steps
       || payload.intent.motion_steps.length < 1
-      || payload.intent.motion_steps.length > 4
+      || payload.intent.motion_steps.length > MAX_IDLE_MOTION_STEPS
       || payload.intent.motion_resource_id
       || payload.intent.expression_resource_id) return null;
     const model = dependencies.getSelectedModel();

@@ -44,7 +44,7 @@ def _valid_motion_shape(value: dict[str, Any], capability: dict[str, Any]) -> bo
         if isinstance(axis, dict) and str(axis.get("id") or "").strip()
     }
     steps = value.get("motion_steps")
-    if not isinstance(steps, list) or not 1 <= len(steps) <= 4:
+    if not isinstance(steps, list) or not 1 <= len(steps) <= 8:
         return False
     for step in steps:
         if not isinstance(step, dict) or set(step) != {"axis_values", "duration_weight"}:

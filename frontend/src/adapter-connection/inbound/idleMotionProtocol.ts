@@ -1,5 +1,6 @@
 import type { MotionPayloadNormalizer, NormalizedMotionPayload } from "../../types/motion.js";
 import type { ProtocolEnvelope } from "../../types/protocol.js";
+import { MAX_IDLE_MOTION_STEPS } from "../../model-engine/constants.js";
 
 export interface IdleMotionEvent {
   messageId: string;
@@ -23,6 +24,8 @@ export function parseIdleMotion(
   const steps = motion.payload.intent.motion_steps;
   if (motion.payload.kind !== "semantic_intent"
     || motion.payload.intent.motion_resource_id || motion.payload.intent.expression_resource_id
-    || !steps || steps.length < 1 || steps.length > 4) throw new Error("idle_motion_shape_invalid");
+    || !steps || steps.length < 1 || steps.length > MAX_IDLE_MOTION_STEPS) {
+    throw new Error("idle_motion_shape_invalid");
+  }
   return { messageId: envelope.message_id, motion: motion.payload, expiresAt: p.expires_at_epoch_ms };
 }
