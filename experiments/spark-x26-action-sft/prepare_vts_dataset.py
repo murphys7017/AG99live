@@ -32,6 +32,7 @@ WHITESPACE_RE = re.compile(r"\s+")
 ALLOWED_ROLES = {"primary", "hint"}
 MIN_DURATION_MS = 320
 MAX_DURATION_MS = 15000
+MAX_MOTION_STEPS = 8
 
 
 @dataclass(frozen=True)
@@ -298,7 +299,7 @@ def _axis_capability(profile: dict[str, Any], bindings: list[AxisBinding]) -> di
         axes.append(item)
     return {
         "axis_value_format": "axis_values",
-        "motion_plan_limits": {"min_motion_steps": 1, "max_motion_steps": 8},
+        "motion_plan_limits": {"min_motion_steps": 1, "max_motion_steps": MAX_MOTION_STEPS},
         "axes": axes,
     }
 
@@ -363,7 +364,7 @@ def _make_motion_target(
     if not frames:
         return None, ["no_parameter_frames"]
     duration_ms = max(MIN_DURATION_MS, min(MAX_DURATION_MS, round((end_ns - start_ns) / 1_000_000)))
-    step_count = max(1, min(4, math.ceil(duration_ms / 1800)))
+    step_count = max(1, min(MAX_MOTION_STEPS, math.ceil(duration_ms / 1800)))
     span = max(1, end_ns - start_ns)
     windows: list[list[tuple[int, dict[str, float]]]] = [[] for _ in range(step_count)]
     for timestamp_ns, values in frames:
@@ -395,7 +396,7 @@ def _make_motion_target(
             previous_values.update(sparse)
     if not steps:
         return None, ["all_frames_neutral"]
-    return {"motion_steps": steps[:4], "duration_hint_ms": int(duration_ms)}, sorted(warnings)
+    return {"motion_steps": steps, "duration_hint_ms": int(duration_ms)}, sorted(warnings)
 
 
 def _load_motion_frames(
