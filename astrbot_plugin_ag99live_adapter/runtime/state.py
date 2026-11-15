@@ -1071,7 +1071,26 @@ def _same_material_catalog_identity(
         "profile_revision",
         "source_hash",
     )
-    return all(previous_catalog.get(key) == current_catalog.get(key) for key in catalog_keys)
+    if not all(previous_catalog.get(key) == current_catalog.get(key) for key in catalog_keys):
+        return False
+    previous_summary = previous_catalog.get("summary")
+    current_summary = current_catalog.get("summary")
+    if not isinstance(previous_summary, dict) or not isinstance(current_summary, dict):
+        return False
+    summary_keys = (
+        "fragment_count",
+        "atom_count",
+        "ambient_fragment_count",
+        "ambient_atom_count",
+        "compatible_fragment_count",
+        "compatible_atom_count",
+        "status_counts",
+        "reason_counts",
+    )
+    return all(
+        previous_summary.get(key) == current_summary.get(key)
+        for key in summary_keys
+    )
 
 
 def _project_frontend_model_info(model_info: dict[str, Any]) -> dict[str, Any]:

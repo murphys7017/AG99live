@@ -52,34 +52,34 @@ const LOCAL_ACTION_TEMPLATES: readonly LocalActionTemplate[] = [
     axisHints: ["yaw", "roll"],
     axisCount: 2,
     durationMs: 1_800,
-    intensityScale: 0.18,
+    intensityScale: 0.34,
   },
   {
     id: "small_glance",
     emotionLabel: "attentive",
-    semanticGroups: ["gaze"],
-    axisHints: ["x", "y", "gaze"],
-    axisCount: 1,
-    durationMs: 1_200,
-    intensityScale: 0.16,
+    semanticGroups: ["gaze", "head"],
+    axisHints: ["x", "y", "yaw", "gaze"],
+    axisCount: 2,
+    durationMs: 1_400,
+    intensityScale: 0.28,
   },
   {
     id: "gentle_nod",
     emotionLabel: "agreeable",
     semanticGroups: ["head", "body"],
     axisHints: ["pitch", "nod"],
-    axisCount: 1,
-    durationMs: 1_500,
-    intensityScale: 0.16,
+    axisCount: 2,
+    durationMs: 1_600,
+    intensityScale: 0.28,
   },
   {
     id: "breath_pause",
     emotionLabel: "resting",
     semanticGroups: ["breath", "body"],
     axisHints: ["breath", "roll"],
-    axisCount: 1,
-    durationMs: 2_100,
-    intensityScale: 0.12,
+    axisCount: 2,
+    durationMs: 2_200,
+    intensityScale: 0.22,
   },
 ];
 
@@ -93,7 +93,7 @@ const BLOCKED_RETRY_MS = 2_500;
 const ACTIVE_RETRY_MS = 1_000;
 const FAILED_RETRY_MS = 3_500;
 const ACTION_GAP_MS = 1_800;
-const LOCAL_MIN_INTERVAL_MS = 7_500;
+const LOCAL_MIN_INTERVAL_MS = 5_000;
 const MATERIAL_COOLDOWN_MS = 30_000;
 const MATERIAL_EVERY_ACCEPTED_ACTIONS = 3;
 
@@ -206,6 +206,13 @@ export function createAmbientActionScheduler(
 
     const decision = dependencies.director.admit(candidate);
     if (decision.accepted) {
+      console.info("[AmbientActionScheduler] idle action admitted.", {
+        candidateId: candidate.id,
+        source: candidate.source,
+        durationMs: candidate.motion.kind === "semantic_intent"
+          ? candidate.motion.intent.duration_hint_ms ?? null
+          : null,
+      });
       recordAccepted(candidate);
       scheduleAfter(getNextAttemptDelay(candidate));
       return;

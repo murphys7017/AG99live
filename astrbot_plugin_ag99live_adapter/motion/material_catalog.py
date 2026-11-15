@@ -165,13 +165,24 @@ def _build_fragment(
         }
     )
     channels = _text_list(motion.get("affects_channels") or motion.get("dominant_channels"))
+    ambient_channels = sorted(set(channels) & _AMBIENT_CHANNELS)
+    material_channels = ambient_channels or channels
     domains = _text_list(motion.get("dominant_domains"))
     status, status_reasons = _classify_material(
-        channels=channels,
+        channels=material_channels,
         intensity=str(motion.get("catalog_intensity") or "").strip(),
         category=str(motion.get("category") or "").strip(),
-        uses_expression=bool(motion.get("uses_expression_parameters")),
-        uses_physics=bool(motion.get("uses_physics_parameters")),
+        # A registered motion can contain expression, physics, and ambient
+        # parameters together. The atom catalog removes the non-ambient
+        # parameters later, so keep the ambient part available as a fragment.
+        uses_expression=(
+            bool(motion.get("uses_expression_parameters"))
+            and not ambient_channels
+        ),
+        uses_physics=(
+            bool(motion.get("uses_physics_parameters"))
+            and not ambient_channels
+        ),
         axis_ids=axis_ids,
         profile_ready=profile_ready,
         duration_ms=_duration_ms(motion.get("duration")),
@@ -189,7 +200,7 @@ def _build_fragment(
         "source_group": str(motion.get("group") or "").strip(),
         "source_category": str(motion.get("category") or "").strip(),
         "duration_ms": _duration_ms(motion.get("duration")),
-        "channels": channels,
+        "channels": material_channels,
         "domains": domains,
         "parameter_ids": parameter_ids,
         "axis_ids": axis_ids,
