@@ -50,7 +50,35 @@ export function createIncrementalOutputRuntime(options: {
   let releasedFrames = 0;
   let textObserved = false;
   const firstPcmMessages = new Set<string>();
+  // Text production remains immediate, while visible text waits for the
+  // matching segment's audio start or an explicit no-audio terminal state.
+  const releasedTextMessages = new Set<string>();
+  const watchedAudioStarts = new Set<string>();
   const resultCredits = new Map<string, { bytes: number; frames: number }>();
+
+  function messageKey(id: IncrementalIdentity): string {
+    return `${id.turnId}\u0000${id.messageId}`;
+  }
+
+  function releaseText(id: IncrementalIdentity): void {
+    const key = messageKey(id);
+    if (!isLive(id, false)) return;
+    if (releasedTextMessages.has(key)) return;
+    releasedTextMessages.add(key);
+    const text = options.getStore().getSession(id.turnId)?.segments
+      .get(id.messageId)?.text.content;
+    if (text) options.displayText(text, id.turnId);
+  }
+
+  function watchAudioStart(id: IncrementalIdentity, handle: PcmTimelineStream): void {
+    const key = messageKey(id);
+    if (watchedAudioStarts.has(key)) return;
+    watchedAudioStarts.add(key);
+    void handle.started.then(
+      () => releaseText(id),
+      () => releaseText(id),
+    );
+  }
 
   function isLive(id: IncrementalIdentity, production = true): boolean {
     const session = options.getStore().getSession(id.turnId);
@@ -94,6 +122,7 @@ export function createIncrementalOutputRuntime(options: {
             throw new Error("incremental_audio_crossed_open_segment");
           }
           await waitWithAbort(active.handle.append(job.offset, job.samples), signal);
+          watchAudioStart(job.id, active.handle);
           signal.throwIfAborted();
           releasedBytes += job.wireBytes;
           releasedFrames += 1;
@@ -161,7 +190,9 @@ export function createIncrementalOutputRuntime(options: {
       store.startIncrementalStream(resource, id);
     } else if (event.kind === "delta") {
       const text = store.appendIncrementalText(id, event.text);
-      options.displayText(text, id.turnId);
+      if (releasedTextMessages.has(messageKey(id))) {
+        options.displayText(text, id.turnId);
+      }
       if (!textObserved) {
         textObserved = true;
         reportLatencyStage("incremental_text_first", id.turnId, id.streamId, id.messageId);
@@ -173,9 +204,14 @@ export function createIncrementalOutputRuntime(options: {
       if (resource === "text") {
         const text = store.getSession(id.turnId)?.segments.get(id.messageId)?.text.content;
         if (text) options.recordText(text, id.turnId);
+        const audioStream = store.getSession(id.turnId)?.segments
+          .get(id.messageId)?.incremental?.streams.audio;
+        if (!audioStream || audioStream.status !== "open") releaseText(id);
       } else if (resource === "audio" && event.length! > 0) {
         enqueue({ kind: "end", id, length: event.length!,
           status: event.status === "completed" ? "completed" : "failed", reason: event.reason });
+      } else if (resource === "audio") {
+        releaseText(id);
       }
     }
   }
@@ -198,6 +234,8 @@ export function createIncrementalOutputRuntime(options: {
     receivedBytes = receivedFrames = releasedBytes = releasedFrames = 0;
     textObserved = false;
     firstPcmMessages.clear();
+    releasedTextMessages.clear();
+    watchedAudioStarts.clear();
     resultCredits.clear();
   }
   return { handleAudio, handleEvent, beginTurn, cancelTurn, reset };

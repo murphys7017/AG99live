@@ -1,6 +1,6 @@
 # OLV 增量输出事件与生命周期契约
 
-更新：2026-10-17。本文是当前事件、容量与生命周期契约；实施状态和职责见 [12 实施计划](12-OLV全生命周期流式实施计划.md)，跨仓库剩余工作见 Core 的 `docs/Yakumo/dev/structured-persona-output/14-olv-remaining-work-and-acceptance.md`。
+更新：2026-11-15。本文是当前事件、容量与生命周期契约；实施状态和职责见 [12 实施计划](12-OLV全生命周期流式实施计划.md)，跨仓库剩余工作见 Core 的 `docs/Yakumo/dev/structured-persona-output/14-olv-remaining-work-and-acceptance.md`。
 
 Core、Adapter 和桌面已接通增量文本/PCM/动作 update，并实现双端信用、动作特殊状态及期限；已有局部验证，真实 Provider、Electron 播放和 Live2D 尚待联合验收。沿用现有 Turn/时间线，能力由既有 OLV 设置门控，增量输出尚未登记为独立公开能力。动作小记录/revision/anchor/融合仍是后续设计。
 
@@ -70,7 +70,7 @@ Core 现提供 `PreOutputProcessor.create_incremental_text_preparer(event)` 预�
 
 纯动作交付事实由 writer 的 `delivered_motion_segment_indexes` 或旧分段回退路径的已发送 payload 记录：只有非空动作 payload 经绑定输出队列成功接受后才记录该段，重复 update 不重复计段。空占位、无结果、failed/cancelled end 和动作任务完成本身都不计成功下发。Core 据此记录输出和收口，OLV 流式请求可接受至少含一项动作的无语音回复；无文字也无动作仍拒绝。已发布但最终没有文字或动作下发的流会关闭 `synth_finished` 并作为失败收口，不记为静默成功。纯动作回合关闭输出队列后等待现有 `control.playback_finished` / `control.turn_finished` 终态，播放失败会使 Core 回合失败，30 秒无回执则中断并失败；带文字回合仍把动作作为可选模态，不等待其播放。历史保留动作交付元数据，不伪造语音文本。需要同步部署配套 Core 与 Adapter。
 
-桌面正式入站已接收文本 start/delta/end。SessionStore 注册增量段，保存完整前缀和独立流状态，delta 原样显示，end 校验 Unicode 码点长度并记录该段历史；生成终态与音频播放终态分别保存。同一 Turn 不混用完整 output.segment 与增量交付，旧完整段执行器不再释放增量段。每 Turn 最多 256 段、文本最多 262144 个 UTF-16 单元，每段最多 65536 个 UTF-16 单元；这些限制不改变 text_length 的码点计数。Core 的增量预处理已接入 producer，桌面身份/结构校验仍不能代替它。
+桌面正式入站已接收文本 start/delta/end。SessionStore 注册增量段，保存完整前缀和独立流状态，delta 原样保存并在对应段音频真正起播后释放到可见字幕，end 校验 Unicode 码点长度并记录该段历史；无音频、空音频或音频失败时，在音频流结束后释放已保存文本。生成终态与音频播放终态分别保存。同一 Turn 不混用完整 output.segment 与增量交付，旧完整段执行器不再释放增量段。每 Turn 最多 256 段、文本最多 262144 个 UTF-16 单元，每段最多 65536 个 UTF-16 单元；这些限制不改变 text_length 的码点计数。Core 的增量预处理已接入 producer，桌面身份/结构校验仍不能代替它。
 
 当前 Persona segment_start 仍包含 actions/tendency；轻量段头先发身份、动作/情绪后置是待评估的协议优化，不能从文本 start 事件推断已经实现。turn_action 在可见回复前完成准入；最终段及流结束校验继续执行，失败保留已交付前缀并显式报错。
 

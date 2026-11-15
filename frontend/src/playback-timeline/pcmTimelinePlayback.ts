@@ -5,6 +5,8 @@ import type { SpeechOutputRuntime } from "./speechOutputRuntime.js";
 import { reportLatencyStage } from "../adapter-connection/runtime/latency.js";
 
 export interface PcmTimelineStream {
+  /** Resolves after the segment has crossed the shared audio start gate. */
+  readonly started: Promise<void>;
   readonly completed: Promise<void>;
   readonly readyForNext: Promise<void>;
   append(sampleOffset: number, samples: Float32Array): Promise<void>;
@@ -167,6 +169,7 @@ export function createPcmTimelinePlayback<TMotion>(options: {
       throw error;
     }
     return {
+      started,
       completed,
       get readyForNext() {
         // Read after finish(): failed production must drain and reject, never

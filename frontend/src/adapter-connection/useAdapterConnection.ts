@@ -504,7 +504,7 @@ export function createAdapterConnection(
       state.lastAssistantText = text;
       state.assistantTextDeliveryTurnId = turnId;
     },
-    recordIncrementalText: (text, turnId) => updateAssistantText(text, turnId),
+    recordIncrementalText: (text, turnId) => recordAssistantText(text, turnId),
     sendAudioCredit: (id, releasedBytes, releasedFrames) => {
       if (!outboundClient.send(OUTBOUND_MESSAGE_TYPES.CONTROL_AUDIO_CREDIT, {
         schema_version: "olv.audio_credit.v1", core_turn_id: id.coreTurnId,
@@ -994,9 +994,7 @@ export function createAdapterConnection(
     }
   }
 
-  function updateAssistantText(text: string, turnId: string | null): void {
-    state.lastAssistantText = text;
-
+  function recordAssistantText(text: string, turnId: string | null): void {
     if (!turnId) {
       pushHistory("assistant", text);
       return;
@@ -1017,6 +1015,11 @@ export function createAdapterConnection(
     }
 
     pushHistory("assistant", text);
+  }
+
+  function updateAssistantText(text: string, turnId: string | null): void {
+    state.lastAssistantText = text;
+    recordAssistantText(text, turnId);
   }
 
   const textSegmentSink = createTextSegmentSink({
