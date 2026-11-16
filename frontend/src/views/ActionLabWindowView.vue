@@ -3,6 +3,7 @@ import { computed, onMounted } from "vue";
 import BaseActionPreviewPanel from "../components/BaseActionPreviewPanel.vue";
 import DesktopWindowPanel from "../components/DesktopWindowPanel.vue";
 import MotionTuningPanel from "../components/MotionTuningPanel.vue";
+import ReactionActionCatalogPanel from "../components/ReactionActionCatalogPanel.vue";
 import { useDesktopBridge } from "../desktop-bridge/useDesktopBridge";
 import type {
   DesktopBaseActionPreview,
@@ -103,6 +104,7 @@ onMounted(() => {
     <p v-if="motionPreviewStatusText" class="history-empty">
       {{ motionPreviewStatusText }}
     </p>
+    <ReactionActionCatalogPanel />
     <section class="settings-grid">
       <MotionTuningPanel
         :semantic-profile="semanticProfile"

@@ -15,25 +15,31 @@ export type MotionPlaybackStartResult =
   | { status: "rejected"; reason: string }
   | { status: "started"; runId: string };
 
+export interface InteractionParameterBinding {
+  /** Optional semantic axis owner for mixed gaze inputs. */
+  axisId?: string;
+  /** Scales the target excursion around the binding's neutral value. */
+  targetRatioScale?: number;
+  parameterId: string;
+  neutralValue: number;
+  negativeValue: number;
+  positiveValue: number;
+  weight: number;
+  maxVelocity: number;
+  maxAcceleration: number;
+  response: { kind: "bounded" } | {
+    kind: "spring";
+    frequency_hz: number;
+    damping_ratio: number;
+  };
+}
+
 export interface InteractionSwayInput {
   axisId: string;
   cycleMs: number;
   attackMs: number;
   releaseMs: number;
-  bindings: Array<{
-    parameterId: string;
-    neutralValue: number;
-    negativeValue: number;
-    positiveValue: number;
-    weight: number;
-    maxVelocity: number;
-    maxAcceleration: number;
-    response: { kind: "bounded" } | {
-      kind: "spring";
-      frequency_hz: number;
-      damping_ratio: number;
-    };
-  }>;
+  bindings: InteractionParameterBinding[];
 }
 
 export interface InteractionGazeInput {

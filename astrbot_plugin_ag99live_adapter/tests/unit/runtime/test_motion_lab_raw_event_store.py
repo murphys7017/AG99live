@@ -224,6 +224,44 @@ def test_motion_lab_store_projects_transform_trace_and_timeline_outcome(
     assert schema_version == ("3",)
 
 
+def test_motion_lab_store_lists_recent_events_with_decoded_payloads(
+    install_fake_astrbot,
+    tmp_path,
+) -> None:
+    install_fake_astrbot()
+    from astrbot_plugin_ag99live_adapter.runtime.motion_lab.raw_event_store import (
+        MotionLabRawEventStore,
+    )
+
+    store = MotionLabRawEventStore(tmp_path / "motion_lab.sqlite3")
+    store.insert_events(
+        [
+            {
+                "id": "event-old",
+                "created_at": "2026-06-28T00:00:00+00:00",
+                "event_type": "motion.playback_started",
+                "turn_id": "turn-1",
+                "message_id": "segment-1",
+                "raw": {"runId": "run-old"},
+            },
+            {
+                "id": "event-new",
+                "created_at": "2026-06-28T00:00:01+00:00",
+                "event_type": "motion.playback_completed",
+                "turn_id": "turn-1",
+                "message_id": "segment-1",
+                "raw": {"status": "completed"},
+            },
+        ]
+    )
+
+    events = store.list_events(limit=1)
+
+    assert len(events) == 1
+    assert events[0]["id"] == "event-new"
+    assert events[0]["raw"] == {"status": "completed"}
+
+
 def test_motion_lab_schema_upgrade_discards_legacy_raw_event_rows(
     install_fake_astrbot,
     tmp_path,

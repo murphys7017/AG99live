@@ -405,7 +405,7 @@ CONFIG_SCHEMA: tuple[ConfigSection, ...] = (
                 key="cooldown_ms",
                 kind="int",
                 label="动作冷却（毫秒）",
-                description="被动动作输出后至少等待的时间；活动播放 Turn 仍会额外阻止新请求。",
+                description="每次后台动作决策（包括 none）后至少等待的时间；活动播放 Turn 仍会额外阻止新请求。",
                 default=3000,
                 minimum=0,
                 maximum=120000,
@@ -1151,6 +1151,7 @@ def register_web_control_page(context: Any, plugin: Any) -> bool:
         ("/history/create", api.create_history, ["POST"], "Create an AG99live conversation"),
         ("/history/load", api.load_history, ["POST"], "Select an AG99live conversation"),
         ("/history/delete", api.delete_history, ["POST"], "Delete an AG99live conversation"),
+        ("/motion-lab/events", api.get_motion_lab_events, ["GET"], "Read Motion Lab events"),
         ("/profile", api.get_profile, ["GET"], "Read a Live2D semantic profile"),
         ("/profile", api.save_profile, ["POST"], "Save a Live2D semantic profile"),
         ("/samples", api.get_samples, ["GET"], "Read motion tuning samples"),
@@ -1268,6 +1269,25 @@ class WebControlPageApi:
 
     async def delete_history(self):
         return await self._mutate_history("delete")
+
+    async def get_motion_lab_events(self):
+        """Read recent live and persisted motion events for the control page."""
+        if response := _require_dashboard_user():
+            return response
+        platform, error = _resolve_platform_from_query()
+        if error:
+            return error
+        try:
+            limit = max(1, min(int(request.args.get("limit", 200)), 500))
+        except (TypeError, ValueError):
+            limit = 200
+        recorder = getattr(platform.runtime_state, "motion_lab_recorder", None)
+        events = recorder.list_events(limit=limit) if recorder is not None else []
+        return jsonify({
+            "platform_id": platform.platform_id,
+            "connected": bool(platform.transport._ws_client is not None),
+            "events": events,
+        })
 
     async def _mutate_history(self, action: Literal["create", "load", "delete"]):
         if response := _require_dashboard_user():

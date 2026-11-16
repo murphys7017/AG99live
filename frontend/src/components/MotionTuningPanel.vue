@@ -30,7 +30,7 @@ import type {
   SemanticAxisProfile,
 } from "../types/semantic-axis-profile";
 
-const RECENT_RECORD_LIMIT = 5;
+const RECENT_RECORD_LIMIT = 20;
 const props = defineProps<{
   semanticProfile: SemanticAxisProfile | null;
   motionPlaybackRecords: readonly DesktopMotionPlaybackRecord[];
@@ -1004,7 +1004,7 @@ function normalizeEmotionKey(value: string): string {
     <div class="settings-card__header">
       <div>
         <p class="settings-card__eyebrow">历史动作微调</p>
-        <h2>最近 5 次大模型控制参数样本</h2>
+        <h2>最近 20 次动作控制参数样本</h2>
       </div>
       <span class="settings-card__badge">
         {{ recentSemanticRecords.length }} recent / {{ llmReferenceSampleCount }} LLM refs

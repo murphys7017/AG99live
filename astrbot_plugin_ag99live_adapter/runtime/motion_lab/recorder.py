@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections import deque
 import time
 from datetime import datetime, timezone
 from math import isfinite
@@ -37,6 +38,7 @@ class MotionLabRecorder:
         self._failure_reason = ""
         self._queue_full_count = 0
         self._last_queue_full_log_at = 0.0
+        self._recent_events: deque[dict[str, Any]] = deque(maxlen=256)
 
     @property
     def queue_full_count(self) -> int:
@@ -86,7 +88,30 @@ class MotionLabRecorder:
                     snapshot.get("event_type") or "motion.unknown",
                 )
             return False
+        self._recent_events.appendleft(snapshot)
         return True
+
+    def list_events(self, *, limit: int = 200) -> list[dict[str, Any]]:
+        """Return persisted events plus the newest events still awaiting a write."""
+        normalized_limit = max(1, min(int(limit), 500))
+        persisted = self._store.list_events(limit=normalized_limit)
+        merged = {
+            str(event.get("id") or ""): event
+            for event in persisted
+            if str(event.get("id") or "").strip()
+        }
+        for event in self._recent_events:
+            event_id = str(event.get("id") or "").strip()
+            if event_id:
+                merged.setdefault(event_id, event)
+        return sorted(
+            merged.values(),
+            key=lambda event: (
+                str(event.get("created_at") or ""),
+                str(event.get("id") or ""),
+            ),
+            reverse=True,
+        )[:normalized_limit]
 
     def get_turn_context(
         self,

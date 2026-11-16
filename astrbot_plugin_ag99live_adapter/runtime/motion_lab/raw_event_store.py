@@ -137,6 +137,28 @@ class MotionLabRawEventStore:
             "assistant_text": assistant_text,
         }
 
+    def list_events(self, *, limit: int = 200) -> list[dict[str, Any]]:
+        """Return recent raw events in newest-first order for the control page."""
+        normalized_limit = max(1, min(int(limit), 500))
+        self._ensure_initialized()
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, created_at, event_type, conversation_uid,
+                       history_uid, turn_id, frontend_turn_id, message_id,
+                       source_route, phase, model_name, profile_id,
+                       profile_revision, run_id, user_text, assistant_text,
+                       payload_kind, raw_json, transform_trace_json,
+                       timeline_outcome_json
+                FROM motion_lab_raw_events
+                ORDER BY created_at DESC, id DESC
+                LIMIT ?
+                """,
+                (normalized_limit,),
+            ).fetchall()
+
+        return [_event_from_row(row) for row in rows]
+
     def _ensure_initialized(self) -> None:
         if self._initialized:
             return
@@ -256,6 +278,63 @@ class MotionLabRawEventStore:
 
 def _json_dumps(value: Any) -> str:
     return json.dumps(value if value is not None else {}, ensure_ascii=False, default=str)
+
+
+def _event_from_row(row: tuple[Any, ...]) -> dict[str, Any]:
+    (
+        event_id,
+        created_at,
+        event_type,
+        conversation_uid,
+        history_uid,
+        turn_id,
+        frontend_turn_id,
+        message_id,
+        source_route,
+        phase,
+        model_name,
+        profile_id,
+        profile_revision,
+        run_id,
+        user_text,
+        assistant_text,
+        payload_kind,
+        raw_json,
+        transform_trace_json,
+        timeline_outcome_json,
+    ) = row
+    return {
+        "id": str(event_id or ""),
+        "created_at": str(created_at or ""),
+        "event_type": str(event_type or ""),
+        "conversation_uid": conversation_uid,
+        "history_uid": history_uid,
+        "turn_id": turn_id,
+        "frontend_turn_id": frontend_turn_id,
+        "message_id": message_id,
+        "source_route": source_route,
+        "phase": phase,
+        "model_name": model_name,
+        "profile_id": profile_id,
+        "profile_revision": profile_revision,
+        "run_id": run_id,
+        "user_text": user_text,
+        "assistant_text": assistant_text,
+        "payload_kind": payload_kind,
+        "raw": _json_loads(raw_json),
+        "transform_trace": _json_loads(transform_trace_json),
+        "timeline_outcome": _json_loads(timeline_outcome_json),
+    }
+
+
+def _json_loads(value: Any) -> dict[str, Any]:
+    if not isinstance(value, str) or not value.strip():
+        return {}
+    try:
+        parsed = json.loads(value)
+    except (TypeError, ValueError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
 
 
 def _require_current_event_columns(conn: sqlite3.Connection) -> None:

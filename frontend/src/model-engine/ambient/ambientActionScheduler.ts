@@ -16,6 +16,10 @@ import {
   type AmbientActionContext,
   type AmbientActionDirector,
 } from "./ambientActionDirector.js";
+import {
+  REACTION_ACTION_CATALOG,
+  type ReactionActionTemplate,
+} from "./reactionActionCatalog.js";
 
 type AmbientScheduleHandle = ReturnType<typeof setTimeout>;
 
@@ -34,54 +38,9 @@ export interface AmbientActionScheduler {
   dispose(): void;
 }
 
-interface LocalActionTemplate {
-  id: string;
-  emotionLabel: string;
-  semanticGroups: readonly string[];
-  axisHints: readonly string[];
-  axisCount: number;
-  durationMs: number;
-  intensityScale: number;
-}
-
-const LOCAL_ACTION_TEMPLATES: readonly LocalActionTemplate[] = [
-  {
-    id: "soft_sway",
-    emotionLabel: "calm",
-    semanticGroups: ["head", "body"],
-    axisHints: ["yaw", "roll"],
-    axisCount: 2,
-    durationMs: 1_800,
-    intensityScale: 0.34,
-  },
-  {
-    id: "small_glance",
-    emotionLabel: "attentive",
-    semanticGroups: ["gaze", "head"],
-    axisHints: ["x", "y", "yaw", "gaze"],
-    axisCount: 2,
-    durationMs: 1_400,
-    intensityScale: 0.28,
-  },
-  {
-    id: "gentle_nod",
-    emotionLabel: "agreeable",
-    semanticGroups: ["head", "body"],
-    axisHints: ["pitch", "nod"],
-    axisCount: 2,
-    durationMs: 1_600,
-    intensityScale: 0.28,
-  },
-  {
-    id: "breath_pause",
-    emotionLabel: "resting",
-    semanticGroups: ["breath", "body"],
-    axisHints: ["breath", "roll"],
-    axisCount: 2,
-    durationMs: 2_200,
-    intensityScale: 0.22,
-  },
-];
+const LOCAL_ACTION_TEMPLATES: readonly ReactionActionTemplate[] =
+  REACTION_ACTION_CATALOG.filter((template) =>
+    template.triggers.includes("idle") || template.triggers.includes("waiting"));
 
 const MATERIAL_RECIPE_IDS = Object.keys(
   MATERIAL_COMPOSITION_RECIPES,
@@ -373,7 +332,7 @@ export function createAmbientActionScheduler(
 
 function selectLocalAxes(
   axes: readonly SemanticAxisDefinition[],
-  template: LocalActionTemplate,
+  template: ReactionActionTemplate,
   sequence: number,
 ): SemanticAxisDefinition[] {
   const usable = axes

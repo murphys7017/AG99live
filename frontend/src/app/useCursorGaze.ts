@@ -87,8 +87,9 @@ export function useCursorGaze(
       if (moved) {
         candidate = target;
         candidateSinceMs = now;
-        // Do not keep staring at a departed cursor while the next dwell is undecided.
-        runtime.updateInteractionGaze(0);
+        // Keep the current gaze while the cursor settles on its next target.
+        // The response dynamics will carry the eyes and head to the new point
+        // after the dwell completes.
         return;
       }
       candidate = target;

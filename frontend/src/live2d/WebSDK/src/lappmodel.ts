@@ -2189,18 +2189,26 @@ export class LAppModel extends CubismUserModel {
     const bindings: ActiveInteractionSwayState["bindings"] = [];
     const seenParameterIndices = new Set<number>();
     for (const binding of input.bindings) {
+      const axisId = binding.axisId?.trim() || input.axisId;
+      const targetRatioScale = Number.isFinite(binding.targetRatioScale)
+        ? Math.max(0, Math.min(1, binding.targetRatioScale as number))
+        : 1;
       const parameterIdRaw = binding.parameterId.trim();
       const parameterIndex = this.resolveWritableParameterIndex(parameterIdRaw);
       if (parameterIndex === null || seenParameterIndices.has(parameterIndex)) {
         return [];
       }
+      const negativeValue = binding.neutralValue
+        + (binding.negativeValue - binding.neutralValue) * targetRatioScale;
+      const positiveValue = binding.neutralValue
+        + (binding.positiveValue - binding.neutralValue) * targetRatioScale;
       const minValue = this._model.getParameterMinimumValue(parameterIndex);
       const maxValue = this._model.getParameterMaximumValue(parameterIndex);
       if (
         !Number.isFinite(minValue)
         || !Number.isFinite(maxValue)
         || minValue > maxValue
-        || ![binding.neutralValue, binding.negativeValue, binding.positiveValue].every(
+        || ![binding.neutralValue, negativeValue, positiveValue].every(
           (value) => Number.isFinite(value) && value >= minValue && value <= maxValue,
         )
       ) {
@@ -2208,12 +2216,12 @@ export class LAppModel extends CubismUserModel {
       }
       seenParameterIndices.add(parameterIndex);
       bindings.push({
-        axisId: input.axisId,
+        axisId,
         parameterIdRaw,
         parameterIndex,
         neutralValue: binding.neutralValue,
-        negativeValue: binding.negativeValue,
-        positiveValue: binding.positiveValue,
+        negativeValue,
+        positiveValue,
         weight: binding.weight,
         presentation: {
           parameterId: parameterIdRaw,

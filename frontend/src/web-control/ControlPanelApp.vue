@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import MotionLabActivityPanel from "../components/MotionLabActivityPanel.vue";
 import MotionTuningPanel from "../components/MotionTuningPanel.vue";
+import ReactionActionCatalogPanel from "../components/ReactionActionCatalogPanel.vue";
 import SemanticAxisProfileEditor from "../components/SemanticAxisProfileEditor.vue";
 import SettingsForm from "./SettingsForm.vue";
 import DesktopSettingsPanel from "./DesktopSettingsPanel.vue";
@@ -27,6 +29,11 @@ import type {
   DesktopMotionTuningSamplesStatus,
   DesktopSemanticAxisProfileSaveResult,
 } from "../types/desktop";
+import {
+  extractMotionPlaybackRecords,
+  type MotionLabEventsResponse,
+  type MotionLabRawEvent,
+} from "../types/motionLab.js";
 import type { SemanticAxisProfile } from "../types/semantic-axis-profile";
 import type { CompiledSemanticMotion } from "../types/compiledSemanticMotion";
 import type { SemanticParameterPlan } from "../types/protocol";
@@ -68,6 +75,9 @@ const selectedModelName = ref("");
 const profile = ref<SemanticAxisProfile | null>(null);
 const profileSaveResult = ref<DesktopSemanticAxisProfileSaveResult | null>(null);
 const motionTuningSamples = ref<DesktopMotionTuningSample[]>([]);
+const motionLabEvents = ref<MotionLabRawEvent[]>([]);
+const motionLabStatus = ref("");
+const motionPlaybackRecords = computed(() => extractMotionPlaybackRecords(motionLabEvents.value));
 const motionTuningStatus = ref<DesktopMotionTuningSamplesStatus>({
   rootError: "",
   loadError: "",
@@ -93,6 +103,7 @@ const desktopError = ref("");
 let overviewLoadRevision = 0;
 let profileLoadRevision = 0;
 let samplesLoadRevision = 0;
+let motionLabLoadRevision = 0;
 const desktopRefreshes = new Map<string, Promise<void>>();
 const desktopWriteQueues = new Map<string, Promise<void>>();
 const {
@@ -502,22 +513,46 @@ function startDesktopPolling(): void {
 function onVisibilityChange(): void {
   if (document.hidden) {
     stopDesktopPolling();
+    stopMotionLabPolling();
     return;
   }
   if (section.value === "settings") {
     void listDesktopSettings();
     startDesktopPolling();
   }
+  if (section.value === "action-lab") startMotionLabPolling();
 }
 
 watch(section, () => {
   if (section.value === "settings") void listDesktopSettings();
   startDesktopPolling();
+  if (section.value === "action-lab") startMotionLabPolling();
+  else stopMotionLabPolling();
 });
 
 onBeforeUnmount(stopDesktopPolling);
 onMounted(() => document.addEventListener("visibilitychange", onVisibilityChange));
 onBeforeUnmount(() => document.removeEventListener("visibilitychange", onVisibilityChange));
+
+let motionLabPollTimer: ReturnType<typeof setInterval> | null = null;
+
+function stopMotionLabPolling(): void {
+  if (motionLabPollTimer !== null) {
+    clearInterval(motionLabPollTimer);
+    motionLabPollTimer = null;
+  }
+}
+
+function startMotionLabPolling(): void {
+  stopMotionLabPolling();
+  if (section.value !== "action-lab" || document.hidden) return;
+  void loadMotionLabEvents();
+  motionLabPollTimer = setInterval(() => {
+    if (!document.hidden) void loadMotionLabEvents();
+  }, 1500);
+}
+
+onBeforeUnmount(stopMotionLabPolling);
 
 async function loadProfile(): Promise<void> {
   const platformId = selectedPlatformId.value;
@@ -607,6 +642,26 @@ async function loadSamples(): Promise<void> {
   }
 }
 
+async function loadMotionLabEvents(): Promise<void> {
+  const platformId = selectedPlatformId.value;
+  if (!platformId) return;
+  const revision = ++motionLabLoadRevision;
+  try {
+    const response = await apiGet<MotionLabEventsResponse>("control/motion-lab/events", {
+      platform_id: platformId,
+      limit: 160,
+    });
+    if (revision !== motionLabLoadRevision || selectedPlatformId.value !== platformId) return;
+    motionLabEvents.value = Array.isArray(response.events) ? response.events : [];
+    motionLabStatus.value = response.connected
+      ? "桌面端已连接，事件流每 1.5 秒刷新。"
+      : "桌面端当前未连接，显示最近一次保存的事件。";
+  } catch (error) {
+    if (revision !== motionLabLoadRevision || selectedPlatformId.value !== platformId) return;
+    motionLabStatus.value = `动作事件读取失败：${error instanceof Error ? error.message : String(error)}`;
+  }
+}
+
 async function saveSample(sample: DesktopMotionTuningSample): Promise<void> {
   const platformId = selectedPlatformId.value;
   if (!platformId) return;
@@ -667,6 +722,8 @@ watch(selectedPlatformId, async (next, previous) => {
   profile.value = null;
   profileSaveResult.value = null;
   motionTuningSamples.value = [];
+  motionLabEvents.value = [];
+  motionLabStatus.value = "";
   motionTuningStatus.value = {
     rootError: "",
     loadError: "",
@@ -675,7 +732,12 @@ watch(selectedPlatformId, async (next, previous) => {
   };
   if (!next) return;
   selectedModelName.value = activePlatform.value?.selected_model ?? "";
-  await Promise.all([loadProfile(), loadSamples(), listDesktopSettings(next)]);
+  await Promise.all([
+    loadProfile(),
+    loadSamples(),
+    loadMotionLabEvents(),
+    listDesktopSettings(next),
+  ]);
 });
 
 watch(selectedModelName, (next, previous) => {
@@ -811,6 +873,8 @@ onMounted(() => void loadOverview());
 
       <section v-else-if="section === 'action-lab'" class="web-control-content">
         <div class="web-control-section-heading"><div><p>MOTION / REFERENCES</p><h2>动作样例与 Prompt 参考</h2></div></div>
+        <ReactionActionCatalogPanel />
+        <MotionLabActivityPanel :events="motionLabEvents" :status="motionLabStatus" />
         <section class="web-control-settings-group web-control-action-preferences">
           <header>
             <h2>动作参数过滤</h2>
@@ -837,7 +901,7 @@ onMounted(() => void loadOverview());
         <p v-if="motionTuningStatus.rootError || motionTuningStatus.loadError" class="web-control-inline-error">{{ motionTuningStatus.rootError || motionTuningStatus.loadError }}</p>
         <MotionTuningPanel
           :semantic-profile="profile"
-          :motion-playback-records="[]"
+          :motion-playback-records="motionPlaybackRecords"
           :motion-tuning-samples="motionTuningSamples"
           :motion-tuning-samples-status="motionTuningStatus"
           :effective-examples="motionTuningStatus.effectiveExamples"

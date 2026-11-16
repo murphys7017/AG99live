@@ -73,12 +73,27 @@ export function resolveMotionTiming(
         performanceCurvePreset: curveTiming.curve_preset,
       };
     }
+    const minimumHoldMs = 120;
+    const transitionBudget = Math.max(0, idleDurationMs - minimumHoldMs);
+    let blendInMs = Math.min(
+      420,
+      Math.max(180, Math.round(idleDurationMs * 0.24)),
+    );
+    let blendOutMs = Math.min(
+      360,
+      Math.max(160, Math.round(idleDurationMs * 0.18)),
+    );
+    if (blendInMs + blendOutMs > transitionBudget) {
+      const scale = transitionBudget / Math.max(1, blendInMs + blendOutMs);
+      blendInMs = Math.max(80, Math.round(blendInMs * scale));
+      blendOutMs = Math.max(80, transitionBudget - blendInMs);
+    }
     return {
       timing: {
         duration_ms: idleDurationMs,
-        blend_in_ms: 80,
-        hold_ms: idleDurationMs - 200,
-        blend_out_ms: 120,
+        blend_in_ms: blendInMs,
+        hold_ms: Math.max(minimumHoldMs, idleDurationMs - blendInMs - blendOutMs),
+        blend_out_ms: blendOutMs,
       },
       resolvedDurationMs: idleDurationMs,
       timingSource,
