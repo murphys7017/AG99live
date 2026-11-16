@@ -83,22 +83,32 @@ class DesktopPresenceCaptureRuntime:
                 )
                 config = raw_config if isinstance(raw_config, dict) else {}
                 settings, interval, enabled = _presence_settings(config)
-                active = {
-                    platform.platform_id: platform
-                    for platform in reconcile_control_platforms(self.context)
-                    if enabled
-                    and platform.desktop_presence.supported
-                    and platform.transport._ws_client is not None
-                }
+                active: dict[str, Any] = {}
+                if enabled:
+                    for platform in reconcile_control_platforms(self.context):
+                        platform_id = str(
+                            getattr(platform, "platform_id", "") or ""
+                        ).strip()
+                        presence = getattr(platform, "desktop_presence", None)
+                        transport = getattr(platform, "transport", None)
+                        if (
+                            not platform_id
+                            or presence is None
+                            or not bool(getattr(presence, "supported", False))
+                            or getattr(transport, "_ws_client", None) is None
+                        ):
+                            continue
+                        active[platform_id] = platform
                 signature_tail = (
                     interval,
                     tuple(settings.items()),
                 )
                 for key, (owner, previous, task) in list(self._workers.items()):
+                    owner_presence = getattr(owner, "desktop_presence", None)
                     current = (
                         *signature_tail,
-                        owner.desktop_presence.generation,
-                        owner.client_uid,
+                        getattr(owner_presence, "generation", None),
+                        str(getattr(owner, "client_uid", "") or ""),
                     )
                     if (
                         active.get(key) is not owner
@@ -113,8 +123,12 @@ class DesktopPresenceCaptureRuntime:
                         continue
                     signature = (
                         *signature_tail,
-                        platform.desktop_presence.generation,
-                        platform.client_uid,
+                        getattr(
+                            getattr(platform, "desktop_presence", None),
+                            "generation",
+                            None,
+                        ),
+                        str(getattr(platform, "client_uid", "") or ""),
                     )
                     task = asyncio.create_task(
                         self._poll(platform, settings, interval),
