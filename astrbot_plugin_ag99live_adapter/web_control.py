@@ -458,6 +458,27 @@ CONFIG_SCHEMA: tuple[ConfigSection, ...] = (
         ),
     ),
     ConfigSection(
+        key="desktop_context",
+        label="桌面视觉上下文",
+        description=(
+            "只有当前消息命中关键词时，才把本轮桌面截图交给 Persona；"
+            "关键词之间可使用空格、顿号、逗号或分号分隔。"
+        ),
+        fields=(
+            ConfigField(
+                key="trigger_keywords",
+                kind="text",
+                label="截图触发关键词",
+                description=(
+                    "例如：桌面、屏幕；截图 看看画面。留空时普通 Persona 对话不接收桌面截图。"
+                ),
+                default="",
+                max_length=1024,
+                required=False,
+            ),
+        ),
+    ),
+    ConfigSection(
         key="desktop_presence_capture",
         label="桌面 Presence 采集",
         description="按间隔读取桌面端 Presence 并发布到 Core 状态，不在 Adapter 内提交主动事实。",

@@ -18,6 +18,12 @@ from .motion.output_sanitizer import (
 )
 from .runtime.message_utils import resolve_platform_segment_message_id
 from .runtime.adapter_event_context import AdapterEventContext
+from .runtime.desktop_context import (
+    DESKTOP_CONTEXT_ALLOWED_EXTRA_KEY,
+    DESKTOP_CONTEXT_MATCHED_KEY_EXTRA_KEY,
+    match_desktop_context_keywords,
+)
+from .runtime.plugin_runtime import get_plugin_config_snapshot
 from .runtime.persona_lifecycle import (
     PersonaResultState,
     PersonaSegmentIdentity,
@@ -158,11 +164,48 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         self._direct_output_sequence = 0
         self._logical_segment_indexes: dict[str, int] = {}
         self._next_logical_segment_index = 0
+        self._set_desktop_context_gate(message_str=message_str, message_obj=message_obj)
         self._attach_prompt_annotations(message_obj=message_obj)
 
     def set_extra(self, key: str, value: Any) -> None:
         super().set_extra(key, value)
         self._adapter_internal_state.observe_extra(key, value)
+
+    def _set_desktop_context_gate(self, *, message_str: str, message_obj: Any) -> None:
+        """Allow desktop images in Persona only for configured visual prompts.
+
+        The raw image remains attached to the event so Core can acquire it for
+        an execution turn.  AstrBot's Persona prompt projection consumes this
+        marker to hide or retain only desktop snapshot records.
+        """
+
+        snapshot_indexes = _resolve_desktop_snapshot_component_indexes(message_obj)
+        if not snapshot_indexes:
+            # Preserve ordinary user image behavior.  The marker is only a
+            # gate for Adapter-provided desktop snapshots.
+            self.set_extra(DESKTOP_CONTEXT_ALLOWED_EXTRA_KEY, True)
+            self.set_extra(DESKTOP_CONTEXT_MATCHED_KEY_EXTRA_KEY, ())
+            return
+
+        runtime_state = getattr(self.adapter, "runtime_state", None)
+        config = getattr(runtime_state, "plugin_config", None)
+        if not isinstance(config, dict):
+            config = get_plugin_config_snapshot().config
+        desktop_context = config.get("desktop_context", {})
+        configured = (
+            desktop_context.get("trigger_keywords")
+            if isinstance(desktop_context, dict)
+            else None
+        )
+        matched = match_desktop_context_keywords(message_str, configured)
+        self.set_extra(DESKTOP_CONTEXT_ALLOWED_EXTRA_KEY, bool(matched))
+        self.set_extra(DESKTOP_CONTEXT_MATCHED_KEY_EXTRA_KEY, matched)
+        logger.debug(
+            "WIRING desktop_context_gate matched=%s keyword_count=%s image_count=%s",
+            bool(matched),
+            len(matched),
+            len(snapshot_indexes),
+        )
 
     async def send(self, message):
         self._direct_output_sequence += 1
