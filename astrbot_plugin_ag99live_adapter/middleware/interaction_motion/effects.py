@@ -53,8 +53,9 @@ def _register_ag99live_motion_persona_effect(
                 "Generate motion intent for persona expression. This effect "
                 "is mandatory exactly once for every assistant segment, including "
                 "greetings, short acknowledgements, and neutral replies. Describe "
-                "the visible performance with intent_tags and valid continuous semantic axis "
-                "values; intent_tags alone is invalid. Every call must select exactly "
+                "the visible performance with valid continuous semantic axis values; "
+                "intent_tags are optional metadata and never replace an executable "
+                "motion shape. Every call must select exactly "
                 "one execution shape: motion_steps or a listed "
                 "motion_resource_id. "
                 "When the intended performance includes turning, tilting, swaying, "
@@ -80,8 +81,10 @@ def _register_ag99live_motion_persona_effect(
                         "minItems": 1,
                         "maxItems": 4,
                     },
+                    "duration_hint_ms": {"type": "integer"},
+                    "expression_resource_id": {"type": "string"},
+                    "motion_resource_id": {"type": "string"},
                 },
-                "required": ["intent_tags"],
             },
             parameters_resolver=_build_ag99live_motion_effect_parameters,
         ),
@@ -193,7 +196,6 @@ def _build_ag99live_motion_effect_parameters(event: Any) -> dict[str, Any]:
         "type": "object",
         "additionalProperties": False,
         "properties": properties,
-        "required": ["intent_tags"],
         "oneOf": execution_shapes,
         "allOf": [
             {
@@ -208,6 +210,14 @@ def _build_ag99live_motion_effect_parameters(event: Any) -> dict[str, Any]:
                 "not": {
                     "required": [
                         "motion_steps",
+                        "motion_resource_id",
+                    ],
+                },
+            },
+            {
+                "not": {
+                    "required": [
+                        "duration_hint_ms",
                         "motion_resource_id",
                     ],
                 },

@@ -22,6 +22,7 @@ PASSIVE_BEHAVIOR_SYSTEM_PROMPT = (
 - 只输出一行 emit；如果当前状态没有值得补充的动作，只输出一行 none。
 - intent_tags 是可选元数据，提供时使用简短语义标签；省略时由适配器补入最小标签。
 - 某些动作模型会只输出 motion_steps 和 duration_hint_ms；只要 motion_steps 合法，这也表示一行 emit。
+- emit 必须包含 motion_steps，长度为 1 到上限；每一步必须包含 axis_values 和 duration_weight，duration_weight 必须是 1 到 3 的整数。
 - motion_steps 只放当前动作需要变化的轴，数值必须位于该轴给出的 value_range。
 - motion_steps 最多使用 """
     + str(MAX_IDLE_MOTION_STEPS)

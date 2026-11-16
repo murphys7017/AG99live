@@ -185,6 +185,25 @@ def test_reference_projection_uses_user_text_and_clamps_axis_values() -> None:
     ]
 
 
+def test_reference_projection_defaults_missing_intent_tags() -> None:
+    projected = _project_reference_examples_for_prompt(
+        [
+            {
+                "input": "保持自然",
+                "output": {
+                    "motion_steps": [
+                        {"axis_values": {"head_yaw": 50.0}, "duration_weight": 1}
+                    ],
+                },
+            }
+        ],
+        allowed_axis_ids={"head_yaw"},
+        value_ranges_by_axis={"head_yaw": (0.0, 100.0)},
+    )
+
+    assert projected[0]["output"]["intent_tags"] == ["动作"]
+
+
 def test_reference_projection_removes_expression_conflicting_axes() -> None:
     projected = _project_reference_examples_for_prompt(
         [

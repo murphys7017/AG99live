@@ -29,11 +29,14 @@ def _project_reference_examples_for_prompt(
         if not input_text or not isinstance(output, dict):
             raise ValueError("motion_reference_example_shape_invalid")
         raw_intent_tags = output.get("intent_tags")
-        if not isinstance(raw_intent_tags, list):
-            raise ValueError("motion_reference_example_intent_tags_invalid")
-        if any(not isinstance(tag, str) for tag in raw_intent_tags):
-            raise ValueError("motion_reference_example_intent_tags_invalid")
-        intent_tags = [tag.strip() for tag in raw_intent_tags if tag.strip()]
+        if raw_intent_tags is None or raw_intent_tags == []:
+            intent_tags = ["动作"]
+        else:
+            if not isinstance(raw_intent_tags, list):
+                raise ValueError("motion_reference_example_intent_tags_invalid")
+            if any(not isinstance(tag, str) for tag in raw_intent_tags):
+                raise ValueError("motion_reference_example_intent_tags_invalid")
+            intent_tags = [tag.strip() for tag in raw_intent_tags if tag.strip()]
         if (
             not 1 <= len(intent_tags) <= 6
             or len(set(intent_tags)) != len(intent_tags)

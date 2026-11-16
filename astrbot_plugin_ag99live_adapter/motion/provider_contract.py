@@ -1,9 +1,10 @@
 """Small provider-facing projections for the streaming motion contract.
 
 The runtime wire payload remains strict v4.  These helpers only normalize the
-outer record emitted by small streaming models: metadata may be omitted and a
-single step may be returned as an object.  Legacy ``axis_levels`` shapes are
-left untouched and are rejected by the v4 normalizer.
+outer record emitted by small streaming models: metadata may be omitted, a
+single step may be returned as an object, and an omitted duration weight gets
+the light default.  Legacy ``axis_levels`` shapes are left untouched and are
+rejected by the v4 normalizer.
 """
 
 from __future__ import annotations
@@ -50,8 +51,14 @@ def _coerce_provider_duration_weights(value: Any) -> Any:
         return value
     normalized: list[Any] = []
     for raw_step in value:
-        if not isinstance(raw_step, dict) or "duration_weight" not in raw_step:
+        if not isinstance(raw_step, dict):
             normalized.append(raw_step)
+            continue
+        if "duration_weight" not in raw_step:
+            # The Prompt requires this field, but the provider boundary is
+            # intentionally tolerant of a minor omission.  A single omitted
+            # weight has the same safe meaning as the default light reaction.
+            normalized.append({**raw_step, "duration_weight": 1})
             continue
         raw_weight = raw_step.get("duration_weight")
         if isinstance(raw_weight, bool):
