@@ -20,9 +20,11 @@ const MAX_BUFFER_SIZE = 80;
 interface BilibiliLiveRuntimeOptions {
   sendText: (text: string) => Promise<boolean>;
   pushHistory: (role: "system" | "error", text: string) => void;
+  backendOwned?: boolean;
 }
 
 export function useBilibiliLiveRuntime(options: BilibiliLiveRuntimeOptions) {
+  const backendOwned = options.backendOwned === true;
   const settings = reactive<BilibiliLiveSettings>(loadBilibiliLiveSettings());
   const status = reactive<BilibiliLiveStatus>({
     ...DEFAULT_BILIBILI_LIVE_STATUS,
@@ -48,6 +50,13 @@ export function useBilibiliLiveRuntime(options: BilibiliLiveRuntimeOptions) {
   function start(): void {
     window.addEventListener(BILIBILI_LIVE_SETTINGS_CHANGED_EVENT, handleExternalSettingsChanged);
     ensureTickTimer();
+    if (backendOwned) {
+      status.enabled = false;
+      status.connected = false;
+      status.status = "disabled";
+      status.lastError = "B 站弹幕由 AG99live Stream Host 插件负责。";
+      return;
+    }
     applySettings(settings);
   }
 
@@ -68,6 +77,14 @@ export function useBilibiliLiveRuntime(options: BilibiliLiveRuntimeOptions) {
     syncStatusFromSettings();
     buffer.splice(0);
     lastFlushAt = Date.now();
+
+    if (backendOwned) {
+      status.enabled = false;
+      status.connected = false;
+      status.status = "disabled";
+      status.lastError = "B 站弹幕由 AG99live Stream Host 插件负责。";
+      return;
+    }
 
     generation += 1;
     const activeGeneration = generation;

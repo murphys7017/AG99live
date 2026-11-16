@@ -853,6 +853,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
   const bilibiliLive = useBilibiliLiveRuntime({
     sendText: (text) => adapter.sendText(text),
     pushHistory: (role, text) => adapter.pushHistory(role, text),
+    backendOwned: true,
   });
 
   function saveMotionTuningSample(sample: DesktopMotionTuningSample): void {

@@ -512,6 +512,28 @@ class OLVPetPlatformAdapter(Platform):
             self,
         )
 
+    def build_stream_input_event(
+        self,
+        message_obj: AstrBotMessage,
+        *,
+        platform_meta: Any,
+        session_id: str,
+    ) -> OLVPetPlatformEvent:
+        """Build an OLV presentation event for an external input adapter.
+
+        The input adapter owns ingestion and commits the event to Core. This
+        bridge keeps the OLV event context and output lifecycle available for
+        Persona/TTS/Live2D while allowing the source platform identity to stay
+        on the event metadata.
+        """
+        return OLVPetPlatformEvent(
+            message_obj.message_str,
+            message_obj,
+            platform_meta,
+            session_id,
+            self,
+        )
+
     async def handle_msg(self, message: dict[str, Any]):
         self._record_desktop_frame_from_message(message)
         await self.turn_coordinator.handle_msg(message)
