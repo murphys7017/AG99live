@@ -22,10 +22,34 @@ class _FrontendIdentitySnapshot:
 def _resolve_motion_runtime_bundle(event: Any) -> _MotionRuntimeBundle | None:
     platform_id = _call_event_method(event, "get_platform_id")
     platform_name = _call_event_method(event, "get_platform_name")
-    if platform_id != "olv_pet_adapter" and platform_name != "olv_pet_adapter":
-        return None
-
     adapter = getattr(event, "adapter", None)
+    if adapter is None and platform_id:
+        # Proactive and delayed AstrBot events may retain the platform identity
+        # without carrying the adapter object from the original event. Resolve
+        # the live AG99 adapter by platform id so TTS/motion binding remains
+        # available for those events too.
+        try:
+            from ...runtime.plugin_runtime import (
+                get_live_control_platform,
+                get_plugin_context,
+            )
+
+            adapter = get_live_control_platform(
+                get_plugin_context(),
+                str(platform_id),
+            )
+        except Exception:
+            adapter = None
+
+    if platform_name != "olv_pet_adapter":
+        metadata_method = getattr(adapter, "meta", None)
+        try:
+            metadata = metadata_method() if callable(metadata_method) else None
+        except Exception:
+            metadata = None
+        if getattr(metadata, "name", None) != "olv_pet_adapter":
+            return None
+
     turn_coordinator = getattr(adapter, "turn_coordinator", None)
     runtime_state = getattr(turn_coordinator, "runtime_state", None)
     if adapter is None or turn_coordinator is None or runtime_state is None:
