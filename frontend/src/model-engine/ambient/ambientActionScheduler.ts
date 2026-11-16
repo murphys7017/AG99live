@@ -144,6 +144,7 @@ export function createAmbientActionScheduler(
       return;
     }
     running = true;
+    console.info("[AmbientActionScheduler] started.");
     scheduleAfter(INITIAL_DELAY_MS);
   }
 

@@ -353,7 +353,7 @@ class WebSocketTransport:
         行为：
           - 若已有 _ws_client，回 control.error 后立刻关掉（单客户端契约）；
           - 否则注册 _ws_client，发 _send_initial_messages 初始化一份快照（server_info
-            / model / motion samples / group / 可能的 start_mic）；
+            / model / motion samples / 可能的 start_mic），再在进入收包循环后异步同步桌面设置；
           - 进入 async for raw_message：
               bytes  → _handle_binary_payload；
               JSON 解析失败 / 解析结果不是 dict → 发 control.error 后继续；
@@ -378,8 +378,13 @@ class WebSocketTransport:
         self._disconnect_notified_client = None
         self._start_outbound_writer(websocket)
         logger.debug("Desktop frontend connected to adapter transport")
+        desktop_settings_sync_task: asyncio.Task | None = None
         try:
             await self._send_initial_messages()
+            desktop_settings_sync_task = asyncio.create_task(
+                self._synchronize_desktop_settings_and_notify(),
+                name="ag99live-desktop-settings-sync",
+            )
             async for raw_message in websocket:
                 if isinstance(raw_message, bytes):
                     await self._handle_binary_payload(raw_message)
@@ -439,6 +444,12 @@ class WebSocketTransport:
             else:
                 logger.exception("Desktop frontend handler aborted unexpectedly")
         finally:
+            if desktop_settings_sync_task is not None:
+                desktop_settings_sync_task.cancel()
+                await asyncio.gather(
+                    desktop_settings_sync_task,
+                    return_exceptions=True,
+                )
             if self._ws_client is websocket:
                 await self._stop_outbound_writer(websocket)
                 await self._notify_disconnect(websocket)
@@ -481,10 +492,10 @@ class WebSocketTransport:
     async def _send_initial_messages(self) -> None:
         """新客户端连上后立刻广播的初始化快照。
 
-        顺序固定：refresh runtime → server_info → canonical desktop settings replay
-        → desktop_settings_sync_complete → current_model_and_conf(force=True)
+        顺序固定：refresh runtime → server_info → current_model_and_conf(force=True)
         → motion_tuning_samples_state，最后如果 auto_start_mic=True 再发
-        control.start_mic。
+        control.start_mic。桌面设置同步在收包循环启动后异步执行，避免等待设置
+        应答时阻塞同一条 WebSocket 的入站读取。
         """
         await self._refresh_runtime_settings_async(
             reload_providers=True,
@@ -498,15 +509,24 @@ class WebSocketTransport:
         )
         if not server_info_sent:
             raise RuntimeError("initial_server_info_send_failed")
-        await self._synchronize_desktop_settings()
-        if not await self.send_json(build_system_desktop_settings_sync_complete()):
-            raise RuntimeError("desktop_settings_sync_complete_send_failed")
         if not await self._send_current_model_and_conf(force=True):
             raise RuntimeError("initial_model_sync_send_failed")
         if not await self._send_motion_tuning_samples_state():
             raise RuntimeError("initial_motion_tuning_state_send_failed")
         if self.auto_start_mic and not await self.send_json(build_control_start_mic()):
             raise RuntimeError("initial_start_mic_send_failed")
+
+    async def _synchronize_desktop_settings_and_notify(self) -> None:
+        try:
+            await self._synchronize_desktop_settings()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Desktop settings synchronization failed")
+            return
+
+        if not await self.send_json(build_system_desktop_settings_sync_complete()):
+            logger.warning("Failed to deliver desktop settings sync completion")
 
 
 def _is_expected_disconnect_error(exc: Exception) -> bool:

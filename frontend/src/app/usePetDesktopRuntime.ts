@@ -862,10 +862,17 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
   onMounted(async () => {
     await adapter.initialize();
     await adapter.connect();
-    await adapter.waitUntilDesktopSettingsReady();
     ambientActionScheduler.start();
     pushToTalk.install();
     bilibiliLive.start();
+    try {
+      await adapter.waitUntilDesktopSettingsReady();
+    } catch (error) {
+      console.warn(
+        "[AG99live] desktop settings sync did not complete; ambient runtime remains active.",
+        error,
+      );
+    }
   });
 
   onBeforeUnmount(async () => {

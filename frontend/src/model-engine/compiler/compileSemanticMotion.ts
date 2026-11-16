@@ -178,7 +178,8 @@ function compileSemanticPoseContext(
     context,
     axes,
     diagnostics: finalizeCompileDiagnostics(context, {
-      intensityApplied: context.intent.mode === "expressive"
+      intensityApplied: (context.intent.mode === "expressive"
+        || context.options.source === "idle_motion")
         && context.settings.motionIntensityScale !== 1,
     }),
   };

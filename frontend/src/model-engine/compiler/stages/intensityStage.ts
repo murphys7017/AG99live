@@ -9,6 +9,7 @@ import { refreshAllAxisValues, replaceControlledAxisValues } from "../compileCon
 
 // Reads:
 // - context.intent.mode
+// - context.options.source
 // - context.settings.motionIntensityScale
 // - context.state.axisById
 // - context.state.controlledValues
@@ -43,6 +44,7 @@ export function runIntensityStage(
       rawValue,
       axis,
       context.intent.mode,
+      context.options.source,
       context.settings.motionIntensityScale,
     );
   }
@@ -57,9 +59,11 @@ function applySemanticIntensity(
   value: number,
   axis: SemanticAxisDefinition,
   mode: SemanticMotionIntent["mode"],
+  source: string | undefined,
   motionIntensityScale: number,
 ): number {
-  if (mode !== "expressive") {
+  const shouldApplyScale = mode === "expressive" || source === "idle_motion";
+  if (!shouldApplyScale) {
     return value;
   }
 
