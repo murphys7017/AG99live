@@ -1,5 +1,9 @@
 <script setup lang="ts">
 import { REACTION_ACTION_CATALOG } from "../model-engine/ambient/reactionActionCatalog.js";
+
+function isRuntimeScheduled(action: (typeof REACTION_ACTION_CATALOG)[number]): boolean {
+  return action.triggers.includes("idle") || action.triggers.includes("waiting");
+}
 </script>
 
 <template>
@@ -21,6 +25,9 @@ import { REACTION_ACTION_CATALOG } from "../model-engine/ambient/reactionActionC
           <strong>{{ action.label }}</strong>
           <code>{{ action.id }}</code>
         </div>
+        <span class="reaction-catalog__status" :data-enabled="isRuntimeScheduled(action)">
+          {{ isRuntimeScheduled(action) ? "已接入待机调度" : "设计模板，待接入触发器" }}
+        </span>
         <p>{{ action.description }}</p>
         <div class="reaction-catalog__meta">
           <span>{{ action.emotionLabel }}</span>
@@ -57,6 +64,17 @@ import { REACTION_ACTION_CATALOG } from "../model-engine/ambient/reactionActionC
 .reaction-catalog__item-header code {
   color: #94a3b8;
   font-size: 11px;
+}
+
+.reaction-catalog__status {
+  display: inline-block;
+  margin-top: 7px;
+  color: #fbbf24;
+  font-size: 11px;
+}
+
+.reaction-catalog__status[data-enabled="true"] {
+  color: #a7f3d0;
 }
 
 .reaction-catalog__item p {

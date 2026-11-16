@@ -15,7 +15,10 @@ import type { createModelSync } from "../adapter-connection/model-sync/useModelS
 import { createPetRuntimeSnapshotPublisher } from "../desktop-bridge/usePetRuntimeSnapshotPublisher";
 import { usePreviewMotionPlayer } from "../live2d-renderer/usePreviewMotionPlayer";
 import { useModelEngine } from "../model-engine/useModelEngine";
-import { createAmbientActionDirector } from "../model-engine/ambient/ambientActionDirector";
+import {
+  createAmbientActionDirector,
+  type AmbientActionLifecycleEvent,
+} from "../model-engine/ambient/ambientActionDirector";
 import { createAmbientActionScheduler } from "../model-engine/ambient/ambientActionScheduler";
 import { reportLatencyStage } from "../adapter-connection/runtime/latency.js";
 import {
@@ -352,6 +355,23 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     turnId: string | null,
     messageId: string,
   ) => sessionStore.getSession(turnId)?.segments.get(messageId)?.speech.cues ?? [];
+  const getSegmentPosition = (
+    turnId: string | null,
+    messageId: string,
+  ): { segmentIndex: number; segmentCount: number } | null => {
+    const session = sessionStore.getSession(turnId);
+    if (!session) {
+      return null;
+    }
+    const segmentIndex = session.segmentOrder.indexOf(messageId);
+    if (segmentIndex < 0 || session.segmentOrder.length === 0) {
+      return null;
+    }
+    return {
+      segmentIndex: segmentIndex + 1,
+      segmentCount: session.segmentOrder.length,
+    };
+  };
   const playbackCoordinator = usePlaybackCompletionCoordinator({
     sessionStore,
     playbackAck,
@@ -364,6 +384,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       turnId,
       messageId,
     ) => playbackTimeline.getTimelineSnapshotForSegment(turnId, messageId),
+    getSegmentPosition,
     onMotionLabRawEvent: (payload, turnId) => {
       sendMotionLabEvent(payload, turnId ?? null);
     },
@@ -565,6 +586,32 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       if (!decision.accepted) {
         console.debug("[AmbientActionDirector] candidate rejected.", decision);
       }
+    },
+    onLifecycleEvent: (event: AmbientActionLifecycleEvent) => {
+      const eventType = event.phase === "admitted"
+        ? "ambient.action_started"
+        : event.phase === "released"
+          ? "ambient.action_released"
+          : "ambient.action_rejected";
+      sendMotionLabEvent({
+        event_type: eventType,
+        message_id: event.candidateId || undefined,
+        source_route: event.source,
+        phase: `ambient_${event.phase}`,
+        model_name: selectedModel.value?.name ?? "",
+        payload_kind: "ambient_action",
+        raw: {
+          actionId: event.candidateId,
+          source: event.source,
+          phase: event.phase,
+          reason: event.reason ?? "",
+          durationMs: event.durationMs ?? null,
+          emotionLabel: event.emotionLabel ?? "",
+          metadata: event.metadata ? cloneJson(event.metadata) : null,
+          occurredAtMs: event.atMs,
+          runId: event.candidateId,
+        },
+      }, null);
     },
   });
   const ambientActionScheduler = createAmbientActionScheduler({

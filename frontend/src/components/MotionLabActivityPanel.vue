@@ -13,6 +13,7 @@ type MotionRun = {
   messageId: string;
   emotionLabel: string;
   source: string;
+  details: string;
   startedAt: string;
   assistantText: string;
   status: "playing" | "completed" | "failed" | "stopped";
@@ -25,8 +26,10 @@ type MotionSegment = {
   messageId: string;
   segmentIndex: number;
   segmentCount: number;
+  ambient: boolean;
   emotionLabel: string;
   source: string;
+  details: string;
   assistantText: string;
   status: string;
   latestEventType: string;
@@ -35,7 +38,7 @@ type MotionSegment = {
 };
 
 const motionEvents = computed(() => props.events
-  .filter((event) => event.event_type.startsWith("motion."))
+  .filter((event) => event.event_type.startsWith("motion.") || event.event_type.startsWith("ambient."))
   .sort((left, right) => left.created_at.localeCompare(right.created_at)));
 
 const activeRuns = computed<MotionRun[]>(() => {
@@ -45,8 +48,31 @@ const activeRuns = computed<MotionRun[]>(() => {
     const record = asRecord(raw.record);
     const runId = stringValue(event.run_id)
       || stringValue(raw.runId)
+      || stringValue(raw.actionId)
       || stringValue(record?.runId);
     if (!runId) continue;
+    if (event.event_type === "ambient.action_started") {
+      runs.set(runId, {
+        runId,
+        turnId: "环境动作",
+        messageId: stringValue(raw.actionId) || stringValue(event.message_id),
+        emotionLabel: stringValue(raw.emotionLabel) || "环境动作",
+        source: stringValue(event.source_route) || "ambient",
+        details: ambientDetails(raw),
+        startedAt: event.created_at,
+        assistantText: "",
+        status: "playing",
+        reason: "",
+      });
+      continue;
+    }
+    if (event.event_type === "ambient.action_released" || event.event_type === "ambient.action_rejected") {
+      const current = runs.get(runId);
+      if (!current) continue;
+      current.status = event.event_type === "ambient.action_released" ? "completed" : "failed";
+      current.reason = stringValue(raw.reason);
+      continue;
+    }
     if (event.event_type === "motion.playback_started") {
       runs.set(runId, {
         runId,
@@ -54,6 +80,7 @@ const activeRuns = computed<MotionRun[]>(() => {
         messageId: stringValue(event.message_id),
         emotionLabel: stringValue(record?.emotionLabel) || "动作",
         source: stringValue(event.source_route) || "motion",
+        details: "",
         startedAt: event.created_at,
         assistantText: stringValue(event.assistant_text)
           || stringValue(record?.assistantText),
@@ -78,8 +105,12 @@ const segments = computed<MotionSegment[]>(() => {
   const groups = new Map<string, {
     turnId: string;
     messageId: string;
+    ambient: boolean;
+    segmentIndex: number | null;
+    segmentCount: number | null;
     emotionLabel: string;
     source: string;
+    details: string;
     assistantText: string;
     status: string;
     latestEventType: string;
@@ -87,16 +118,27 @@ const segments = computed<MotionSegment[]>(() => {
     eventCount: number;
   }>();
   for (const event of motionEvents.value) {
-    const turnId = stringValue(event.turn_id) || "无 turn";
-    const messageId = stringValue(event.message_id) || "无 segment";
-    const key = `${turnId}\u0000${messageId}`;
     const raw = event.raw ?? {};
     const record = asRecord(raw.record);
+    const ambient = event.event_type.startsWith("ambient.");
+    const turnId = ambient ? "环境动作" : stringValue(event.turn_id) || "无 turn";
+    const messageId = ambient
+      ? stringValue(raw.actionId) || stringValue(event.message_id) || "无 action"
+      : stringValue(event.message_id) || "无 segment";
+    const key = ambient
+      ? `ambient\u0000${messageId}`
+      : `${turnId}\u0000${messageId}`;
+    const segmentIndex = numberValue(raw.segmentIndex) ?? numberValue(raw.segment_index);
+    const segmentCount = numberValue(raw.segmentCount) ?? numberValue(raw.segment_count);
     const current = groups.get(key) ?? {
       turnId,
       messageId,
+      ambient,
+      segmentIndex,
+      segmentCount,
       emotionLabel: stringValue(record?.emotionLabel) || "动作",
       source: stringValue(event.source_route) || "motion",
+      details: ambient ? ambientDetails(raw) : "",
       assistantText: stringValue(event.assistant_text) || stringValue(record?.assistantText),
       status: "已生成",
       latestEventType: event.event_type,
@@ -108,9 +150,15 @@ const segments = computed<MotionSegment[]>(() => {
     current.createdAt = event.created_at;
     current.assistantText ||= stringValue(event.assistant_text) || stringValue(record?.assistantText);
     current.emotionLabel ||= stringValue(record?.emotionLabel) || "动作";
+    current.segmentIndex = segmentIndex ?? current.segmentIndex;
+    current.segmentCount = segmentCount ?? current.segmentCount;
+    current.details ||= ambientDetails(raw);
     if (event.event_type === "motion.playback_started") current.status = "播放中";
     if (event.event_type === "motion.playback_completed") current.status = "已完成";
     if (event.event_type === "motion.playback_failed") current.status = "失败";
+    if (event.event_type === "ambient.action_started") current.status = "播放中";
+    if (event.event_type === "ambient.action_released") current.status = "已完成";
+    if (event.event_type === "ambient.action_rejected") current.status = "未执行";
     groups.set(key, current);
   }
 
@@ -123,8 +171,20 @@ const segments = computed<MotionSegment[]>(() => {
   const indexed: MotionSegment[] = [];
   for (const [turnId, list] of byTurn) {
     list.sort((left, right) => left[1].createdAt.localeCompare(right[1].createdAt));
+    const authoritativeCount = Math.max(
+      list.length,
+      ...list.map(([, group]) => group.segmentCount ?? 0),
+    );
     list.forEach(([key, group], index) => {
-      indexed.push({ ...group, key, turnId, segmentIndex: index + 1, segmentCount: list.length });
+      indexed.push({
+        ...group,
+        key,
+        turnId,
+        segmentIndex: group.ambient ? 1 : group.segmentIndex ?? index + 1,
+        segmentCount: group.ambient
+          ? 1
+          : Math.max(group.segmentCount ?? 0, authoritativeCount),
+      });
     });
   }
   return indexed.sort((left, right) => right.createdAt.localeCompare(left.createdAt)).slice(0, 30);
@@ -138,6 +198,30 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function stringValue(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function numberValue(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : null;
+}
+
+function ambientDetails(raw: Record<string, unknown>): string {
+  const metadata = asRecord(raw.metadata);
+  if (!metadata) return "";
+  const recipeId = stringValue(metadata.recipeId);
+  const templateId = stringValue(metadata.templateId);
+  const fragments = Array.isArray(metadata.fragmentIds)
+    ? metadata.fragmentIds.filter((value): value is string => typeof value === "string").length
+    : 0;
+  const atoms = Array.isArray(metadata.atomIds)
+    ? metadata.atomIds.filter((value): value is string => typeof value === "string").length
+    : 0;
+  const labels = [
+    recipeId ? `配方 ${recipeId}` : "",
+    templateId ? `模板 ${templateId}` : "",
+    fragments ? `${fragments} fragments` : "",
+    atoms ? `${atoms} atoms` : "",
+  ].filter(Boolean);
+  return labels.join(" · ");
 }
 
 function formatTime(value: string): string {
@@ -170,6 +254,7 @@ function formatTime(value: string): string {
           <div>
             <strong>{{ run.emotionLabel }}</strong>
             <small>{{ run.source }} · {{ run.messageId || "无 segment" }}</small>
+            <small v-if="run.details">{{ run.details }}</small>
           </div>
           <time>{{ formatTime(run.startedAt) }}</time>
         </article>
@@ -179,21 +264,22 @@ function formatTime(value: string): string {
 
     <section class="motion-activity__history">
       <div class="motion-activity__section-title">
-        <strong>消息动作历史</strong>
-        <span>按 turn / segment 分组</span>
+        <strong>动作历史</strong>
+        <span>消息分段与环境动作</span>
       </div>
       <div v-if="segments.length" class="motion-activity__segment-list">
         <article v-for="segment in segments" :key="segment.key" class="motion-activity__segment">
           <div class="motion-activity__segment-header">
-            <strong>{{ segment.emotionLabel }}</strong>
+            <strong>{{ segment.ambient ? "环境 · " : "" }}{{ segment.emotionLabel }}</strong>
             <span :data-status="segment.status">{{ segment.status }}</span>
           </div>
-          <p>{{ segment.assistantText || "暂无助手文本" }}</p>
+          <p>{{ segment.assistantText || (segment.ambient ? "待机或环境反应动作" : "暂无助手文本") }}</p>
           <small>
-            {{ segment.turnId }} · 第 {{ segment.segmentIndex }}/{{ segment.segmentCount }} 段 ·
+            {{ segment.turnId }} · {{ segment.ambient ? "环境动作" : "第 " + segment.segmentIndex + "/" + segment.segmentCount + " 段" }} ·
             {{ segment.messageId }} · {{ segment.source }} · {{ formatTime(segment.createdAt) }} ·
             {{ segment.eventCount }} events
           </small>
+          <small v-if="segment.details" class="motion-activity__segment-details">{{ segment.details }}</small>
         </article>
       </div>
       <p v-else class="motion-activity__empty">还没有收到动作事件。</p>
@@ -278,6 +364,12 @@ function formatTime(value: string): string {
   margin: 7px 0;
   color: #cbd5e1;
   line-height: 1.5;
+}
+
+.motion-activity__segment-details {
+  display: block;
+  margin-top: 4px;
+  color: #a5b4fc;
 }
 
 .motion-activity__empty {

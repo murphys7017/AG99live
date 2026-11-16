@@ -3,6 +3,15 @@ import { MAX_IDLE_MOTION_STEPS } from "../constants.js";
 
 export type AmbientActionSource = "local" | "material_composition" | "model_passive";
 
+export interface AmbientActionMetadata {
+  recipeId?: string;
+  templateId?: string;
+  seed?: string;
+  fragmentIds?: readonly string[];
+  atomIds?: readonly string[];
+  diagnostics?: readonly string[];
+}
+
 export interface AmbientActionContext {
   connectionReady: boolean;
   modelReady: boolean;
@@ -19,6 +28,7 @@ export interface AmbientActionCandidate {
   source: AmbientActionSource;
   motion: NormalizedMotionPayload;
   expiresAt: number;
+  metadata?: AmbientActionMetadata;
 }
 
 export type AmbientActionRejectionReason =
@@ -51,12 +61,24 @@ export type AmbientActionDecision =
     reason: AmbientActionRejectionReason;
   };
 
+export type AmbientActionLifecycleEvent = {
+  phase: "admitted" | "released" | "rejected";
+  candidateId: string;
+  source: AmbientActionSource;
+  atMs: number;
+  durationMs?: number;
+  reason?: string;
+  metadata?: AmbientActionMetadata;
+  emotionLabel?: string;
+};
+
 export interface AmbientActionDirectorDependencies {
   getContext: () => AmbientActionContext;
   start: (candidate: AmbientActionCandidate) => { durationMs: number } | null;
   release: (candidateId: string, reason: string) => void;
   now?: () => number;
   onDecision?: (decision: AmbientActionDecision) => void;
+  onLifecycleEvent?: (event: AmbientActionLifecycleEvent) => void;
 }
 
 export interface AmbientActionDirector {
@@ -94,10 +116,33 @@ export function createAmbientActionDirector(
     return decision;
   }
 
+  function emitLifecycle(event: AmbientActionLifecycleEvent): void {
+    try {
+      dependencies.onLifecycleEvent?.(event);
+    } catch (error) {
+      console.warn("[AmbientActionDirector] lifecycle observer failed.", error);
+    }
+  }
+
+  function getEmotionLabel(candidate: AmbientActionCandidate): string | undefined {
+    return candidate.motion.kind === "semantic_intent"
+      ? candidate.motion.intent.emotion_label || undefined
+      : undefined;
+  }
+
   function reject(
     candidate: AmbientActionCandidate,
     reason: AmbientActionRejectionReason,
   ): AmbientActionDecision {
+    emitLifecycle({
+      phase: "rejected",
+      candidateId: candidate.id.trim(),
+      source: candidate.source,
+      atMs: now(),
+      reason,
+      metadata: candidate.metadata,
+      emotionLabel: getEmotionLabel(candidate),
+    });
     return emit({
       accepted: false,
       candidateId: candidate.id.trim(),
@@ -107,9 +152,9 @@ export function createAmbientActionDirector(
   }
 
   function releaseAll(reason: string): void {
-    const candidateIds = [...active.keys()];
+    const entries = [...active.entries()];
     active.clear();
-    for (const candidateId of candidateIds) {
+    for (const [candidateId, entry] of entries) {
       try {
         dependencies.release(candidateId, reason);
       } catch (error) {
@@ -119,6 +164,15 @@ export function createAmbientActionDirector(
           error,
         });
       }
+      emitLifecycle({
+        phase: "released",
+        candidateId,
+        source: entry.candidate.source,
+        atMs: now(),
+        reason,
+        metadata: entry.candidate.metadata,
+        emotionLabel: getEmotionLabel(entry.candidate),
+      });
     }
   }
 
@@ -148,6 +202,15 @@ export function createAmbientActionDirector(
           error,
         });
       }
+      emitLifecycle({
+        phase: "released",
+        candidateId,
+        source: entry.candidate.source,
+        atMs: currentTime,
+        reason: "ambient_action_completed",
+        metadata: entry.candidate.metadata,
+        emotionLabel: getEmotionLabel(entry.candidate),
+      });
     }
   }
 
@@ -215,6 +278,15 @@ export function createAmbientActionDirector(
     active.set(candidateId, {
       candidate: normalizedCandidate,
       releaseAt: now() + durationMs + AMBIENT_ACTION_RELEASE_GRACE_MS,
+    });
+    emitLifecycle({
+      phase: "admitted",
+      candidateId,
+      source: normalizedCandidate.source,
+      atMs: now(),
+      durationMs,
+      metadata: normalizedCandidate.metadata,
+      emotionLabel: getEmotionLabel(normalizedCandidate),
     });
     return emit({
       accepted: true,

@@ -32,6 +32,10 @@ export interface MotionPlaybackRecorderOptions {
     turnId: string | null,
     messageId: string,
   ) => PlaybackTimelineSnapshot | null;
+  getSegmentPosition?: (
+    turnId: string | null,
+    messageId: string,
+  ) => { segmentIndex: number; segmentCount: number } | null;
   onMotionLabRawEvent: (
     payload: {
       event_type: string;
@@ -89,6 +93,7 @@ export function useMotionPlaybackRecorder(options: MotionPlaybackRecorderOptions
         : null,
     });
     pruneActiveMotionRuns();
+    const segmentPosition = options.getSegmentPosition?.(event.turnId, event.messageId) ?? null;
 
     const now = new Date();
     const baseRecord = {
@@ -155,6 +160,8 @@ export function useMotionPlaybackRecorder(options: MotionPlaybackRecorderOptions
         playerMessage: event.playerMessage,
         runId: event.runId,
         queuedDelayMs: event.queuedDelayMs,
+        segmentIndex: segmentPosition?.segmentIndex ?? null,
+        segmentCount: segmentPosition?.segmentCount ?? null,
       },
     };
     options.onMotionLabRawEvent(startedPayload, event.turnId);
@@ -173,6 +180,8 @@ export function useMotionPlaybackRecorder(options: MotionPlaybackRecorderOptions
             ? cloneJson(event.request)
             : null,
           plan: cloneJson(event.plan),
+          segmentIndex: segmentPosition?.segmentIndex ?? null,
+          segmentCount: segmentPosition?.segmentCount ?? null,
         },
       }, event.turnId);
     }
@@ -195,6 +204,7 @@ export function useMotionPlaybackRecorder(options: MotionPlaybackRecorderOptions
       run.turnId,
       run.messageId,
     ) ?? null;
+    const segmentPosition = options.getSegmentPosition?.(run.turnId, run.messageId) ?? null;
     options.onMotionLabRawEvent({
       event_type: event.status === "completed"
         ? "motion.playback_completed"
@@ -211,6 +221,8 @@ export function useMotionPlaybackRecorder(options: MotionPlaybackRecorderOptions
         reason: event.reason ?? "",
         turnId: run.turnId,
         messageId: run.messageId,
+        segmentIndex: segmentPosition?.segmentIndex ?? null,
+        segmentCount: segmentPosition?.segmentCount ?? null,
         transform_trace: run.transformTrace,
         timeline_outcome: {
           motion: event.status,

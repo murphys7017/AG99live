@@ -242,6 +242,13 @@ export function createAmbientActionScheduler(
         intent: result.intent,
       },
       expiresAt: currentTime + getCandidateLifetime(result.intent),
+      metadata: {
+        recipeId: result.metadata.recipeId,
+        seed: result.metadata.seed,
+        fragmentIds: [...result.metadata.fragmentIds],
+        atomIds: [...result.metadata.atomIds],
+        diagnostics: [...result.metadata.diagnostics],
+      },
     };
   }
 
@@ -298,6 +305,13 @@ export function createAmbientActionScheduler(
       source: "local",
       motion: { kind: "semantic_intent", intent },
       expiresAt: currentTime + getCandidateLifetime(intent),
+      metadata: {
+        templateId: template.id,
+        diagnostics: [
+          `axis_count:${Object.keys(targetValues).length}`,
+          `duration_ms:${durationHintMs}`,
+        ],
+      },
     };
   }
 

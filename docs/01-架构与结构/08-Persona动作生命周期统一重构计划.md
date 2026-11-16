@@ -16,7 +16,7 @@
 - runtime/persona_lifecycle.py 已定义不可变的 PersonaTurnIdentity、PersonaSegmentIdentity，并有 PersonaTurnSessionRegistry、PersonaTurnSession、PersonaResultState 和 PersonaSegmentState。目前跨层调用仍主要传递独立字符串、索引和字典，身份值对象尚未成为统一的内部调用边界。
 - Turn/Result/Segment 的对象层级、任务登记、取消、TTS binding 和部分状态校验已经存在。状态仍未完全收口：PersonaResultState.delivery_state 是动态字典；Provider、wire、取消等字段在状态对象中直接写入；M2 writer、M0/M1 输出协调器和平台事件也各自保留传输状态。
 - 原先独立的 Persona 动作 work registry 已由 PersonaTurnSessionRegistry 承担主要职责，但不能据此认定所有重复状态和临时容器都已消失。
-- Motion Lab 已有按 sample_id 归并事件快照、检查身份/路由/模式冲突、生成审核清单及导出人工批准样本的 CLI。它是离线训练样本投影，不是运行时生命周期 reducer；失败、超时、取消等诊断终态仍需确认能否从事实事件中稳定区分。
+- Motion Lab 已有按 sample_id 归并事件快照、检查身份/路由/模式冲突、生成审核清单及导出人工批准样本的 CLI；动作实验室页面同时展示正式播放和环境动作的实时事件流。它们都是事实投影和诊断界面，不是运行时生命周期 reducer；失败、超时、取消等诊断终态仍需确认能否从事实事件中稳定区分。
 - M0/M1 的完整段交付由 OutputSegmentCoordinator 管理，M2 由 OLV writer 管理。两种协议的发送状态有真实差异，应统一生命周期边界和归属规则，不强行变成同一套 wire 状态字段。
 - 桌面播放/Live2D 执行状态属于客户端事实；Adapter 不能从 Provider 完成或 WebSocket 发送成功推断执行成功。
 - Motion 来源路由已在 OLV 事件创建时固定，并被后续分段调度和 TTS 身份记录复用；这一项已有实现，不再列为待办功能。
@@ -173,7 +173,7 @@ M0、M1、M2 是交付模式；persona_effect 和 independent_motion 是动作�
 - C++ 高性能验证工程。
 - 连续存在感/注意力表现层和桌面观察行为。
 - NeuroBrain 测试插件或任何连续态接入。
-- 新的小模型训练、训练任务提交或 Motion Lab 图形审核界面。
+- 新的小模型训练、训练任务提交或把动作实验室页面升级为生命周期权威存储。
 - 未经事实缺口证明的 Motion Lab schema 扩展。
 - Persona 输出结构、OLV、WebSocket 或桌面客户端协议变更。
 - 为追求净删除行数而进行的代码改写。
