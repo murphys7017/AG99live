@@ -308,7 +308,7 @@ std::optional<MotionPlan> CompileMotionPlan(
   std::vector<std::pair<ag99::runtime::Json, int>> input_steps;
   const auto steps = intent.find("motion_steps");
   if (steps == intent.end() || !steps->is_array() || steps->empty()
-      || steps->size() > 4) {
+      || steps->size() > 8) {
     return std::nullopt;
   }
   for (const auto& step : *steps) {
@@ -332,15 +332,16 @@ std::optional<MotionPlan> CompileMotionPlan(
   }
 
   MotionPlan plan;
-  plan.duration_ms = static_cast<int>(ClampValue(
-      json::ReadNumber(intent, "duration_hint_ms", 900.0), 250.0, 5000.0));
+  const auto duration = intent.find("duration_hint_ms");
+  if (duration != intent.end() && !json::IsIntegerInRange(*duration, 320, 15000)) {
+    return std::nullopt;
+  }
+  plan.duration_ms = duration == intent.end() ? 1000 : duration->get<int>();
   plan.blend_in_ms = std::min(140, std::max(40, plan.duration_ms / 5));
   plan.blend_out_ms = std::min(220, std::max(80, plan.duration_ms / 5));
   std::vector<AxisMap> resolved_steps;
   resolved_steps.reserve(input_steps.size());
   int total_weight = 0;
-  std::unordered_map<std::string, int> previous_directions;
-  std::unordered_map<std::string, int> repeat_counts;
   for (const auto& [values, weight] : input_steps) {
     const auto resolution = ResolveAxisValues(
         *profile,
@@ -371,22 +372,6 @@ std::optional<MotionPlan> CompileMotionPlan(
       for (const auto& [axis_id, _] : active_strengths) {
         governed_values.emplace(axis_id, resolution.values.at(axis_id));
       }
-    }
-    for (auto& [axis_id, axis_value] : governed_values) {
-      const auto delta = axis_value.value - axis_value.neutral;
-      const int direction = delta > 0.08 ? 1 : delta < -0.08 ? -1 : 0;
-      const auto previous = previous_directions.find(axis_id);
-      if (direction == 0 || previous == previous_directions.end()
-          || previous->second != direction) {
-        repeat_counts[axis_id] = direction == 0 ? 0 : 1;
-      } else {
-        const int repeat = ++repeat_counts[axis_id];
-        const double attenuation = std::max(
-            0.5, std::pow(0.68, std::min(repeat - 1, 3)));
-        axis_value.value = axis_value.neutral
-            + (axis_value.value - axis_value.neutral) * attenuation;
-      }
-      previous_directions[axis_id] = direction;
     }
     resolved_steps.push_back(std::move(governed_values));
     total_weight += weight;
@@ -714,7 +699,7 @@ std::optional<ParameterPlan> ParseParameterPlan(
     if (const auto keyframes = item.find("keyframes");
         keyframes != item.end()) {
       if (!keyframes->is_array() || keyframes->size() < 2
-          || keyframes->size() > 4) {
+          || keyframes->size() > 8) {
         return std::nullopt;
       }
       int previous_at = -1;

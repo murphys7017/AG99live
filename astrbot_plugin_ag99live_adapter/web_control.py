@@ -991,7 +991,6 @@ def normalize_settings_patch(value: Any) -> dict[str, dict[str, Any]]:
             for field_key in fields
         }
 
-    _normalize_cross_field(normalized)
     _verify_providers(normalized)
     return normalized
 
@@ -1466,7 +1465,12 @@ class WebControlPageApi:
         current: dict[str, Any] = {}
         try:
             async with self._settings_lock:
-                previous, current = apply_plugin_config_patch(patch)
+                try:
+                    previous, current = apply_plugin_config_patch(
+                        patch, validate=lambda merged: _normalize_cross_field(_project_settings(merged))
+                    )
+                except ConfigValidationError as exc:
+                    return jsonify({"ok": False, "error": exc.to_json()})
             for platform in _live_control_platforms():
                 await platform._refresh_runtime_settings_async(reload_providers=True)
                 await platform._send_current_model_and_conf(force=True)

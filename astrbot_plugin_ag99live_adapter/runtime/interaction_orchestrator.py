@@ -310,18 +310,17 @@ class InteractionOrchestrator:
                 return
             return
 
-        event = self.active_events.get(normalized_turn_id)
-        if event is not None:
-            if self._active_event_motion_cancel is not None:
-                self._active_event_motion_cancel(
-                    event,
-                    normalized_turn_id,
-                    normalized_reason or "turn_finished",
-                )
-            if self._stop_event_requested is not None:
-                self._stop_event_requested(event)
-
         try:
+            event = self.active_events.get(normalized_turn_id)
+            if event is not None:
+                if self._active_event_motion_cancel is not None:
+                    self._active_event_motion_cancel(
+                        event,
+                        normalized_turn_id,
+                        normalized_reason or "turn_finished",
+                    )
+                if self._stop_event_requested is not None:
+                    self._stop_event_requested(event)
             await self._send_control(
                 ControlEvent(
                     type=TYPE_CONTROL_TURN_FINISHED,
@@ -330,7 +329,7 @@ class InteractionOrchestrator:
                 ),
                 required=True,
             )
-        except Exception:
+        except (asyncio.CancelledError, Exception):
             failure_reason = f"turn_finished_send_failed:{normalized_turn_id}"
             self.rollback_terminal_publication(normalized_turn_id, failure_reason)
             raise

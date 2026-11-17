@@ -35,6 +35,7 @@ TENDENCY_KEYS = (
 IDENTITY_FIELDS = (
     "turn_id",
     "core_turn_id",
+    "delivery_turn_id",
     "persona_result_id",
     "segment_index",
     "segment_count",
@@ -113,15 +114,15 @@ def _load_events(
                phase, raw_json, timeline_outcome_json
         FROM motion_lab_raw_events
         WHERE event_type = ?
-           OR event_type IN (?, ?, ?, ?)
-        ORDER BY created_at, id
+           OR event_type IN (?, ?, ?, ?, ?)
         """,
-        (SAMPLE_EVENT_TYPE, *PLAYBACK_EVENT_TYPES),
+        (SAMPLE_EVENT_TYPE, *PLAYBACK_EVENT_TYPES, "motion.feedback_positive"),
     ).fetchall()
     samples: list[dict[str, Any]] = []
     playback: list[dict[str, Any]] = []
     malformed: list[dict[str, str]] = []
-    for row in rows:
+    # Sort row references in memory; a SQLite sort would spool the large JSON blobs.
+    for row in sorted(rows, key=lambda r: (r["created_at"], r["id"])):
         raw_value: Any = None
         raw_error = ""
         try:
@@ -537,20 +538,35 @@ def _playback_evidence(
 ) -> list[dict[str, Any]]:
     turn_id = str(sample["identity"].get("turn_id") or "")
     message_id = str(sample["identity"].get("segment_message_id") or "")
-    if not message_id:
+    delivery_turn_id = sample["identity"].get("delivery_turn_id")
+    if not message_id or not turn_id or any(
+        reason.startswith("identity_conflict:") for reason in sample.get("blockers", ())
+    ):
         return []
     evidence = []
+    observed_turns = set()
     for event in playback_events:
         if event["message_id"] != message_id:
-            continue
-        if turn_id and event["turn_id"] and event["turn_id"] != turn_id:
             continue
         raw = event["raw"]
         payload = raw.get("frontend_payload") if isinstance(raw.get("frontend_payload"), dict) else raw
         detail = payload.get("raw") if isinstance(payload.get("raw"), dict) else {}
         origin = detail.get("playbackOrigin")
-        if origin == "manual_preview":
+        if origin == "manual_preview" or not event["turn_id"]:
             continue
+        observed_turns.add(event["turn_id"])
+        if delivery_turn_id:
+            if delivery_turn_id != event["turn_id"]:
+                continue
+        elif turn_id != event["turn_id"]:
+            # Older recordings embed the core turn in their allocated segment ID.
+            # Require independent confirmation from the renderer before linking.
+            if not (
+                message_id.startswith(turn_id + "::segment::")
+                and detail.get("messageId") == message_id
+                and detail.get("turnId") == event["turn_id"]
+            ):
+                continue
         evidence.append(
             {
                 "event_id": event["id"],
@@ -558,6 +574,9 @@ def _playback_evidence(
                 "created_at": event["created_at"],
                 "status": detail.get("status") or event["event_type"].rsplit("_", 1)[-1],
                 "playback_origin": origin,
+                "exit_reason": detail.get("reason"),
+                "execution_status": detail.get("executionStatus"),
+                "segment_elapsed_ms": detail.get("segment_elapsed_ms"),
                 "payload_kind": payload.get("payload_kind"),
                 "run_id": detail.get("runId"),
                 "intent": detail.get("intent"),
@@ -566,6 +585,8 @@ def _playback_evidence(
                 "timeline_outcome": event["timeline_outcome"],
             }
         )
+    if not delivery_turn_id and len(observed_turns) != 1:
+        return []
     return evidence
 
 
@@ -634,7 +655,9 @@ def _make_review_sample(
     if neurobrain_present:
         blockers.append("neurobrain_state_present")
 
-    playback = _playback_evidence(reduced, playback_events)
+    linked = _playback_evidence(reduced, playback_events)
+    feedback = [e for e in linked if e["event_type"] == "motion.feedback_positive"]
+    playback = [e for e in linked if e["event_type"] != "motion.feedback_positive"]
     terminal_playback = [
         item
         for item in playback
@@ -661,11 +684,15 @@ def _make_review_sample(
             }
         )
     elif terminal_playback:
-        playback_status = (
-            "completed"
-            if terminal_playback[-1]["event_type"] == "motion.playback_completed"
-            else "failed"
-        )
+        terminal = terminal_playback[-1]
+        if terminal["exit_reason"] in {"motion_replaced", "motion_plan_replaced", "direct_parameter_plan_replaced"}:
+            playback_status = "replaced"
+        elif terminal["execution_status"] == "stopped":
+            playback_status = "interrupted"
+        elif terminal["event_type"] == "motion.playback_completed":
+            playback_status = "completed"
+        else:
+            playback_status = "failed"
     elif any(item["event_type"] == "motion.playback_started" for item in playback):
         playback_status = "started"
     else:
@@ -697,7 +724,8 @@ def _make_review_sample(
         "delivery_evidence": {
             "playback_status": playback_status,
             "playback_events": playback,
-            "human_feedback": "not_recorded",
+            "human_feedback": "positive" if feedback else "not_recorded",
+            "feedback_event_ids": [e["event_id"] for e in feedback],
         },
         "snapshot_trace": [
             {
@@ -740,8 +768,27 @@ def _reduce_database(
     for event in snapshot_events:
         sample_id = str(event["raw"].get("sample_id") or "").strip()
         grouped[sample_id].append(event)
+    by_message = defaultdict(list)
+    for event in playback_events:
+        by_message[event["message_id"]].append(event)
+    sample_messages = {
+        sample_id: {
+            identity["segment_message_id"]
+            for event in events
+            if isinstance(identity := event["raw"].get("identity"), dict)
+            and isinstance(identity.get("segment_message_id"), str)
+            and identity["segment_message_id"]
+        }
+        for sample_id, events in grouped.items()
+    }
+    owners = Counter(msg for messages in sample_messages.values() for msg in messages)
     samples = [
-        _make_review_sample(sample_id, events, playback_events)
+        _make_review_sample(sample_id, events, [
+            event
+            for msg in sample_messages[sample_id]
+            if owners[msg] == 1
+            for event in by_message[msg]
+        ])
         for sample_id, events in sorted(grouped.items())
     ]
     counts["unique_samples"] = len(samples)

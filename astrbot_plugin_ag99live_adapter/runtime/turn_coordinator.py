@@ -1323,17 +1323,17 @@ class TurnCoordinator:
                 )
             self._turn_timings.pop(resolved_turn_id, None)
             return
-        event = self._events_by_turn_id.get(resolved_turn_id)
-        if event is not None:
-            self._cancel_turn_owned_motion_task(
-                event,
-                turn_id=resolved_turn_id,
-                reason=normalized_reason or "turn_finished",
-            )
-            set_extra = getattr(event, "set_extra", None)
-            if callable(set_extra):
-                resolve_adapter_event_context(event).set_agent_stop_requested(event)
         try:
+            event = self._events_by_turn_id.get(resolved_turn_id)
+            if event is not None:
+                self._cancel_turn_owned_motion_task(
+                    event,
+                    turn_id=resolved_turn_id,
+                    reason=normalized_reason or "turn_finished",
+                )
+                set_extra = getattr(event, "set_extra", None)
+                if callable(set_extra):
+                    resolve_adapter_event_context(event).set_agent_stop_requested(event)
             sent = await self._send_json(
                 build_control_turn_finished(
                     turn_id=resolved_turn_id,
@@ -1343,7 +1343,7 @@ class TurnCoordinator:
             )
             if not sent:
                 raise RuntimeError(f"turn_finished_send_failed:{resolved_turn_id}")
-        except Exception:
+        except (asyncio.CancelledError, Exception):
             failure_reason = f"turn_finished_send_failed:{resolved_turn_id}"
             self._turn_terminal_results.pop(resolved_turn_id, None)
             for waiter in self._turn_terminal_waiters.pop(resolved_turn_id, []):

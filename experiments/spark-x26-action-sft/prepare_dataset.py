@@ -133,7 +133,6 @@ def _axis_spec(axis: Any) -> dict[str, Any] | None:
 
 def _axis_specs_for_request(
     request: dict[str, Any],
-    target_axis_ids: set[str],
 ) -> dict[str, dict[str, Any]]:
     capability = _parse_capability(str(request.get("system_prompt") or ""))
     specs: dict[str, dict[str, Any]] = {}
@@ -141,11 +140,6 @@ def _axis_specs_for_request(
         spec = _axis_spec(axis)
         if spec is not None:
             specs[spec["id"]] = spec
-    for axis_id in sorted(target_axis_ids):
-        if axis_id and axis_id not in specs:
-            spec = _axis_spec({"id": axis_id})
-            if spec is not None:
-                specs[axis_id] = spec
     return specs
 
 
@@ -176,10 +170,7 @@ def _normalize_axis_values(
             return None
         spec = specs.get(axis_id)
         if spec is None:
-            spec = _axis_spec({"id": axis_id})
-            if spec is None:
-                return None
-            specs[axis_id] = spec
+            return None
         low, high = (float(value) for value in spec["value_range"])
         if number < low or number > high:
             return None
@@ -200,10 +191,7 @@ def _convert_axis_levels(
             return None
         spec = specs.get(axis_id)
         if spec is None:
-            spec = _axis_spec({"id": axis_id})
-            if spec is None:
-                return None
-            specs[axis_id] = spec
+            return None
         values[axis_id] = _legacy_level_value(raw_level, spec)
     return values
 
@@ -224,22 +212,7 @@ def _convert_motion_target(
     if type(duration) is not int or not 320 <= duration <= 15000:
         return None, source_shape, "duration_hint_ms_required"
 
-    if "motion_steps" in target:
-        raw_steps = target.get("motion_steps")
-        if isinstance(raw_steps, list):
-            target_axis_ids = {
-                str(axis_id).strip()
-                for step in raw_steps
-                if isinstance(step, dict)
-                for axis_id in (step.get("axis_values") or step.get("axis_levels") or {})
-                if str(axis_id).strip()
-            }
-        else:
-            target_axis_ids = set()
-    else:
-        raw_values = target.get("axis_values") or target.get("axis_levels") or {}
-        target_axis_ids = {str(axis_id).strip() for axis_id in raw_values if str(axis_id).strip()}
-    specs = _axis_specs_for_request(request, target_axis_ids)
+    specs = _axis_specs_for_request(request)
 
     converted_legacy = False
     if "motion_steps" in target:
@@ -279,18 +252,8 @@ def _convert_motion_target(
     return output, source_shape, "converted_legacy" if converted_legacy else "native"
 
 
-def _training_capability(
-    request: dict[str, Any],
-    target: dict[str, Any],
-) -> dict[str, Any]:
-    target_axis_ids = {
-        str(axis_id).strip()
-        for step in target.get("motion_steps") or []
-        if isinstance(step, dict)
-        for axis_id in (step.get("axis_values") or {})
-        if str(axis_id).strip()
-    }
-    specs = _axis_specs_for_request(request, target_axis_ids)
+def _training_capability(request: dict[str, Any]) -> dict[str, Any]:
+    specs = _axis_specs_for_request(request)
     raw_capability = _parse_capability(str(request.get("system_prompt") or ""))
     raw_by_id = {
         str(axis.get("id") or "").strip(): axis
@@ -425,7 +388,7 @@ def _continuous_training_record(
     converted, source_shape, conversion_status = _convert_motion_target(target, request)
     if converted is None:
         return None, None, target_origin, conversion_status
-    capability = _training_capability(request, converted)
+    capability = _training_capability(request)
     contexts = sample.get("input", {}).get("recent_context")
     if not isinstance(contexts, list):
         return None, None, target_origin, "contexts"

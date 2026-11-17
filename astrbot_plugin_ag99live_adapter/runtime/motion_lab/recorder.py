@@ -36,6 +36,8 @@ class MotionLabRecorder:
         self._closed = False
         self._healthy = True
         self._failure_reason = ""
+        self._dropped_after_write_failure = 0
+        self._last_failed_write_epoch_ms = 0
         self._queue_full_count = 0
         self._last_queue_full_log_at = 0.0
         self._recent_events: deque[dict[str, Any]] = deque(maxlen=256)
@@ -51,6 +53,9 @@ class MotionLabRecorder:
             "queued": self._queue.qsize(),
             "capacity": self._queue.maxsize,
             "queue_full_count": self._queue_full_count,
+            "write_failed": int(not self._healthy),
+            "dropped_after_write_failure": self._dropped_after_write_failure,
+            "last_failed_write_epoch_ms": self._last_failed_write_epoch_ms,
         }
 
     def enqueue(
@@ -59,7 +64,7 @@ class MotionLabRecorder:
         *,
         on_persisted: Callable[[], None] | None = None,
     ) -> bool:
-        if self._closed or not self._healthy:
+        if self._closed:
             logger.error(
                 "MotionLab raw event rejected: recorder is unavailable (%s).",
                 self._failure_reason or "closed",
@@ -176,8 +181,20 @@ class MotionLabRecorder:
             if not persisted:
                 for _event, _callback in batch:
                     self._queue.task_done()
-                self._discard_queued_events_after_failure()
-                return
+                lost_ids = {event["id"] for event, _callback in batch}
+                self._recent_events = deque(
+                    (event for event in self._recent_events if event["id"] not in lost_ids),
+                    maxlen=self._recent_events.maxlen,
+                )
+                self._dropped_after_write_failure += len(batch)
+                self._last_failed_write_epoch_ms = int(time.time() * 1000)
+                if not self._closed:
+                    await asyncio.sleep(min(retry_delay_seconds * 2, 5.0))
+                continue
+            if not self._healthy:
+                self._healthy = True
+                self._failure_reason = ""
+                logger.info("MotionLab writes resumed; discarded events: %s", self._dropped_after_write_failure)
             for _event, callback in batch:
                 if callback is not None:
                     try:
@@ -191,27 +208,10 @@ class MotionLabRecorder:
         self._failure_reason = reason
         logger.error("MotionLab recorder became unhealthy: %s", reason)
 
-    def _discard_queued_events_after_failure(self) -> None:
-        discarded_count = 0
-        while True:
-            try:
-                self._queue.get_nowait()
-            except asyncio.QueueEmpty:
-                if discarded_count:
-                    logger.error(
-                        "MotionLab discarded %s queued events after recorder failure.",
-                        discarded_count,
-                    )
-                return
-            self._queue.task_done()
-            discarded_count += 1
-
     async def close(self, *, timeout_seconds: float = 5.0) -> None:
         if self._closed:
             return
         self._closed = True
-        if not self._healthy:
-            raise RuntimeError(f"MotionLab recorder is unhealthy: {self._failure_reason}")
         if not self._queue.empty() and not self._ensure_worker():
             raise RuntimeError("MotionLab recorder close requires a running event loop.")
         task = self._worker_task
@@ -238,6 +238,9 @@ class MotionLabRecorder:
                 await task
             except asyncio.CancelledError:
                 pass
+
+        if not self._healthy:
+            raise RuntimeError(f"MotionLab recorder is unhealthy: {self._failure_reason}")
 
 
 def _normalize_event(event: dict[str, Any]) -> dict[str, Any]:

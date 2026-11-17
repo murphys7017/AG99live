@@ -68,8 +68,8 @@ The current executable, `ag99-render-host`, verifies:
   the existing binary PCM protocol;
 - `output.pre_action` can start and cancel a bounded one-step reaction without
   entering the conversation playback ledger;
-- Native semantic motion applies the same eight-axis budget and repeated
-  direction attenuation used by the TypeScript performance governor;
+- Native and Web semantic motion retain up to eight active axes and preserve
+  authored same-direction steps within a sequence;
 - the configured Bilibili live room can be read from the shared Web settings,
   receive public-room danmaku, and submit bounded batches back as Adapter text;
 - resizing the model window resizes the D3D11 composition surface and model

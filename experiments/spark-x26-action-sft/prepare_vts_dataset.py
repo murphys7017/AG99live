@@ -190,39 +190,46 @@ def _build_text_segments(
         current_end = None
         current_rewrite = False
 
+    # ASR partials can replace any suffix of the current utterance, including
+    # text that would otherwise have crossed a training segment boundary.
+    chunks: list[tuple[TranscriptEvent, str, int, bool]] = []
+    utterance_start = 0
     for event in ordered:
-        if previous is None:
-            delta = event.text
-            delta_start = event.audio_start_ns
-        elif event.text.startswith(previous.text):
-            delta = event.text[len(previous.text) :]
+        rewrite = False
+        delta_start = event.audio_start_ns
+        prefix = 0
+        if previous is not None and event.audio_start_ns < previous.audio_end_ns:
+            prefix = _longest_common_prefix(previous.text, event.text)
+            remove = len(previous.text) - prefix
+            rewrite = remove > 0
             delta_start = previous.audio_end_ns
+            while remove and len(chunks) > utterance_start:
+                source, text, start, changed = chunks.pop()
+                delta_start = start
+                if len(text) > remove:
+                    chunks.append((source, text[:-remove], start, changed or rewrite))
+                    remove = 0
+                else:
+                    remove -= len(text)
         else:
-            common = _longest_common_prefix(previous.text, event.text)
-            delta = event.text[common:]
-            delta_start = previous.audio_end_ns
-            current_rewrite = True
-        if not delta:
-            previous = event
-            continue
+            utterance_start = len(chunks)
+        delta = event.text[prefix:]
+        if delta:
+            chunks.append((event, delta, delta_start, rewrite))
+        previous = event
 
-        pause_boundary = (
-            previous is not None
-            and event.audio_end_ns - previous.audio_end_ns >= pause_ns
-        )
-        duration_boundary = (
-            current_start is not None
-            and event.audio_end_ns - current_start >= max_segment_ns
-        )
-        if pause_boundary or duration_boundary:
+    for event, delta, start, rewrite in chunks:
+        if current_end is not None and (
+            (start >= current_end and event.audio_end_ns - current_end >= pause_ns)
+            or event.audio_end_ns - current_start >= max_segment_ns
+        ):
             flush()
-
         if current_start is None:
-            current_start = max(delta_start, 0)
+            current_start = max(start, 0)
         current_end = max(event.audio_end_ns, current_start + 1)
         current_raw.append(delta)
         current_sequences.append(event.sequence_no)
-        previous = event
+        current_rewrite |= rewrite
     flush()
     return segments
 
@@ -346,14 +353,6 @@ def _frame_axes(
     }
 
 
-def _median(values: list[float]) -> float:
-    ordered = sorted(values)
-    middle = len(ordered) // 2
-    if len(ordered) % 2:
-        return ordered[middle]
-    return (ordered[middle - 1] + ordered[middle]) / 2.0
-
-
 def _make_motion_target(
     frames: list[tuple[int, dict[str, float]]],
     bindings: list[AxisBinding],
@@ -364,36 +363,50 @@ def _make_motion_target(
     if not frames:
         return None, ["no_parameter_frames"]
     duration_ms = max(MIN_DURATION_MS, min(MAX_DURATION_MS, round((end_ns - start_ns) / 1_000_000)))
-    step_count = max(1, min(MAX_MOTION_STEPS, math.ceil(duration_ms / 1800)))
-    span = max(1, end_ns - start_ns)
-    windows: list[list[tuple[int, dict[str, float]]]] = [[] for _ in range(step_count)]
-    for timestamp_ns, values in frames:
-        index = int(((timestamp_ns - start_ns) * step_count) / span)
-        windows[min(step_count - 1, max(0, index))].append((timestamp_ns, values))
-    neutral_by_axis = {binding.axis_id: binding.neutral for binding in bindings}
+    usable = [(t, values) for t, values in frames if values]
+    if not usable:
+        return None, ["no_parameter_frames"]
+    ranges = {b.axis_id: max(1e-6, b.value_range[1] - b.value_range[0]) for b in bindings}
+    # Preserve the largest departures from linear motion in timestamp order.
+    # This retains an out-and-back gesture even when its window median is neutral.
+    selected = [0]
+    if len(usable) > 1:
+        selected.append(len(usable) - 1)
+    while len(selected) < MAX_MOTION_STEPS:
+        best_error, best_index = 0.03, None
+        for left, right in zip(selected, selected[1:]):
+            t0, first = usable[left]
+            t1, last = usable[right]
+            for index in range(left + 1, right):
+                t, values = usable[index]
+                fraction = (t - t0) / max(1, t1 - t0)
+                for axis, value in values.items():
+                    initial = first.get(axis, value)
+                    expected = initial + (last.get(axis, initial) - initial) * fraction
+                    error = abs(value - expected) / ranges.get(axis, 100.0)
+                    if error > best_error:
+                        best_error, best_index = error, index
+        if best_index is None:
+            break
+        selected.append(best_index)
+        selected.sort()
+
     steps: list[dict[str, Any]] = []
-    previous_values: dict[str, float] = {}
-    for window in windows:
-        axis_samples: dict[str, list[float]] = {}
-        for _, values in window:
-            for axis_id, value in values.items():
-                axis_samples.setdefault(axis_id, []).append(value)
-        medians = {axis_id: round(_median(values), 3) for axis_id, values in axis_samples.items()}
-        sparse: dict[str, float] = {}
-        for axis_id, value in medians.items():
-            neutral = neutral_by_axis.get(axis_id, 50.0)
-            change = abs(value - previous_values.get(axis_id, neutral))
-            if abs(value - neutral) >= 3.0 or change >= 3.0:
-                sparse[axis_id] = value
-        if not sparse and medians:
-            axis_id, value = max(
-                medians.items(),
-                key=lambda item: abs(item[1] - neutral_by_axis.get(item[0], 50.0)),
-            )
-            sparse[axis_id] = value
-        if sparse:
-            steps.append({"axis_values": sparse, "duration_weight": 1})
-            previous_values.update(sparse)
+    times: list[int] = []
+    previous: dict[str, float] = {}
+    for index in selected:
+        timestamp, pose = usable[index]
+        changed = {
+            axis: value for axis, value in pose.items()
+            if axis not in previous or abs(value - previous[axis]) >= 0.01 * ranges.get(axis, 100.0)
+        }
+        if changed:
+            steps.append({"axis_values": changed, "duration_weight": 1})
+            times.append(timestamp)
+            previous.update(changed)
+    durations = [max(1, stop - start) for start, stop in zip(times, times[1:] + [end_ns])]
+    for step, duration in zip(steps, durations):
+        step["duration_weight"] = max(1, min(3, round(3 * duration / max(durations))))
     if not steps:
         return None, ["all_frames_neutral"]
     return {"motion_steps": steps, "duration_hint_ms": int(duration_ms)}, sorted(warnings)

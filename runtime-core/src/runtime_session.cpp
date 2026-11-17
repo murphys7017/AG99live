@@ -193,6 +193,17 @@ void RuntimeProtocolSession::ingest_text(std::string_view text_frame) {
       }
       return;
     }
+    if (envelope.type == "system.motion_lab_raw_event_recorded") {
+      if (envelope.source != "adapter" || !envelope.payload.is_object()) {
+        throw ProtocolError("invalid Motion Lab receipt");
+      }
+      const auto id = envelope.payload.find("event_id");
+      if (envelope.turn_id && id != envelope.payload.end() && id->is_string()
+          && callbacks_.on_motion_feedback_recorded) {
+        callbacks_.on_motion_feedback_recorded(*envelope.turn_id, id->get<std::string>());
+      }
+      return;
+    }
     if (envelope.type == "system.desktop_settings_query") {
       auto query = parse_desktop_settings_query(envelope);
       if (callbacks_.on_desktop_settings_query) {

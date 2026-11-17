@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 import json
@@ -251,6 +251,8 @@ def _write_plugin_config_locked(config: Mapping[str, Any]) -> None:
 
 def apply_plugin_config_patch(
     patch: Mapping[str, Mapping[str, Any]],
+    *,
+    validate: Callable[[dict[str, Any]], None] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Atomically merge and persist a section patch.
 
@@ -269,6 +271,8 @@ def apply_plugin_config_patch(
                 **current,
                 **deepcopy(dict(fields)),
             }
+        if validate is not None:
+            validate(merged)
         _write_plugin_config_locked(merged)
         return previous, deepcopy(merged)
 

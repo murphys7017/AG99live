@@ -37,6 +37,31 @@ int main() {
       })},
       {"relation_graph", {"edges", ag99::runtime::Json::array()}},
   };
+  auto bound_profile = profile;
+  bound_profile["axes"][0]["parameter_bindings"] = ag99::runtime::Json::array({
+      {{"parameter_id", "ParamAngleY"}, {"input_range", {0, 100}}, {"output_range", {-30, 30}}}});
+  ag99::runtime::OutputSegment segment;
+  segment.motion.state = ag99::runtime::MotionSlot::State::Present;
+  auto& intent = segment.motion.payload;
+  intent["schema_version"] = "engine.motion_intent.v4";
+  intent["duration_hint_ms"] = 15000;
+  auto& steps = intent["motion_steps"] = ag99::runtime::Json::array();
+  for (int i = 0; i < 8; ++i) {
+    steps.push_back({{"axis_values", {{"head_pitch", 51 + i}}}, {"duration_weight", 1}});
+  }
+  const ag99::native::motion::MotionCompileContext context{
+      &bound_profile, 1.0, [](std::string_view) { return 0; }};
+  const auto long_plan = ag99::native::motion::CompileMotionPlan(segment, {}, context);
+  if (!long_plan || long_plan->duration_ms != 15000 || long_plan->tracks.size() != 1
+      || long_plan->tracks.front().keyframes.size() != 8
+      || long_plan->tracks.front().keyframes.back().target_value < 4.79f) {
+    return 1;
+  }
+  steps.push_back(steps.front());
+  if (ag99::native::motion::CompileMotionPlan(segment, {}, context)) {
+    return 1;
+  }
+
   const auto resolution = ag99::native::motion::ResolveAxisValues(
       profile,
       ag99::runtime::Json{{"head_pitch", 60.0}},

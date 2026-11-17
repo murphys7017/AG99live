@@ -835,6 +835,7 @@ async def generate_independent_motion(
             getattr(bundle.runtime_state, "motion_lab_recorder", None),
             turn_id=str(turn_id),
             core_turn_id=resolve_persona_core_turn_id(event),
+            delivery_turn_id=resolve_adapter_event_context(event).delivery_turn_id,
             persona_result_id=persona_result_id,
             segment_index=segment_index,
             segment_count=None,

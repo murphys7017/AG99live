@@ -956,7 +956,8 @@ IdleMotionEvent parse_idle_motion(const ProtocolEnvelope& envelope) {
   const auto steps = motion.find("motion_steps");
   if (schema == motion.end()
       || *schema != std::string(protocol_manifest::kMotionIntentSchema)
-      || steps == motion.end() || !steps->is_array() || steps->size() != 1) {
+      || steps == motion.end() || !steps->is_array() || steps->empty()
+      || steps->size() > 4) {
     throw ProtocolError("output.idle_motion motion shape is invalid");
   }
   if (motion.contains("motion_resource_id")

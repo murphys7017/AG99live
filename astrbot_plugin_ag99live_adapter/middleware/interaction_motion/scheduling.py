@@ -1450,6 +1450,7 @@ def _record_motion_lab_interaction_event(
         record_persona_motion_sample(
             recorder,
             turn_id=turn_id,
+            delivery_turn_id=resolve_adapter_event_context(event).delivery_turn_id,
             persona_result_id=(
                 str(persona_result_id).strip()
                 if persona_result_id is not None

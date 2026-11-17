@@ -1,7 +1,6 @@
 import type {
   CompiledSemanticAxis,
   CompiledSemanticMotion,
-  CompiledSemanticMotionStep,
   PerformanceCompositionDirection,
 } from "../../types/compiledSemanticMotion.js";
 import type { MotionPlanPayload } from "../../types/protocol.js";
@@ -141,36 +140,6 @@ function governAxes(
   });
 }
 
-function axisDirections(
-  axes: readonly CompiledSemanticAxis[],
-): Map<string, PerformanceCompositionDirection> {
-  return new Map(
-    axes.map((axis) => [
-      axis.axisId,
-      resolveDirection(axis.value, axis.neutralValue),
-    ]),
-  );
-}
-
-function governStep(
-  step: CompiledSemanticMotionStep,
-  previousDirections: ReadonlyMap<string, PerformanceCompositionDirection>,
-  repeatCounts: Map<string, number>,
-  budget: PerformanceBudget,
-  truncatedAxisIds: string[],
-  repeatedDirectionAxisIds: string[],
-): CompiledSemanticMotionStep {
-  const axes = governAxes(
-    step.axes,
-    previousDirections,
-    repeatCounts,
-    budget,
-    truncatedAxisIds,
-    repeatedDirectionAxisIds,
-  );
-  return { ...step, axes };
-}
-
 function appendWarning(warnings: string[], warning: string): void {
   if (!warnings.includes(warning)) warnings.push(warning);
 }
@@ -223,20 +192,13 @@ export class PerformanceGovernor {
       if (truncatedStepCount > 0) {
         appendWarning(warnings, `performance_budget_steps_truncated:${truncatedStepCount}`);
       }
-      const steps: CompiledSemanticMotionStep[] = [];
-      let directions = previousDirections;
-      for (const step of sourceSteps) {
-        const governedStep = governStep(
-          step,
-          directions,
-          repeatCounts,
-          this.budget,
-          truncatedAxisIds,
-          repeatedDirectionAxisIds,
-        );
-        steps.push(governedStep);
-        directions = axisDirections(governedStep.axes);
-      }
+      const steps = sourceSteps.map((step, index) => ({
+        ...step,
+        axes: index === 0
+          ? governAxes(step.axes, previousDirections, repeatCounts, this.budget,
+              truncatedAxisIds, repeatedDirectionAxisIds)
+          : selectBudgetedAxes(step.axes, this.budget.maxActiveAxes, truncatedAxisIds),
+      }));
       governedMotion = { ...motion, steps };
     }
 

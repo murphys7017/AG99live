@@ -280,15 +280,6 @@ public:
     return _lip_sync_parameter_indices;
   }
 
-  void ApplyDrag(float drag_x, float drag_y) {
-    AddNormalizedParameterValue("ParamAngleX", drag_x);
-    AddNormalizedParameterValue("ParamAngleY", drag_y);
-    AddNormalizedParameterValue("ParamAngleZ", drag_x * drag_y * -1.0f);
-    AddNormalizedParameterValue("ParamBodyAngleX", drag_x);
-    AddNormalizedParameterValue("ParamEyeBallX", drag_x);
-    AddNormalizedParameterValue("ParamEyeBallY", drag_y);
-  }
-
   void UpdateMotion(csmFloat32 delta_seconds) {
     if (!_motionManager || !_model) {
       return;
@@ -387,27 +378,6 @@ private:
               minimum,
               maximum));
     }
-  }
-
-  void AddNormalizedParameterValue(
-      const char* parameter_id,
-      float normalized_value) {
-    if (!_model || !parameter_id || !std::isfinite(normalized_value)) {
-      return;
-    }
-    const auto parameter_index = _model->GetParameterIndex(
-        CubismFramework::GetIdManager()->GetId(parameter_id));
-    if (parameter_index < 0) {
-      return;
-    }
-    const auto clamped = std::clamp(normalized_value, -1.0f, 1.0f);
-    const auto minimum = _model->GetParameterMinimumValue(parameter_index);
-    const auto default_value = _model->GetParameterDefaultValue(parameter_index);
-    const auto maximum = _model->GetParameterMaximumValue(parameter_index);
-    const auto delta = clamped >= 0.0f
-        ? (maximum - default_value) * clamped
-        : (default_value - minimum) * clamped;
-    _model->SetParameterValue(parameter_index, default_value + delta);
   }
 
   ACubismMotion* LoadDemoMotion(
@@ -568,23 +538,19 @@ public:
 
     CubismModel* cubism_model = _model->GetModel();
     const auto now = services_.now_seconds();
-    const auto delta_seconds = _last_update_seconds > 0.0
-        ? static_cast<csmFloat32>(std::clamp(
-              now - _last_update_seconds, 0.0, 0.1))
+    const auto presentation_delta = _last_update_seconds > 0.0
+        ? static_cast<csmFloat32>(std::max(0.0, now - _last_update_seconds))
         : 1.0f / 60.0f;
+    const auto simulation_delta = std::min(presentation_delta, 0.1f);
     _last_update_seconds = now;
-    _model->UpdateMotion(delta_seconds);
-    ApplyIdleMotion(now);
-    ApplyPreActionMotion(now);
-    ApplyQueuedMotion(now);
-    _model->ApplyDrag(services_.drag_x->load(), services_.drag_y->load());
-      services_.audio.update_audio_level(delta_seconds, now);
+    _model->UpdateMotion(simulation_delta);
+    services_.audio.update_audio_level(simulation_delta, now);
     ApplyParameterFrame(
         services_.audio.speech_lip_sync_intensity(),
         services_.audio.audio_end_seconds() > now,
-        delta_seconds,
+        presentation_delta,
         now);
-    _model->UpdatePhysicsAndPose(delta_seconds);
+    _model->UpdatePhysicsAndPose(simulation_delta);
     cubism_model->Update();
 
     _renderer.Draw();
@@ -757,7 +723,7 @@ public:
           *clock, false, "native_model_unavailable");
       return;
     }
-    InterruptMotionPlansLocked("motion_plan_replaced");
+    DiscardPendingMotionLocked();
     const auto& payload = segment.motion.payload;
     const auto schema = json::ReadString(payload, "schema_version");
     if (schema == std::string(ag99::runtime::kParameterPlanSchema)) {
@@ -826,6 +792,7 @@ public:
             && _pre_action_motion->clock.message_id != request_id)) {
       return;
     }
+    CaptureReleaseLocked(_pre_action_motion->tracks, _pre_action_motion->blend_out_ms);
     _pre_action_motion.reset();
     _pre_action_expires_at_epoch_ms.reset();
   }
@@ -850,6 +817,7 @@ public:
     }
     if (_motion_scheduler.active_motion
         && _motion_scheduler.active_motion->clock.turn_id == turn_id) {
+      CaptureReleaseLocked(_motion_scheduler.active_motion->tracks, _motion_scheduler.active_motion->blend_out_ms);
       _motion_scheduler.active_motion.reset();
     }
     if (_pending_parameter_clock
@@ -859,9 +827,11 @@ public:
     }
     if (_active_parameter_plan
         && _active_parameter_plan->clock.turn_id == turn_id) {
+      CaptureReleaseLocked(_active_parameter_plan->bindings, _active_parameter_plan->blend_out_ms);
       _active_parameter_plan.reset();
     }
     if (_pre_action_motion && _pre_action_motion->clock.turn_id == turn_id) {
+      CaptureReleaseLocked(_pre_action_motion->tracks, _pre_action_motion->blend_out_ms);
       _pre_action_motion.reset();
       _pre_action_expires_at_epoch_ms.reset();
     }
@@ -870,6 +840,8 @@ public:
   void ResetRuntimeSegments(std::uint64_t generation) {
     std::scoped_lock lock(_motion_mutex);
     _connection_generation = generation;
+    _release_pose.clear();
+    _frame_resolved_values.clear();
     _motion_scheduler.pending_motion_segment.reset();
     _motion_scheduler.pending_motion_clock.reset();
     _motion_scheduler.active_motion.reset();
@@ -945,7 +917,7 @@ public:
       _gaze_candidate_y = cursor.y;
       _gaze_candidate_since_ms = now_ms;
       if (_interaction_gaze) {
-        _interaction_gaze->target_ratio = 0.0;
+        _interaction_gaze->target_ratio = target_ratio;
       }
       return;
     }
@@ -1006,27 +978,32 @@ private:
         clock, success, std::move(reason)});
   }
 
-  void InterruptMotionPlansLocked(const std::string& reason) {
+  void DiscardPendingMotionLocked() {
+    const std::string reason = "motion_plan_replaced";
     if (_motion_scheduler.pending_motion_clock) {
       QueueMotionTerminalLocked(
           *_motion_scheduler.pending_motion_clock, false, reason);
     }
+    if (_pending_parameter_clock) {
+      QueueMotionTerminalLocked(*_pending_parameter_clock, false, reason);
+    }
+    _motion_scheduler.pending_motion_segment.reset();
+    _motion_scheduler.pending_motion_clock.reset();
+    _pending_parameter_plan.reset();
+    _pending_parameter_clock.reset();
+  }
+
+  void ReleaseActiveMotionForReplacementLocked() {
+    const std::string reason = "motion_plan_replaced";
     if (_motion_scheduler.active_motion) {
       QueueMotionTerminalLocked(
           _motion_scheduler.active_motion->clock, false, reason);
-    }
-    if (_pending_parameter_clock) {
-      QueueMotionTerminalLocked(*_pending_parameter_clock, false, reason);
     }
     if (_active_parameter_plan) {
       QueueMotionTerminalLocked(
           _active_parameter_plan->clock, false, reason);
     }
-    _motion_scheduler.pending_motion_segment.reset();
-    _motion_scheduler.pending_motion_clock.reset();
     _motion_scheduler.active_motion.reset();
-    _pending_parameter_plan.reset();
-    _pending_parameter_clock.reset();
     _active_parameter_plan.reset();
     _idle_motion.reset();
     _idle_expires_at_epoch_ms.reset();
@@ -1035,6 +1012,9 @@ private:
   }
 
   enum class ParameterContributionOwner {
+    AuthoredMotion,
+    Drag,
+    Release,
     InteractionSway,
     InteractionGaze,
     DirectPlan,
@@ -1078,6 +1058,8 @@ private:
   }
 
   void CacheParameterIds() {
+    _release_pose.clear();
+    _frame_resolved_values.clear();
     _parameter_ids.clear();
     auto* model = _model ? _model->GetModel() : nullptr;
     if (!model) {
@@ -1174,6 +1156,76 @@ private:
     if (_pending_thinking_turn_id
         && (turn_id.empty() || *_pending_thinking_turn_id == turn_id)) {
       _pending_thinking_turn_id.reset();
+    }
+  }
+
+  void CollectMotionTracksLocked(const MotionPlan& plan, double elapsed_ms, int priority) {
+    for (const auto& track : plan.tracks) {
+      if (!track.keyframes.empty() && elapsed_ms >= track.start_at_ms) {
+        _frame_contributions.push_back({
+            ParameterIdAt(track.parameter_index), track.parameter_index,
+            ParameterContributionOwner::AuthoredMotion, "motion",
+            static_cast<float>(motion::EvaluateTrackValue(plan, track, elapsed_ms)),
+            1.0f, priority});
+      }
+    }
+  }
+
+  void CollectDragLocked() {
+    const auto x = services_.drag_x->load();
+    const auto y = services_.drag_y->load();
+    if (x == 0.0f && y == 0.0f) {
+      return;
+    }
+    auto add = [this](const char* parameter, float amount) {
+      if (!std::isfinite(amount) || amount == 0.0f) {
+        return;
+      }
+      auto* model = _model->GetModel();
+      const auto index = model->GetParameterIndex(
+          CubismFramework::GetIdManager()->GetId(parameter));
+      if (index < 0 || index >= model->GetParameterCount()) {
+        return;
+      }
+      const auto neutral = model->GetParameterDefaultValue(index);
+      const auto span = amount > 0.0f ? model->GetParameterMaximumValue(index) - neutral
+                                     : neutral - model->GetParameterMinimumValue(index);
+      _frame_contributions.push_back({ParameterIdAt(index), index,
+          ParameterContributionOwner::Drag, "drag", std::clamp(amount, -1.0f, 1.0f) * span,
+          1.0f, 40});
+    };
+    add("ParamAngleX", x);
+    add("ParamAngleY", y);
+    add("ParamAngleZ", -x * y);
+    add("ParamBodyAngleX", x);
+    add("ParamEyeBallX", x);
+    add("ParamEyeBallY", y);
+  }
+
+  template <class Tracks>
+  void CaptureReleaseLocked(const Tracks& tracks, int blend_out_ms) {
+    for (const auto& track : tracks) {
+      auto sample = std::lower_bound(_frame_resolved_values.begin(), _frame_resolved_values.end(),
+          track.parameter_index, [](const auto& value, auto index) { return value.first < index; });
+      if (sample != _frame_resolved_values.end() && sample->first == track.parameter_index) {
+        _release_pose[track.parameter_index] = sample->second;
+      }
+    }
+    _release_started_at = services_.now_seconds();
+    _release_duration = std::clamp(blend_out_ms / 1000.0, 0.08, 0.25);
+  }
+
+  void CollectReleaseLocked(double now) {
+    if (_release_pose.empty()) return;
+    const float weight = 1.0f - Smoothstep(static_cast<float>(
+        std::clamp((now - _release_started_at) / _release_duration, 0.0, 1.0)));
+    if (weight <= 0.0f) {
+      _release_pose.clear();
+      return;
+    }
+    for (const auto& [index, value] : _release_pose) {
+      _frame_contributions.push_back({ParameterIdAt(index), index,
+          ParameterContributionOwner::Release, "turn_release", value, weight, 190});
     }
   }
 
@@ -1282,15 +1334,6 @@ private:
           static_cast<csmFloat32>(*_pending_physics_response_scale));
       _pending_physics_response_scale.reset();
     }
-    if (!_pending_parameter_plan
-        && !_active_parameter_plan
-        && !_pending_thinking_turn_id
-        && !_interaction_sway
-        && !_interaction_gaze
-        && !lip_sync_active) {
-      return true;
-    }
-    _frame_contributions.clear();
     if (_pending_parameter_plan) {
       const auto clock = _pending_parameter_clock.value_or(
           NativeSegmentClock{
@@ -1315,6 +1358,7 @@ private:
               false,
               "expression_resource_not_found:" + parsed->expression_id);
         } else {
+          ReleaseActiveMotionForReplacementLocked();
           _active_parameter_plan = *parsed;
           ReleaseThinkingSwayLocked(turn_id);
           std::cerr << "[motion] activated parameter plan with "
@@ -1327,6 +1371,17 @@ private:
         QueueMotionTerminalLocked(
             clock, false, "parameter_plan_rejected");
       }
+    }
+    _frame_contributions.clear();
+    CollectQueuedMotionLocked(now);
+    CollectIdleMotionLocked(now);
+    CollectPreActionMotionLocked(now);
+    CollectDragLocked();
+    CollectReleaseLocked(now);
+    if (_frame_contributions.empty() && !_active_parameter_plan
+        && !_pending_thinking_turn_id && !_interaction_sway
+        && !_interaction_gaze && !lip_sync_active) {
+      return true;
     }
     const auto fail_active_parameter_plan = [this](std::string reason) {
       if (_active_parameter_plan) {
@@ -1558,14 +1613,25 @@ private:
          group_index < _frame_group_count;
          ++group_index) {
       auto& group = groups[group_index];
-      const auto base_value = group.snapshot.base_value;
+      auto base_value = group.snapshot.base_value;
       auto mixed_target = base_value;
       auto direct_only_target = base_value;
       bool has_lip_sync = false;
+      const ParameterFrameContribution* releasing = nullptr;
       ParameterPresentationState* presentation_state = nullptr;
       bool presentation_is_direct_plan = false;
       double presentation_elapsed_ms = 0.0;
       for (const auto* contribution : group.contributions) {
+        if (contribution->owner == ParameterContributionOwner::Release) {
+          releasing = contribution;
+          continue;
+        }
+        if (contribution->owner == ParameterContributionOwner::Drag) {
+          mixed_target = std::clamp(mixed_target + contribution->value,
+              group.snapshot.minimum_value, group.snapshot.maximum_value);
+          direct_only_target = base_value = mixed_target;
+          continue;
+        }
         mixed_target = mixed_target * (1.0f - contribution->weight)
             + contribution->value * contribution->weight;
         if (contribution->owner == ParameterContributionOwner::LipSync) {
@@ -1573,6 +1639,10 @@ private:
         } else {
           direct_only_target = direct_only_target * (1.0f - contribution->weight)
               + contribution->value * contribution->weight;
+          if (contribution->owner == ParameterContributionOwner::AuthoredMotion) {
+            base_value = direct_only_target;
+
+          }
           if (contribution->presentation) {
             presentation_state = contribution->presentation;
             presentation_is_direct_plan = contribution->presentation_is_direct_plan;
@@ -1627,6 +1697,9 @@ private:
         }
       }
 
+      if (releasing && !has_lip_sync) {
+        final_value += releasing->weight * (releasing->value - final_value);
+      }
       if (!std::isfinite(final_value)) {
         return reject(
             "resolved_value_invalid:" + std::string(group.parameter_id));
@@ -2025,8 +2098,7 @@ private:
     return motion::CompileMotionPlan(segment, clock, context);
   }
 
-  void ApplyQueuedMotion(double now) {
-    std::scoped_lock lock(_motion_mutex);
+  void CollectQueuedMotionLocked(double now) {
     if (!_model || !_model->GetModel()) {
       return;
     }
@@ -2053,6 +2125,7 @@ private:
       _motion_scheduler.pending_motion_segment.reset();
       _motion_scheduler.pending_motion_clock.reset();
       if (plan) {
+        ReleaseActiveMotionForReplacementLocked();
         _motion_scheduler.active_motion = *plan;
         ReleaseThinkingSwayLocked(turn_id);
         std::cerr << "[motion] compiled "
@@ -2068,20 +2141,7 @@ private:
     }
     const double elapsed_ms =
         (now - _motion_scheduler.active_motion->started_at) * 1000.0;
-    for (const auto& track : _motion_scheduler.active_motion->tracks) {
-      if (track.keyframes.empty()) {
-        continue;
-      }
-      const double value = motion::EvaluateTrackValue(
-          *_motion_scheduler.active_motion, track, elapsed_ms);
-      const double minimum = _model->GetModel()->GetParameterMinimumValue(
-          track.parameter_index);
-      const double maximum = _model->GetModel()->GetParameterMaximumValue(
-          track.parameter_index);
-      _model->GetModel()->SetParameterValue(
-          track.parameter_index,
-          static_cast<csmFloat32>(Clamp(value, minimum, maximum)));
-    }
+    CollectMotionTracksLocked(*_motion_scheduler.active_motion, elapsed_ms, 30);
     if (elapsed_ms >= _motion_scheduler.active_motion->duration_ms) {
       QueueMotionTerminalLocked(
           _motion_scheduler.active_motion->clock, true);
@@ -2089,8 +2149,7 @@ private:
     }
   }
 
-  void ApplyPreActionMotion(double now) {
-    std::scoped_lock lock(_motion_mutex);
+  void CollectPreActionMotionLocked(double now) {
     if (!_pre_action_motion || !_model || !_model->GetModel()) {
       return;
     }
@@ -2102,28 +2161,14 @@ private:
     }
     const double elapsed_ms =
         (now - _pre_action_motion->started_at) * 1000.0;
-    for (const auto& track : _pre_action_motion->tracks) {
-      if (track.keyframes.empty()) {
-        continue;
-      }
-      const double value = motion::EvaluateTrackValue(
-          *_pre_action_motion, track, elapsed_ms);
-      const double minimum = _model->GetModel()->GetParameterMinimumValue(
-          track.parameter_index);
-      const double maximum = _model->GetModel()->GetParameterMaximumValue(
-          track.parameter_index);
-      _model->GetModel()->SetParameterValue(
-          track.parameter_index,
-          static_cast<csmFloat32>(Clamp(value, minimum, maximum)));
-    }
+    CollectMotionTracksLocked(*_pre_action_motion, elapsed_ms, 20);
     if (elapsed_ms >= _pre_action_motion->duration_ms) {
       _pre_action_motion.reset();
       _pre_action_expires_at_epoch_ms.reset();
     }
   }
 
-  void ApplyIdleMotion(double now) {
-    std::scoped_lock lock(_motion_mutex);
+  void CollectIdleMotionLocked(double now) {
     if (!_idle_motion || !_model || !_model->GetModel()) {
       return;
     }
@@ -2134,20 +2179,7 @@ private:
       return;
     }
     const double elapsed_ms = (now - _idle_motion->started_at) * 1000.0;
-    for (const auto& track : _idle_motion->tracks) {
-      if (track.keyframes.empty()) {
-        continue;
-      }
-      const auto value = motion::EvaluateTrackValue(
-          *_idle_motion, track, elapsed_ms);
-      const auto minimum = _model->GetModel()->GetParameterMinimumValue(
-          track.parameter_index);
-      const auto maximum = _model->GetModel()->GetParameterMaximumValue(
-          track.parameter_index);
-      _model->GetModel()->SetParameterValue(
-          track.parameter_index,
-          static_cast<csmFloat32>(Clamp(value, minimum, maximum)));
-    }
+    CollectMotionTracksLocked(*_idle_motion, elapsed_ms, 10);
     if (elapsed_ms >= _idle_motion->duration_ms) {
       _idle_motion.reset();
       _idle_expires_at_epoch_ms.reset();
@@ -2159,6 +2191,9 @@ private:
   CubismModelSettingJson* _setting = nullptr;
   ag99::live2d::D3D11Renderer _renderer;
   std::vector<std::string> _parameter_ids;
+  std::unordered_map<csmInt32, float> _release_pose;
+  double _release_started_at = 0.0;
+  double _release_duration = 0.15;
   std::vector<ParameterFrameContribution> _frame_contributions;
   std::vector<ParameterFrameGroup> _frame_groups;
   std::size_t _frame_group_count = 0;

@@ -36,6 +36,10 @@ struct NativeRuntimeCoordinator::Impl {
     std::string message_id;
     std::string text;
     bool approved = false;
+
+    std::string FeedbackId() const {
+      return "native-feedback-" + ag99::runtime::Json::array({turn_id, message_id}).dump();
+    }
   };
 
 public:
@@ -167,6 +171,15 @@ public:
                 on_desktop_presence_request_(std::move(request));
               } else {
                 HandleDesktopPresenceRequest(std::move(request));
+              }
+            },
+            [this](std::string turn_id, std::string event_id) {
+              std::scoped_lock lock(playback_mutex_);
+              if (latest_assistant_segment_ && latest_assistant_segment_->turn_id == turn_id
+                  && latest_assistant_segment_->FeedbackId() == event_id) {
+                latest_assistant_segment_->approved = true;
+                services_.set_feedback_approved(true);
+                services_.notify_input_runtime_state_changed();
               }
             },
         }) {
@@ -448,10 +461,8 @@ public:
         return false;
       }
       segment = *latest_assistant_segment_;
-      latest_assistant_segment_->approved = true;
     }
-    const auto event_id = "native-feedback-" +
-        std::to_string(next_feedback_id_.fetch_add(1));
+    const auto event_id = segment.FeedbackId();
     const auto envelope = ag99::runtime::build_envelope(
         "system.motion_lab_raw_event",
         {
@@ -470,17 +481,8 @@ public:
         },
         segment.turn_id,
         "frontend");
-    if (transport_.SendText(envelope.dump())) {
-      services_.set_feedback_approved(true);
-      services_.notify_input_runtime_state_changed();
-      return true;
-    }
-    std::scoped_lock lock(playback_mutex_);
-    if (latest_assistant_segment_
-        && latest_assistant_segment_->message_id == segment.message_id) {
-      latest_assistant_segment_->approved = false;
-    }
-    return false;
+    // Until the persisted receipt arrives, a click retries the same vote.
+    return transport_.SendText(envelope.dump());
   }
 
   bool ToggleMicrophone() {
@@ -841,6 +843,24 @@ private:
       }
     }
     QueuePlaybackAcknowledgement(terminal.clock.turn_id);
+    if (terminal.reason != "deferred_motion_absent") {
+      const auto& clock = terminal.clock;
+      const auto kind = terminal.success ? "motion.playback_completed" : "motion.playback_failed";
+      const auto envelope = ag99::runtime::build_envelope(
+          "system.motion_lab_raw_event",
+          {{"event_id", "native-terminal-" + ag99::runtime::Json::array(
+                {clock.turn_id, clock.message_id}).dump()},
+           {"event_type", kind}, {"message_id", clock.message_id},
+           {"source_route", "native_motion_player"}, {"phase", "playback_terminal"},
+           {"raw", {{"turnId", clock.turn_id}, {"messageId", clock.message_id},
+                    {"playbackOrigin", "native"}, {"reason", terminal.reason},
+                    {"segment_elapsed_ms", std::max(0.0,
+                        (services_.now_seconds() - clock.started_at_seconds) * 1000.0)}}}},
+          clock.turn_id, "frontend");
+      if (!transport_.SendText(envelope.dump())) {
+        std::cerr << "[motion-lab] terminal observation not delivered\n";
+      }
+    }
   }
 
   void DispatchMotionUpdate(
@@ -1664,7 +1684,6 @@ private:
   std::atomic<bool> closing_{false};
   std::unique_ptr<NativePlaybackRuntime> playback_runtime_;
   std::atomic<std::uint64_t> next_turn_id_{1};
-  std::atomic<std::uint64_t> next_feedback_id_{1};
   std::string last_input_turn_id_;
   std::uint64_t subtitle_sequence_ = 0;
   std::string subtitle_turn_id_;
