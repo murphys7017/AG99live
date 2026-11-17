@@ -193,13 +193,8 @@ export function usePreviewMotionPlayer(runtime: Live2dRuntimePort) {
       profileRevision: playbackPlan.plan.profile_revision,
     });
 
-    if (activeMotionResourceRunId) {
-      try {
-        stopActiveMotionResource("direct_parameter_plan_replaced");
-      } catch (error) {
-        console.error("[MotionPlayer] direct parameter plan replacement failed.", error);
-        return { status: "rejected", reason: "motion_replacement_stop_failed" };
-      }
+    if (activeMotionResourceRunId && !runtime.releaseActiveMotion()) {
+      return { status: "rejected", reason: "motion_replacement_release_failed" };
     }
 
     const playbackRunId = `motion-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -327,11 +322,8 @@ export function usePreviewMotionPlayer(runtime: Live2dRuntimePort) {
       return { status: "rejected", reason };
     }
     if (hadActivePlayback) {
-      try {
-        stopPlan("motion_resource_replaced");
-      } catch (error) {
-        console.error("[MotionPlayer] motion resource replacement failed.", error);
-        return { status: "rejected", reason: "motion_replacement_stop_failed" };
+      if (!runtime.releaseActiveMotion()) {
+        return { status: "rejected", reason: "motion_replacement_release_failed" };
       }
     }
 
@@ -344,9 +336,11 @@ export function usePreviewMotionPlayer(runtime: Live2dRuntimePort) {
         return;
       }
       activeMotionStop = null;
-      state.status = "failed";
-      state.message = `完整动作资源执行失败：${motion.motion_id}（${reason}）。`;
-      state.finishedAt = new Date().toISOString();
+      if (!activeDirectPlanRunId) {
+        state.status = "failed";
+        state.message = `完整动作资源执行失败：${motion.motion_id}（${reason}）。`;
+        state.finishedAt = new Date().toISOString();
+      }
       activeMotionResourceRunId = "";
       options.onFinished?.({ runId: playbackRunId, status: "failed", reason });
     };
@@ -355,9 +349,11 @@ export function usePreviewMotionPlayer(runtime: Live2dRuntimePort) {
         return;
       }
       activeMotionStop = null;
-      state.status = "finished";
-      state.message = "完整动作资源执行完成。";
-      state.finishedAt = new Date().toISOString();
+      if (!activeDirectPlanRunId) {
+        state.status = "finished";
+        state.message = "完整动作资源执行完成。";
+        state.finishedAt = new Date().toISOString();
+      }
       activeMotionResourceRunId = "";
       options.onFinished?.({ runId: playbackRunId, status: "completed" });
     };
@@ -393,9 +389,11 @@ export function usePreviewMotionPlayer(runtime: Live2dRuntimePort) {
             return;
           }
           activeMotionStop = null;
-          state.status = "idle";
-          state.message = `完整动作资源已停止（${reason}）。`;
-          state.finishedAt = new Date().toISOString();
+          if (!activeDirectPlanRunId) {
+            state.status = "idle";
+            state.message = `完整动作资源已停止（${reason}）。`;
+            state.finishedAt = new Date().toISOString();
+          }
           activeMotionResourceRunId = "";
           options.onFinished?.({ runId: playbackRunId, status: "stopped", reason });
         },
@@ -437,5 +435,6 @@ export function usePreviewMotionPlayer(runtime: Live2dRuntimePort) {
     playPlan,
     playMotionResource,
     stopPlan,
+    releasePlan: () => runtime.releaseActiveMotion(),
   };
 }

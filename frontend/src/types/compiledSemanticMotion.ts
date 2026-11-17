@@ -194,6 +194,7 @@ export interface PerformanceScheduleTrace {
 export interface PerformanceTimingEventTrace {
   id: string;
   kind:
+    | "semantic_activation"
     | "semantic_transition"
     | "speech_start"
     | "speech_phrase"

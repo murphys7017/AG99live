@@ -66,6 +66,7 @@ export interface IdleMotionStartResult {
 
 interface PreparedSemanticMotionEntry {
   durationMs: number;
+  originMs: number;
   assistantText: string;
   speechCueKey: string;
   prepared: PreparedSemanticMotionPayload;
@@ -86,6 +87,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
   const preActionBlockedTurns = new Set<string>();
   const preActionBlockedRequests = new Set<string>();
   let activePlaybackPlan: MotionPlanPayload | null = null;
+  let activePlaybackPlanRunId: string | null = null;
   let continuityEnvelope: ContinuityEnvelope | null = null;
   let thinkingSwayTurnId: string | null = null;
   const preparedSemanticMotions = new Map<string, PreparedSemanticMotionEntry>();
@@ -224,6 +226,27 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     return false;
   }
 
+  function withPlaybackClockOrigin(context: StartPayloadContext, originMs: number): StartPayloadContext {
+    const clock = context.playbackClock;
+    const reader = context.playbackClockReader;
+    return {
+      ...context,
+      playbackClock: clock ? {
+        ...clock,
+        currentTimeMs: Math.max(0, clock.currentTimeMs - originMs),
+        durationMs: clock.durationMs === null ? null : Math.max(0, clock.durationMs - originMs),
+      } : null,
+      playbackClockReader: reader ? {
+        getElapsedMs() {
+          const elapsedMs = reader.getElapsedMs();
+          return elapsedMs !== null && Number.isFinite(elapsedMs)
+            ? Math.max(0, elapsedMs - originMs)
+            : null;
+        },
+      } : null,
+    };
+  }
+
   const motionStartDependencies: MotionStartDependencies = {
     getSelectedModel: dependencies.getSelectedModel,
     getSettings: dependencies.getSettings,
@@ -249,9 +272,13 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     getPlayerMessage: dependencies.getPlayerMessage,
     getContinuityEnvelope: () => continuityEnvelope,
     onPlanStarted: (event) => {
-      activePlaybackPlan = event.executionKind === "parameter_plan"
-        ? event.plan
-        : null;
+      // A resource may take the foreground while a parameter plan is still
+      // fading. Retain that plan for the next parameter handoff until its own
+      // terminal arrives; the foreground run alone cannot identify its owner.
+      if (event.executionKind === "parameter_plan") {
+        activePlaybackPlan = event.plan;
+        activePlaybackPlanRunId = event.runId;
+      }
       continuityEnvelope = event.executionKind === "parameter_plan"
         ? createContinuityEnvelope({
             runId: event.runId,
@@ -326,7 +353,9 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
         ? cached.prepared
         : null;
       discardPreparedSemanticMotion(key);
-      let startContext = context;
+      let startContext = prepared && cached
+        ? withPlaybackClockOrigin(context, cached.originMs)
+        : context;
       if (!prepared && context.playbackClock?.source === "audio") {
         const clock = context.playbackClock;
         const reader = context.playbackClockReader;
@@ -345,24 +374,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
         // with both the plan and its clock measured from this same audio sample.
         // Keep the original reader so pauses, cancellation and drain still belong
         // to the existing segment; do not create a second playback clock.
-        startContext = {
-          ...context,
-          playbackClock: {
-            ...clock,
-            currentTimeMs: 0,
-            // Open PCM has no total yet. Keep it unknown: the compiler uses
-            // the action's bounded timing rather than inventing an audio EOF.
-            durationMs: clock.durationMs === null ? null : clock.durationMs - originMs,
-          },
-          playbackClockReader: {
-            getElapsedMs() {
-              const elapsedMs = reader.getElapsedMs();
-              return elapsedMs !== null && Number.isFinite(elapsedMs)
-                ? Math.max(0, elapsedMs - originMs)
-                : null;
-            },
-          },
-        };
+        startContext = withPlaybackClockOrigin(context, originMs);
         console.info("[ModelEngine] preparing deferred motion on active audio.", {
           turnId: context.turnId,
           messageId: context.messageId,
@@ -569,7 +581,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     discardPreparedSemanticMotion(key);
     const started = startSpeechOnlyMotionRequest(
       speechOnlyRequest,
-      {
+      withPlaybackClockOrigin({
         messageId: normalizedMessageId,
         turnId: playbackClock.turnId,
         assistantText,
@@ -581,7 +593,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
         queuedDelayMs: 0,
         playbackClock,
         playbackClockReader,
-      },
+      }, cached?.originMs ?? 0),
       motionStartDependencies,
       runtimeStateController,
       prepared,
@@ -620,6 +632,10 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
         status: "failed",
         reason: "motion_preparation_requires_active_audio_duration",
       };
+    }
+
+    if (playbackClock.source === "audio" && playbackClock.currentTimeMs >= audioDurationMs) {
+      return { status: "not_applicable", reason: "audio_window_ended_before_motion_preparation" };
     }
 
     const normalizedMessageId = playbackClock.messageId.trim();
@@ -695,6 +711,8 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
       return { status: "prepared", source };
     }
 
+    const originMs = playbackClock.source === "audio" ? playbackClock.currentTimeMs : 0;
+    context = withPlaybackClockOrigin(context, originMs);
     const prepared = source === "speech_only"
       ? prepareSpeechOnlyMotionRequest(
           speechOnlyRequest as SpeechOnlyMotionRequest,
@@ -736,6 +754,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     }
     rememberPreparedSemanticMotion(key, {
       durationMs,
+      originMs,
       assistantText,
       speechCueKey,
       prepared,
@@ -906,27 +925,21 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
   function handlePlaybackTerminal(
     event: ModelEnginePlaybackTerminalEvent,
   ): ModelEngineActivePlaybackRun | null {
+    if (activePlaybackPlanRunId === event.runId) {
+      activePlaybackPlan = null;
+      activePlaybackPlanRunId = null;
+    }
     const completedRun = activePlaybackRun?.runId === event.runId
       ? activePlaybackRun
       : null;
     if (!completedRun) {
       return null;
     }
-    const isSpeechSegmentHandoff = event.status === "stopped"
-      && event.reason === "speech_segment_handoff";
     if (activePlaybackRun?.runId === event.runId) {
       activePlaybackRun = null;
-      // A speech handoff ends the previous execution, but its parameter plan
-      // and continuity envelope are still the source state for the successor
-      // segment. Ordinary completion, failure and interruption must clear them.
-      if (!isSpeechSegmentHandoff) {
-        activePlaybackPlan = null;
-        continuityEnvelope = null;
-      }
+      continuityEnvelope = null;
     }
-    if (isSpeechSegmentHandoff) {
-      setState("idle", "动作已交接，等待下一段动作。", null);
-    } else if (event.status === "failed" || event.status === "rejected") {
+    if (event.status === "failed" || event.status === "rejected") {
       setState(
         "failed",
         event.reason || "动作执行失败。",
@@ -954,6 +967,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     } finally {
       activePlaybackRun = null;
       activePlaybackPlan = null;
+      activePlaybackPlanRunId = null;
       continuityEnvelope = null;
       state.lastCompileReason = "";
       if (stopFailed) {
@@ -997,6 +1011,16 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     stopActivePlayback(reason, `动作引擎已停止（${reason}）。`);
   }
 
+  function handoffPlaybackSegment(turnId: string | null, messageId: string): boolean {
+    runtimeScheduler.cancelPendingPayloadForSegment(turnId, messageId);
+    discardPreparedSemanticMotion(buildSegmentKey(turnId, messageId));
+    if (activePlaybackRun?.turnId !== normalizeTurnId(turnId)
+      || activePlaybackRun.messageId !== messageId.trim()) return false;
+    // Keep the run, plan and response state alive until it drains or a new plan
+    // inherits its parameter offsets and velocity through the existing mixer.
+    return dependencies.releasePlan();
+  }
+
   return {
     state: readonly(state),
     ingestNormalizedPayload,
@@ -1012,6 +1036,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     releaseThinkingSway,
     handlePlaybackTerminal,
     interruptPlaybackSegment,
+    handoffPlaybackSegment,
     stop,
   };
 }

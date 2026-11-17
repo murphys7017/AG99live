@@ -175,6 +175,7 @@ export interface ModelEngineDependencies extends MotionStartDependencies {
   startIdlePlan?: (plan: MotionPlanPayload, actionId?: string, source?: string) => boolean;
   releaseIdlePlan?: (actionId?: string) => void;
   stopPlan: (reason?: string) => void;
+  releasePlan: () => boolean;
   startInteractionSway: (input: InteractionSwayInput) => boolean;
   stopInteractionSway: () => void;
   canStartSpeechOnlyMotion: (

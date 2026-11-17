@@ -1876,6 +1876,30 @@ export class LAppModel extends CubismUserModel {
     return true;
   }
 
+  /** Begin a parameter-weight release without resetting presentation state. */
+  public releaseActiveMotion(): boolean {
+    let released = false;
+    const state = this._directParameterPlanState;
+    if (state) {
+      if (state.releaseStartedAtMs === null) {
+        const clockMs = state.playbackClockReader.getElapsedMs();
+        state.releaseStartedAtMs = Math.max(
+          state.presentationElapsedMs,
+          clockMs !== null && Number.isFinite(clockMs) ? clockMs : 0,
+        );
+      }
+      released = true;
+    }
+    if (this._activeMotionResourceHandle !== InvalidMotionQueueEntryHandleValue) {
+      // Resource motions use Cubism's configured fade instead of losing their
+      // queue entry and lifecycle callback at the speech boundary.
+      this._motionManager.fadeOutAllMotions();
+      this._motionManager.setCurrentPriority(0);
+      released = true;
+    }
+    return released;
+  }
+
   public stopDirectParameterPlan(
     reason = "",
     status: DirectParameterPlanTerminalStatus = "stopped",

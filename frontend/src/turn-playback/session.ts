@@ -114,6 +114,7 @@ export interface TurnPlaybackSessionAudio {
   released: boolean;
   started: boolean;
   startedAtMs: number | null;
+  terminalAtMs: number | null;
   durationMs: number | null;
   terminal: AudioTerminalState;
   reason: string;
@@ -267,6 +268,7 @@ export function createEmptyAudioState(): TurnPlaybackSessionAudio {
     released: false,
     started: false,
     startedAtMs: null,
+    terminalAtMs: null,
     durationMs: null,
     terminal: "idle",
     reason: "",

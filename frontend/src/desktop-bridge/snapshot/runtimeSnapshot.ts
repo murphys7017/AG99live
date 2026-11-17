@@ -472,6 +472,7 @@ function isCompatiblePerformanceEvent(event: unknown): boolean {
     && Boolean(event.id.trim())
     && (
       event.kind === "semantic_transition"
+      || event.kind === "semantic_activation"
       || event.kind === "speech_start"
       || event.kind === "speech_phrase"
       || event.kind === "speech_release"

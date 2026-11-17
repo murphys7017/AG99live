@@ -5,6 +5,7 @@ import type { DesktopMotionPlaybackRecord } from "../types/desktop.js";
 import type { MotionPlaybackRecordPort } from "../turn-playback/ports.js";
 import type { PlaybackTimelineSnapshot } from "../playback-timeline/contracts.js";
 import { cloneJson } from "../utils/cloneJson.js";
+import { resolveMotionTerminal } from "../turn-playback/terminals.js";
 
 const DEFAULT_MAX_MOTION_PLAYBACK_RECORDS = 5;
 const MOTION_RECORD_DEDUP_WINDOW_MS = 1200;
@@ -205,8 +206,9 @@ export function useMotionPlaybackRecorder(options: MotionPlaybackRecorderOptions
       run.messageId,
     ) ?? null;
     const segmentPosition = options.getSegmentPosition?.(run.turnId, run.messageId) ?? null;
+    const terminal = resolveMotionTerminal(event);
     options.onMotionLabRawEvent({
-      event_type: event.status === "completed"
+      event_type: terminal === "completed"
         ? "motion.playback_completed"
         : "motion.playback_failed",
       message_id: run.messageId,
@@ -217,7 +219,8 @@ export function useMotionPlaybackRecorder(options: MotionPlaybackRecorderOptions
       raw: {
         playbackOrigin: run.playbackOrigin,
         runId: event.runId,
-        status: event.status,
+        status: terminal === "completed" ? "completed" : event.status,
+        executionStatus: event.status,
         reason: event.reason ?? "",
         turnId: run.turnId,
         messageId: run.messageId,
@@ -225,7 +228,7 @@ export function useMotionPlaybackRecorder(options: MotionPlaybackRecorderOptions
         segmentCount: segmentPosition?.segmentCount ?? null,
         transform_trace: run.transformTrace,
         timeline_outcome: {
-          motion: event.status,
+          motion: terminal,
           reason: event.reason ?? "",
           timeline_phase: timeline?.phase ?? "missing",
           clock_source: timeline?.clockSource ?? "missing",
@@ -234,7 +237,7 @@ export function useMotionPlaybackRecorder(options: MotionPlaybackRecorderOptions
               sink.id,
               {
                 required: sink.required,
-                terminal: sink.id === "motion" ? event.status : sink.terminal,
+                terminal: sink.id === "motion" ? terminal : sink.terminal,
                 reason: sink.id === "motion"
                   ? event.reason ?? ""
                   : sink.reason ?? "",

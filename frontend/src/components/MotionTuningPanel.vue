@@ -848,7 +848,7 @@ function appendPerformanceScheduleDiagnostics(
     return;
   }
   const semanticEventCount = schedule.events.filter((event) =>
-    event.kind === "semantic_transition",
+    event.kind === "semantic_transition" || event.kind === "semantic_activation",
   ).length;
   const gazeEventCount = schedule.events.filter((event) =>
     event.kind.startsWith("gaze_"),

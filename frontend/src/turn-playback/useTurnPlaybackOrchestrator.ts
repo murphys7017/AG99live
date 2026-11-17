@@ -5,10 +5,10 @@ import { cloneJson } from "../utils/cloneJson.js";
 import {
   canReleaseAudio,
   canReleaseMotion,
-  getActivePlaybackSegment,
   isPlaybackSegmentResolved,
 } from "./selectors.js";
-import type { TurnPlaybackSegment } from "./session.js";
+import { isSegmentLocallySettled, type TurnPlaybackSegment } from "./session.js";
+import { createSegmentIdentity, segmentIdentityKey } from "./identity.js";
 import type { PlaybackTimelineRuntime } from "../playback-timeline/playbackTimelineRuntime.js";
 
 type SessionStore = TurnPlaybackSessionPort;
@@ -23,29 +23,71 @@ interface TurnPlaybackOrchestratorOptions {
     | "startIncrementalMotion"
     | "rejectMotionBeforeStart"
     | "subscribeExecutionStateChanges"
+    | "prepareActiveAudioMotion"
   >;
 }
 
 export function useTurnPlaybackOrchestrator(
   options: TurnPlaybackOrchestratorOptions,
 ) {
+  let scheduling = false;
+  let reschedule = false;
+  let disposed = false;
+
   function scheduleReadySegments(): void {
+    if (disposed) return;
+    if (scheduling) {
+      reschedule = true;
+      return;
+    }
+    scheduling = true;
+    try {
+      releaseReadySegments();
+    } finally {
+      scheduling = false;
+      if (reschedule) {
+        reschedule = false;
+        queueMicrotask(scheduleReadySegments);
+      }
+    }
+  }
+
+  function executionKey(segment: { turnId: string | null; messageId: string }): string {
+    const identity = createSegmentIdentity(segment.turnId, segment.messageId);
+    if (!identity) throw new Error("playback_segment_identity_missing");
+    return segmentIdentityKey(identity);
+  }
+
+  function releaseReadySegments(): void {
+    const yieldedSpeechWindows = new Set<string>();
     for (const session of options.sessionStore.getSessions()) {
       if (session.interrupted || session.phase === "completed" || session.phase === "failed") continue;
-      for (let index = 0; index + 1 < session.segmentOrder.length; index++) {
+      let laterAudioStarted = false;
+      for (let index = session.segmentOrder.length - 2; index >= 0; index--) {
         const previous = session.segments.get(session.segmentOrder[index]!);
         const next = session.segments.get(session.segmentOrder[index + 1]!);
-        if (!previous || !next || previous.incremental || next.incremental
-          || previous.audio.terminal !== "completed" || !previous.text.delivered
-          || !isPlaybackSegmentResolved(next) || !canReleaseAudio(next)) continue;
-        if (previous.motion.pending) {
+        laterAudioStarted ||= next?.audio.started === true;
+        if (!previous || !next
+          || previous.audio.terminal !== "completed" || !previous.text.delivered) continue;
+        const successorReady = laterAudioStarted
+          || (next.incremental
+            ? next.audio.terminal === "absent" && next.text.delivered && next.motion.payload !== null
+            : isPlaybackSegmentResolved(next) && (canReleaseAudio(next) || next.audio.released));
+        if (!successorReady) continue;
+        yieldedSpeechWindows.add(executionKey(previous));
+        if (!previous.motion.released && !previous.motion.absent
+          && !previous.motion.failed && !previous.motion.completed) {
           // A generated result is still acknowledged later, but can no longer
           // animate this completed speech window or hold up the following audio.
-          options.sessionStore.markMotionFailed(previous.turnId, previous.messageId, "deferred_motion_speech_window_ended");
+          options.timelineRuntime.rejectMotionBeforeStart(
+            previous.turnId, previous.messageId, "deferred_motion_speech_window_ended",
+          );
         }
         options.timelineRuntime.handoffSpeechMotionTail(previous.turnId, previous.messageId);
       }
     }
+    const hasYieldedSpeechWindow = (segment: DeepReadonly<TurnPlaybackSegment>) =>
+      yieldedSpeechWindows.has(executionKey(segment));
     // Motion follows segment order independently of text/PCM production.
     // An unfinished earlier action must not overwrite a later action on arrival.
     for (const session of options.sessionStore.getSessions()) {
@@ -53,6 +95,10 @@ export function useTurnPlaybackOrchestrator(
       for (const segmentId of session.segmentOrder) {
         const segment = session.segments.get(segmentId);
         if (!segment?.incremental) continue;
+        if (hasYieldedSpeechWindow(segment)) continue;
+        if (segment.motion.absent && segment.audio.started && segment.audio.terminal === "idle") {
+          options.timelineRuntime.prepareActiveAudioMotion(segment.turnId, segment.messageId);
+        }
         if (segment.motion.failed || segment.motion.completed || segment.motion.absent) continue;
         if (segment.motion.payload && !segment.motion.released
           && segment.audio.terminal === "failed") {
@@ -82,7 +128,9 @@ export function useTurnPlaybackOrchestrator(
       if (session.interrupted || session.phase === "completed" || session.phase === "failed") {
         continue;
       }
-      segment = getActivePlaybackSegment(session);
+      segment = session.segmentOrder.map((id) => session.segments.get(id))
+        .find((candidate) => candidate && !isSegmentLocallySettled(candidate)
+          && !hasYieldedSpeechWindow(candidate)) ?? null;
       if (segment) {
         break;
       }
@@ -301,6 +349,7 @@ export function useTurnPlaybackOrchestrator(
   return {
     flush: scheduleReadySegments,
     dispose() {
+      disposed = true;
       stopSessionWatch();
       unsubscribeExecutionStateChanges();
     },

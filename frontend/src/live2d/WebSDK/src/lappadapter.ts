@@ -137,6 +137,10 @@ export class LAppAdapter {
       || this._directParameterPlanError;
   }
 
+  public releaseActiveMotion(): boolean {
+    return this.getModel()?.releaseActiveMotion() ?? false;
+  }
+
   public beginExternalAudioSignalSource(
     sourceId: string,
     options?: {

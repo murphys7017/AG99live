@@ -606,6 +606,8 @@ export class ActiveParameterMixer {
     const contributions: ParameterContribution[] = [];
     let allBindingsActivated = true;
     for (const item of planState.semanticBindings) {
+      if (planState.releaseStartedAtMs !== null
+        && item.activationAtMs > planState.releaseStartedAtMs) continue;
       if (elapsedMs < item.activationAtMs) {
         allBindingsActivated = false;
         continue;

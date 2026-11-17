@@ -48,6 +48,7 @@ interface PlaybackTimelineEntry {
   messageId: string;
   engine: PlaybackTimelineEngine;
   projectsMotionSession: boolean;
+  motionHandoffRequested: boolean;
   deferredText: PlaybackTimelineDeferredTextRelease | null;
   audioStartTimeoutHandle: ReturnType<typeof globalThis.setTimeout> | null;
   audioInterruptHandler: ((reason: string) => void) | null;
@@ -88,6 +89,7 @@ export interface PlaybackTimelineRuntimeDeps<TMotionPayload = unknown> {
 
 export interface PlaybackTimelineRuntime<TMotionPayload = unknown> {
   handoffSpeechMotionTail: (turnId: string | null, messageId: string) => boolean;
+  prepareActiveAudioMotion: (turnId: string | null, messageId: string) => void;
   startSegmentJob: (
     job: PlaybackTimelineSegmentJob<TMotionPayload>,
   ) => boolean;
@@ -311,6 +313,7 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
       messageId,
       engine,
       projectsMotionSession: false,
+      motionHandoffRequested: false,
       deferredText: options.deferredText ?? null,
       audioStartTimeoutHandle: null,
       audioInterruptHandler: options.onInterrupt ?? null,
@@ -705,6 +708,7 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
       messageId,
       engine,
       projectsMotionSession: true,
+      motionHandoffRequested: false,
       deferredText: null,
       audioStartTimeoutHandle: null,
       audioInterruptHandler: null,
@@ -760,6 +764,16 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     }
   }
 
+  function prepareActiveAudioMotion(turnId: string | null, messageId: string): void {
+    const snapshot = getTimeline(turnId, messageId)?.engine.getSnapshot();
+    if (!snapshot || snapshot.clockSource !== "audio"
+      || (snapshot.phase !== "playing" && snapshot.phase !== "paused")
+      || snapshot.durationMs === null || snapshot.currentTimeMs >= snapshot.durationMs) return;
+    const motion = snapshot.sinks.find((sink) => sink.id === MOTION_TIMELINE_SINK_ID);
+    if (motion && motion.terminal !== "idle") return;
+    deps.onAudioTimelineDurationReady?.(turnId, messageId, snapshot);
+  }
+
   function markAudioTimelineStarted(
     turnId: string | null,
     messageId: string,
@@ -787,6 +801,14 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     engine.markSinkStarted(AUDIO_TIMELINE_SINK_ID);
     if (engine.getPhase() === "ready") {
       engine.start(startedAtMs);
+    }
+    // PCM can start on the device before Vue's session watcher runs. Release
+    // older speech owners before this segment can start SpeechOnly or motion,
+    // so their ownership is handed off while ModelEngine still identifies them.
+    for (const previous of [...timelines.values()]) {
+      if (previous !== timeline && previous.turnId === turnId) {
+        handoffSpeechMotionTail(previous.turnId, previous.messageId);
+      }
     }
     sessionProjection.markAudioStarted(
       turnId,
@@ -1188,7 +1210,8 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
       // Preserve ordered ownership. The orchestrator may explicitly hand off
       // a completed speech segment's motion tail before starting its successor.
       const blocksRelease = snapshot.sinks.some(
-        (sink) => sink.required && !isTerminalSinkValue(sink.terminal),
+        (sink) => sink.required && !isTerminalSinkValue(sink.terminal)
+          && !(timeline.motionHandoffRequested && sink.id === MOTION_TIMELINE_SINK_ID),
       );
       if (!blocksRelease) {
         continue;
@@ -1207,13 +1230,20 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
     if (!timeline || !snapshot
       || snapshot.sinks.find((sink) => sink.id === AUDIO_TIMELINE_SINK_ID)?.terminal !== "completed"
       || !hasOpenSink(timeline, MOTION_TIMELINE_SINK_ID)) return false;
-    // Stop the previous owner through ModelEngine before releasing the next
-    // segment. This is an intentional handoff, not concurrent parameter writes.
-    deps.segmentExecution.motionSink.interrupt(turnId, messageId, "speech_segment_handoff");
-    reportLatencyStage("motion_handoff", turnId, null, messageId);
-    if (getTimeline(turnId, messageId) === timeline) {
-      markMotionTimelineTerminal(turnId, messageId, "completed", "speech_segment_handoff");
+    if (timeline.motionHandoffRequested) return true;
+    const motion = snapshot.sinks.find((sink) => sink.id === MOTION_TIMELINE_SINK_ID);
+    if (motion?.terminal !== "started") {
+      rejectMotionBeforeStart(turnId, messageId, "deferred_motion_speech_window_ended");
+      return false;
     }
+    if (!deps.segmentExecution.motionSink.handoff(turnId, messageId)) {
+      throw new Error(`motion_handoff_owner_missing:${messageId}`);
+    }
+    // Unblock the successor while the previous run eases out. Completion still
+    // waits for its real terminal; a replacement inherits presentation state.
+    timeline.motionHandoffRequested = true;
+    reportLatencyStage("motion_handoff", turnId, null, messageId);
+    notifyExecutionStateChanged();
     return true;
   }
 
@@ -1515,6 +1545,7 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
 
   return {
     handoffSpeechMotionTail,
+    prepareActiveAudioMotion,
     startSegmentJob,
     startIncrementalMotion,
     rejectAudioBeforeStart,

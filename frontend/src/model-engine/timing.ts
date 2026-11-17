@@ -73,7 +73,7 @@ export function resolveMotionTiming(
 
   if (options.mode === "idle") {
     const idleDurationMs =
-      options.speechActive === true && syncedDuration !== null
+      options.speechActive === true
         ? resolvedDurationMs
         : Math.max(480, Math.min(resolvedDurationMs, 2200));
     const curveTiming = resolvePerformanceCurveTiming({

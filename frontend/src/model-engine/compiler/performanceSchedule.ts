@@ -395,44 +395,7 @@ export function compileSemanticTrackTiming(options: {
   const firstChangedStepIndex = changedStepIndices[0];
   const firstChangedStep = schedule.semanticSteps[firstChangedStepIndex];
   const baseReleaseAtMs = Math.max(1, schedule.durationMs - blendOutMs);
-  if (changedStepIndices.length === 1) {
-    if (firstChangedStep.index === 0) {
-      return {
-        ok: true,
-        reason: "",
-        value: {
-          strategy: "semantic",
-          events: [],
-          parameterEvents: [],
-          requiredOwnedUntilMs: baseReleaseAtMs,
-          staggered: false,
-          residual: false,
-          compressed: false,
-        },
-      };
-    }
-    // A sparse sequence may introduce an axis after playback has started. It
-    // has no parameter-to-parameter transition, but it still needs time at
-    // full ownership before the shared plan releases it.
-    const activationEndMs = firstChangedStep.startMs
-      + policy.transitionMs
-      + policy.preferredHoldMs;
-    const residualMs = resolvePerformanceResidualMs(
-      schedule,
-      semanticAxisId,
-      semanticGroup,
-      "semantic",
-      Math.max(0, MAX_MOTION_DURATION_MS - blendOutMs - activationEndMs),
-      false,
-    );
-    const requiredOwnedUntilMs = Math.max(
-      baseReleaseAtMs,
-      activationEndMs + residualMs,
-    );
-    recordPerformanceDecision(
-      schedule,
-      `semantic_delayed_activation:${semanticAxisId}:${firstChangedStep.index}:${requiredOwnedUntilMs}`,
-    );
+  if (changedStepIndices.length === 1 && firstChangedStep.index === 0) {
     return {
       ok: true,
       reason: "",
@@ -440,9 +403,9 @@ export function compileSemanticTrackTiming(options: {
         strategy: "semantic",
         events: [],
         parameterEvents: [],
-        requiredOwnedUntilMs,
+        requiredOwnedUntilMs: baseReleaseAtMs,
         staggered: false,
-        residual: residualMs > 0,
+        residual: false,
         compressed: false,
       },
     };
@@ -474,8 +437,40 @@ export function compileSemanticTrackTiming(options: {
 
   const events: PerformanceTimingEventTrace[] = [];
   let compressed = false;
-  let finalTransitionEndMs = firstChangedStep.startMs;
   const initialNextAtMs = transitionStarts[0] ?? schedule.durationMs;
+  const delayedActivation = firstChangedStep.index > 0;
+  const initialAtMs = firstChangedStep.startMs
+    + (delayedActivation ? Math.max(1, policy.transitionOffsetMs) : 0);
+  const initialTransition = !delayedActivation
+    ? { transitionMs: 0, compressed: false }
+    : transitionStarts.length === 0
+      ? { transitionMs: policy.transitionMs, compressed: false }
+      : resolveTransitionWindow(initialNextAtMs - initialAtMs, policy);
+  let finalTransitionEndMs = initialAtMs + initialTransition.transitionMs;
+  if (delayedActivation) {
+    // The first keyframe anchors the newly owned axis at neutral. The next
+    // event performs the actual entry using the same pacing as later steps.
+    events.push({
+      id: `${buildSemanticEventId(semanticAxisId, firstChangedStep.index)}:activation`,
+      kind: "semantic_activation",
+      source: "semantic_step",
+      timingSource: "semantic_group_policy",
+      semanticAxisId,
+      semanticGroup,
+      atMs: firstChangedStep.startMs,
+      transitionMs: 0,
+      holdMs: initialAtMs - firstChangedStep.startMs,
+      residualMs: 0,
+      transitionOffsetMs: 0,
+      compressed: false,
+      stepIndex: firstChangedStep.index,
+    });
+    recordPerformanceDecision(
+      schedule,
+      `semantic_delayed_activation:${semanticAxisId}:${firstChangedStep.index}:${initialTransition.transitionMs}`,
+    );
+  }
+  compressed ||= initialTransition.compressed;
   events.push({
     id: buildSemanticEventId(semanticAxisId, firstChangedStep.index),
     kind: "semantic_transition",
@@ -483,12 +478,13 @@ export function compileSemanticTrackTiming(options: {
     timingSource: "semantic_group_policy",
     semanticAxisId,
     semanticGroup,
-    atMs: firstChangedStep.startMs,
-    transitionMs: 0,
-    holdMs: Math.max(0, initialNextAtMs - firstChangedStep.startMs),
+    atMs: initialAtMs,
+    transitionMs: initialTransition.transitionMs,
+    holdMs: Math.max(0, initialNextAtMs - finalTransitionEndMs),
     residualMs: 0,
-    transitionOffsetMs: 0,
-    compressed: false,
+    transitionOffsetMs: initialAtMs - firstChangedStep.startMs,
+    compressed: initialTransition.compressed,
+    compressionReason: initialTransition.compressed ? "transition_window_short" : undefined,
     stepIndex: firstChangedStep.index,
   });
 
@@ -550,6 +546,7 @@ export function compileSemanticTrackTiming(options: {
   const requiredOwnedUntilMs = Math.max(
     baseReleaseAtMs,
     finalTransitionEndMs + residualMs,
+    delayedActivation ? finalTransitionEndMs + policy.preferredHoldMs : 0,
   );
   const finalEvent = events[events.length - 1];
   if (finalEvent) {

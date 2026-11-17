@@ -23,3 +23,12 @@ export function sinkTerminalToTurnTerminal(
 ): TurnTerminal {
   return value === "completed" || value === "absent" ? "completed" : value;
 }
+
+/** A replacement transfers presentation ownership rather than failing playback. */
+export function resolveMotionTerminal(event: { status: string; reason?: string }): TurnTerminal {
+  if (event.status === "completed" || (event.status === "stopped"
+    && (event.reason === "direct_parameter_plan_replaced" || event.reason === "motion_replaced"))) {
+    return "completed";
+  }
+  return event.status === "stopped" ? "interrupted" : "failed";
+}

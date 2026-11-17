@@ -324,6 +324,7 @@ function resolveParameterSteps(
 function buildSemanticTrack(
   parameterSteps: readonly ParameterStep[],
   events: PerformancePartTrackTiming["parameterEvents"],
+  axisNeutralValue: number,
 ): ParameterTrackBuildResult {
   if (events.length === 0) {
     return {
@@ -344,8 +345,12 @@ function buildSemanticTrack(
     points.push({
       at_ms: event.atMs,
       transition_ms: event.transitionMs,
-      target_value: parameter.target_value,
-      input_value: parameter.input_value,
+      target_value: event.kind === "semantic_activation"
+        ? parameter.neutral_target_value
+        : parameter.target_value,
+      input_value: event.kind === "semantic_activation" && parameter.input_value !== undefined
+        ? axisNeutralValue
+        : parameter.input_value,
     });
   }
   return {
@@ -497,7 +502,7 @@ function buildScheduledParameterTrack(
       axisNeutralValue,
     );
   }
-  return buildSemanticTrack(parameterSteps, timing.parameterEvents);
+  return buildSemanticTrack(parameterSteps, timing.parameterEvents, axisNeutralValue);
 }
 
 function resolvePartTrackTiming(

@@ -33,6 +33,7 @@ export interface PlaybackTimelineComposition {
 export interface PlaybackTimelineMotionEnginePort {
   ingestNormalizedPayload: PlaybackTimelineMotionSink["start"];
   interruptPlaybackSegment(turnId: string | null, messageId: string, reason: string): void;
+  handoffPlaybackSegment(turnId: string | null, messageId: string): boolean;
   preparePlaybackTimeline(
     playbackTimeline: ReturnType<typeof projectMotionPlaybackClock>,
     assistantText: string,
@@ -53,7 +54,7 @@ export function createAppPlaybackTimelineRuntime(options: {
   adapterPlayback: AdapterPlaybackCompositionPort;
   motionSink: Pick<
     PlaybackTimelineSegmentMotionSink<NormalizedMotionPayload>,
-    "start" | "interrupt"
+    "start" | "interrupt" | "handoff"
   >;
   audioSink: PlaybackTimelineAudioSink;
   speechOutputRuntime: SpeechOutputRuntime;
@@ -200,12 +201,27 @@ export function configurePlaybackTimelineMotionRuntime(options: {
       return;
     }
     const motionSink = currentTimeline.sinks.find((sink) => sink.id === "motion");
-    if (!motionSink || motionSink.terminal !== "idle") {
+    if (!motionSink) {
+      // Short PCM can finish production before its first sample is presented;
+      // duration-ready and started may therefore arrive in either order.
+      if (currentTimeline.durationMs !== null) {
+        handleAudioTimelineDurationReady(normalizedTurnId, normalizedMessageId, currentTimeline);
+      }
+      return;
+    }
+    if (motionSink.terminal !== "idle") {
       console.info("[PlaybackTimelineWiring] audio timeline started without pending motion sink.", {
         turnId: normalizedTurnId,
         messageId: normalizedMessageId,
         timeline: currentTimeline,
       });
+      return;
+    }
+    if (currentTimeline.clockSource === "audio" && currentTimeline.durationMs !== null
+      && currentTimeline.currentTimeMs >= currentTimeline.durationMs) {
+      playbackTimeline.rejectMotionBeforeStart(
+        normalizedTurnId, normalizedMessageId, "audio_window_ended_before_motion_start",
+      );
       return;
     }
     const timelineClockReader = playbackTimeline.getTimelineClockReaderForSegment(
@@ -234,6 +250,10 @@ export function configurePlaybackTimelineMotionRuntime(options: {
     messageId: string,
     preparedTimeline: PlaybackTimelineSnapshot,
   ): void {
+    const currentTimeline = playbackTimeline.getTimelineSnapshotForSegment(turnId, messageId);
+    if (!currentTimeline || currentTimeline.timelineId !== preparedTimeline.timelineId) return;
+    const motion = currentTimeline.sinks.find((sink) => sink.id === "motion");
+    if (motion && motion.terminal !== "idle") return;
     console.info("[ModelEngine] audio timeline duration ready for motion preparation.", {
       turnId,
       messageId,
@@ -244,7 +264,7 @@ export function configurePlaybackTimelineMotionRuntime(options: {
       sinks: preparedTimeline.sinks,
     });
     const result = motionEngine.preparePlaybackTimeline(
-      projectMotionPlaybackClock(preparedTimeline),
+      projectMotionPlaybackClock(currentTimeline),
       getCanonicalAssistantText(turnId, messageId),
       getCanonicalSpeechCues(turnId, messageId),
     );
@@ -285,6 +305,11 @@ export function configurePlaybackTimelineMotionRuntime(options: {
       source: result.source,
       durationMs: preparedTimeline.durationMs,
     });
+    const readyTimeline = playbackTimeline.getTimelineSnapshotForSegment(turnId, messageId);
+    if (readyTimeline?.clockSource === "audio"
+      && (readyTimeline.phase === "playing" || readyTimeline.phase === "paused")) {
+      handleAudioTimelineStarted(turnId, messageId, readyTimeline);
+    }
   }
 
   const motionTimelineSink = createModelEngineMotionTimelineSink({

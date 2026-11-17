@@ -20,6 +20,7 @@ export interface PlaybackTimelineMotionSink<TMotionPayload = unknown> {
     context: PlaybackTimelineMotionContext,
   ): boolean | void;
   interrupt(turnId: string | null, messageId: string, reason: string): void;
+  handoff(turnId: string | null, messageId: string): boolean;
 }
 
 export type MotionTimelineTerminal = "completed" | "failed" | "interrupted";

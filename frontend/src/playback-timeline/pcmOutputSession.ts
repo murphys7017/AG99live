@@ -100,12 +100,6 @@ export function createPcmOutputSession(
     return samples;
   }
 
-  function timelineSamples(): number {
-    if (firstStartTime === null) return 0;
-    const endTime = Math.min(context.currentTime, tailTime);
-    return Math.max(0, Math.floor((endTime - firstStartTime) * SAMPLE_RATE));
-  }
-
   function clearPrebufferTimer(): void {
     if (prebufferTimer !== null) {
       clearTimeout(prebufferTimer);
@@ -224,9 +218,11 @@ export function createPcmOutputSession(
     },
     getScheduledWaitMs: () => Math.max(0, (notBefore - context.currentTime) * 1000),
     clock: {
-      getCurrentTimeMs: () => timelineSamples() * 1000 / SAMPLE_RATE,
+      // Sample position excludes scheduling gaps. Underruns freeze this clock;
+      // newly admitted PCM continues from the same prefix instead of jumping.
+      getCurrentTimeMs: () => currentSamples() * 1000 / SAMPLE_RATE,
       getDurationMs: () => finished
-        ? Math.max(acceptedSamples, scheduledDurationSamples()) * 1000 / SAMPLE_RATE
+        ? acceptedSamples * 1000 / SAMPLE_RATE
         : null,
       getPlaybackRate: () => 1,
       isPlaying: () => !disposed && context.state === "running" && chunks.some(

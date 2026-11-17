@@ -461,6 +461,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       },
     }),
     stopPlan: (reason) => motionPlayer.stopPlan(reason),
+    releasePlan: () => motionPlayer.releasePlan(),
     startInteractionSway: (input) => live2dRuntime.startInteractionSway(input),
     stopInteractionSway: () => live2dRuntime.stopInteractionSway(),
     onMotionRejected: ({ turnId, messageId, reason }) =>

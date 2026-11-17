@@ -430,12 +430,11 @@ export function useTurnPlaybackSessionStore(options?: { normalizeMotionPayload?:
       segment.motion.source = material.source;
       segment.motion.receivedAtMs = performance.now();
       segment.motion.lateByMs = segment.audio.terminal === "completed"
-        && segment.audio.startedAtMs !== null
-        && segment.audio.durationMs !== null
+        && segment.audio.terminalAtMs !== null
         ? Math.max(
           0,
           segment.motion.receivedAtMs
-            - (segment.audio.startedAtMs + segment.audio.durationMs),
+            - segment.audio.terminalAtMs,
         )
         : null;
     } else if (material.state === "absent") {
@@ -538,6 +537,7 @@ export function useTurnPlaybackSessionStore(options?: { normalizeMotionPayload?:
     }
     segment.audio.released = true;
     segment.audio.terminal = terminal;
+    segment.audio.terminalAtMs = performance.now();
     segment.audio.reason = reason || segment.audio.reason;
   }
 

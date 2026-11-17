@@ -16,6 +16,7 @@ import type {
   PlaybackTimelineMotionSink,
 } from "../playback-timeline/motionTypes.js";
 import { normalizeIdentityPart } from "../turn-playback/identity.js";
+import { resolveMotionTerminal } from "../turn-playback/terminals.js";
 
 export interface ModelEnginePlaybackTimelineMotionEngine {
   ingestNormalizedPayload(
@@ -27,6 +28,7 @@ export interface ModelEnginePlaybackTimelineMotionEngine {
     messageId: string,
     reason: string,
   ): void;
+  handoffPlaybackSegment(turnId: string | null, messageId: string): boolean;
 }
 
 export interface MotionTimelineTerminalEvent {
@@ -218,6 +220,9 @@ export function createModelEngineMotionTimelineSink(options: {
       });
       options.motionEngine.interruptPlaybackSegment(turnId, messageId, reason);
     },
+    handoff(turnId, messageId) {
+      return options.motionEngine.handoffPlaybackSegment(turnId, messageId);
+    },
   };
 }
 
@@ -236,7 +241,6 @@ export function createMotionTimelineRunTracker(options: {
   const runs = new Map<string, {
     turnId: string | null;
     messageId: string;
-    executionKind: ModelEnginePlanStartedEvent["executionKind"];
   }>();
 
   return {
@@ -255,7 +259,6 @@ export function createMotionTimelineRunTracker(options: {
       runs.set(event.runId, {
         turnId: event.turnId,
         messageId: event.messageId,
-        executionKind: event.executionKind,
       });
       options.markMotionTimelineStarted(event.turnId, event.messageId);
     },
@@ -276,19 +279,10 @@ export function createMotionTimelineRunTracker(options: {
         status: event.status,
         reason: event.reason,
       });
-      const completedByHandoff = owner.executionKind === "parameter_plan"
-        && event.status === "stopped"
-        && event.reason === "direct_parameter_plan_replaced";
-      const completedSpeechTail = event.status === "stopped"
-        && event.reason === "speech_segment_handoff";
       options.markMotionTimelineTerminal(
         owner.turnId,
         owner.messageId,
-        event.status === "completed" || completedByHandoff || completedSpeechTail
-          ? "completed"
-          : event.status === "stopped"
-            ? "interrupted"
-            : "failed",
+        resolveMotionTerminal(event),
         event.reason || event.status,
       );
       runs.delete(event.runId);

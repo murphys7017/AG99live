@@ -87,6 +87,7 @@ declare global {
       ) => boolean;
       releaseIdleParameterPlan?: (actionId?: string) => void;
       stopDirectParameterPlan?: (reason?: string, status?: DirectParameterPlanTerminalStatus) => void;
+      releaseActiveMotion?: () => boolean;
       getDirectParameterPlanError?: () => string;
       startInteractionSway?: (input: InteractionSwayInput) => boolean;
       stopInteractionSway?: () => void;

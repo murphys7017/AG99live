@@ -55,6 +55,9 @@ export function createConversationPlaybackRuntime(options: {
     interrupt(turnId, messageId, reason) {
       requireMotionRuntime().motionTimelineSink.interrupt(turnId, messageId, reason);
     },
+    handoff(turnId, messageId) {
+      return requireMotionRuntime().motionTimelineSink.handoff(turnId, messageId);
+    },
   };
   const speechOutputRuntime = createSpeechOutputRuntime();
   const adapter: AdapterConnectionCompositionInstance = createAdapterConnection({
