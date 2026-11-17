@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from uuid import uuid4
 
 from astrbot.api import logger
@@ -512,26 +512,40 @@ class OLVPetPlatformAdapter(Platform):
             self,
         )
 
-    def build_stream_input_event(
+    async def submit_stream_input_event(
         self,
         message_obj: AstrBotMessage,
         *,
         platform_meta: Any,
         session_id: str,
-    ) -> OLVPetPlatformEvent:
-        """Build an OLV presentation event for an external input adapter.
+        event_extras: dict[str, Any],
+        commit_event: Callable[[Any], None],
+    ) -> None:
+        """Bind an external source to OLV playback, then use its Core queue.
 
-        The input adapter owns ingestion and commits the event to Core. This
-        bridge keeps the OLV event context and output lifecycle available for
-        Persona/TTS/Live2D while allowing the source platform identity to stay
-        on the event metadata.
+        The input adapter retains source identity and queue ownership. OLV
+        admits the playback turn and binds Core/delivery IDs before that queue
+        sees the event, exactly as it does for a desktop input turn.
         """
-        return OLVPetPlatformEvent(
+        delivery_turn_id = uuid4().hex
+        message_obj.raw_message = {
+            **dict(message_obj.raw_message or {}),
+            "turn_id": delivery_turn_id,
+        }
+        event = OLVPetPlatformEvent(
             message_obj.message_str,
             message_obj,
             platform_meta,
             session_id,
             self,
+        )
+        for key, value in event_extras.items():
+            event.set_extra(key, value)
+        await self.turn_coordinator._commit_inbound_message(
+            message_obj,
+            turn_id=delivery_turn_id,
+            event=event,
+            commit_event=commit_event,
         )
 
     async def handle_msg(self, message: dict[str, Any]):

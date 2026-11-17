@@ -1009,7 +1009,11 @@ class TurnCoordinator:
             if not future.done():
                 future.cancel()
 
-    async def _commit_inbound_message(self, message_obj, *, turn_id: str | None = None) -> None:
+    async def _commit_inbound_message(
+        self, message_obj, *, turn_id: str | None = None,
+        event: Any | None = None,
+        commit_event: Callable[[Any], None] | None = None,
+    ) -> None:
         self.observation_window.note_input()
         async with self._turn_lock:
             normalized_turn_id = self._require_turn_id_value(turn_id)
@@ -1038,6 +1042,7 @@ class TurnCoordinator:
                         )
                     )
             except Exception as exc:
+                turn_identity_map.clear_frontend_turn(normalized_turn_id)
                 raise RuntimeError(
                     f"turn_started_send_failed:{normalized_turn_id}"
                 ) from exc
@@ -1063,7 +1068,8 @@ class TurnCoordinator:
                     turn_id=current_turn_id,
                 )
 
-                event = self._build_platform_event(message_obj)
+                if event is None:
+                    event = self._build_platform_event(message_obj)
                 set_extra = getattr(event, "set_extra", None)
                 if callable(set_extra):
                     event_context = resolve_adapter_event_context(event)
@@ -1088,7 +1094,8 @@ class TurnCoordinator:
                     orchestrator.register_active_event(current_turn_id, event)
                 else:
                     self._events_by_turn_id[current_turn_id] = event
-                self._commit_event(event)
+                submit_event = commit_event if commit_event is not None else self._commit_event
+                submit_event(event)
                 if orchestrator is not None:
                     await orchestrator.publish_conversation_event(
                         ConversationEvent(
