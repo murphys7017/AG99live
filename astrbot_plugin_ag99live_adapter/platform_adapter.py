@@ -520,7 +520,7 @@ class OLVPetPlatformAdapter(Platform):
         session_id: str,
         event_extras: dict[str, Any],
         commit_event: Callable[[Any], None],
-    ) -> None:
+    ) -> str:
         """Bind an external source to OLV playback, then use its Core queue.
 
         The input adapter retains source identity and queue ownership. OLV
@@ -547,6 +547,7 @@ class OLVPetPlatformAdapter(Platform):
             event=event,
             commit_event=commit_event,
         )
+        return delivery_turn_id
 
     async def handle_msg(self, message: dict[str, Any]):
         self._record_desktop_frame_from_message(message)
