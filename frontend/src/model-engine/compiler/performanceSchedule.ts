@@ -130,7 +130,11 @@ function isFaceSemanticGroup(semanticGroup: string): boolean {
 
 export function resolvePerformancePartTrackStrategy(
   semanticGroup: string,
+  pacing: PerformanceSchedule["pacing"],
 ): PerformanceStagedPartTrackStrategy | null {
+  if (pacing === "ambient") {
+    return null;
+  }
   const normalizedGroup = semanticGroup.trim().toLowerCase();
   if (normalizedGroup === "gaze") {
     return "gaze";
@@ -142,6 +146,7 @@ export function compilePerformanceSchedule(options: {
   assistantText?: string;
   speechCues?: readonly OutputSegmentSpeechCue[];
   durationMs: number;
+  pacing: PerformanceSchedule["pacing"];
   intentTags?: readonly string[];
   sequenceSteps?: readonly PerformanceSequenceStepInput[];
 }): PerformanceScheduleCompileResult {
@@ -190,13 +195,14 @@ export function compilePerformanceSchedule(options: {
     : [];
   const schedule: PerformanceSchedule = {
     durationMs: options.durationMs,
+    pacing: options.pacing,
     textSource,
     phrases: resolvedPhrases,
     speechCueMappings: speechCueResult.mappings,
     semanticSteps,
     estimatedAlignments,
     hesitationWindows: [],
-    decisions: [],
+    decisions: [`pacing:${options.pacing}`],
     events: [],
     parameterNodes: [],
   };
@@ -354,7 +360,8 @@ export function compileSemanticTrackTiming(options: {
     reversalStepIndices,
   } = options;
   const normalizedGroup = semanticGroup.trim().toLowerCase();
-  if (normalizedGroup === "gaze" || isFaceSemanticGroup(normalizedGroup)) {
+  if (schedule.pacing !== "ambient"
+    && (normalizedGroup === "gaze" || isFaceSemanticGroup(normalizedGroup))) {
     return {
       ok: false,
       value: null,
@@ -383,7 +390,7 @@ export function compileSemanticTrackTiming(options: {
     };
   }
 
-  const policy = resolveTrackTimingPolicy(semanticGroup);
+  const policy = resolveTrackTimingPolicy(semanticGroup, schedule);
   const reversalSteps = new Set(reversalStepIndices);
   const firstChangedStepIndex = changedStepIndices[0];
   const firstChangedStep = schedule.semanticSteps[firstChangedStepIndex];
@@ -1449,8 +1456,23 @@ function resolveTransitionWindow(
   };
 }
 
-function resolveTrackTimingPolicy(semanticGroup: string): PerformanceTrackTimingPolicy {
+function resolveTrackTimingPolicy(
+  semanticGroup: string,
+  schedule: PerformanceSchedule,
+): PerformanceTrackTimingPolicy {
   const group = semanticGroup.trim().toLowerCase();
+  if (schedule.pacing === "ambient") {
+    const body = group === "body" || group === "torso" || group === "shoulder";
+    return {
+      transitionOffsetMs: body ? 100 : 0,
+      transitionMs: clampInteger(
+        Math.round(schedule.durationMs * (body ? 0.28 : group === "gaze" ? 0.18 : 0.22)),
+        700,
+        1600,
+      ),
+      preferredHoldMs: 180,
+    };
+  }
   if (group === "head") {
     return {
       transitionOffsetMs: 0,

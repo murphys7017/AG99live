@@ -109,7 +109,10 @@ function attachPosePartTracks(
   let gazeTrackCount = 0;
   let faceTrackCount = 0;
   for (const axis of context.state.profile.axes) {
-    const strategy = resolvePerformancePartTrackStrategy(axis.semantic_group);
+    const strategy = resolvePerformancePartTrackStrategy(
+      axis.semantic_group,
+      context.performanceSchedule.pacing,
+    );
     if (!strategy) {
       continue;
     }

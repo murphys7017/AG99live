@@ -170,12 +170,13 @@ export function createAmbientActionScheduler(
       console.info("[AmbientActionScheduler] idle action admitted.", {
         candidateId: candidate.id,
         source: candidate.source,
-        durationMs: candidate.motion.kind === "semantic_intent"
+        durationMs: decision.durationMs,
+        durationHintMs: candidate.motion.kind === "semantic_intent"
           ? candidate.motion.intent.duration_hint_ms ?? null
           : null,
       });
       recordAccepted(candidate);
-      scheduleAfter(getNextAttemptDelay(candidate));
+      scheduleAfter(getNextAttemptDelay(decision.durationMs));
       return;
     }
 
@@ -187,7 +188,7 @@ export function createAmbientActionScheduler(
         const fallbackDecision = dependencies.director.admit(fallback);
         if (fallbackDecision.accepted) {
           recordAccepted(fallback);
-          scheduleAfter(getNextAttemptDelay(fallback));
+          scheduleAfter(getNextAttemptDelay(fallbackDecision.durationMs));
           return;
         }
       }
@@ -336,11 +337,8 @@ export function createAmbientActionScheduler(
     return MATERIAL_RECIPE_IDS[(offset + 1) % MATERIAL_RECIPE_IDS.length];
   }
 
-  function getNextAttemptDelay(candidate: AmbientActionCandidate): number {
-    const duration = candidate.motion.kind === "semantic_intent"
-      ? candidate.motion.intent.duration_hint_ms ?? 1_800
-      : 1_800;
-    return Math.max(LOCAL_MIN_INTERVAL_MS, Math.round(duration) + ACTION_GAP_MS);
+  function getNextAttemptDelay(durationMs: number): number {
+    return Math.max(LOCAL_MIN_INTERVAL_MS, Math.round(durationMs) + ACTION_GAP_MS);
   }
 
   return { start, nudge, dispose };

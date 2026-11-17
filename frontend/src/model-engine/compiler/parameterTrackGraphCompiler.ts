@@ -99,6 +99,7 @@ export function compileParameterSequenceTrackGraph(
   const activeStagedPartAxes = resolveActiveStagedPartAxes(
     parameterStepsResult.parameterSteps,
     axisById,
+    schedule.pacing,
   );
   for (const parameterSteps of parameterStepsResult.parameterSteps.values()) {
     const firstDefinedStepIndex = parameterSteps.findIndex(
@@ -146,6 +147,7 @@ export function compileParameterSequenceTrackGraph(
     const strategy = resolvePartTrackStrategy(
       axis.semantic_group,
       activeStagedPartAxes.has(axis.id),
+      schedule.pacing,
     );
     const timing = resolvePartTrackTiming(
       timingsByAxis,
@@ -627,6 +629,7 @@ function resolveStagedPartTargetRatio(
 function resolveActiveStagedPartAxes(
   parameterStepsById: Map<string, ParameterStep[]>,
   axisById: Map<string, SemanticAxisDefinition>,
+  pacing: PerformanceSchedule["pacing"],
 ): Set<string> {
   const activeAxisIds = new Set<string>();
   for (const parameterSteps of parameterStepsById.values()) {
@@ -639,7 +642,7 @@ function resolveActiveStagedPartAxes(
     const axis = axisById.get(firstParameter.axis_id);
     if (
       axis
-      && resolvePerformancePartTrackStrategy(axis.semantic_group)
+      && resolvePerformancePartTrackStrategy(axis.semantic_group, pacing)
       && isStagedPartParameterTrackActive(parameterSteps, axis.neutral)
     ) {
       activeAxisIds.add(axis.id);
@@ -651,9 +654,10 @@ function resolveActiveStagedPartAxes(
 function resolvePartTrackStrategy(
   semanticGroup: string,
   active: boolean,
+  pacing: PerformanceSchedule["pacing"],
 ): PerformancePartTrackStrategy {
   if (!active) {
     return "semantic";
   }
-  return resolvePerformancePartTrackStrategy(semanticGroup) ?? "semantic";
+  return resolvePerformancePartTrackStrategy(semanticGroup, pacing) ?? "semantic";
 }

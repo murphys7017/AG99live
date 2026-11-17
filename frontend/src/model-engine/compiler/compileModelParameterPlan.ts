@@ -45,6 +45,7 @@ export function compileModelParameterPlan(
     },
   };
   const performanceScheduleResult = compilePerformanceSchedule({
+    pacing: options.source === "idle_motion" ? "ambient" : "foreground",
     assistantText: options.assistantText,
     speechCues: options.speechCues,
     durationMs: semanticMotion.timing.timing.duration_ms,

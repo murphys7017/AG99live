@@ -1,5 +1,5 @@
 import type { NormalizedMotionPayload } from "../../types/motion.js";
-import { MAX_IDLE_MOTION_STEPS } from "../constants.js";
+import { MAX_IDLE_MOTION_STEPS, MAX_MOTION_DURATION_MS } from "../constants.js";
 
 export type AmbientActionSource = "local" | "material_composition" | "model_passive";
 
@@ -53,6 +53,7 @@ export type AmbientActionDecision =
     accepted: true;
     candidateId: string;
     source: AmbientActionSource;
+    durationMs: number;
   }
   | {
     accepted: false;
@@ -95,7 +96,7 @@ interface ActiveAmbientAction {
 
 const AMBIENT_ACTION_MIN_DURATION_MS = 300;
 const AMBIENT_ACTION_DEFAULT_DURATION_MS = 3_000;
-const AMBIENT_ACTION_MAX_DURATION_MS = 10_000;
+const AMBIENT_ACTION_MAX_DURATION_MS = MAX_MOTION_DURATION_MS;
 const AMBIENT_ACTION_RELEASE_GRACE_MS = 750;
 // Keep the contribution graph bounded while allowing one active plan per source.
 const MAX_ACTIVE_AMBIENT_ACTIONS = 3;
@@ -292,6 +293,7 @@ export function createAmbientActionDirector(
       accepted: true,
       candidateId,
       source: candidate.source,
+      durationMs,
     });
   }
 

@@ -72,6 +72,7 @@ export interface PerformanceSequenceStepInput {
 
 export interface PerformanceSchedule {
   readonly durationMs: number;
+  readonly pacing: "ambient" | "foreground";
   readonly textSource: "assistant_text" | "duration_only";
   readonly phrases: readonly PerformancePhraseSlot[];
   readonly speechCueMappings: readonly PerformanceSpeechCueMapping[];

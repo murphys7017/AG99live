@@ -13,6 +13,7 @@ import type { MotionTimingResolution } from "../types/compiledSemanticMotion.js"
 
 interface ResolveMotionTimingOptions {
   mode: "idle" | "expressive";
+  source?: string;
   durationHintMs?: number | null;
   targetDurationMs?: number | null;
   speechActive?: boolean;
@@ -53,6 +54,21 @@ export function resolveMotionTiming(
   } else if (syncedDuration !== null) {
     resolvedDurationMs = syncedDuration;
     timingSource = "audio_sync";
+  }
+
+  if (options.source === "idle_motion") {
+    const durationMs = Math.max(3000, Math.min(resolvedDurationMs, 10000));
+    const transitionMs = Math.round(durationMs * 0.28);
+    return {
+      timing: {
+        duration_ms: durationMs,
+        blend_in_ms: transitionMs,
+        hold_ms: durationMs - transitionMs * 2,
+        blend_out_ms: transitionMs,
+      },
+      resolvedDurationMs: durationMs,
+      timingSource,
+    };
   }
 
   if (options.mode === "idle") {
