@@ -1,3 +1,23 @@
+proactive_output_followup_20261118:
+  class: bugfix
+  risk: high
+  status: reviewed_local_commit_authorized_unified_deployment_deferred
+  scope: >-
+    Add Core RuntimeObservation output capability with one frontend turn per
+    Core turn, stable TTS correlation, indexed text/audio grouping and playback
+    completion acknowledgement. Reserve under the coordinator lock and reject
+    busy targets. Preserve unrelated parser/subtitle/frontend/motion work.
+  validation: >-
+    Scoped Ruff and source call-chain review. Live AG99 playback, interruption
+    and timeout evidence are still required; no full test suite run.
+  review_followup: >-
+    The first accepted output consumes the RuntimeObservation scheduling guard.
+    Subsequent segments continue after a scene change; user stop and frontend
+    turn ownership still interrupt output. Core public-boundary handoff check
+    passed; actual multi-segment playback remains pending unified deployment.
+    User requested local review and commit; skip the automatic post-commit
+    deployment hook for this commit to preserve the deployment deferral.
+
 state_meta:
   schema_version: 3
   updated_at: '2026-11-15'

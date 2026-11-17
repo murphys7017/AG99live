@@ -142,7 +142,9 @@ class OLVPetPlatformAdapter(Platform):
         self.port = int(get_config_value(self.config, "port", 12396))
         self.http_port = int(get_config_value(self.config, "http_port", 12397))
         self.speaker_name = get_config_value(self.config, "speaker_name", "AstrBot")
-        self.auto_start_mic = bool(get_config_value(self.config, "auto_start_mic", False))
+        self.auto_start_mic = bool(
+            get_config_value(self.config, "auto_start_mic", False)
+        )
         self.desktop_persona_segment_stream_enabled = False
         self.desktop_audio_credit_enabled = False
         self._event_loop: asyncio.AbstractEventLoop | None = None
@@ -223,7 +225,9 @@ class OLVPetPlatformAdapter(Platform):
             client_uid=self.client_uid,
             nickname=self.client_nickname,
             media_service=self.media_service,
-            image_cooldown_seconds_getter=lambda: self.runtime_state.image_cooldown_seconds,
+            image_cooldown_seconds_getter=lambda: (
+                self.runtime_state.image_cooldown_seconds
+            ),
             latest_desktop_frame_getter=self._read_latest_desktop_frame,
         )
         self.chat_buffer = ChatBuffer(
@@ -334,10 +338,12 @@ class OLVPetPlatformAdapter(Platform):
             output_port=self.avatar_output_port,
             event_sink=self._handle_provider_event,
             active_event_motion_cancel=(
-                lambda event, turn_id, reason: self.turn_coordinator._cancel_turn_owned_motion_task(
-                    event,
-                    turn_id=turn_id,
-                    reason=reason,
+                lambda event, turn_id, reason: (
+                    self.turn_coordinator._cancel_turn_owned_motion_task(
+                        event,
+                        turn_id=turn_id,
+                        reason=reason,
+                    )
                 )
             ),
         )
@@ -458,6 +464,19 @@ class OLVPetPlatformAdapter(Platform):
             await self.passive_behavior_runtime.stop()
             unregister_control_platform(self.platform_id, self)
             self._event_loop = None
+
+    def is_proactive_output_available(self) -> bool:
+        """Admission hint; the turn coordinator owns final output reservation."""
+        return (
+            self.transport._ws_client is not None
+            and not self.session_state.current_turn_id
+            and not self.turn_coordinator.has_active_speech_input
+        )
+
+    def create_runtime_output(self, event):
+        from .runtime.proactive_output import ProactiveOutput
+
+        return ProactiveOutput(self, event)
 
     async def send_by_session(self, session: MessageSesion, message_chain):
         turn_id = await self.turn_coordinator.begin_proactive_output_turn()
@@ -711,15 +730,16 @@ class OLVPetPlatformAdapter(Platform):
         sent = await self._send_json(payload)
         if not sent:
             logger.warning(
-                "Failed to deliver current model payload. "
-                "Will retry on next refresh.",
+                "Failed to deliver current model payload. Will retry on next refresh.",
             )
             return False
 
         self.runtime_state.mark_model_payload_sent(signature)
         return True
 
-    async def _refresh_and_send_current_model_and_conf(self, *, force: bool = False) -> None:
+    async def _refresh_and_send_current_model_and_conf(
+        self, *, force: bool = False
+    ) -> None:
         self._refresh_runtime_settings()
         await self._send_current_model_and_conf(force=force)
 
@@ -740,14 +760,16 @@ class OLVPetPlatformAdapter(Platform):
         orchestrator = getattr(self, "interaction_orchestrator", None)
         if orchestrator is not None:
             return await orchestrator.open_incremental_output(
-            turn_id=event_context.delivery_turn_id,
-            core_turn_id=event_context.core_turn_id,
-            persona_result_id=persona_result_id,
-            send_payload=self.transport.bind_current_client_sender(),
-            require_turn_active=lambda: self.turn_coordinator.require_incremental_turn_active(
                 turn_id=event_context.delivery_turn_id,
                 core_turn_id=event_context.core_turn_id,
-            ),
+                persona_result_id=persona_result_id,
+                send_payload=self.transport.bind_current_client_sender(),
+                require_turn_active=lambda: (
+                    self.turn_coordinator.require_incremental_turn_active(
+                        turn_id=event_context.delivery_turn_id,
+                        core_turn_id=event_context.core_turn_id,
+                    )
+                ),
             )
         return await self.turn_coordinator.open_incremental_output(
             turn_id=event_context.delivery_turn_id,
@@ -756,7 +778,9 @@ class OLVPetPlatformAdapter(Platform):
             send_payload=self.transport.bind_current_client_sender(),
         )
 
-    async def discard_incremental_output(self, *, event, persona_result_id: str) -> bool:
+    async def discard_incremental_output(
+        self, *, event, persona_result_id: str
+    ) -> bool:
         event_context = resolve_adapter_event_context(event)
         orchestrator = getattr(self, "interaction_orchestrator", None)
         if orchestrator is not None:
@@ -786,13 +810,19 @@ class OLVPetPlatformAdapter(Platform):
             return
         if message.type == TYPE_SYSTEM_DESKTOP_RUNTIME_SETTINGS:
             self.desktop_state_store.mark_connected(client_uid=self.client_uid)
-            self.desktop_presence.supported = message.payload.get("desktop_presence_schema") == PRESENCE_SCHEMA
-            self.desktop_observation.supported = message.payload.get("desktop_observation_schema") == SCHEMA
+            self.desktop_presence.supported = (
+                message.payload.get("desktop_presence_schema") == PRESENCE_SCHEMA
+            )
+            self.desktop_observation.supported = (
+                message.payload.get("desktop_observation_schema") == SCHEMA
+            )
             self.desktop_state_store.update_capabilities(
                 observation_supported=self.desktop_observation.supported,
                 presence_supported=self.desktop_presence.supported,
             )
-            self.desktop_audio_credit_enabled = message.payload.get("audio_credit_schema") == "olv.audio_credit.v1"
+            self.desktop_audio_credit_enabled = (
+                message.payload.get("audio_credit_schema") == "olv.audio_credit.v1"
+            )
             self.desktop_persona_segment_stream_enabled = message.payload[
                 "persona_segment_stream_enabled"
             ]

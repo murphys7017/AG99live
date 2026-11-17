@@ -88,6 +88,8 @@ from .interaction_orchestrator import (
 
 
 MAX_REMEMBERED_TERMINAL_TURNS = 256
+
+
 def _resolve_motion_work_turn_id(event: Any, fallback_turn_id: str) -> str:
     try:
         runtime_turn_id = resolve_adapter_event_context(event).core_turn_id
@@ -149,12 +151,15 @@ class TurnCoordinator:
         self._active_speech_capture_turns: set[str] = set()
         self._pre_action_input_id: str | None = None
         self.pre_action = PreActionRuntime(
-            runtime_state=self.runtime_state, send_json=self._send_json,
+            runtime_state=self.runtime_state,
+            send_json=self._send_json,
             build_event=lambda: self._build_platform_event(
                 self._build_message_object(text="", raw_message={})
             ),
         )
-        self._passive_behavior_interrupt_handler: Callable[[], Awaitable[None]] | None = None
+        self._passive_behavior_interrupt_handler: (
+            Callable[[], Awaitable[None]] | None
+        ) = None
         self.speech_ingress = SpeechIngressService(
             media_service=self.media_service,
             runtime_state=self.runtime_state,
@@ -231,19 +236,13 @@ class TurnCoordinator:
     @property
     def _turn_timings(self) -> dict[str, dict[str, Any]]:
         owner = self._interaction_orchestrator
-        return (
-            owner.turn_timings
-            if owner is not None
-            else self._local_turn_timings
-        )
+        return owner.turn_timings if owner is not None else self._local_turn_timings
 
     @property
     def _events_by_turn_id(self) -> dict[str, Any]:
         owner = self._interaction_orchestrator
         return (
-            owner.active_events
-            if owner is not None
-            else self._local_events_by_turn_id
+            owner.active_events if owner is not None else self._local_events_by_turn_id
         )
 
     @property
@@ -494,18 +493,23 @@ class TurnCoordinator:
     async def _handle_parsed_message(self, message) -> None:
 
         if message.type.startswith("system."):
-            if message.type in {"system.history_create", "system.history_load", "system.history_delete",
-                                "system.semantic_axis_profile_save"}:
+            if message.type in {
+                "system.history_create",
+                "system.history_load",
+                "system.history_delete",
+                "system.semantic_axis_profile_save",
+            }:
                 self._pre_action_input_id = None
                 await self.pre_action.cancel()
             await self._handle_frontend_system(message)
             return
 
-
         turn_id = self._require_interactive_turn_id(message)
 
         if message.type == "control.audio_credit":
-            self.output_segments.release_audio_credit(turn_id=turn_id, payload=message.payload)
+            self.output_segments.release_audio_credit(
+                turn_id=turn_id, payload=message.payload
+            )
             return
 
         if message.type == TYPE_CONTROL_PLAYBACK_FINISHED:
@@ -550,7 +554,9 @@ class TurnCoordinator:
             if message.type == TYPE_INPUT_AUDIO_STREAM_END:
                 message_obj = None
                 try:
-                    message_obj = await self.speech_ingress.handle_audio_stream_end(message)
+                    message_obj = await self.speech_ingress.handle_audio_stream_end(
+                        message
+                    )
                     if message_obj is not None:
                         await self._commit_inbound_message(message_obj, turn_id=turn_id)
                 finally:
@@ -608,9 +614,7 @@ class TurnCoordinator:
                 cleanup_failures.extend(orchestrator.reset_active_events())
             else:
                 for turn_id, event in tuple(self._events_by_turn_id.items()):
-                    cleanup_failures.extend(
-                        self.cleanup_active_event(turn_id, event)
-                    )
+                    cleanup_failures.extend(self.cleanup_active_event(turn_id, event))
 
             tracked_turn_ids = set(self._turn_timings)
             tracked_turn_ids.update(self.output_segments.tracked_turn_ids())
@@ -671,8 +675,7 @@ class TurnCoordinator:
         else:
             failures.append(f"{turn_id}:set_extra_unavailable")
             logger.error(
-                "Active AstrBot event cannot publish disconnect stop flag: "
-                "turn_id=%s",
+                "Active AstrBot event cannot publish disconnect stop flag: turn_id=%s",
                 turn_id,
             )
 
@@ -683,15 +686,13 @@ class TurnCoordinator:
             except Exception:
                 failures.append(f"{turn_id}:stop_event_failed")
                 logger.exception(
-                    "Failed to stop active AstrBot event during disconnect: "
-                    "turn_id=%s",
+                    "Failed to stop active AstrBot event during disconnect: turn_id=%s",
                     turn_id,
                 )
         else:
             failures.append(f"{turn_id}:stop_event_unavailable")
             logger.error(
-                "Active AstrBot event cannot be stopped during disconnect: "
-                "turn_id=%s",
+                "Active AstrBot event cannot be stopped during disconnect: turn_id=%s",
                 turn_id,
             )
         return failures
@@ -721,7 +722,11 @@ class TurnCoordinator:
             self._active_vad_turn_by_capture_turn[capture_turn_id] = turn_id
 
     async def open_incremental_output(
-        self, *, turn_id: str, core_turn_id: str, persona_result_id: str,
+        self,
+        *,
+        turn_id: str,
+        core_turn_id: str,
+        persona_result_id: str,
         send_payload: SendPayload,
     ) -> IncrementalOutputSession:
         orchestrator = getattr(self, "_interaction_orchestrator", None)
@@ -738,9 +743,13 @@ class TurnCoordinator:
             )
 
         return await self.output_segments.open_incremental_output(
-            turn_id=turn_id, core_turn_id=core_turn_id, persona_result_id=persona_result_id,
-            send_payload=send_payload, require_turn_active=lambda: self.require_incremental_turn_active(
-                turn_id=turn_id, core_turn_id=core_turn_id,
+            turn_id=turn_id,
+            core_turn_id=core_turn_id,
+            persona_result_id=persona_result_id,
+            send_payload=send_payload,
+            require_turn_active=lambda: self.require_incremental_turn_active(
+                turn_id=turn_id,
+                core_turn_id=core_turn_id,
             ),
         )
 
@@ -799,10 +808,16 @@ class TurnCoordinator:
             platform_extras=platform_extras,
         )
 
-    async def begin_proactive_output_turn(self) -> str:
+    async def begin_proactive_output_turn(self, *, turn_id: str | None = None) -> str:
         """Create and announce a frontend turn for an AstrBot proactive send."""
         async with self._turn_lock:
-            return await self._begin_proactive_output_turn_locked("proactive")
+            if turn_id and (
+                self.session_state.current_turn_id or self.has_active_speech_input
+            ):
+                raise RuntimeError("proactive_output_target_busy")
+            return await self._begin_proactive_output_turn_locked(
+                "proactive", turn_id=turn_id
+            )
 
     @property
     def has_active_speech_input(self) -> bool:
@@ -814,8 +829,10 @@ class TurnCoordinator:
     ) -> None:
         self._passive_behavior_interrupt_handler = handler
 
-    async def _begin_proactive_output_turn_locked(self, prefix: str) -> str:
-        turn_id = f"{prefix}:{uuid4().hex}"
+    async def _begin_proactive_output_turn_locked(
+        self, prefix: str, *, turn_id: str | None = None
+    ) -> str:
+        turn_id = turn_id or f"{prefix}:{uuid4().hex}"
         orchestrator = getattr(self, "_interaction_orchestrator", None)
         current_turn_id = self.session_state.begin_turn("", turn_id=turn_id)
         self.turn_identity_map.register_frontend_turn(current_turn_id)
@@ -996,9 +1013,7 @@ class TurnCoordinator:
                 asyncio.shield(future), timeout=float(timeout_seconds)
             )
         except asyncio.TimeoutError as exc:
-            raise TimeoutError(
-                f"turn_finished_ack_timeout:{resolved_turn_id}"
-            ) from exc
+            raise TimeoutError(f"turn_finished_ack_timeout:{resolved_turn_id}") from exc
         finally:
             current_waiters = self._turn_terminal_waiters.get(resolved_turn_id)
             if current_waiters is not None:
@@ -1010,7 +1025,10 @@ class TurnCoordinator:
                 future.cancel()
 
     async def _commit_inbound_message(
-        self, message_obj, *, turn_id: str | None = None,
+        self,
+        message_obj,
+        *,
+        turn_id: str | None = None,
         event: Any | None = None,
         commit_event: Callable[[Any], None] | None = None,
     ) -> None:
@@ -1087,14 +1105,17 @@ class TurnCoordinator:
                     set_extra("enable_streaming", False)
                     logger.debug(
                         "DIAG input.turn_bound: frontend_turn_id=%s core_turn_id=%s",
-                        current_turn_id, backend_turn_id,
+                        current_turn_id,
+                        backend_turn_id,
                     )
                 orchestrator = getattr(self, "_interaction_orchestrator", None)
                 if orchestrator is not None:
                     orchestrator.register_active_event(current_turn_id, event)
                 else:
                     self._events_by_turn_id[current_turn_id] = event
-                submit_event = commit_event if commit_event is not None else self._commit_event
+                submit_event = (
+                    commit_event if commit_event is not None else self._commit_event
+                )
                 submit_event(event)
                 if orchestrator is not None:
                     await orchestrator.publish_conversation_event(
@@ -1182,12 +1203,18 @@ class TurnCoordinator:
         if not resolved_turn_id:
             raise ValueError("interrupt_turn_id_missing")
 
-        input_only = ((resolved_turn_id.startswith("input:")
-                       or self.pre_action.turn_id == resolved_turn_id
-                       or resolved_turn_id in self._active_speech_capture_turns)
-                      and resolved_turn_id not in self._events_by_turn_id
-                      and self.session_state.current_turn_id != resolved_turn_id)
-        await self.speech_ingress.handle_audio_stream_interrupt(turn_id=resolved_turn_id)
+        input_only = (
+            (
+                resolved_turn_id.startswith("input:")
+                or self.pre_action.turn_id == resolved_turn_id
+                or resolved_turn_id in self._active_speech_capture_turns
+            )
+            and resolved_turn_id not in self._events_by_turn_id
+            and self.session_state.current_turn_id != resolved_turn_id
+        )
+        await self.speech_ingress.handle_audio_stream_interrupt(
+            turn_id=resolved_turn_id
+        )
         await self._handle_capture_abandoned(resolved_turn_id)
         if input_only:
             return
@@ -1277,9 +1304,7 @@ class TurnCoordinator:
 
         started = resolved_turn_id not in self._turn_terminal_results
         existing_result = (
-            self._turn_terminal_results.get(resolved_turn_id)
-            if not started
-            else None
+            self._turn_terminal_results.get(resolved_turn_id) if not started else None
         )
         if started:
             self._turn_terminal_results[resolved_turn_id] = None
@@ -1479,7 +1504,7 @@ class TurnCoordinator:
             raise ValueError(
                 f"vad_message_turn_id_invalid:{capture_turn_id}:{child_turn_id or 'missing'}"
             )
-        child_sequence = child_turn_id[len(expected_prefix):]
+        child_sequence = child_turn_id[len(expected_prefix) :]
         if not child_sequence.isdecimal() or int(child_sequence) <= 0:
             raise ValueError(f"vad_message_turn_sequence_invalid:{child_turn_id}")
         return child_turn_id
@@ -1581,8 +1606,12 @@ class TurnCoordinator:
     def _require_turn_id_value(turn_id: str | None) -> str:
         normalized = str(turn_id or "").strip()
         if not normalized:
-            raise ValueError("Interactive protocol messages require a non-empty turn_id.")
+            raise ValueError(
+                "Interactive protocol messages require a non-empty turn_id."
+            )
         return normalized
+
+
 def _coerce_perf_counter(value: Any) -> float | None:
     if isinstance(value, (int, float)):
         return float(value)
