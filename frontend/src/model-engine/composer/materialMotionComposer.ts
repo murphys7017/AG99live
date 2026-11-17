@@ -31,6 +31,7 @@ export interface MaterialMotionCompositionOptions {
   model: ModelSummary;
   recipeId: MaterialCompositionRecipeId;
   seed: string | number;
+  allowedAxisIds: readonly string[];
   reservedChannels?: readonly string[];
 }
 
@@ -166,7 +167,8 @@ export function composeMaterialMotion(
     return failComposition("composition_material_catalog_identity_mismatch", baseMetadata);
   }
 
-  const axes = buildControllableAxes(profile.axes);
+  const axes = buildControllableAxes(profile.axes)
+    .filter((axis) => options.allowedAxisIds.includes(axis.id));
   const axisIds = new Set(axes.map((axis) => axis.id));
   const reservedChannels = new Set([
     ...EXCLUSIVE_CHANNELS,

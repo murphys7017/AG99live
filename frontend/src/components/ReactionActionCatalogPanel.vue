@@ -1,8 +1,11 @@
 <script setup lang="ts">
-import { REACTION_ACTION_CATALOG } from "../model-engine/ambient/reactionActionCatalog.js";
+import {
+  IDLE_REACTION_ACTIONS,
+  REACTION_ACTION_CATALOG,
+} from "../model-engine/ambient/reactionActionCatalog.js";
 
 function isRuntimeScheduled(action: (typeof REACTION_ACTION_CATALOG)[number]): boolean {
-  return action.triggers.includes("idle") || action.triggers.includes("waiting");
+  return IDLE_REACTION_ACTIONS.includes(action);
 }
 </script>
 

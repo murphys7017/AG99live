@@ -17,7 +17,7 @@ import {
   type AmbientActionDirector,
 } from "./ambientActionDirector.js";
 import {
-  REACTION_ACTION_CATALOG,
+  IDLE_REACTION_ACTIONS,
   type ReactionActionTemplate,
 } from "./reactionActionCatalog.js";
 
@@ -38,13 +38,14 @@ export interface AmbientActionScheduler {
   dispose(): void;
 }
 
-const LOCAL_ACTION_TEMPLATES: readonly ReactionActionTemplate[] =
-  REACTION_ACTION_CATALOG.filter((template) =>
-    template.triggers.includes("idle") || template.triggers.includes("waiting"));
-
-const MATERIAL_RECIPE_IDS = Object.keys(
-  MATERIAL_COMPOSITION_RECIPES,
-) as MaterialCompositionRecipeId[];
+// Automatic idle gestures stay lateral. Pitch, vertical gaze and breath accents
+// belong to explicit reactions or the continuous Cubism base effects.
+const IDLE_AXIS_IDS: readonly string[] = [
+  "head_yaw", "head_roll", "body_yaw", "body_roll", "gaze_x",
+];
+const MATERIAL_RECIPE_IDS: readonly MaterialCompositionRecipeId[] = [
+  "calm_companion", "speech_gap",
+];
 
 const INITIAL_DELAY_MS = 1_500;
 const NUDGE_DELAY_MS = 250;
@@ -226,6 +227,7 @@ export function createAmbientActionScheduler(
       model,
       recipeId,
       seed: `ambient-material:${model.name}:${sequence}`,
+      allowedAxisIds: IDLE_AXIS_IDS,
     });
     if (!result.ok) {
       console.debug("[AmbientActionScheduler] material composition unavailable.", {
@@ -261,7 +263,7 @@ export function createAmbientActionScheduler(
     if (!profile) {
       return null;
     }
-    const template = LOCAL_ACTION_TEMPLATES[sequence % LOCAL_ACTION_TEMPLATES.length];
+    const template = IDLE_REACTION_ACTIONS[sequence % IDLE_REACTION_ACTIONS.length];
     const axes = selectLocalAxes(profile.axes, template, sequence);
     if (axes.length === 0) {
       return null;
@@ -354,23 +356,17 @@ function selectLocalAxes(
       || axis.control_role === "hint"
       || axis.control_role === "ambient")
     .filter((axis) => axis.parameter_bindings.length > 0)
+    .filter((axis) => IDLE_AXIS_IDS.includes(axis.id) && template.axisIds.includes(axis.id))
     .filter((axis) => template.semanticGroups.includes(axis.semantic_group))
     .sort((left, right) => left.id.localeCompare(right.id));
-  const hinted = usable.filter((axis) => matchesAxisHint(axis, template.axisHints));
-  const pool = hinted.length > 0 ? hinted : usable;
   const selected: SemanticAxisDefinition[] = [];
-  for (let index = 0; index < template.axisCount && pool.length > 0; index += 1) {
-    const axis = pool[(sequence + index) % pool.length];
+  for (let index = 0; index < template.axisCount && usable.length > 0; index += 1) {
+    const axis = usable[(sequence + index) % usable.length];
     if (!selected.some((item) => item.id === axis.id)) {
       selected.push(axis);
     }
   }
   return selected;
-}
-
-function matchesAxisHint(axis: SemanticAxisDefinition, hints: readonly string[]): boolean {
-  const searchable = `${axis.id} ${axis.label} ${axis.semantic_group}`.toLowerCase();
-  return hints.some((hint) => searchable.includes(hint));
 }
 
 function buildTargetValue(
