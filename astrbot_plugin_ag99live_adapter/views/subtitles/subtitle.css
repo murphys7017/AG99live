@@ -1,0 +1,46 @@
+:root {
+  --subtitle-background: #141326;
+  --subtitle-card-background: #2c2345;
+  --subtitle-border: #8870bb;
+  --subtitle-color: #faf8ff;
+  --subtitle-muted: #b6acd2;
+  --subtitle-accent: #704fa0;
+  --subtitle-font: Arial, "Microsoft YaHei", sans-serif;
+  --subtitle-font-size: 16px;
+  --subtitle-radius: 16px;
+  --subtitle-max-width: 960px;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; background: transparent; }
+body { padding: 12px 16px 12px 32px; font-family: var(--subtitle-font); }
+[hidden] { display: none !important; }
+.subtitle-shell {
+  width: 100%; max-width: var(--subtitle-max-width); padding: 16px 12px 12px;
+  border-radius: var(--subtitle-radius); background: var(--subtitle-background);
+  color: var(--subtitle-color);
+}
+.subtitle-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 18px; }
+.subtitle-brand { font-size: 12px; color: var(--subtitle-muted); line-height: 18px; }
+.subtitle-wave { opacity: .95; }
+.subtitle-card {
+  margin-top: 16px; padding: 12px; border: 1px solid var(--subtitle-border);
+  border-radius: 13px; background: var(--subtitle-card-background);
+}
+.subtitle-speaker-row { display: flex; align-items: center; gap: 8px; min-height: 32px; }
+.subtitle-avatar {
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  width: 32px; height: 32px; border-radius: 50%; background: var(--subtitle-accent);
+}
+.subtitle-speaker { color: #c7b4e9; font-size: 14px; font-weight: 600; }
+.subtitle-status { color: var(--subtitle-muted); font-size: 11px; }
+.subtitle-text {
+  margin: 9px 0 0; font-size: var(--subtitle-font-size); font-weight: 500; line-height: 24px;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.subtitle-footer { margin-top: 12px; color: var(--subtitle-muted); font-size: 13px; line-height: 18px; }
+@media (max-width: 480px) {
+  body { padding: 8px; }
+  .subtitle-shell { padding: 12px; }
+  .subtitle-card { margin-top: 12px; }
+}
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }

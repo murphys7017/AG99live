@@ -32,7 +32,7 @@ export function createIncrementalOutputRuntime(options: {
   getStore(): TurnPlaybackSessionPort;
   currentTurnId(): string | null;
   openPcm(turnId: string, messageId: string): Promise<PcmTimelineStream>;
-  displayText(text: string, turnId: string): void;
+  displayText(text: string, turnId: string, messageId: string, speaking: boolean | null): void;
   recordText(text: string, turnId: string): void;
   sendAudioCredit(id: IncrementalIdentity, releasedBytes: number, releasedFrames: number): void;
   onAsyncError(error: unknown): void;
@@ -54,20 +54,22 @@ export function createIncrementalOutputRuntime(options: {
   // matching segment's audio start or an explicit no-audio terminal state.
   const releasedTextMessages = new Set<string>();
   const watchedAudioStarts = new Set<string>();
+  const startedAudioMessages = new Set<string>();
+  const noAudioMessages = new Set<string>();
   const resultCredits = new Map<string, { bytes: number; frames: number }>();
 
   function messageKey(id: IncrementalIdentity): string {
     return `${id.turnId}\u0000${id.messageId}`;
   }
 
-  function releaseText(id: IncrementalIdentity): void {
+  function releaseText(id: IncrementalIdentity, speaking: boolean | null = null): void {
     const key = messageKey(id);
     if (!isLive(id, false)) return;
-    if (releasedTextMessages.has(key)) return;
+    if (releasedTextMessages.has(key) && speaking !== true) return;
     releasedTextMessages.add(key);
     const text = options.getStore().getSession(id.turnId)?.segments
       .get(id.messageId)?.text.content;
-    if (text) options.displayText(text, id.turnId);
+    if (text) options.displayText(text, id.turnId, id.messageId, speaking);
   }
 
   function watchAudioStart(id: IncrementalIdentity, handle: PcmTimelineStream): void {
@@ -75,7 +77,7 @@ export function createIncrementalOutputRuntime(options: {
     if (watchedAudioStarts.has(key)) return;
     watchedAudioStarts.add(key);
     void handle.started.then(
-      () => releaseText(id),
+      () => { startedAudioMessages.add(key); releaseText(id, true); },
       () => releaseText(id),
     );
   }
@@ -191,7 +193,9 @@ export function createIncrementalOutputRuntime(options: {
     } else if (event.kind === "delta") {
       const text = store.appendIncrementalText(id, event.text);
       if (releasedTextMessages.has(messageKey(id))) {
-        options.displayText(text, id.turnId);
+        const key = messageKey(id);
+        options.displayText(text, id.turnId, id.messageId,
+          startedAudioMessages.has(key) ? true : noAudioMessages.has(key) ? false : null);
       }
       if (!textObserved) {
         textObserved = true;
@@ -206,12 +210,15 @@ export function createIncrementalOutputRuntime(options: {
         if (text) options.recordText(text, id.turnId);
         const audioStream = store.getSession(id.turnId)?.segments
           .get(id.messageId)?.incremental?.streams.audio;
-        if (!audioStream || audioStream.status !== "open") releaseText(id);
+        if (!audioStream || audioStream.status !== "open") {
+          releaseText(id, !audioStream || noAudioMessages.has(messageKey(id)) ? false : null);
+        }
       } else if (resource === "audio" && event.length! > 0) {
         enqueue({ kind: "end", id, length: event.length!,
           status: event.status === "completed" ? "completed" : "failed", reason: event.reason });
       } else if (resource === "audio") {
-        releaseText(id);
+        noAudioMessages.add(messageKey(id));
+        releaseText(id, false);
       }
     }
   }
@@ -236,6 +243,8 @@ export function createIncrementalOutputRuntime(options: {
     firstPcmMessages.clear();
     releasedTextMessages.clear();
     watchedAudioStarts.clear();
+    startedAudioMessages.clear();
+    noAudioMessages.clear();
     resultCredits.clear();
   }
   return { handleAudio, handleEvent, beginTurn, cancelTurn, reset };

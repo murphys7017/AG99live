@@ -722,6 +722,32 @@ private:
     return true;
   }
 
+  // Called with playback_mutex_ held. This projection never owns playback.
+  void ReportSubtitleLocked(
+      std::string_view state,
+      const std::string& turn_id,
+      const std::string& segment_id,
+      const std::string& text = {}) {
+    if ((state == "speaking" || state == "text") && text.empty()) return;
+    if ((state == "ended" || state == "clear")
+        && (subtitle_turn_id_ != turn_id || subtitle_segment_id_ != segment_id)) return;
+    if (subtitle_state_ == state && subtitle_turn_id_ == turn_id
+        && subtitle_segment_id_ == segment_id && subtitle_text_ == text) return;
+    subtitle_state_ = state;
+    subtitle_turn_id_ = turn_id;
+    subtitle_segment_id_ = segment_id;
+    subtitle_text_ = text;
+    const auto envelope = ag99::runtime::build_envelope(
+        "system.subtitle_state",
+        {{"schema_version", "ag99.subtitle.v1"},
+         {"sequence", ++subtitle_sequence_}, {"state", state},
+         {"segment_id", segment_id}, {"text", text}},
+        turn_id, "frontend");
+    // SendText is already safe on receive and playback callbacks. Do not take
+    // transport_mutex_ under playback_mutex_ (connection reset owns the reverse).
+    transport_.SendText(envelope.dump());
+  }
+
   bool IsSegmentPlaybackOpen(const AudioQueueItem& item) {
     std::scoped_lock lock(playback_mutex_);
     const auto turn = playback_turns_.find(item.turn_id);
@@ -747,6 +773,7 @@ private:
         return;
       }
       segment->second.audio_terminal = true;
+      ReportSubtitleLocked(success ? "ended" : "clear", item.turn_id, item.message_id);
       if (!success) {
         segment->second.audio_failure_reason = ResolveFailureReason(
             reason,
@@ -878,6 +905,9 @@ private:
       return std::nullopt;
     }
     segment->second.clock = clock;
+    if (item.segment.text.state == ag99::runtime::TextSlot::State::Present) {
+      ReportSubtitleLocked("speaking", item.turn_id, item.message_id, item.segment.text.content);
+    }
     if (!segment->second.deferred_motion) {
       return std::nullopt;
     }
@@ -983,6 +1013,12 @@ private:
       }
       incremental_segment->audio_terminal = true;
       incremental_segment->clock = clock;
+      if (success && clock.duration_seconds == 0.0 && incremental_segment->text_terminal) {
+        ReportSubtitleLocked("text", identity.turn_id, identity.segment_message_id,
+            turn->second.incremental_text[identity.segment_message_id]);
+      } else {
+        ReportSubtitleLocked(success ? "ended" : "clear", identity.turn_id, identity.segment_message_id);
+      }
       if (!success) {
         incremental_segment->audio_failure_reason = ResolveFailureReason(
             reason,
@@ -1013,12 +1049,17 @@ private:
     }
     if (auto* segment = FindIncrementalSegmentLocked(identity, turn->second)) {
       segment->clock = clock;
+      ReportSubtitleLocked("speaking", identity.turn_id, identity.segment_message_id,
+          turn->second.incremental_text[identity.segment_message_id]);
     }
   }
 
   void RetireTurn(const std::string& turn_id, bool cancel_playback) {
     {
       std::scoped_lock lock(playback_mutex_);
+      if (subtitle_turn_id_ == turn_id) {
+        ReportSubtitleLocked(cancel_playback ? "clear" : "ended", turn_id, subtitle_segment_id_);
+      }
       playback_turns_.erase(turn_id);
       if (last_input_turn_id_ == turn_id) {
         last_input_turn_id_.clear();
@@ -1198,6 +1239,9 @@ private:
               identity.segment_message_id,
               text,
               false};
+          if (segment->clock.audio_serial != 0 && !segment->audio_terminal) {
+            ReportSubtitleLocked("speaking", identity.turn_id, identity.segment_message_id, text);
+          }
         }
         std::cout << "[assistant] " << text << '\n';
         services_.set_preview_text(services_.widen_utf8(text));
@@ -1219,6 +1263,10 @@ private:
             return;
           }
           segment->text_terminal = true;
+          if (segment->audio_terminal && segment->clock.duration_seconds == 0.0) {
+            ReportSubtitleLocked("text", identity.turn_id, identity.segment_message_id,
+                turn->second.incremental_text[identity.segment_message_id]);
+          }
           if (event.status != ag99::runtime::IncrementalOutputStatus::Completed) {
             segment->text_failure_reason = ResolveFailureReason(
                 event.reason,
@@ -1475,6 +1523,13 @@ private:
       return;
     }
 
+    if (segment.audio.state != ag99::runtime::AudioSlot::State::Present
+        && segment.audio.state != ag99::runtime::AudioSlot::State::Failed
+        && segment.text.state == ag99::runtime::TextSlot::State::Present) {
+      std::scoped_lock lock(playback_mutex_);
+      ReportSubtitleLocked("text", turn_id, segment.envelope.message_id, segment.text.content);
+    }
+
     if (segment.audio.state == ag99::runtime::AudioSlot::State::Present) {
       AudioQueueItem item;
       item.segment = std::move(segment);
@@ -1611,6 +1666,11 @@ private:
   std::atomic<std::uint64_t> next_turn_id_{1};
   std::atomic<std::uint64_t> next_feedback_id_{1};
   std::string last_input_turn_id_;
+  std::uint64_t subtitle_sequence_ = 0;
+  std::string subtitle_turn_id_;
+  std::string subtitle_segment_id_;
+  std::string subtitle_state_;
+  std::string subtitle_text_;
   std::optional<AssistantSegment> latest_assistant_segment_;
   std::atomic<std::uint64_t> connection_generation_{0};
   std::atomic<std::uint64_t> pending_closed_generation_{0};

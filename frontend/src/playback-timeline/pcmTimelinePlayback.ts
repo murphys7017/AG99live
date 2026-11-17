@@ -31,8 +31,8 @@ export function createPcmTimelinePlayback<TMotion>(options: {
   createLipSyncSink(turnId: string, messageId: string): PlaybackTimelineAudioLipSyncSink;
   onPreparing(): void;
   onStarted(turnId: string, durationMs: number | null): void;
-  onEnded(): void;
-  onFailed(reason: string): void;
+  onEnded(turnId: string, messageId: string): void;
+  onFailed(reason: string, turnId: string, messageId: string): void;
 }) {
   let active: ActiveStream | null = null;
   let last: ActiveStream | null = null;
@@ -66,8 +66,8 @@ export function createPcmTimelinePlayback<TMotion>(options: {
       }
     }
     try {
-      if (terminal === "failed") options.onFailed(reason);
-      else if (wasActive) options.onEnded();
+      if (terminal === "failed") options.onFailed(reason, stream.turnId, stream.messageId);
+      else if (wasActive) options.onEnded(stream.turnId, stream.messageId);
     } catch (error) { errors.push(error); }
     // Terminal projection can synchronously release the next segment. Release
     // our resources first so it cannot collide with the previous PCM owner.

@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AG99live · LIVE SUBTITLES</title>
+  <link rel="stylesheet" href="/subtitle/assets/subtitle.css">
+  <link id="custom-css" rel="stylesheet" href="/subtitle/custom.css">
+  <script src="/subtitle/assets/subtitle.js" defer></script>
+</head>
+<body>
+  <main class="subtitle-shell" id="subtitle" hidden data-state="idle">
+    <header class="subtitle-header">
+      <span class="subtitle-brand">AG99live · LIVE SUBTITLES</span>
+      <img class="subtitle-wave" src="/subtitle/assets/waveform.svg" alt="" width="18" height="18">
+    </header>
+    <section class="subtitle-card" aria-live="polite" aria-atomic="true">
+      <div class="subtitle-speaker-row">
+        <span class="subtitle-avatar"><img src="/subtitle/assets/sparkles.svg" alt="" width="20" height="20"></span>
+        <span class="subtitle-speaker" id="speaker">Alice</span>
+        <span class="subtitle-status" id="status">正在说话</span>
+      </div>
+      <p class="subtitle-text" id="text"></p>
+    </section>
+    <footer class="subtitle-footer" id="footer">语音同步字幕</footer>
+  </main>
+</body>
+</html>

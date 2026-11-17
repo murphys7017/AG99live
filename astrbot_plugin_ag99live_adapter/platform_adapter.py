@@ -61,6 +61,7 @@ from .runtime.passive_behavior import PassiveBehaviorRuntime
 from .runtime.interaction_orchestrator import InteractionOrchestrator, ProviderEvent
 from .platform_event import OLVPetPlatformEvent
 from .transport.static_resources import StaticResourceServer
+from .transport.subtitle_web import SubtitleWebService
 from .adapters.astrbot.provider_bridge import (
     AstrBotAvatarOutputPort,
     ProviderBridgeCallbacks,
@@ -91,6 +92,7 @@ def _register_ag99live_adapter(adapter_class: type[Platform]) -> type[Platform]:
         "default_config_tmpl": {
             "port": 12396,
             "http_port": 12397,
+            "subtitle_port": 18765,
             "speaker_name": "AstrBot",
             "auto_start_mic": False,
         },
@@ -183,6 +185,12 @@ class OLVPetPlatformAdapter(Platform):
             state_dir=STATE_DIR,
         )
         self.session_state = SessionState(client_uid=self.client_uid)
+        self.subtitle_web = SubtitleWebService(
+            port=int(get_config_value(self.config, "subtitle_port", 18765)),
+            assets_dir=PLUGIN_DIR / "views" / "subtitles",
+            css_path=PLUGIN_DATA_DIR / "subtitles" / f"{self.port}" / "custom.css",
+            speaker=str(self.speaker_name),
+        )
         self.turn_identity_map = TurnIdentityMap()
         get_snapshot_hub = getattr(self._plugin_context, "get_snapshot_hub", None)
         snapshot_hub = get_snapshot_hub() if callable(get_snapshot_hub) else None
@@ -426,6 +434,12 @@ class OLVPetPlatformAdapter(Platform):
             name=f"streaming-asr-prewarm:{self.platform_id}",
         )
         try:
+            try:
+                await self.subtitle_web.start()
+            except OSError:
+                logger.exception(
+                    "OBS subtitle HTTP service failed to start; check subtitle_port"
+                )
             await self.transport.start()
         except asyncio.CancelledError:
             await self.terminate()
@@ -434,6 +448,7 @@ class OLVPetPlatformAdapter(Platform):
             logger.exception("AG99live adapter failed during run()")
             raise
         finally:
+            await self.subtitle_web.stop()
             await asyncio.gather(asr_prewarm_task, return_exceptions=True)
             try:
                 await self._reset_connection_runtime("adapter_stopped")
@@ -756,6 +771,13 @@ class OLVPetPlatformAdapter(Platform):
 
     async def _handle_frontend_system(self, message: Any) -> None:
         # TurnCoordinator hands over a parsed ProtocolMessage, not the raw dict.
+        if message.type == "system.subtitle_state":
+            self.subtitle_web.publish(
+                message.payload,
+                turn_id=message.turn_id or "",
+                current_turn_id=self.session_state.current_turn_id,
+            )
+            return
         if message.type == "system.desktop_presence_result":
             self.desktop_presence.resolve(message.payload)
             return
@@ -808,6 +830,7 @@ class OLVPetPlatformAdapter(Platform):
             self.desktop_settings_broker.fail_pending("adapter_terminated")
             await self.transport.stop()
         finally:
+            await self.subtitle_web.stop()
             unregister_control_platform(self.platform_id, self)
             try:
                 motion_lab_recorder = self.runtime_state.motion_lab_recorder
@@ -835,6 +858,7 @@ class OLVPetPlatformAdapter(Platform):
         各连接级所有者按固定顺序释放资源；任一所有者失败都必须留下诊断，但不能阻止
         后续所有者清理。全部尝试结束后再把失败汇总交回 transport。
         """
+        self.subtitle_web.clear(reset_sequence=True)
         desktop_observation = getattr(self, "desktop_observation", None)
         if desktop_observation is not None:
             desktop_observation.disconnect()

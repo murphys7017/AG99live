@@ -31,8 +31,8 @@ import type { Live2dRuntimePort } from "../live2d/runtimePort.js";
 export interface ConversationPlaybackAudioPresentation {
   reportAudioPlaybackPreparing(): void;
   reportAudioPlaybackStarted(turnId: string | null, durationMs: number | null): void;
-  reportAudioPlaybackEnded(): void;
-  reportAudioPlaybackFailed(reason: string): void;
+  reportAudioPlaybackEnded(turnId?: string | null, messageId?: string): void;
+  reportAudioPlaybackFailed(reason: string, turnId?: string | null, messageId?: string): void;
   reportPlaybackHistory(text: string): void;
 }
 
@@ -98,8 +98,8 @@ export function createConversationPlaybackAudioRuntime(options: {
     createLipSyncSink,
     onPreparing: () => presentation.reportAudioPlaybackPreparing(),
     onStarted: (turnId, durationMs) => presentation.reportAudioPlaybackStarted(turnId, durationMs),
-    onEnded: () => presentation.reportAudioPlaybackEnded(),
-    onFailed: (reason) => presentation.reportAudioPlaybackFailed(reason),
+    onEnded: (turnId, messageId) => presentation.reportAudioPlaybackEnded(turnId, messageId),
+    onFailed: (reason, turnId, messageId) => presentation.reportAudioPlaybackFailed(reason, turnId, messageId),
   });
 
   async function startAudioSegmentPlayback(
@@ -117,10 +117,10 @@ export function createConversationPlaybackAudioRuntime(options: {
       },
       onEnded: () => {
         reportLatencyStage("audio_ended", turnId, null, messageId);
-        presentation.reportAudioPlaybackEnded();
+        presentation.reportAudioPlaybackEnded(turnId, messageId);
       },
       onError: (reason) => {
-        presentation.reportAudioPlaybackFailed(reason);
+        presentation.reportAudioPlaybackFailed(reason, turnId, messageId);
       },
     });
   }
@@ -146,7 +146,7 @@ export function createConversationPlaybackAudioRuntime(options: {
     try {
       audioSegmentRunner.stop(turnId, messageId, reason);
     } finally {
-      presentation.reportAudioPlaybackEnded();
+      presentation.reportAudioPlaybackEnded(turnId, messageId ?? undefined);
     }
   }
 

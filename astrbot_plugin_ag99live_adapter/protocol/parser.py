@@ -160,6 +160,14 @@ def build_message_envelope(
 
 
 def _validate_payload(message_type: str, payload: dict[str, Any]) -> None:
+    if message_type == "system.subtitle_state":
+        from .subtitle import validate_subtitle_state
+
+        try:
+            validate_subtitle_state(payload)
+        except ValueError as exc:
+            raise ProtocolError(str(exc)) from exc
+        return
     if message_type == "system.desktop_presence_result":
         from .desktop_presence import validate_presence_result
         try:

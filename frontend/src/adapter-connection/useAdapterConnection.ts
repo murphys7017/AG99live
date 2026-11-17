@@ -23,6 +23,7 @@ import {
   sendText as sendTextAction,
 } from "./outbound/outboundActions.js";
 import { createAdapterOutboundClient } from "./outbound/outboundClient.js";
+import { createSubtitleReporter } from "./runtime/subtitleReporter.js";
 import { OUTBOUND_MESSAGE_TYPES } from "./core/protocolMessageTypes.js";
 import {
   createDesktopSettingsResponder,
@@ -175,8 +176,8 @@ export interface AdapterPlaybackCompositionPort {
   ) => boolean;
   reportAudioPlaybackPreparing: () => void;
   reportAudioPlaybackStarted: (turnId: string | null, durationMs: number | null) => void;
-  reportAudioPlaybackEnded: () => void;
-  reportAudioPlaybackFailed: (reason: string) => void;
+  reportAudioPlaybackEnded: (turnId?: string | null, messageId?: string) => void;
+  reportAudioPlaybackFailed: (reason: string, turnId?: string | null, messageId?: string) => void;
   reportPlaybackHistory: (text: string) => void;
 }
 
@@ -351,6 +352,7 @@ export function createAdapterConnection(
   }
 
   function stopAudioAndSettleTurn(turnId: string | null, reason: string): void {
+    subtitleReporter.clear(turnId);
     requirePlaybackAudioControl().stopAudioAndSettleTurn(turnId, reason);
   }
 
@@ -372,6 +374,7 @@ export function createAdapterConnection(
     getSocket: () => socket,
     buildEnvelope: buildMessageEnvelope as (typeof buildMessageEnvelope),
   });
+  const subtitleReporter = createSubtitleReporter(outboundClient);
 
   function persistDesktopSetting(key: string, value: string): boolean {
     return outboundClient.send(
@@ -500,9 +503,10 @@ export function createAdapterConnection(
     getSessionStore: () => sessionStore,
     openPcmForTimelinePlayback: (turnId, messageId) =>
       requirePlaybackAudioControl().openPcmForTimelinePlayback(turnId, messageId),
-    displayIncrementalText: (text, turnId) => {
+    displayIncrementalText: (text, turnId, messageId, speaking) => {
       state.lastAssistantText = text;
       state.assistantTextDeliveryTurnId = turnId;
+      if (speaking !== null) subtitleReporter.show(text, turnId, messageId, speaking);
     },
     recordIncrementalText: (text, turnId) => recordAssistantText(text, turnId),
     sendAudioCredit: (id, releasedBytes, releasedFrames) => {
@@ -548,7 +552,13 @@ export function createAdapterConnection(
         },
       }, envelope.turn_id);
     },
-    notifyTurnLifecycle: (event) => turnLifecycleObserver?.(event),
+    notifyTurnLifecycle: (event) => {
+      if (event.phase === "terminal") {
+        if (state.turnFinishedSuccess) subtitleReporter.end(event.turnId);
+        else subtitleReporter.clear(event.turnId);
+      }
+      turnLifecycleObserver?.(event);
+    },
     handleDesktopObservationRequest: (envelope) => {
       const connection = socket;
       const respond = (result: { ok: false; error: string } | { ok: true; data: string; mime_type: "image/jpeg" }) => {
@@ -952,6 +962,7 @@ export function createAdapterConnection(
   }
 
   async function resetConnectionRuntimeState(reason: string): Promise<void> {
+    subtitleReporter.clear();
     preActionInputId = null;
     preActionReceived.clear();
     preActionObserver?.({ action: "cancel", turnId: null });
@@ -1038,11 +1049,13 @@ export function createAdapterConnection(
     messageId: string,
     turnId: string | null,
   ): boolean {
-    return textSegmentSink.releaseAssistantTextForPlayback(
+    const accepted = textSegmentSink.releaseAssistantTextForPlayback(
       text,
       messageId,
       turnId,
     );
+    if (accepted) subtitleReporter.show(text, turnId, messageId);
+    return accepted;
   }
 
   function failAssistantTextForPlayback(
@@ -1243,10 +1256,12 @@ export function createAdapterConnection(
         console.info("[Connection] audio playback started.", latencyEvent);
         desktopHostPort.getApi()?.reportLatencyEvent?.(latencyEvent);
       },
-      reportAudioPlaybackEnded: () => {
+      reportAudioPlaybackEnded: (turnId, messageId) => {
         state.isPlayingAudio = false;
+        subtitleReporter.end(turnId, messageId);
       },
-      reportAudioPlaybackFailed: (reason) => {
+      reportAudioPlaybackFailed: (reason, turnId, messageId) => {
+        subtitleReporter.clear(turnId, messageId);
         state.isPlayingAudio = false;
         state.lastError = reason === "audio_autoplay_blocked"
           ? "浏览器拒绝自动播放语音。"

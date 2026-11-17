@@ -1,0 +1,25 @@
+:root { color-scheme: dark; font-family: Arial, "Microsoft YaHei", sans-serif; color: #f5f1ff; background: #111020; }
+* { box-sizing: border-box; }
+body { margin: 0; padding: 32px 24px; }
+main { max-width: 1040px; margin: auto; }
+header, .panel-heading, .actions, .url-row { display: flex; gap: 16px; align-items: center; justify-content: space-between; }
+header { margin-bottom: 24px; }
+.eyebrow { color: #b5a1d9; font-size: 12px; letter-spacing: .08em; }
+h1 { font-size: 26px; margin: 10px 0; } h2 { font-size: 17px; margin: 0 0 8px; }
+p { color: #b9b1cc; font-size: 14px; line-height: 1.7; margin: 8px 0; }
+a { color: #cfb4ff; text-decoration: none; }
+section { border: 1px solid #37304c; border-radius: 16px; margin-bottom: 20px; padding: 24px; background: #1b182c; }
+.preview-panel { background: #efedf4; padding: 0; overflow: hidden; }
+iframe { display: block; border: 0; width: 100%; height: 260px; }
+label { display: block; color: #d4c9e7; font-size: 13px; margin: 16px 0 8px; }
+textarea, input { font-family: Consolas, monospace; background: #100e1c; color: #e8ddff; border: 1px solid #4c405f; border-radius: 8px; }
+textarea { width: 100%; min-height: 260px; resize: vertical; padding: 16px; line-height: 1.6; font-size: 14px; tab-size: 2; }
+input { flex: 1; min-width: 0; padding: 12px; }
+button { border: 1px solid #6c528b; border-radius: 8px; background: #332544; color: #f6eeff; padding: 10px 15px; font: inherit; cursor: pointer; white-space: nowrap; }
+#save { background: #7750a6; border-color: #9d71d0; }
+button:hover { filter: brightness(1.15); } button:disabled { opacity: .5; cursor: wait; }
+button:focus-visible, a:focus-visible, textarea:focus-visible, input:focus-visible { outline: 2px solid #bf97f4; outline-offset: 3px; }
+.actions { justify-content: flex-start; flex-wrap: wrap; margin-top: 16px; }
+#result { color: #cdb3ef; font-size: 13px; } code { overflow-wrap: anywhere; color: #d2b5f9; }
+.url-row { margin: 16px 0; }
+@media (max-width: 600px) { body { padding: 16px 12px; } section { padding: 16px; } .panel-heading { align-items: flex-start; flex-direction: column; } header { align-items: flex-start; } h1 { font-size: 23px; } }

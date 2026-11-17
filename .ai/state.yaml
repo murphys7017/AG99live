@@ -188,3 +188,33 @@ test_commands:
   version_check: python scripts/check_version_consistency.py
   state_parse: python -c "import yaml; yaml.safe_load(open('.ai/state.yaml', encoding='utf-8'))"
   whitespace: git diff --check
+
+obs_web_subtitles:
+  status: deployed_pending_reload_and_live_acceptance
+  scope: >-
+    User requested a Web version of the current subtitles matching the supplied
+    purple card and editable CSS; keep the existing desktop subtitle window.
+    Add a loopback subtitle HTTP/SSE service in the presentation Adapter, a
+    separate preview/CSS editor and persistent custom.css with live reload.
+    TypeScript and Native clients report actual playback caption facts using
+    the additive system.subtitle_state / ag99.subtitle.v1 message. OBS is a
+    read-only subscriber and never owns audio or terminal acknowledgements.
+  validation: >-
+    Scoped Ruff and JavaScript syntax checks passed. Renderer typecheck, full
+    Electron production build and Native Release build passed. Browser compared reference and implementation
+    at 817x208 and verified draft isolation, save/hot apply and reset. Actual
+    HTTP/SSE boundary smoke verified caption projection, terminal clear,
+    reconnect snapshot, rejected cross-origin CSS write and file hot reload.
+    Preview uses the actual AstrBot API. Review fixes were validated with scoped
+    Ruff, JavaScript syntax checks, Electron production build and one real
+    HTTP/SSE case rejecting an old segment clear while retaining the new caption.
+  review_fixes: >-
+    Preserve turn/segment identity through ended/failed playback callbacks and
+    reject mismatched clear facts. Track the CSS version actually submitted
+    while editing during save, reload styles on SSE reconnect, and start the
+    optional HTTP service inside the Adapter cleanup boundary.
+  remaining: >-
+    Adapter has been deployed by deploy_adapter.ps1. Reload AstrBot and use an
+    updated desktop build. Actual TTS/Live2D/OBS acceptance remains pending. Preserve
+    unrelated concurrent edits, including edits in Native coordinator and
+    platform adapter. User requested review and a scoped subtitle commit.

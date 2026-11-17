@@ -33,7 +33,7 @@ export interface AdapterInboundRuntimeDeps {
   state: AdapterConnectionState;
   getSessionStore: () => TurnPlaybackSessionPort;
   openPcmForTimelinePlayback(turnId: string, messageId: string): Promise<PcmTimelineStream>;
-  displayIncrementalText(text: string, turnId: string): void;
+  displayIncrementalText(text: string, turnId: string, messageId: string, speaking: boolean | null): void;
   recordIncrementalText(text: string, turnId: string): void;
   sendAudioCredit: Parameters<typeof createIncrementalOutputRuntime>[0]["sendAudioCredit"];
   onAsyncMessageError(error: unknown): void;
@@ -67,7 +67,7 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
     getStore: deps.getSessionStore,
     currentTurnId: () => deps.state.currentTurnId,
     openPcm: (turnId, messageId) => deps.openPcmForTimelinePlayback(turnId, messageId),
-    displayText: (text, turnId) => deps.displayIncrementalText(text, turnId),
+    displayText: (text, turnId, messageId, speaking) => deps.displayIncrementalText(text, turnId, messageId, speaking),
     recordText: (text, turnId) => deps.recordIncrementalText(text, turnId),
     sendAudioCredit: deps.sendAudioCredit,
     onAsyncError: deps.onAsyncMessageError,
