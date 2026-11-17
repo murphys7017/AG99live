@@ -36,6 +36,7 @@ struct NativeRuntimeCoordinator::Impl {
     std::string message_id;
     std::string text;
     bool approved = false;
+    bool feedback_available = false;
 
     std::string FeedbackId() const {
       return "native-feedback-" + ag99::runtime::Json::array({turn_id, message_id}).dump();
@@ -120,10 +121,7 @@ public:
               }
             },
             [this](std::string turn_id) {
-              RetireTurn(turn_id, true);
-              if (on_turn_interrupted_) {
-                on_turn_interrupted_(turn_id);
-              }
+              StopInterruptedTurn(turn_id, "turn_interrupted");
             },
             [this](ag99::runtime::DesktopSettingsQuery query) {
               ag99::runtime::DesktopSettingsResult result;
@@ -179,6 +177,7 @@ public:
                   && latest_assistant_segment_->FeedbackId() == event_id) {
                 latest_assistant_segment_->approved = true;
                 services_.set_feedback_approved(true);
+                services_.set_status_text(L"赞同已保存");
                 services_.notify_input_runtime_state_changed();
               }
             },
@@ -421,6 +420,7 @@ public:
     if (sent) {
       std::scoped_lock lock(playback_mutex_);
       last_input_turn_id_ = turn_id;
+      latest_assistant_segment_.reset();
       services_.set_feedback_available(false);
       services_.set_feedback_approved(false);
     }
@@ -457,7 +457,8 @@ public:
     AssistantSegment segment;
     {
       std::scoped_lock lock(playback_mutex_);
-      if (!latest_assistant_segment_ || latest_assistant_segment_->approved) {
+      if (!latest_assistant_segment_ || !latest_assistant_segment_->feedback_available
+          || latest_assistant_segment_->approved) {
         return false;
       }
       segment = *latest_assistant_segment_;
@@ -810,14 +811,6 @@ private:
               terminal.reason,
               "motion_playback_failed:" + terminal.clock.message_id);
         }
-        if (terminal.success && terminal.reason != "deferred_motion_absent"
-            && latest_assistant_segment_
-            && latest_assistant_segment_->message_id
-                == terminal.clock.message_id) {
-          services_.set_feedback_available(true);
-          services_.set_status_text(L"待命");
-          services_.notify_input_runtime_state_changed();
-        }
       } else {
         const auto incremental_segment = turn->second.incremental_segments.find(
             terminal.clock.message_id);
@@ -833,33 +826,42 @@ private:
                   terminal.reason,
                   "incremental_motion_playback_failed:" +
                       terminal.clock.message_id);
-        } else if (latest_assistant_segment_
-            && latest_assistant_segment_->message_id
-                == terminal.clock.message_id) {
-          services_.set_feedback_available(true);
-          services_.set_status_text(L"待命");
-          services_.notify_input_runtime_state_changed();
         }
+      }
+      if (terminal.success && terminal.reason != "deferred_motion_absent"
+          && latest_assistant_segment_
+          && latest_assistant_segment_->turn_id == terminal.clock.turn_id
+          && latest_assistant_segment_->message_id == terminal.clock.message_id) {
+        latest_assistant_segment_->feedback_available = true;
+        services_.set_feedback_available(true);
+        services_.set_status_text(L"待命");
+        services_.notify_input_runtime_state_changed();
       }
     }
     QueuePlaybackAcknowledgement(terminal.clock.turn_id);
     if (terminal.reason != "deferred_motion_absent") {
-      const auto& clock = terminal.clock;
-      const auto kind = terminal.success ? "motion.playback_completed" : "motion.playback_failed";
-      const auto envelope = ag99::runtime::build_envelope(
-          "system.motion_lab_raw_event",
-          {{"event_id", "native-terminal-" + ag99::runtime::Json::array(
-                {clock.turn_id, clock.message_id}).dump()},
-           {"event_type", kind}, {"message_id", clock.message_id},
-           {"source_route", "native_motion_player"}, {"phase", "playback_terminal"},
-           {"raw", {{"turnId", clock.turn_id}, {"messageId", clock.message_id},
-                    {"playbackOrigin", "native"}, {"reason", terminal.reason},
-                    {"segment_elapsed_ms", std::max(0.0,
-                        (services_.now_seconds() - clock.started_at_seconds) * 1000.0)}}}},
-          clock.turn_id, "frontend");
-      if (!transport_.SendText(envelope.dump())) {
-        std::cerr << "[motion-lab] terminal observation not delivered\n";
-      }
+      SendMotionObservation(terminal);
+    }
+  }
+
+  void SendMotionObservation(const NativeSegmentTerminal& terminal) {
+    const auto& clock = terminal.clock;
+    const auto kind = terminal.success ? "motion.playback_completed" : "motion.playback_failed";
+    const auto envelope = ag99::runtime::build_envelope(
+        "system.motion_lab_raw_event",
+        {{"event_id", "native-terminal-" + ag99::runtime::Json::array(
+              {clock.turn_id, clock.message_id}).dump()},
+         {"event_type", kind}, {"message_id", clock.message_id},
+         {"source_route", "native_motion_player"}, {"phase", "playback_terminal"},
+         {"raw", {{"turnId", clock.turn_id}, {"messageId", clock.message_id},
+                  {"playbackOrigin", "native"}, {"reason", terminal.reason},
+                  {"executionStatus", terminal.reason == "turn_interrupted" ? "stopped"
+                      : (terminal.success ? "completed" : "failed")},
+                  {"segment_elapsed_ms", std::max(0.0,
+                      (services_.now_seconds() - clock.started_at_seconds) * 1000.0)}}}},
+        clock.turn_id, "frontend");
+    if (!transport_.SendText(envelope.dump())) {
+      std::cerr << "[motion-lab] terminal observation not delivered\n";
     }
   }
 
@@ -1074,6 +1076,16 @@ private:
     }
   }
 
+  void StopInterruptedTurn(const std::string& turn_id, const std::string& reason) {
+    RetireTurn(turn_id, true);
+    if (on_turn_interrupted_) {
+      if (auto clock = on_turn_interrupted_(turn_id);
+          clock && clock->generation == connection_generation_.load()) {
+        SendMotionObservation({*clock, false, reason});
+      }
+    }
+  }
+
   void RetireTurn(const std::string& turn_id, bool cancel_playback) {
     {
       std::scoped_lock lock(playback_mutex_);
@@ -1254,19 +1266,20 @@ private:
             return;
           }
           segment->text_terminal = false;
-          latest_assistant_segment_ = AssistantSegment{
-              identity.turn_id,
-              identity.segment_message_id,
-              text,
-              false};
+          if (latest_assistant_segment_ && latest_assistant_segment_->turn_id == identity.turn_id
+              && latest_assistant_segment_->message_id == identity.segment_message_id) {
+            latest_assistant_segment_->text = text;
+          } else {
+            latest_assistant_segment_ = AssistantSegment{identity.turn_id, identity.segment_message_id, text};
+            services_.set_feedback_available(false);
+            services_.set_feedback_approved(false);
+          }
           if (segment->clock.audio_serial != 0 && !segment->audio_terminal) {
             ReportSubtitleLocked("speaking", identity.turn_id, identity.segment_message_id, text);
           }
         }
         std::cout << "[assistant] " << text << '\n';
         services_.set_preview_text(services_.widen_utf8(text));
-        services_.set_feedback_available(false);
-        services_.set_feedback_approved(false);
         services_.set_status_text(L"播放中");
         services_.notify_input_runtime_state_changed();
       } else if (event.kind
@@ -1449,10 +1462,7 @@ private:
       }
     }
     std::cerr << "[runtime] incremental audio failed: " << reason << '\n';
-    RetireTurn(identity.turn_id, true);
-    if (on_turn_interrupted_) {
-      on_turn_interrupted_(identity.turn_id);
-    }
+    StopInterruptedTurn(identity.turn_id, ResolveFailureReason(reason, "incremental_audio_failed"));
   }
 
   std::uint64_t InvalidateConnection() {
@@ -1673,7 +1683,7 @@ private:
   std::function<void(const std::string&)> on_turn_started_;
   std::function<void(const std::string&, bool, const std::string&)>
       on_turn_finished_;
-  std::function<void(const std::string&)> on_turn_interrupted_;
+  std::function<std::optional<NativeSegmentClock>(const std::string&)> on_turn_interrupted_;
   std::function<ag99::runtime::DesktopSettingsResult(
       const ag99::runtime::DesktopSettingsQuery&)> on_desktop_settings_query_;
   ag99::runtime::RuntimeProtocolSession session_;

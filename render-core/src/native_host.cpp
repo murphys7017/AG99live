@@ -409,7 +409,7 @@ LRESULT CALLBACK NativeHost::InputWindowProc(
       }
       if (LOWORD(wparam) == kInputFeedback) {
         const bool sent = (*host->bindings_.approve_latest_segment) && (*host->bindings_.approve_latest_segment)();
-        host->SetInputStatus(window, sent ? L"已赞同最近一条回复" : L"暂无可赞同的回复");
+        host->SetInputStatus(window, sent ? L"等待保存赞同" : L"暂无可赞同的回复");
         return 0;
       }
       if (LOWORD(wparam) == kInputInterrupt) {

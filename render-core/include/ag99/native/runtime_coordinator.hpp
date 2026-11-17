@@ -36,7 +36,7 @@ struct RuntimeCoordinatorCallbacks {
   std::function<void(const std::string&)> on_turn_started;
   std::function<void(const std::string&, bool, const std::string&)>
       on_turn_finished;
-  std::function<void(const std::string&)> on_turn_interrupted;
+  std::function<std::optional<NativeSegmentClock>(const std::string&)> on_turn_interrupted;
   std::function<ag99::runtime::DesktopSettingsResult(
       const ag99::runtime::DesktopSettingsQuery&)>
       on_desktop_settings_query;

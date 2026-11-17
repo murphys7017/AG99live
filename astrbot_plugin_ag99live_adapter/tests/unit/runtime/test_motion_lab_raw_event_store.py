@@ -262,7 +262,7 @@ def test_motion_lab_store_lists_recent_events_with_decoded_payloads(
     assert events[0]["raw"] == {"status": "completed"}
 
 
-def test_motion_lab_schema_upgrade_discards_legacy_raw_event_rows(
+def test_motion_lab_schema_upgrade_archives_legacy_raw_event_rows(
     install_fake_astrbot,
     tmp_path,
 ) -> None:
@@ -304,8 +304,44 @@ def test_motion_lab_schema_upgrade_discards_legacy_raw_event_rows(
             "SELECT value FROM motion_lab_meta WHERE key = 'schema_version'"
         ).fetchone()
 
+        [(archive,)] = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' "
+            "AND name GLOB 'motion_lab_raw_events_before_v3_*'"
+        ).fetchall()
+        archived_row = conn.execute(
+            f'SELECT id, event_type, raw_json FROM "{archive}"'
+        ).fetchone()
+
+    assert archived_row == ("old-event", "motion.playback_started", "{}")
     assert event_ids == [("new-sample",)]
     assert schema_version == ("3",)
+
+
+def test_motion_lab_failed_upgrade_keeps_original_rows(
+    install_fake_astrbot, tmp_path, monkeypatch
+) -> None:
+    install_fake_astrbot()
+    from astrbot_plugin_ag99live_adapter.runtime.motion_lab import raw_event_store
+
+    db_path = tmp_path / "motion_lab.sqlite3"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("CREATE TABLE motion_lab_raw_events (legacy_text TEXT)")
+        conn.execute("INSERT INTO motion_lab_raw_events VALUES ('legacy playback')")
+
+    def reject_schema(_conn):
+        raise RuntimeError("injected_schema_failure")
+
+    monkeypatch.setattr(raw_event_store, "_require_current_event_columns", reject_schema)
+    with pytest.raises(RuntimeError, match="injected_schema_failure"):
+        raw_event_store.MotionLabRawEventStore(db_path).list_events()
+
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute("SELECT * FROM motion_lab_raw_events").fetchall() == [
+            ("legacy playback",)
+        ]
+        assert conn.execute(
+            "SELECT name FROM sqlite_master WHERE name GLOB 'motion_lab_raw_events_before_*'"
+        ).fetchall() == []
 
 
 def test_persona_motion_sample_event_persists_input_and_intent(

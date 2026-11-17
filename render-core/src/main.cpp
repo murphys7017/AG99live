@@ -592,8 +592,9 @@ int Run(
         },
         .on_turn_interrupted = [&model](const std::string& turn_id) {
           model.CancelPreAction(turn_id);
-          model.CancelTurn(turn_id);
+          auto interrupted = model.CancelTurn(turn_id);
           model.ReleaseThinkingSway(turn_id);
+          return interrupted;
         },
         .on_desktop_settings_query = [&model, &spout](
             const ag99::runtime::DesktopSettingsQuery& query) {

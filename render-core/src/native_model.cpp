@@ -808,8 +808,9 @@ public:
     return terminals;
   }
 
-  void CancelTurn(const std::string& turn_id) {
+  std::optional<NativeSegmentClock> CancelTurn(const std::string& turn_id) {
     std::scoped_lock lock(_motion_mutex);
+    std::optional<NativeSegmentClock> interrupted;
     if (_motion_scheduler.pending_motion_clock
         && _motion_scheduler.pending_motion_clock->turn_id == turn_id) {
       _motion_scheduler.pending_motion_segment.reset();
@@ -817,6 +818,7 @@ public:
     }
     if (_motion_scheduler.active_motion
         && _motion_scheduler.active_motion->clock.turn_id == turn_id) {
+      interrupted = _motion_scheduler.active_motion->clock;
       CaptureReleaseLocked(_motion_scheduler.active_motion->tracks, _motion_scheduler.active_motion->blend_out_ms);
       _motion_scheduler.active_motion.reset();
     }
@@ -827,6 +829,7 @@ public:
     }
     if (_active_parameter_plan
         && _active_parameter_plan->clock.turn_id == turn_id) {
+      interrupted = _active_parameter_plan->clock;
       CaptureReleaseLocked(_active_parameter_plan->bindings, _active_parameter_plan->blend_out_ms);
       _active_parameter_plan.reset();
     }
@@ -835,6 +838,7 @@ public:
       _pre_action_motion.reset();
       _pre_action_expires_at_epoch_ms.reset();
     }
+    return interrupted;
   }
 
   void ResetRuntimeSegments(std::uint64_t generation) {
@@ -2285,8 +2289,8 @@ bool NativeModel::StartIdleMotion(
   return impl_->StartIdleMotion(event);
 }
 void NativeModel::CancelIdleMotion() { impl_->CancelIdleMotion(); }
-void NativeModel::CancelTurn(const std::string& turn_id) {
-  impl_->CancelTurn(turn_id);
+std::optional<NativeSegmentClock> NativeModel::CancelTurn(const std::string& turn_id) {
+  return impl_->CancelTurn(turn_id);
 }
 void NativeModel::SetModelSync(const ag99::runtime::Json& payload) {
   impl_->SetModelSync(payload);

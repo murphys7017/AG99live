@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 
 SCHEMA_VERSION = 3
@@ -59,7 +61,7 @@ class MotionLabRawEventStore:
             )
         if not rows:
             return
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             conn.executemany(
                 """
                 INSERT OR IGNORE INTO motion_lab_raw_events (
@@ -102,7 +104,7 @@ class MotionLabRawEventStore:
         if not normalized_turn_id or not normalized_message_id:
             return None
         self._ensure_initialized()
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             user_row = conn.execute(
                 """
                 SELECT user_text
@@ -141,7 +143,7 @@ class MotionLabRawEventStore:
         """Return recent raw events in newest-first order for the control page."""
         normalized_limit = max(1, min(int(limit), 500))
         self._ensure_initialized()
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             rows = conn.execute(
                 """
                 SELECT id, created_at, event_type, conversation_uid,
@@ -163,9 +165,10 @@ class MotionLabRawEventStore:
         if self._initialized:
             return
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA synchronous=NORMAL")
+            conn.execute("BEGIN IMMEDIATE")
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS motion_lab_meta (
@@ -194,9 +197,12 @@ class MotionLabRawEventStore:
                     )
             has_legacy_table = table_row is not None
             if has_legacy_table and stored_version != str(SCHEMA_VERSION):
-                # The old observations do not meet the new Persona sample
-                # contract. Reset only this table; curated Motion Tuning
-                # samples and AstrBot conversation history live elsewhere.
+                # Keep the original columns and values for later reprocessing.
+                # The new sample reader only queries the current table.
+                archive = f"motion_lab_raw_events_before_v{SCHEMA_VERSION}_{uuid4().hex}"
+                conn.execute(
+                    f"CREATE TABLE {archive} AS SELECT * FROM motion_lab_raw_events"
+                )
                 conn.execute("DROP TABLE motion_lab_raw_events")
             conn.execute(
                 """
