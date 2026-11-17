@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import time
 from pathlib import Path
 from typing import Any
 
@@ -29,7 +28,6 @@ class SubtitleWebService:
         self.speaker = speaker
         self._runner: web.AppRunner | None = None
         self._watch_task: asyncio.Task | None = None
-        self._clear_task: asyncio.Task | None = None
         self._subscribers: set[asyncio.Queue] = set()
         self._source_sequence = 0
         self._revision = 0
@@ -40,7 +38,7 @@ class SubtitleWebService:
 
     def _empty_caption(self) -> dict[str, Any]:
         return {"state": "idle", "text": "", "turn_id": None,
-                "segment_id": "", "speaker": self.speaker, "expires_at": None}
+                "segment_id": "", "speaker": self.speaker}
 
     def snapshot(self) -> dict[str, Any]:
         return {"revision": self._revision, "css_revision": self._css_revision,
@@ -99,12 +97,8 @@ class SubtitleWebService:
         if state in {"speaking", "text"}:
             if not turn_id or turn_id != current_turn_id or not payload["text"].strip():
                 return
-            self._cancel_clear()
             self._caption = {"state": state, "text": payload["text"], "turn_id": turn_id,
-                             "segment_id": payload["segment_id"], "speaker": self.speaker,
-                             "expires_at": None}
-            if state == "text":
-                self._schedule_clear(8)
+                             "segment_id": payload["segment_id"], "speaker": self.speaker}
             self._broadcast()
         elif (self._caption["turn_id"] == turn_id
               and self._caption["segment_id"] == payload["segment_id"]):
@@ -112,31 +106,13 @@ class SubtitleWebService:
                 self.clear()
             elif self._caption["state"] != "ended":
                 self._caption["state"] = "ended"
-                self._schedule_clear(1.5)
                 self._broadcast()
 
     def clear(self, *, reset_sequence: bool = False) -> None:
-        self._cancel_clear()
         if reset_sequence:
             self._source_sequence = 0
         self._caption = self._empty_caption()
         self._broadcast()
-
-    def _cancel_clear(self) -> None:
-        if self._clear_task is not None:
-            self._clear_task.cancel()
-            self._clear_task = None
-
-    def _schedule_clear(self, seconds: float) -> None:
-        self._cancel_clear()
-        self._caption["expires_at"] = time.time() + seconds
-
-        async def later() -> None:
-            await asyncio.sleep(seconds)
-            self._clear_task = None
-            self.clear()
-
-        self._clear_task = asyncio.create_task(later(), name="obs-subtitle-clear")
 
     def _broadcast(self) -> None:
         self._revision += 1

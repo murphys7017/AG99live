@@ -211,6 +211,15 @@ test_commands:
 
 obs_web_subtitles:
   status: deployed_pending_reload_and_live_acceptance
+  retention_followup: >-
+    User requested keeping the final caption after playback. Remove both server
+    and browser auto-hide timers for spoken and text-only replies. Keep ended
+    captions until replaced; explicit interruption, failure or disconnect still
+    clears them. Scoped Ruff, JavaScript syntax and compilation passed; a real
+    HTTP/SSE check verified retention beyond the former timeout, reconnect
+    restoration, replacement and explicit clear. Deployment is synchronized;
+    reload is required. Reviewed for a scoped retention follow-up commit;
+    actual OBS/TTS playback acceptance remains pending.
   scope: >-
     User requested a Web version of the current subtitles matching the supplied
     purple card and editable CSS; keep the existing desktop subtitle window.
