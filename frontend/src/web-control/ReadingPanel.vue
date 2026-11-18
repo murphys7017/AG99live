@@ -11,6 +11,7 @@ type ActiveReading = {
   total: number;
   rendered: boolean;
   auto_advance: boolean;
+  waiting_for_audience?: boolean;
   hold_seconds: number;
   interaction_seconds: number;
   comment_status: string;
@@ -43,8 +44,8 @@ const phaseLabels: Record<ActiveReading["phase"], string> = {
   ready: "待开始", running: "共读中", paused: "已暂停", faulted: "异常暂停", finished: "已结束",
 };
 const commentLabels: Record<string, string> = {
-  pending: "待评论", generating: "正在生成或播放", played: "播放完成",
-  silent: "已选择静默", rejected: "目标不可用", failed: "失败", unknown: "结果待确认",
+  pending: "等待评论", generating: "评估、生成或播放中", played: "播放完成",
+  silent: "本段保持安静", rejected: "目标不可用", failed: "失败", unknown: "结果待确认",
 };
 const outputLabels: Record<string, string> = {
   ready: "角色空闲", busy: "角色忙碌", presentation_offline: "桌面端离线",
@@ -235,6 +236,7 @@ async function copyUrl() {
         <p class="reading-original">{{ current.text }}</p>
         <p v-if="current.comment" class="reading-comment">{{ current.comment }}</p>
         <p role="status">{{ current.rendered ? "OBS 已展示" : "等待 OBS 展示" }} · {{ commentLabels[current.comment_status] || current.comment_status }}</p>
+        <p v-if="current.waiting_for_audience" role="status">自动共读等待观众活动，当前段保持展示。</p>
         <p v-if="current.pending_position">本轮结束后切到第 {{ current.pending_position }} 段。</p>
         <p v-if="current.error" class="reading-error" role="alert">{{ current.error === "playback_receipt_unconfirmed" ? "播放回执缺失，本轮结果待确认。" : current.error }}</p>
         <p v-if="current.comment_status === 'unknown' && current.delivery_turn_id">播放轮次 <code>{{ current.delivery_turn_id }}</code></p>
@@ -245,7 +247,7 @@ async function copyUrl() {
           </div>
         </label>
         <div class="reading-row reading-options">
-          <label><input v-model="auto" type="checkbox" :disabled="locked"> 自动评论并翻页</label>
+          <label><input v-model="auto" type="checkbox" :disabled="locked"> 自动共读</label>
           <label>展示停留 <input v-model.number="hold" type="number" min="5" max="300" :disabled="locked"> 秒</label>
           <label>互动窗口 <input v-model.number="gap" type="number" min="1" max="30" :disabled="locked"> 秒</label>
         </div>
