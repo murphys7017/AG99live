@@ -38,6 +38,16 @@ body { padding: 12px 16px 12px 32px; font-family: var(--subtitle-font); }
   white-space: pre-wrap; overflow-wrap: anywhere;
 }
 .subtitle-footer { margin-top: 12px; color: var(--subtitle-muted); font-size: 13px; line-height: 18px; }
+.reading-card {
+  width: 100%; max-width: var(--subtitle-max-width); margin-bottom: 10px;
+  padding: 18px 22px; border: 1px solid var(--subtitle-border);
+  border-radius: var(--subtitle-radius); background: var(--subtitle-background);
+  color: var(--subtitle-color);
+}
+.reading-header { display: flex; align-items: baseline; gap: 16px; justify-content: space-between; }
+.reading-header h1 { margin: 0; font-size: 18px; overflow-wrap: anywhere; }
+#reading-progress { color: var(--subtitle-muted); flex-shrink: 0; font-size: 13px; }
+#reading-text { margin: 12px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 18px; line-height: 1.7; }
 @media (max-width: 480px) {
   body { padding: 8px; }
   .subtitle-shell { padding: 12px; }

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -1171,6 +1172,11 @@ def register_web_control_page(context: Any, plugin: Any) -> bool:
         ("/history/create", api.create_history, ["POST"], "Create an AG99live conversation"),
         ("/history/load", api.load_history, ["POST"], "Select an AG99live conversation"),
         ("/history/delete", api.delete_history, ["POST"], "Delete an AG99live conversation"),
+        ("/reading/state", api.get_reading_state, ["GET"], "Read Stream Host reading progress"),
+        ("/reading/events", api.get_reading_events, ["GET"], "Subscribe to reading progress"),
+        ("/reading/preview", api.preview_reading, ["POST"], "Preview reading passages"),
+        ("/reading/material", api.save_reading, ["POST"], "Save reading material"),
+        ("/reading/command", api.command_reading, ["POST"], "Control a reading session"),
         ("/motion-lab/events", api.get_motion_lab_events, ["GET"], "Read Motion Lab events"),
         ("/profile", api.get_profile, ["GET"], "Read a Live2D semantic profile"),
         ("/profile", api.save_profile, ["POST"], "Save a Live2D semantic profile"),
@@ -1280,6 +1286,84 @@ class WebControlPageApi:
             if error:
                 return error
         return await self._history_response(platform, history_uid=history_uid)
+
+    def _stream_host(self):
+        metadata = self._plugin.context.get_registered_star("astrbot_plugin_ag99live_stream_host")
+        plugin = metadata.star_cls if metadata is not None and metadata.activated else None
+        if plugin is None or getattr(plugin, "reading", None) is None:
+            raise ValueError("请在 AstrBot 启用直播主持插件。")
+        return plugin
+
+    def _reading_state(self, platform_id: str) -> dict:
+        try:
+            return self._stream_host().reading.view(platform_id)
+        except (ValueError, RuntimeError) as exc:
+            return {"phase": "unavailable", "error": str(exc)}
+
+    async def get_reading_state(self):
+        if response := _require_dashboard_user():
+            return response
+        platform, error = _resolve_platform_from_query()
+        return error if error else jsonify(self._reading_state(platform.platform_id))
+
+    async def get_reading_events(self):
+        if response := _require_dashboard_user():
+            return response
+        platform, error = _resolve_platform_from_query()
+        if error:
+            return error
+        from starlette.responses import StreamingResponse
+
+        platform_id = platform.platform_id
+
+        async def events():
+            previous = None
+            while True:
+                state = self._reading_state(platform_id)
+                if state != previous:
+                    yield "data: " + json.dumps(state, ensure_ascii=False) + "\n\n"
+                    previous = state
+                else:
+                    yield ": keep-alive\n\n"
+                await asyncio.sleep(1)
+
+        return StreamingResponse(
+            events(), media_type="text/event-stream",
+            headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+        )
+
+    async def preview_reading(self):
+        return await self._reading_write("preview")
+
+    async def save_reading(self):
+        return await self._reading_write("save")
+
+    async def command_reading(self):
+        return await self._reading_write("command")
+
+    async def _reading_write(self, action: str):
+        if response := _require_dashboard_user():
+            return response
+        if request.content_length is not None and request.content_length > 512 * 1024:
+            return _error("共读材料太长。", 413)
+        body = await _read_json_body()
+        if isinstance(body, tuple):
+            return body[1]
+        platform, error = _resolve_platform_from_body(body)
+        if error:
+            return error
+        try:
+            plugin = self._stream_host()
+            if action == "preview":
+                plugin.reading.view(platform.platform_id)
+                return jsonify({"passages": plugin.reading.preview(body.get("text"))})
+            if action == "save":
+                return jsonify(await plugin.reading.save(platform.platform_id, body))
+            return jsonify(await plugin.reading_command(platform.platform_id, body))
+        except ValueError as exc:
+            return _error(str(exc), 409)
+        except RuntimeError as exc:
+            return _error("共读服务暂不可用。", 503, detail=str(exc))
 
     async def create_history(self):
         return await self._mutate_history("create")

@@ -335,6 +335,20 @@ def persona_expression_intent(request: Any) -> Mapping[str, Any] | None:
     return intent if isinstance(intent, Mapping) else None
 
 
+def persona_motion_phase(request: Any) -> str | None:
+    """Resolve the output phase used by the adapter's motion result identity."""
+    intent = persona_expression_intent(request)
+    if intent is None:
+        return None
+    phase = str(intent.get("phase") or "").strip()
+    kind = str(intent.get("kind") or "").strip()
+    if kind == "reply" and phase in {"immediate", "final"}:
+        return phase
+    if kind == phase == "proactive" and intent.get("source") == "reading_commentary":
+        return "immediate"
+    return None
+
+
 async def _prepare_independent_motion_context(
     event: Any,
     bundle: _MotionRuntimeBundle,

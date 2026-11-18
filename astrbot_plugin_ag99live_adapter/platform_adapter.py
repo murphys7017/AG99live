@@ -187,15 +187,22 @@ class OLVPetPlatformAdapter(Platform):
             state_dir=STATE_DIR,
         )
         self.session_state = SessionState(client_uid=self.client_uid)
+        get_snapshot_hub = getattr(self._plugin_context, "get_snapshot_hub", None)
+        snapshot_hub = get_snapshot_hub() if callable(get_snapshot_hub) else None
+        reading_scope = None
+        if snapshot_hub is not None:
+            from astrbot.api import SnapshotScope
+
+            reading_scope = SnapshotScope("platform", self.platform_id)
         self.subtitle_web = SubtitleWebService(
             port=int(get_config_value(self.config, "subtitle_port", 18765)),
             assets_dir=PLUGIN_DIR / "views" / "subtitles",
             css_path=PLUGIN_DATA_DIR / "subtitles" / f"{self.port}" / "custom.css",
             speaker=str(self.speaker_name),
+            snapshot_hub=snapshot_hub, reading_scope=reading_scope,
+            reading_target=lambda: f"{self.platform_id}:FriendMessage:{self.client_uid}",
         )
         self.turn_identity_map = TurnIdentityMap()
-        get_snapshot_hub = getattr(self._plugin_context, "get_snapshot_hub", None)
-        snapshot_hub = get_snapshot_hub() if callable(get_snapshot_hub) else None
         self.desktop_state_store = DesktopStateStore(
             client_uid=self.client_uid,
             scope_id=self.platform_id,
@@ -544,6 +551,36 @@ class OLVPetPlatformAdapter(Platform):
             self.meta(),
             message_obj.session_id,
             self,
+        )
+
+    def reading_display_url(self, key: str) -> str:
+        return f"http://127.0.0.1:{self.subtitle_web.port}/subtitle/#reading={key}"
+
+    @property
+    def plugin_commentary_presentation_effects(self) -> tuple[tuple[str, str], ...]:
+        from .middleware.interaction_motion.shared import (
+            AG99LIVE_MOTION_EFFECT_NAME,
+            AG99LIVE_PLUGIN_ID,
+        )
+
+        return ((AG99LIVE_PLUGIN_ID, AG99LIVE_MOTION_EFFECT_NAME),)
+
+    def plugin_commentary_output_status(self, session_id: str) -> str:
+        if session_id != self.client_uid:
+            return "presentation_session_mismatch"
+        if self.transport._ws_client is None:
+            return "presentation_offline"
+        return "ready" if self.is_proactive_output_available() else "busy"
+
+    def create_plugin_commentary_event(
+        self, message_obj: AstrBotMessage, source_meta,
+    ) -> OLVPetPlatformEvent:
+        """Create an unbound output event for admission by Core."""
+        from dataclasses import replace
+
+        return OLVPetPlatformEvent(
+            "", message_obj, replace(source_meta, name=self.meta().name),
+            message_obj.session_id, self,
         )
 
     async def submit_stream_input_event(

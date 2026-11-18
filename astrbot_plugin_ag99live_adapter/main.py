@@ -428,8 +428,7 @@ class MyPlugin(Star):
             _prepare_independent_motion_context,
             await_with_hard_deadline,
             generate_independent_motion,
-            is_persona_expression_request,
-            persona_expression_intent,
+            persona_motion_phase,
             resolve_stream_motion_budget_seconds,
         )
         from .middleware.interaction_motion.shared import _resolve_motion_runtime_bundle
@@ -456,13 +455,8 @@ class MyPlugin(Star):
         ):
             return
         request = event.get_extra("provider_request")
-        intent = persona_expression_intent(request)
-        if (
-            not is_persona_expression_request(request)
-            or intent is None
-            or str(intent.get("phase") or "").strip() not in {"immediate", "final"}
-            or str(intent.get("kind") or "").strip() != "reply"
-        ):
+        phase = persona_motion_phase(request)
+        if phase is None:
             return
         normalized_turn_id = str(turn_id or "").strip()
         normalized_result_id = str(persona_result_id or "").strip()
@@ -488,7 +482,7 @@ class MyPlugin(Star):
             persona_result_id=normalized_result_id,
             segment_index=segment_index,
             segment_message_id=normalized_segment_id,
-            phase=str(intent.get("phase") or "").strip(),
+            phase=phase,
             intent_ready=True,
             actions=actions,
             tendency=tendency,
@@ -772,8 +766,7 @@ class MyPlugin(Star):
             _prepare_independent_motion_context,
             await_with_hard_deadline,
             generate_independent_motion_for_segments,
-            is_persona_expression_request,
-            persona_expression_intent,
+            persona_motion_phase,
             resolve_stream_motion_budget_seconds,
         )
         from .middleware.interaction_motion.shared import (
@@ -829,15 +822,9 @@ class MyPlugin(Star):
             return
 
         request = event.get_extra("provider_request")
-        intent = persona_expression_intent(request)
-        if (
-            not is_persona_expression_request(request)
-            or intent is None
-            or str(intent.get("phase") or "").strip() not in {"immediate", "final"}
-            or str(intent.get("kind") or "").strip() != "reply"
-        ):
+        phase = persona_motion_phase(request)
+        if phase is None:
             return
-        phase = str(intent.get("phase") or "").strip()
         if isinstance(segment, Mapping):
             speech = str(segment.get("speech") or "")
             raw_actions = segment.get("actions")
@@ -1269,8 +1256,7 @@ class MyPlugin(Star):
 
         from .middleware.interaction_motion.independent import (
             generate_independent_motion_for_segments,
-            is_persona_expression_request,
-            persona_expression_intent,
+            persona_motion_phase,
         )
         from .middleware.interaction_motion.shared import (
             _resolve_motion_runtime_bundle,
@@ -1317,17 +1303,9 @@ class MyPlugin(Star):
                     )
                     return
                 request = event.get_extra("provider_request")
-                intent = persona_expression_intent(request)
-                if (
-                    not is_persona_expression_request(request)
-                    or intent is None
-                    or str(intent.get("phase") or "").strip()
-                    not in {"immediate", "final"}
-                    or str(intent.get("kind") or "").strip() != "reply"
-                    or event_context.agent_stop_requested
-                ):
+                phase = persona_motion_phase(request)
+                if phase is None or event_context.agent_stop_requested:
                     return
-                phase = str(intent.get("phase") or "").strip()
                 if not persona_result_id:
                     logger.warning(
                         "WIRING independent_motion.segment_generation_skipped "

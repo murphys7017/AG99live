@@ -7,6 +7,7 @@ import SemanticAxisProfileEditor from "../components/SemanticAxisProfileEditor.v
 import SettingsForm from "./SettingsForm.vue";
 import DesktopSettingsPanel from "./DesktopSettingsPanel.vue";
 import HistoryPanel from "./HistoryPanel.vue";
+import ReadingPanel from "./ReadingPanel.vue";
 import { useWebHistory } from "./useWebHistory";
 import { useParameterExcludeKeywords } from "../action-lab/parameterExcludeKeywords";
 import {
@@ -42,7 +43,7 @@ import {
   serializeMotionTuningSample,
 } from "../adapter-connection/features/motionTuningPayload.js";
 
-type ControlSection = "overview" | "settings" | "profile" | "action-lab" | "history";
+type ControlSection = "overview" | "settings" | "profile" | "action-lab" | "history" | "reading";
 type AdapterSummary = {
   platform_id: string;
   platform_type: string;
@@ -121,6 +122,7 @@ const activeTitle = computed(() => ({
   profile: "Profile Editor",
   "action-lab": "动作实验室",
   history: "对话历史",
+  reading: "文本共读",
 }[section.value]));
 const modelNameOptions = computed(() => activePlatform.value?.available_models ?? []);
 
@@ -762,6 +764,7 @@ onMounted(() => void loadOverview());
         <button :aria-current="section === 'profile' ? 'page' : undefined" @click="section = 'profile'">Profile</button>
         <button :aria-current="section === 'action-lab' ? 'page' : undefined" @click="section = 'action-lab'">动作实验室</button>
         <button :aria-current="section === 'history' ? 'page' : undefined" @click="section = 'history'">对话历史</button>
+        <button :aria-current="section === 'reading' ? 'page' : undefined" @click="section = 'reading'">文本共读</button>
       </nav>
       <div class="web-control-nav__footer">AstrBot Plugin Page</div>
     </aside>
@@ -929,6 +932,9 @@ onMounted(() => void loadOverview());
           @load="void history.load($event)"
           @delete="void history.delete($event)"
         />
+      </section>
+      <section v-else-if="section === 'reading'" class="web-control-content">
+        <ReadingPanel :platform-id="selectedPlatformId" />
       </section>
     </section>
   </main>

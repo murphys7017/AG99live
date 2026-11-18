@@ -808,16 +808,33 @@ class TurnCoordinator:
             platform_extras=platform_extras,
         )
 
-    async def begin_proactive_output_turn(self, *, turn_id: str | None = None) -> str:
+    async def begin_proactive_output_turn(
+        self, *, turn_id: str | None = None, event: Any | None = None,
+    ) -> str:
         """Create and announce a frontend turn for an AstrBot proactive send."""
+        core_id = self._require_turn_id_value(turn_id) if event is not None else turn_id
         async with self._turn_lock:
-            if turn_id and (
+            if event is not None and event.session_id != self.session_state.client_uid:
+                raise RuntimeError("presentation_session_mismatch")
+            if core_id and (
                 self.session_state.current_turn_id or self.has_active_speech_input
             ):
                 raise RuntimeError("proactive_output_target_busy")
-            return await self._begin_proactive_output_turn_locked(
-                "proactive", turn_id=turn_id
+            delivery_id = await self._begin_proactive_output_turn_locked(
+                "proactive", turn_id=core_id
             )
+            if event is not None and core_id is not None:
+                self.turn_identity_map.bind_astrbot_turn(
+                    frontend_turn_id=delivery_id, astrbot_turn_id=core_id,
+                )
+                resolve_adapter_event_context(event).set_turn_identity(
+                    event, core_turn_id=core_id, delivery_turn_id=delivery_id,
+                )
+                if (orchestrator := self._interaction_orchestrator) is not None:
+                    orchestrator.register_active_event(delivery_id, event)
+                else:
+                    self._events_by_turn_id[delivery_id] = event
+            return delivery_id
 
     @property
     def has_active_speech_input(self) -> bool:
@@ -847,6 +864,14 @@ class TurnCoordinator:
                 sent = await self._send_json(
                     build_control_turn_started(turn_id=current_turn_id)
                 )
+        except asyncio.CancelledError:
+            self.turn_identity_map.clear_frontend_turn(current_turn_id)
+            self._turn_timings.pop(current_turn_id, None)
+            if orchestrator is not None:
+                orchestrator.discard_turn(current_turn_id)
+            if self.session_state.current_turn_id == current_turn_id:
+                self.session_state.reset_to_idle()
+            raise
         except Exception as exc:
             sent = False
             logger.debug(

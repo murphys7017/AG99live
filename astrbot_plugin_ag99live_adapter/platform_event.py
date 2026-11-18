@@ -34,6 +34,14 @@ ACTION_ONLY_MOTION_ACK_TIMEOUT_SECONDS = 30.0
 
 
 class OutputSegmentDeliveryPort(Protocol):
+    async def begin_proactive_output_turn(
+        self, *, turn_id: str | None = None, event: Any | None = None,
+    ) -> str: ...
+
+    async def wait_for_turn_finished(
+        self, *, turn_id: str, timeout_seconds: float,
+    ) -> tuple[bool, str | None]: ...
+
     async def finalize_output_segment(self, *, turn_id: str, message_id: str) -> None: ...
 
     def has_pending_persona_segment(self, *, turn_id: str, message_id: str) -> bool: ...
@@ -618,6 +626,27 @@ class OLVPetPlatformEvent(AstrMessageEvent):
             self._has_send_oper = previous_has_send_oper
         else:
             await super().send(message)
+
+    async def begin_plugin_commentary_output(self) -> bool:
+        try:
+            await self.adapter.turn_coordinator.begin_proactive_output_turn(
+                turn_id=self._adapter_internal_state.core_turn_id, event=self,
+            )
+        except RuntimeError as exc:
+            if str(exc) != "proactive_output_target_busy":
+                raise
+            return False
+        return True
+
+    async def wait_for_plugin_commentary_output(self) -> None:
+        turn_id = self._adapter_internal_state.delivery_turn_id
+        if not turn_id:
+            raise RuntimeError("commentary_output_not_started")
+        success, reason = await self.adapter.turn_coordinator.wait_for_turn_finished(
+            turn_id=turn_id, timeout_seconds=120,
+        )
+        if not success:
+            raise RuntimeError(f"commentary_playback_failed:{reason or 'unknown'}")
 
     async def complete_visible_turn(self) -> None:
         if self._is_stop_requested():
