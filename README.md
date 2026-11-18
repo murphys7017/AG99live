@@ -17,6 +17,10 @@ Windows · Live2D Cubism · AI Motion Generation · AstrBot Ecosystem
 
 </div>
 
+murphys7017（YakumoAki）在本仓库维护 AG99live 桌宠及 AstrBot 适配器。直播输入、桌面感知和情绪模型接入分别维护，方便按需安装和追踪修改。
+
+[桌宠适配器](astrbot_plugin_ag99live_adapter/) · [直播主持](https://github.com/murphys7017/astrbot_plugin_ag99live_stream_host) · [桌面感知](https://github.com/murphys7017/astrbot_plugin_ag99_desktop_awareness) · [NeuroBrain 插件](https://github.com/murphys7017/astrbot_plugin_neurobrain)
+
 ## 让虚拟角色真正参与交流
 
 很多 AI 桌宠已经能够聊天、说话和播放 Live2D 动画，但角色的表现往往仍然依赖关键词、预设表情或固定动作。

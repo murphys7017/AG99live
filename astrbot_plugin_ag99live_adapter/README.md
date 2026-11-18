@@ -1,5 +1,7 @@
 # AG99live Adapter
 
+此适配器由 murphys7017 随 AG99live 维护。语音、动作与中断协议和本仓库的桌面端配套。 [AG99live 项目](../README.md)
+
 AG99 插件 `astrbot_plugin_ag99live_adapter` 将 AG99 的对话、TTS 和动作结果接入 AG99live 桌面端。动作可由 Persona Effect 或独立 Provider 生成。当前产品版本为 **AG99live 1.0.0**，协议版本以 `protocol/schema_manifest.json` 为准。Adapter 和桌面端按同一产品版本配套发布。
 
 ## 职责
