@@ -16,7 +16,7 @@ async def _noop_async(*_args, **_kwargs) -> None:
 def _observation_window_stub():
     return types.SimpleNamespace(
         note_input=lambda: None,
-        note_output_finished=lambda: None,
+        note_output_finished=lambda *_: None,
         reset=lambda: None,
     )
 

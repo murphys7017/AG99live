@@ -104,6 +104,7 @@ export interface AdapterTurnLifecycleEvent {
 }
 
 export interface AdapterConnectionInstance {
+  reportSegmentPresented: (turnId: string | null, messageId: string, kind: "speech" | "motion" | "text") => void;
   setPreActionObserver: (observer: ((event: PreActionEvent) => void) | null) => void;
   setIdleMotionObserver: (observer: ((event: IdleMotionEvent) => void) | null) => void;
   readonly state: DeepReadonly<ReturnType<typeof createAdapterConnectionState>>;
@@ -507,6 +508,7 @@ export function createAdapterConnection(
       state.lastAssistantText = text;
       state.assistantTextDeliveryTurnId = turnId;
       if (speaking !== null) subtitleReporter.show(text, turnId, messageId, speaking);
+      if (speaking === false) reportSegmentPresented(turnId, messageId, "text");
     },
     recordIncrementalText: (text, turnId) => recordAssistantText(text, turnId),
     sendAudioCredit: (id, releasedBytes, releasedFrames) => {
@@ -1055,7 +1057,10 @@ export function createAdapterConnection(
       messageId,
       turnId,
     );
-    if (accepted) subtitleReporter.show(text, turnId, messageId);
+    if (accepted) {
+      subtitleReporter.show(text, turnId, messageId);
+      if (turnId && sessionStore.getSession(turnId)?.segments.get(messageId)?.audio.terminal === "absent") reportSegmentPresented(turnId, messageId, "text");
+    }
     return accepted;
   }
 
@@ -1073,6 +1078,21 @@ export function createAdapterConnection(
 
   function sendText(text: string): Promise<boolean> {
     return sendTextAction(outboundCtx, text);
+  }
+
+  let presentedTurnId: string | null = null;
+  const presentedResources = new Set<string>();
+  function reportSegmentPresented(turnId: string | null, messageId: string, kind: "speech" | "motion" | "text"): void {
+    if (turnId && turnId === state.currentTurnId && messageId) {
+      if (presentedTurnId !== turnId) {
+        presentedResources.clear();
+        presentedTurnId = turnId;
+      }
+      const key = `${kind}:${messageId}`;
+      if (!presentedResources.has(key) && outboundClient.send("system.segment_presented", { segment_id: messageId, kind }, turnId)) {
+        presentedResources.add(key);
+      }
+    }
   }
 
   function setTurnLifecycleObserver(
@@ -1209,6 +1229,7 @@ export function createAdapterConnection(
     waitUntilDesktopSettingsReady,
     disconnect,
     sendText,
+    reportSegmentPresented,
     setTurnLifecycleObserver,
     setPreActionObserver: (observer: ((event: PreActionEvent) => void) | null) => {
       preActionObserver = observer;

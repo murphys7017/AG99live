@@ -180,9 +180,11 @@ class PassiveBehaviorRuntime:
             profile = resolve_selected_semantic_axis_profile(
                 runtime_state=self.runtime_state,
             )
+            window = getattr(self.turn_coordinator, "observation_window", None)
             prompt = build_passive_behavior_prompt(
                 neurobrain_state=state,
                 semantic_profile=profile,
+                recent_interaction=window.recent_interaction() if window else None,
             )
         except Exception as exc:
             logger.debug("NeuroBrain passive behavior skipped: profile unavailable: %s", exc)

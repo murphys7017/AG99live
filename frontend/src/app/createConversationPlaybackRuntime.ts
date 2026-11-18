@@ -76,6 +76,7 @@ export function createConversationPlaybackRuntime(options: {
     speechOutputRuntime,
     live2dRuntime: options.live2dRuntime,
     onAudioTimelineStarted: (turnId, messageId, timeline) => {
+      adapter.reportSegmentPresented(turnId, messageId, "speech");
       requireMotionRuntime().handleAudioTimelineStarted(turnId, messageId, timeline);
     },
     onAudioTimelineDurationReady: (turnId, messageId, timeline) => {

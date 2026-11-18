@@ -486,6 +486,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     pushHistory: (role, text) => adapter.pushHistory(role, text),
     getPlayerMessage: () => motionPlayer.state.message,
     onPlanStarted: (event) => {
+      if (event.playbackOrigin === "conversation") adapter.reportSegmentPresented(event.turnId, event.messageId, "motion");
       if (event.playbackOrigin === "pre_action") {
         reportLatencyStage("pre_action_started", event.turnId, null, event.messageId);
       }

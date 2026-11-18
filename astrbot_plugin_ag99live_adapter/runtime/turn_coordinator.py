@@ -297,7 +297,7 @@ class TurnCoordinator:
     ) -> None:
         """Release AstrBot/runtime-owned resources after neutral terminal commit."""
 
-        self.observation_window.note_output_finished()
+        self.observation_window.note_output_finished(turn_id, self._turn_terminal_results[turn_id])
         self._prune_turn_terminal_results()
         self.turn_identity_map.clear_frontend_turn(turn_id)
         if self.session_state.current_turn_id == turn_id:
@@ -360,6 +360,10 @@ class TurnCoordinator:
         )
 
     async def _dispatch_system_message(self, message: Any) -> None:
+        if message.type == "system.segment_presented":
+            if message.turn_id and message.turn_id == self.session_state.current_turn_id:
+                self.observation_window.note_presentation(message.turn_id, message.payload["kind"])
+            return
         if message.type in {
             "system.history_create",
             "system.history_load",
@@ -601,7 +605,7 @@ class TurnCoordinator:
 
     def reset_turn_tracking(self) -> None:
         """Stop active AstrBot events before discarding connection-scoped state."""
-        self.observation_window.note_input()
+        self.observation_window.reset()
         self._preparing_inputs.clear()
         self.pre_action.reset()
         self._pre_action_input_id = None
@@ -1377,7 +1381,7 @@ class TurnCoordinator:
             raise
 
         self._turn_terminal_results[resolved_turn_id] = terminal_result
-        self.observation_window.note_output_finished()
+        self.observation_window.note_output_finished(resolved_turn_id, terminal_result)
         for waiter in self._turn_terminal_waiters.pop(resolved_turn_id, []):
             if not waiter.done():
                 waiter.set_result(terminal_result)

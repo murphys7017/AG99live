@@ -13,6 +13,9 @@ class ConversationObservationWindow:
         self._last_activity_at = monotonic()
         self._cancel_event = asyncio.Event()
         self.revision = 0
+        self._presented_turn: str | None = None
+        self._presented_kind = ""
+        self._presentation_end: tuple[str, str, float] | None = None
 
     def note_input(self) -> None:
         """Withdraw all facts sampled before this new user input."""
@@ -21,7 +24,28 @@ class ConversationObservationWindow:
         self._last_activity_at = monotonic()
         self.revision += 1
 
-    def note_output_finished(self) -> None:
+    def note_presentation(self, turn_id: str, kind: str) -> None:
+        self._presented_turn = turn_id
+        self._presented_kind = kind
+
+    def reset(self) -> None:
+        self.note_input()
+        self._presented_turn = self._presentation_end = None
+
+    def recent_interaction(self) -> dict | None:
+        if self._presentation_end is None:
+            return None
+        kind, outcome, ended_at = self._presentation_end
+        return {"kind": kind, "outcome": outcome, "seconds_since_end": int(monotonic() - ended_at)}
+
+    def note_output_finished(self, turn_id: str, result: tuple[bool, str | None]) -> None:
+        if self._presented_turn == turn_id:
+            success, reason = result
+            outcome = "completed" if success else (
+                "interrupted" if reason in {"interrupted", "superseded_by_new_user_input", "provider_interrupt"} else "failed"
+            )
+            self._presentation_end = self._presented_kind, outcome, monotonic()
+            self._presented_turn = None
         # Completion starts a fresh quiet period, but must not cancel the very
         # action awaiting this playback acknowledgement.
         self._last_activity_at = monotonic()

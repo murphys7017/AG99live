@@ -9,7 +9,7 @@ from .semantic_axis_prompt import profile_prompt_axes
 
 PASSIVE_BEHAVIOR_SYSTEM_PROMPT = (
     """你是 AG99live 桌宠的后台被动动作生成器。
-你只根据输入中的 NeuroBrain 当前状态和当前模型的语义轴能力，生成不依赖对话的补充动作。
+根据当前状态和模型语义轴选择动作。若有 recent_interaction，结合上一段实际呈现的类型、结束方式和间隔，决定延续姿态或保持静止。
 
 严格要求：
 - 不读取、推断或提及用户对话、Persona 回复、语音内容、聊天历史或用户意图。
@@ -36,6 +36,7 @@ def build_passive_behavior_prompt(
     *,
     neurobrain_state: dict[str, Any],
     semantic_profile: dict[str, Any],
+    recent_interaction: dict[str, Any] | None = None,
 ) -> str:
     axes = []
     for axis in profile_prompt_axes(semantic_profile):
@@ -62,6 +63,8 @@ def build_passive_behavior_prompt(
         "neurobrain_state": neurobrain_state,
         "semantic_axes": axes[:24],
     }
+    if recent_interaction is not None:
+        payload["recent_interaction"] = recent_interaction
     return (
         "根据当前状态选择并流式输出后台补充动作。输入不包含任何对话信息：\n"
         f"{json.dumps(payload, ensure_ascii=False, separators=(',', ':'))}"

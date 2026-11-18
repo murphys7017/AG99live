@@ -160,6 +160,12 @@ def build_message_envelope(
 
 
 def _validate_payload(message_type: str, payload: dict[str, Any]) -> None:
+    if message_type == "system.segment_presented":
+        if not isinstance(payload.get("segment_id"), str) or not payload["segment_id"].strip():
+            raise ProtocolError("segment_presented requires a segment_id")
+        if payload.get("kind") not in ("speech", "motion", "text"):
+            raise ProtocolError("segment_presented kind invalid")
+        return
     if message_type == "system.subtitle_state":
         from .subtitle import validate_subtitle_state
 
