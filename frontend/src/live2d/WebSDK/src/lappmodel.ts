@@ -1845,9 +1845,6 @@ export class LAppModel extends CubismUserModel {
     }
 
     const previousState = this._directParameterPlanState;
-    if (previousState) {
-      this.transferDirectParameterPresentation(previousState, candidate.state);
-    }
     this._directParameterPlanState = null;
     if (previousState?.expressionId && !expressionId) {
       this.stopExpression();
@@ -2095,31 +2092,6 @@ export class LAppModel extends CubismUserModel {
     }
     if (expressionStopError !== null) {
       throw expressionStopError;
-    }
-  }
-
-  private transferDirectParameterPresentation(
-    previousState: DirectParameterPlanState,
-    nextState: DirectParameterPlanState,
-  ): void {
-    const previousBindings = new Map(
-      previousState.semanticBindings.map((binding) => [
-        binding.parameterIndex,
-        binding,
-      ]),
-    );
-    for (const binding of nextState.semanticBindings) {
-      const previous = previousBindings.get(binding.parameterIndex)?.presentation;
-      if (
-        !previous
-        || previous.drivenOffset === null
-        || !Number.isFinite(previous.drivenOffset)
-        || !Number.isFinite(previous.velocity)
-      ) {
-        continue;
-      }
-      binding.presentation.drivenOffset = previous.drivenOffset;
-      binding.presentation.velocity = previous.velocity;
     }
   }
 

@@ -31,14 +31,11 @@ export function resolveParameterPresentationFrame(
   frameTargetValue: number,
   baseValue: number,
   elapsedMs: number,
-  timing: DirectParameterExecutionPlan["timing"],
+  timing: DirectParameterExecutionPlan["timing"] | null,
 ): { drivenValue: number; settled: boolean } {
-  const envelopedTargetValue = resolveTrajectoryEnvelope(
-    node,
-    frameTargetValue,
-    elapsedMs,
-    timing,
-  );
+  const envelopedTargetValue = timing
+    ? resolveTrajectoryEnvelope(node, frameTargetValue, elapsedMs, timing)
+    : frameTargetValue;
   const targetOffset = envelopedTargetValue - baseValue;
   const previousOffset = node.drivenOffset ?? 0;
   const previousElapsedMs = node.lastElapsedMs;
