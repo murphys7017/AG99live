@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import secrets
+from dataclasses import dataclass
 from pathlib import Path
 from time import monotonic
 from typing import TYPE_CHECKING, Any
@@ -27,6 +28,12 @@ READING_SOURCE = "ag99live.stream_host"
 RENDERED_KIND = "ag99live_reading_rendered"
 RENDERED_SOURCE = "ag99live.subtitle"
 RENDER_RECEIPT_TTL_SECONDS = 10
+
+
+@dataclass(eq=False, slots=True)
+class _ReadingView:
+    key: str
+    last_sequence: int = 0
 
 
 class SubtitleWebService:
@@ -57,8 +64,8 @@ class SubtitleWebService:
         self._reading_scope = reading_scope
         self._reading_target = reading_target
         self._reading_subscription = None
-        self._reading_views: dict[str, tuple[str, asyncio.Queue]] = {}
-        self._rendered_view: tuple[str, asyncio.Queue] | None = None
+        self._reading_views: dict[str, _ReadingView] = {}
+        self._rendered_view: _ReadingView | None = None
         self._rendered_identity: tuple | None = None
         self._rendered_at = 0.0
         self._last_rendered_heartbeat = 0.0
@@ -261,22 +268,37 @@ class SubtitleWebService:
             or not isinstance(body.get("renderer"), str)
         ):
             raise web.HTTPBadRequest()
+        visible = body.get("visible", True)
+        sequence = body.get("sequence")
+        if type(visible) is not bool or (
+            sequence is not None and (type(sequence) is not int or sequence < 1)
+        ):
+            raise web.HTTPBadRequest()
         key = body["key"]
         payload = self._reading_for(key)
         view = self._reading_views.get(body["renderer"])
         fields = ("session_id", "visit_id", "display_revision")
         if (
-            payload is None or view is None or key != view[0]
+            payload is None or view is None or key != view.key
             or any(body.get(field) != payload[field] for field in fields)
         ):
             raise web.HTTPConflict()
+        if sequence is not None:
+            if sequence <= view.last_sequence:
+                raise web.HTTPConflict()
+            view.last_sequence = sequence
         identity = tuple(payload[field] for field in fields)
+        if not visible:
+            if self._rendered_view is view and self._rendered_identity == identity:
+                self._clear_reading_receipt()
+            return web.Response(status=204)
+
         now = monotonic()
         owner = self._rendered_view
         heartbeat_expired = now - self._last_rendered_heartbeat >= RENDER_RECEIPT_TTL_SECONDS
-        if owner is not None and owner != view and owner[0] == key and not heartbeat_expired:
+        if owner is not None and owner is not view and owner.key == key and not heartbeat_expired:
             raise web.HTTPConflict()
-        if owner != view or identity != self._rendered_identity or heartbeat_expired:
+        if owner is not view or identity != self._rendered_identity or heartbeat_expired:
             self._rendered_view = view
             self._rendered_identity = identity
             self._rendered_at = now
@@ -296,7 +318,7 @@ class SubtitleWebService:
         queue: asyncio.Queue = asyncio.Queue(maxsize=1)
         reading_key = request.query.get("reading", "")
         renderer = request.query.get("renderer", "")
-        view = (reading_key, queue)
+        view = _ReadingView(reading_key)
         view_registered = False
         self._subscribers.add(queue)
         queue.put_nowait(self.snapshot())
@@ -312,8 +334,10 @@ class SubtitleWebService:
                     reading = self._reading_for(reading_key)
                     if not view_registered and reading is not None and 1 <= len(renderer) <= 64:
                         previous_view = self._reading_views.get(renderer)
-                        if previous_view is not None and previous_view == self._rendered_view:
-                            self._clear_reading_receipt()
+                        if previous_view is not None and previous_view.key == reading_key:
+                            view.last_sequence = previous_view.last_sequence
+                            if previous_view is self._rendered_view:
+                                self._clear_reading_receipt()
                         self._reading_views[renderer] = view
                         view_registered = True
                     snapshot = {**snapshot, "reading": reading}
@@ -323,9 +347,9 @@ class SubtitleWebService:
             pass
         finally:
             self._subscribers.discard(queue)
-            if self._reading_views.get(renderer) == view:
+            if self._reading_views.get(renderer) is view:
                 self._reading_views.pop(renderer, None)
-            if self._rendered_view == view:
+            if self._rendered_view is view:
                 self._clear_reading_receipt()
         return response
 

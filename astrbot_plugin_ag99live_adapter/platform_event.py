@@ -645,8 +645,17 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         success, reason = await self.adapter.turn_coordinator.wait_for_turn_finished(
             turn_id=turn_id, timeout_seconds=120,
         )
-        if not success:
-            raise RuntimeError(f"commentary_playback_failed:{reason or 'unknown'}")
+        if success:
+            return
+        if reason in {
+            "interaction_orchestrator_reset_before_completion",
+            "turn_coordinator_reset_before_completion",
+        } or (reason and reason.startswith("turn_finished_send_failed:")):
+            raise TimeoutError(reason)
+
+        from astrbot.core.interaction.persona_expression_types import InteractionExpressionError
+
+        raise InteractionExpressionError("commentary_playback_failed", reason or "unknown")
 
     async def complete_visible_turn(self) -> None:
         if self._is_stop_requested():

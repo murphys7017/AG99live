@@ -15,13 +15,16 @@ type ActiveReading = {
   interaction_seconds: number;
   comment_status: string;
   comment: string;
+  delivery_turn_id?: string | null;
   error: string | null;
+  persistence_pending?: boolean;
   output_status: string;
   pending_position: number | null;
   display_url: string;
 };
 type ReadingView = ActiveReading | { phase: "empty" | "unavailable"; error?: string };
-type ReadingCommand = "start" | "pause" | "previous" | "next" | "comment" | "end";
+type ReadingCommand = "start" | "pause" | "previous" | "next" | "comment" | "end" | "retry_persistence";
+type ReadingRhythm = Pick<ActiveReading, "auto_advance" | "hold_seconds" | "interaction_seconds">;
 
 const props = defineProps<{ platformId: string }>();
 const view = ref<ReadingView>();
@@ -37,7 +40,7 @@ const error = ref("");
 const notice = ref("");
 const urlInput = ref<HTMLInputElement>();
 const phaseLabels: Record<ActiveReading["phase"], string> = {
-  ready: "待开始", running: "共读中", paused: "已暂停", faulted: "评论失败", finished: "已结束",
+  ready: "待开始", running: "共读中", paused: "已暂停", faulted: "异常暂停", finished: "已结束",
 };
 const commentLabels: Record<string, string> = {
   pending: "待评论", generating: "正在生成或播放", played: "播放完成",
@@ -62,11 +65,10 @@ function applyView(next: ReadingView) {
   if ("session_id" in next) {
     const previous = current.value;
     if (previous && next.revision < previous.revision) return;
-    if (!previous || previous.session_id !== next.session_id) {
-      auto.value = next.auto_advance;
-      hold.value = next.hold_seconds;
-      gap.value = next.interaction_seconds;
-    }
+    const sameSession = previous?.session_id === next.session_id;
+    if (!sameSession || auto.value === previous?.auto_advance) auto.value = next.auto_advance;
+    if (!sameSession || hold.value === previous?.hold_seconds) hold.value = next.hold_seconds;
+    if (!sameSession || gap.value === previous?.interaction_seconds) gap.value = next.interaction_seconds;
   }
   view.value = next;
 }
@@ -95,12 +97,12 @@ async function refresh() {
     const id = await api.subscribeSSE("control/reading/events", {
       onMessage: (event) => {
         if (attempt !== generation) return;
-        try {
-          const state = JSON.parse(event.data) as ReadingView;
-          if (state && typeof state.phase === "string") applyView(state);
-        } catch {
+        const state = event.parsed;
+        if (!state || typeof state !== "object" || !("phase" in state) || typeof state.phase !== "string") {
           error.value = "共读状态无法读取，请刷新。";
+          return;
         }
+        applyView(state as ReadingView);
       },
       onError: () => { if (attempt === generation) error.value = "状态连接已断开，请刷新。"; },
       onClose: () => { if (attempt === generation) error.value = "状态连接已断开，请刷新。"; },
@@ -174,9 +176,15 @@ async function save() {
 async function command(action: ReadingCommand) {
   const session = current.value;
   if (!session) return;
+  const rhythm: Partial<ReadingRhythm> = {};
+  if (action === "start") {
+    if (auto.value !== session.auto_advance) rhythm.auto_advance = auto.value;
+    if (hold.value !== session.hold_seconds) rhythm.hold_seconds = hold.value;
+    if (gap.value !== session.interaction_seconds) rhythm.interaction_seconds = gap.value;
+  }
   const next = await perform<ReadingView>("control/reading/command", {
     session_id: session.session_id, revision: session.revision, action,
-    auto_advance: auto.value, hold_seconds: hold.value, interaction_seconds: gap.value,
+    ...rhythm,
   });
   if (next) applyView(next);
 }
@@ -211,7 +219,7 @@ async function copyUrl() {
         <div class="reading-row">
           <label class="reading-file">导入 TXT / Markdown<input type="file" accept=".txt,.md,.markdown" :disabled="locked" @change="importFile"></label>
           <button type="button" :disabled="locked || !text.trim()" @click="preview">预览分段</button>
-          <button type="button" :disabled="locked || !title.trim() || !passages.length || current?.phase === 'running'" @click="save">保存材料</button>
+          <button type="button" :disabled="locked || !title.trim() || !passages.length || current?.phase === 'running' || current?.persistence_pending" @click="save">保存材料</button>
         </div>
         <ol v-if="passages.length" class="reading-passages">
           <li v-for="(_, index) in passages" :key="index">
@@ -228,7 +236,8 @@ async function copyUrl() {
         <p v-if="current.comment" class="reading-comment">{{ current.comment }}</p>
         <p role="status">{{ current.rendered ? "OBS 已展示" : "等待 OBS 展示" }} · {{ commentLabels[current.comment_status] || current.comment_status }}</p>
         <p v-if="current.pending_position">本轮结束后切到第 {{ current.pending_position }} 段。</p>
-        <p v-if="current.error" class="reading-error" role="alert">{{ current.error }}</p>
+        <p v-if="current.error" class="reading-error" role="alert">{{ current.error === "playback_receipt_unconfirmed" ? "播放回执缺失，本轮结果待确认。" : current.error }}</p>
+        <p v-if="current.comment_status === 'unknown' && current.delivery_turn_id">播放轮次 <code>{{ current.delivery_turn_id }}</code></p>
         <label>OBS 共读地址
           <div class="reading-row">
             <input ref="urlInput" :value="current.display_url" readonly @focus="urlInput?.select()">
@@ -240,7 +249,11 @@ async function copyUrl() {
           <label>展示停留 <input v-model.number="hold" type="number" min="5" max="300" :disabled="locked"> 秒</label>
           <label>互动窗口 <input v-model.number="gap" type="number" min="1" max="30" :disabled="locked"> 秒</label>
         </div>
-        <div class="reading-row">
+        <div v-if="current.persistence_pending" class="reading-row">
+          <p class="reading-error" role="alert">共读结果待保存。</p>
+          <button type="button" :disabled="locked" @click="command('retry_persistence')">重试保存</button>
+        </div>
+        <div v-else class="reading-row">
           <button type="button" :disabled="locked || current.phase === 'finished'" @click="command('start')">{{ current.phase === "running" ? "应用节奏" : current.phase === "ready" ? "开始" : "继续" }}</button>
           <button type="button" :disabled="locked || current.phase !== 'running'" @click="command('pause')">暂停</button>
           <button type="button" :disabled="locked || (current.pending_position ?? current.position) <= 1" @click="command('previous')">上一段</button>

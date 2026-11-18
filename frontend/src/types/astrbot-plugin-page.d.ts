@@ -10,7 +10,7 @@ declare global {
       subscribeSSE: (
         endpoint: string,
         handlers: {
-          onMessage: (event: { data: string }) => void;
+          onMessage: (event: { raw: string; parsed: unknown }) => void;
           onClose?: () => void;
           onError?: () => void;
         },
