@@ -14,7 +14,8 @@ export function useCursorGaze(
   let timer: number | null = null;
   let candidate: { x: number; y: number } | null = null;
   let candidateSinceMs = 0;
-  let active = false;
+  let stage: "eyes" | "full" | null = null;
+  let hasEyeBindings = true;
   let mounted = false;
   let pollInFlight = false;
   let pollRevision = 0;
@@ -43,9 +44,10 @@ export function useCursorGaze(
     }
     candidate = null;
     candidateSinceMs = 0;
-    if (active) {
+    hasEyeBindings = true;
+    if (stage) {
       runtime.stopInteractionGaze();
-      active = false;
+      stage = null;
       reportAttentionChanged(false);
     }
   }
@@ -80,29 +82,36 @@ export function useCursorGaze(
         stop();
         return;
       }
-      if (active) {
-        if (!runtime.updateInteractionGaze(target)) stop();
+      if (stage && !runtime.updateInteractionGaze(target)) {
+        stop();
         return;
       }
+      if (stage === "full") return;
 
       const now = performance.now();
-      const moved = !candidate
-        || Math.hypot(target.x - candidate.x, target.y - candidate.y) > settings.stationaryDistancePx;
-      if (moved) {
+      if (!candidate) {
         candidate = target;
         candidateSinceMs = now;
         return;
       }
-      if (now - candidateSinceMs < settings.dwellMs) {
+      const moved = Math.hypot(target.x - candidate.x, target.y - candidate.y) > settings.stationaryDistancePx;
+      if (moved) {
+        candidate = target;
+        candidateSinceMs = now;
+      }
+      const nextStage = now - candidateSinceMs >= settings.dwellMs ? "full" : "eyes";
+      if (nextStage === "eyes" && (!moved || stage === "eyes" || !hasEyeBindings)) return;
+      const input = buildCursorGazeInput(model, target, nextStage);
+      if (!input) {
+        if (nextStage === "eyes") hasEyeBindings = false;
         return;
       }
-      const input = buildCursorGazeInput(model, target);
-      if (!input || !runtime.startInteractionGaze(input)) {
-        return;
-      }
-      active = true;
-      reportAttentionChanged(true);
-      console.info("[CursorGaze] dwell gaze started.", {
+      if (!runtime.startInteractionGaze(input)) return;
+      const firstStage = stage === null;
+      stage = nextStage;
+      if (firstStage) reportAttentionChanged(true);
+      console.info("[CursorGaze] gaze started.", {
+        stage,
         axisId: input.axisId,
         target: input.target,
         bindingCount: input.bindings.length,

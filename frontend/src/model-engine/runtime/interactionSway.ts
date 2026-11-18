@@ -65,9 +65,10 @@ export function buildThinkingSwayInput(model: ModelSummary): InteractionSwayInpu
 export function buildCursorGazeInput(
   model: ModelSummary,
   target: GazeTarget,
+  stage: "eyes" | "full" = "full",
 ): InteractionGazeInput | null {
   const profile = model.semantic_axis_profile;
-  const axes = profile ? selectCursorGazeAxes(profile) : [];
+  const axes = profile ? selectCursorGazeAxes(profile, stage) : [];
   if (!axes.length || !Number.isFinite(target.horizontalRatio) || !Number.isFinite(target.verticalRatio)) {
     return null;
   }
@@ -117,7 +118,7 @@ export function buildCursorGazeInput(
   };
 }
 
-function selectCursorGazeAxes(profile: SemanticAxisProfile) {
+function selectCursorGazeAxes(profile: SemanticAxisProfile, stage: "eyes" | "full") {
   const eligible = profile.axes.filter((axis) =>
     (axis.control_role === "primary" || axis.control_role === "hint")
     && hasLateralAnchors(axis) && axis.parameter_bindings.length > 0);
@@ -138,7 +139,7 @@ function selectCursorGazeAxes(profile: SemanticAxisProfile) {
     if (eye) {
       result.push({ axis: eye, targetComponent, targetRatioScale: 1 });
     }
-    if (head && head !== eye) {
+    if (stage === "full" && head && head !== eye) {
       result.push({ axis: head, targetComponent, targetRatioScale: eye ? 0.58 : 0.72 });
     }
   };
