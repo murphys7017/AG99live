@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-import math
 import time
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable
 from typing import Any
 from uuid import uuid4
 
@@ -26,6 +25,7 @@ from ..prompts.passive_behavior import (
     build_passive_behavior_prompt,
 )
 from ..protocol.parser import build_message_envelope
+from .motion_emotion import read_motion_emotion
 from .output_segment import PASSIVE_BEHAVIOR_MOTION_SOURCE
 
 
@@ -33,24 +33,6 @@ _POLL_INTERVAL_SECONDS = 0.1
 _MAX_ACTIONS_PER_STREAM = 1
 _MAX_STREAM_CHARS = 16000
 _MAX_ACTION_LINE_CHARS = 4096
-_EMOTION_KEYS = (
-    "joy",
-    "trust",
-    "fear",
-    "surprise",
-    "sadness",
-    "disgust",
-    "anger",
-    "anticipation",
-)
-_BEHAVIOR_KEYS = (
-    "engagement",
-    "avoidance",
-    "expression",
-    "exploration",
-    "initiative",
-    "activation",
-)
 
 
 async def _discard_passive_output(_message: dict[str, Any]) -> bool:
@@ -416,57 +398,13 @@ class PassiveBehaviorRuntime:
         return provider_id, id(provider)
 
     def _read_neurobrain_state(self) -> dict[str, Any] | None:
-        context = getattr(self.runtime_state, "plugin_context", None)
-        get_registered_star = getattr(context, "get_registered_star", None)
-        if not callable(get_registered_star):
-            return None
-        try:
-            metadata = get_registered_star("astrbot_plugin_neurobrain")
-            plugin = getattr(metadata, "star_cls", None)
-            if plugin is None or not bool(getattr(plugin, "enabled", True)):
-                return None
-            readonly_api = getattr(plugin, "readonly_api", None)
-            get_state = getattr(readonly_api, "get_state", None)
-            if not callable(get_state):
-                return None
-            snapshot = get_state()
-        except Exception as exc:
-            logger.debug("NeuroBrain passive state read failed: %s", exc)
-            return None
-        return _project_neurobrain_state(snapshot)
+        return read_motion_emotion(self.runtime_state)
 
     def _connected(self) -> bool:
         try:
             return bool(self.is_desktop_connected())
         except Exception:
             return False
-
-
-def _project_neurobrain_state(snapshot: Any) -> dict[str, Any] | None:
-    if not isinstance(snapshot, Mapping):
-        return None
-
-    def unit_values(value: Any, keys: tuple[str, ...]) -> dict[str, float]:
-        if not isinstance(value, Mapping):
-            return {}
-        result: dict[str, float] = {}
-        for key in keys:
-            raw = value.get(key)
-            if isinstance(raw, bool) or not isinstance(raw, (int, float)):
-                continue
-            number = float(raw)
-            if math.isfinite(number):
-                result[key] = max(0.0, min(1.0, number))
-        return result
-
-    emotion = unit_values(snapshot.get("emotion"), _EMOTION_KEYS)
-    behavior = unit_values(snapshot.get("behavior"), _BEHAVIOR_KEYS)
-    if not emotion and not behavior:
-        return None
-    return {
-        "emotion": emotion,
-        "behavior": behavior,
-    }
 
 
 def _normalize_motion_action(

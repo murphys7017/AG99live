@@ -10,6 +10,7 @@ from time import monotonic, perf_counter, time_ns
 from typing import Any
 from uuid import uuid4
 
+from ...runtime.motion_emotion import read_motion_emotion
 from astrbot.api import logger
 
 from ...runtime.adapter_event_context import resolve_adapter_event_context
@@ -246,75 +247,6 @@ def _append_planned_motion_context(
         reference_diagnostics=context.reference_diagnostics,
         persona_guidance=context.persona_guidance,
     )
-
-
-_NEUROBRAIN_EMOTION_KEYS = (
-    "joy",
-    "trust",
-    "fear",
-    "surprise",
-    "sadness",
-    "disgust",
-    "anger",
-    "anticipation",
-)
-_NEUROBRAIN_BEHAVIOR_KEYS = (
-    "engagement",
-    "avoidance",
-    "expression",
-    "exploration",
-    "initiative",
-    "activation",
-)
-def _project_neurobrain_state(snapshot: Any) -> dict[str, Any] | None:
-    """Keep only bounded numeric state needed by the action generator."""
-
-    if not isinstance(snapshot, Mapping):
-        return None
-
-    def _unit_mapping(value: Any, keys: tuple[str, ...]) -> dict[str, float]:
-        if not isinstance(value, Mapping):
-            return {}
-        result: dict[str, float] = {}
-        for key in keys:
-            raw = value.get(key)
-            if isinstance(raw, bool) or not isinstance(raw, (int, float)):
-                continue
-            number = float(raw)
-            if math.isfinite(number):
-                result[key] = max(0.0, min(1.0, number))
-        return result
-
-    emotion = _unit_mapping(snapshot.get("emotion"), _NEUROBRAIN_EMOTION_KEYS)
-    behavior = _unit_mapping(snapshot.get("behavior"), _NEUROBRAIN_BEHAVIOR_KEYS)
-    if not emotion and not behavior:
-        return None
-    return {
-        "emotion": emotion,
-        "behavior": behavior,
-    }
-
-
-def _read_neurobrain_state(bundle: _MotionRuntimeBundle) -> dict[str, Any] | None:
-    """Read current state immediately, independently of input processing."""
-    context = getattr(bundle.runtime_state, "plugin_context", None)
-    get_registered_star = getattr(context, "get_registered_star", None)
-    if not callable(get_registered_star):
-        return None
-    try:
-        metadata = get_registered_star("astrbot_plugin_neurobrain")
-        plugin = getattr(metadata, "star_cls", None)
-        if plugin is None or not bool(getattr(plugin, "enabled", True)):
-            return None
-        readonly_api = getattr(plugin, "readonly_api", None)
-        get_state = getattr(readonly_api, "get_state", None)
-        if not callable(get_state):
-            return None
-        snapshot = get_state()
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("NeuroBrain state unavailable to motion provider: %s", exc)
-        return None
-    return _project_neurobrain_state(snapshot)
 
 
 def is_persona_expression_request(request: Any) -> bool:
@@ -1057,7 +989,7 @@ async def generate_independent_motion(
             ) = prompt_snapshot
         else:
             neurobrain_state = (
-                _read_neurobrain_state(bundle)
+                read_motion_emotion(bundle.runtime_state, event_context.delivery_turn_id)
                 if segment_intent is not None
                 else None
             )

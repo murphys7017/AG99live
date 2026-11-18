@@ -41,6 +41,7 @@ from .client_profile import (
     normalize_client_nickname,
     normalize_client_uid,
 )
+from .motion_emotion import MotionEmotionSnapshots
 from .motion_lab import MotionLabRawEventStore, MotionLabRecorder
 from .motion_state import MotionTuningStore
 from .persona_lifecycle import PersonaTurnSessionRegistry
@@ -110,6 +111,7 @@ class RuntimeState:
         self.plugin_config_source = "constructor"
         self.plugin_config_path: str | None = None
         self.plugin_config_mtime_ns: int | None = None
+        self.motion_emotion = MotionEmotionSnapshots(plugin_context)
         self.plugin_context = plugin_context
         self.provider_registry = provider_registry
         self.plugin_config_loader = plugin_config_loader

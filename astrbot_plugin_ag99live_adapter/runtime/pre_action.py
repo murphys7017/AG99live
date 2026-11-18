@@ -27,6 +27,7 @@ from ..prompts.pre_action import (
 )
 from ..prompts.semantic_axis_prompt import profile_prompt_axes
 from ..protocol.parser import build_message_envelope
+from .motion_emotion import read_motion_emotion
 
 
 def _fallback_persona_motion_prompt(prompt: str) -> str:
@@ -174,54 +175,14 @@ class PreActionRuntime:
         }
 
     def _read_state(self) -> dict:
-        metadata = self.state.plugin_context.get_registered_star(
-            "astrbot_plugin_neurobrain"
-        )
-        plugin = getattr(metadata, "star_cls", None)
-        if plugin is None or not getattr(plugin, "enabled", False):
+        state = read_motion_emotion(self.state, self.turn_id)
+        if not state:
             return {}
-        value = plugin.readonly_api.get_state()
-        if not isinstance(value, dict):
-            return {}
-        result = {}
-        fields = {
-            "action_tendency": (
-                "behavior",
-                (
-                    "engagement",
-                    "avoidance",
-                    "expression",
-                    "exploration",
-                    "initiative",
-                    "activation",
-                ),
-            ),
-            "affect_snapshot": (
-                "emotion",
-                (
-                    "joy",
-                    "trust",
-                    "fear",
-                    "surprise",
-                    "sadness",
-                    "disgust",
-                    "anger",
-                    "anticipation",
-                ),
-            ),
+        return {
+            "action_tendency": state["behavior"],
+            "affect_snapshot": state["emotion"],
+            **{key: state[key] for key in ("revision", "updated_at") if key in state},
         }
-        for target, (source, keys) in fields.items():
-            values = value.get(source, {})
-            if not isinstance(values, dict):
-                continue
-            projected = {
-                k: round(float(values[k]), 3)
-                for k in keys
-                if type(values.get(k)) in (int, float) and math.isfinite(values[k])
-            }
-            if projected:
-                result[target] = projected
-        return result
 
     async def _run(self, text, turn_id, request_id, started) -> None:
         candidate_shape = ""
