@@ -164,7 +164,7 @@ async function preview() {
 
 async function save() {
   const next = await perform<ReadingView>("control/reading/material", {
-    title: title.value, passages: passages.value,
+    title: title.value, passages: [...passages.value],
     session_id: current.value?.session_id, revision: current.value?.revision,
   });
   if (next) {
