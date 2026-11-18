@@ -84,4 +84,9 @@ class MotionEmotionSnapshots:
 
 def read_motion_emotion(state: Any, turn_id: str | None = None) -> dict | None:
     snapshots = getattr(state, "motion_emotion", None)
-    return snapshots.read(turn_id) if snapshots is not None else None
+    if snapshots is None:
+        context = getattr(state, "plugin_context", None)
+        if context is None:
+            return None
+        snapshots = state.motion_emotion = MotionEmotionSnapshots(context)
+    return snapshots.read(turn_id)

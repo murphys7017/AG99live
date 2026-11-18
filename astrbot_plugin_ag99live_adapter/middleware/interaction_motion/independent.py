@@ -989,7 +989,7 @@ async def generate_independent_motion(
             ) = prompt_snapshot
         else:
             neurobrain_state = (
-                read_motion_emotion(bundle.runtime_state, event_context.delivery_turn_id)
+                read_motion_emotion(bundle.runtime_state, event_context.delivery_turn_id or event_context.core_turn_id)
                 if segment_intent is not None
                 else None
             )
