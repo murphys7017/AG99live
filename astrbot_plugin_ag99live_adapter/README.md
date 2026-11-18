@@ -74,7 +74,7 @@ NeuroBrain 状态只是动作选择的辅助信号，不是动作命令；动作
 
 ### OLV 后台被动动作实验链路
 
-`passive_behavior.enabled` 默认关闭。开启后，OLV 桌宠 Adapter 自己维护一个异步后台任务；只有桌面端在线、没有活动 Turn 或正在采集/转写的语音输入、请求间隔和冷却条件都满足时，才读取 NeuroBrain 只读 API 的当前快照并调用所选 AstrBot Provider。读取无需状态键或人格 ID。该链路不读取或写入聊天历史，不等待 Persona，也不参与普通回复、TTS 或用户消息处理。
+`passive_behavior.enabled` 默认关闭。开启后，OLV 桌宠 Adapter 自己维护一个异步后台任务；只有桌面端在线、没有活动 Turn 或正在采集/转写的语音输入、请求间隔和冷却条件都满足时，才读取 NeuroBrain 只读 API 的当前快照并调用所选 AstrBot Provider。每次后台决策（包括 Provider 返回 `none`）都会进入冷却，避免在没有动作时持续轮询。读取无需状态键或人格 ID。该链路不读取或写入聊天历史，不等待 Persona，也不参与普通回复、TTS 或用户消息处理。
 
 后台 Provider 使用 AstrBot 的 `text_chat_stream()`。每次只接收一个完整动作决策，校验后立即通过 `output.idle_motion` 发送，`turn_id=null`，不创建、占用或结束任何对话 Turn，也不发合成完成信号。payload 仅包含现有 `engine.motion_intent.v4` 数据 `motion` 和过期时间 `expires_at_epoch_ms`。过期、断线或前台忙碌时丢弃，不进入对话播放队列。
 

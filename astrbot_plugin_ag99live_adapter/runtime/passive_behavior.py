@@ -33,6 +33,7 @@ _POLL_INTERVAL_SECONDS = 0.1
 _MAX_ACTIONS_PER_STREAM = 1
 _MAX_STREAM_CHARS = 16000
 _MAX_ACTION_LINE_CHARS = 4096
+_NONE_DECISION_LOG_INTERVAL_SECONDS = 30.0
 
 
 async def _discard_passive_output(_message: dict[str, Any]) -> bool:
@@ -62,7 +63,8 @@ class PassiveBehaviorRuntime:
         self._active_stream_task: asyncio.Task[None] | None = None
         self._stopping = False
         self._last_request_at = 0.0
-        self._last_action_at = 0.0
+        self._last_decision_at = float("-inf")
+        self._last_none_log_at = 0.0
         self._provider_identity_key: tuple[str, int] | None = None
         self._unsupported_provider_identity: tuple[str, int] | None = None
         self._consecutive_provider_failures = 0
@@ -130,7 +132,7 @@ class PassiveBehaviorRuntime:
         ) / 1000
         if now - self._last_request_at < request_interval:
             return
-        if now - self._last_action_at < cooldown:
+        if now - self._last_decision_at < cooldown:
             return
 
         provider = getattr(
@@ -243,7 +245,15 @@ class PassiveBehaviorRuntime:
 
             decision = action.get("decision")
             if decision == "none" and set(action) == {"decision"}:
-                logger.debug("NeuroBrain passive behavior decision=none")
+                now = time.monotonic()
+                self._last_decision_at = now
+                if (
+                    self._last_none_log_at == 0.0
+                    or now - self._last_none_log_at
+                    >= _NONE_DECISION_LOG_INTERVAL_SECONDS
+                ):
+                    self._last_none_log_at = now
+                    logger.debug("NeuroBrain passive behavior decision=none")
                 return False
             try:
                 action = normalize_provider_motion_record(
@@ -312,7 +322,7 @@ class PassiveBehaviorRuntime:
             if not sent:
                 return False
             emitted_count += 1
-            self._last_action_at = time.monotonic()
+            self._last_decision_at = time.monotonic()
             logger.info(
                 "WIRING passive_behavior.action_streamed message_id=%s "
                 "tags=%s axes=%s latency_ms=%s",

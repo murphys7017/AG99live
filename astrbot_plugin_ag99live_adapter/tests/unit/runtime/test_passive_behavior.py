@@ -97,6 +97,43 @@ def test_provider_failures_back_off_before_retrying(
     assert runtime._retry_not_before > time.monotonic()
 
 
+def test_none_decision_enters_cooldown_before_retrying(
+    install_fake_astrbot,
+    monkeypatch,
+) -> None:
+    install_fake_astrbot()
+    from astrbot_plugin_ag99live_adapter.runtime import passive_behavior
+
+    calls = 0
+
+    async def text_chat_stream(**_kwargs):
+        nonlocal calls
+        calls += 1
+        yield SimpleNamespace(
+            role="assistant",
+            completion_text='{"decision":"none"}',
+            is_chunk=True,
+        )
+
+    provider = SimpleNamespace(text_chat_stream=text_chat_stream)
+    runtime = _make_runtime(monkeypatch, passive_behavior, provider)
+    runtime.runtime_state.passive_behavior_cooldown_ms = 1000
+
+    async def run_case() -> None:
+        now = 100.0
+        monkeypatch.setattr(passive_behavior, "time", SimpleNamespace(monotonic=lambda: now))
+        await runtime._request_if_ready()
+        now += 0.5  # Request interval elapsed, decision cooldown still active.
+        await runtime._request_if_ready()
+        assert calls == 1
+        now += 0.5
+        await runtime._request_if_ready()
+
+    asyncio.run(run_case())
+
+    assert calls == 2
+
+
 def test_result_ttl_cancels_provider_stream_without_waiting_for_request_timeout(
     install_fake_astrbot,
     monkeypatch,
