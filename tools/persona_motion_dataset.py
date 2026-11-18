@@ -663,36 +663,31 @@ def _make_review_sample(
         for item in playback
         if item["event_type"] in {"motion.playback_completed", "motion.playback_failed"}
     ]
-    terminal_playback_types = {item["event_type"] for item in terminal_playback}
-    if len(terminal_playback_types) > 1:
+    terminal_outcomes = defaultdict(list)
+    for terminal in terminal_playback:
+        if terminal["exit_reason"] in {"motion_replaced", "motion_plan_replaced", "direct_parameter_plan_replaced"}:
+            outcome = "replaced"
+        elif terminal["execution_status"] == "stopped":
+            outcome = "interrupted"
+        elif terminal["event_type"] == "motion.playback_completed":
+            outcome = "completed"
+        else:
+            outcome = "failed"
+        terminal_outcomes[outcome].append(terminal["event_id"])
+    if len(terminal_outcomes) > 1:
         playback_status = "conflict"
         blockers.append("playback_terminal_conflict")
         reduced["conflicts"].append(
             {
                 "field": "delivery_evidence.playback_status",
                 "values": [
-                    {
-                        "value": event_type,
-                        "event_ids": sorted(
-                            item["event_id"]
-                            for item in terminal_playback
-                            if item["event_type"] == event_type
-                        ),
-                    }
-                    for event_type in sorted(terminal_playback_types)
+                    {"value": outcome, "event_ids": sorted(event_ids)}
+                    for outcome, event_ids in sorted(terminal_outcomes.items())
                 ],
             }
         )
-    elif terminal_playback:
-        terminal = terminal_playback[-1]
-        if terminal["exit_reason"] in {"motion_replaced", "motion_plan_replaced", "direct_parameter_plan_replaced"}:
-            playback_status = "replaced"
-        elif terminal["execution_status"] == "stopped":
-            playback_status = "interrupted"
-        elif terminal["event_type"] == "motion.playback_completed":
-            playback_status = "completed"
-        else:
-            playback_status = "failed"
+    elif terminal_outcomes:
+        playback_status = next(iter(terminal_outcomes))
     elif any(item["event_type"] == "motion.playback_started" for item in playback):
         playback_status = "started"
     else:

@@ -997,15 +997,27 @@ private:
     _pending_parameter_clock.reset();
   }
 
-  void ReleaseActiveMotionForReplacementLocked() {
+  template <class Tracks>
+  void ReleaseActiveMotionForReplacementLocked(const Tracks& incoming) {
     const std::string reason = "motion_plan_replaced";
     if (_motion_scheduler.active_motion) {
+      CaptureReleaseLocked(_motion_scheduler.active_motion->tracks, _motion_scheduler.active_motion->blend_out_ms);
       QueueMotionTerminalLocked(
           _motion_scheduler.active_motion->clock, false, reason);
     }
     if (_active_parameter_plan) {
+      CaptureReleaseLocked(_active_parameter_plan->bindings, _active_parameter_plan->blend_out_ms);
       QueueMotionTerminalLocked(
           _active_parameter_plan->clock, false, reason);
+    }
+    if (_idle_motion) {
+      CaptureReleaseLocked(_idle_motion->tracks, _idle_motion->blend_out_ms);
+    }
+    if (_pre_action_motion) {
+      CaptureReleaseLocked(_pre_action_motion->tracks, _pre_action_motion->blend_out_ms);
+    }
+    for (const auto& track : incoming) {
+      _release_pose.erase(track.parameter_index);
     }
     _motion_scheduler.active_motion.reset();
     _active_parameter_plan.reset();
@@ -1208,28 +1220,29 @@ private:
 
   template <class Tracks>
   void CaptureReleaseLocked(const Tracks& tracks, int blend_out_ms) {
+    const auto now = services_.now_seconds();
+    const auto duration = std::clamp(blend_out_ms / 1000.0, 0.08, 0.25);
     for (const auto& track : tracks) {
       auto sample = std::lower_bound(_frame_resolved_values.begin(), _frame_resolved_values.end(),
           track.parameter_index, [](const auto& value, auto index) { return value.first < index; });
       if (sample != _frame_resolved_values.end() && sample->first == track.parameter_index) {
-        _release_pose[track.parameter_index] = sample->second;
+        _release_pose[track.parameter_index] = {sample->second, now, duration};
       }
     }
-    _release_started_at = services_.now_seconds();
-    _release_duration = std::clamp(blend_out_ms / 1000.0, 0.08, 0.25);
   }
 
   void CollectReleaseLocked(double now) {
-    if (_release_pose.empty()) return;
-    const float weight = 1.0f - Smoothstep(static_cast<float>(
-        std::clamp((now - _release_started_at) / _release_duration, 0.0, 1.0)));
-    if (weight <= 0.0f) {
-      _release_pose.clear();
-      return;
-    }
-    for (const auto& [index, value] : _release_pose) {
+    for (auto it = _release_pose.begin(); it != _release_pose.end();) {
+      const auto& [index, release] = *it;
+      const float weight = 1.0f - Smoothstep(static_cast<float>(
+          std::clamp((now - release.start) / release.duration, 0.0, 1.0)));
+      if (weight <= 0.0f) {
+        it = _release_pose.erase(it);
+        continue;
+      }
       _frame_contributions.push_back({ParameterIdAt(index), index,
-          ParameterContributionOwner::Release, "turn_release", value, weight, 190});
+          ParameterContributionOwner::Release, "turn_release", release.value, weight, 190});
+      ++it;
     }
   }
 
@@ -1362,7 +1375,7 @@ private:
               false,
               "expression_resource_not_found:" + parsed->expression_id);
         } else {
-          ReleaseActiveMotionForReplacementLocked();
+          ReleaseActiveMotionForReplacementLocked(parsed->bindings);
           _active_parameter_plan = *parsed;
           ReleaseThinkingSwayLocked(turn_id);
           std::cerr << "[motion] activated parameter plan with "
@@ -2129,7 +2142,7 @@ private:
       _motion_scheduler.pending_motion_segment.reset();
       _motion_scheduler.pending_motion_clock.reset();
       if (plan) {
-        ReleaseActiveMotionForReplacementLocked();
+        ReleaseActiveMotionForReplacementLocked(plan->tracks);
         _motion_scheduler.active_motion = *plan;
         ReleaseThinkingSwayLocked(turn_id);
         std::cerr << "[motion] compiled "
@@ -2195,9 +2208,12 @@ private:
   CubismModelSettingJson* _setting = nullptr;
   ag99::live2d::D3D11Renderer _renderer;
   std::vector<std::string> _parameter_ids;
-  std::unordered_map<csmInt32, float> _release_pose;
-  double _release_started_at = 0.0;
-  double _release_duration = 0.15;
+  struct ReleasedParameter {
+    float value;
+    double start;
+    double duration;
+  };
+  std::unordered_map<csmInt32, ReleasedParameter> _release_pose;
   std::vector<ParameterFrameContribution> _frame_contributions;
   std::vector<ParameterFrameGroup> _frame_groups;
   std::size_t _frame_group_count = 0;

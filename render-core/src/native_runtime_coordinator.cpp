@@ -498,7 +498,7 @@ public:
   }
 
   void NotifyMotionTerminal(NativeSegmentTerminal terminal) {
-    CompleteMotionSegment(std::move(terminal));
+    CompleteMotionSegment(std::move(terminal), true);
   }
 
   void OnSegmentMotion(ag99::runtime::SegmentMotionUpdate update) {
@@ -791,12 +791,25 @@ private:
     QueuePlaybackAcknowledgement(item.turn_id);
   }
 
-  void CompleteMotionSegment(NativeSegmentTerminal terminal) {
+  void CompleteMotionSegment(NativeSegmentTerminal terminal, bool from_renderer = false) {
+    const bool playback_failed = !terminal.success && terminal.reason != "motion_plan_replaced";
     {
-      std::scoped_lock lock(playback_mutex_);
+      std::unique_lock lock(playback_mutex_);
       const auto turn = playback_turns_.find(terminal.clock.turn_id);
-      if (turn == playback_turns_.end()
-          || turn->second.generation != terminal.clock.generation) {
+      if (turn == playback_turns_.end()) {
+        // A rendered terminal can already be in the frame queue when an
+        // interrupt retires the turn. Keep that fact without reopening the turn.
+        lock.unlock();
+        if (!from_renderer) {
+          return;
+        }
+        std::scoped_lock transport_lock(transport_mutex_);
+        if (!closing_.load() && terminal.clock.generation == connection_generation_.load()) {
+          SendMotionObservation(terminal);
+        }
+        return;
+      }
+      if (turn->second.generation != terminal.clock.generation) {
         return;
       }
       const auto segment = turn->second.segments.find(
@@ -806,7 +819,7 @@ private:
           return;
         }
         segment->second.motion_terminal = true;
-        if (!terminal.success) {
+        if (playback_failed) {
           segment->second.motion_failure_reason = ResolveFailureReason(
               terminal.reason,
               "motion_playback_failed:" + terminal.clock.message_id);
@@ -820,7 +833,7 @@ private:
           return;
         }
         incremental_segment->second.motion_terminal = true;
-        if (!terminal.success && terminal.reason != "motion_plan_replaced") {
+        if (playback_failed) {
           incremental_segment->second.motion_failure_reason =
               ResolveFailureReason(
                   terminal.reason,
