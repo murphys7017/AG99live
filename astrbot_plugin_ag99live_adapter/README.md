@@ -80,6 +80,8 @@ NeuroBrain 状态只是动作选择的辅助信号，不是动作命令；动作
 
 后台 Provider 使用 AstrBot 的 `text_chat_stream()`。每次只接收一个完整动作决策，校验后立即通过 `output.idle_motion` 发送，`turn_id=null`，不创建、占用或结束任何对话 Turn，也不发合成完成信号。payload 仅包含现有 `engine.motion_intent.v4` 数据 `motion` 和过期时间 `expires_at_epoch_ms`。过期、断线或前台忙碌时丢弃，不进入对话播放队列。
 
+Ollama 原生 Provider 的后台请求使用 JSON Schema 约束决策结构。流结束时若没有合法决策，后台按现有失败策略延长请求间隔，并合并重复告警。
+
 待机动作只进入 WebSDK 参数混合器的低优先级 `idle_motion` 层，不调用正式动作计划的替换入口，不改变前台状态、聊天历史、动作实验室或 performance curve 状态。前台动作、视线和口型优先；切换来源时保留当前参数偏移和速度。默认动作时长 4 秒，最短 3 秒，进入和退出各约占 35%，通过逐帧权重混合和现有参数响应限制缓慢接入、平滑释放。
 
 PTT 采集开始、VAD 检测到开口以及新输入提交时会打断被动播放并取消在途生成；语音采集和转写期间暂停新的被动请求。

@@ -7,6 +7,58 @@ from ..motion.motion_intent import MAX_IDLE_MOTION_STEPS
 from .semantic_axis_prompt import profile_prompt_axes
 
 
+PASSIVE_BEHAVIOR_RESPONSE_SCHEMA = {
+    "anyOf": [
+        {
+            "type": "object",
+            "properties": {"decision": {"const": "none"}},
+            "required": ["decision"],
+            "additionalProperties": False,
+        },
+        {
+            "type": "object",
+            "properties": {
+                "decision": {"const": "emit"},
+                "motion_steps": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": MAX_IDLE_MOTION_STEPS,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "axis_values": {
+                                "type": "object",
+                                "minProperties": 1,
+                                "additionalProperties": {"type": "number"},
+                            },
+                            "duration_weight": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 3,
+                            },
+                        },
+                        "required": ["axis_values", "duration_weight"],
+                        "additionalProperties": False,
+                    },
+                },
+                "duration_hint_ms": {
+                    "type": "integer",
+                    "minimum": 3000,
+                    "maximum": 10000,
+                },
+                "intent_tags": {
+                    "type": "array",
+                    "maxItems": 6,
+                    "items": {"type": "string", "minLength": 1, "maxLength": 48},
+                },
+            },
+            "required": ["decision", "motion_steps"],
+            "additionalProperties": False,
+        },
+    ],
+}
+
+
 PASSIVE_BEHAVIOR_SYSTEM_PROMPT = (
     """你是 AG99live 桌宠的后台被动动作生成器。
 根据当前状态和模型语义轴选择动作。若有 recent_interaction，结合上一段实际呈现的类型、结束方式和间隔，决定延续姿态或保持静止。
@@ -15,14 +67,13 @@ PASSIVE_BEHAVIOR_SYSTEM_PROMPT = (
 - 不读取、推断或提及用户对话、Persona 回复、语音内容、聊天历史或用户意图。
 - 不生成文本回复，不调用工具，不输出 Live2D 原始参数、参数名、资源文件名或说明。
 - 仅使用输入列出的语义轴 ID 和对应 value_range 内的具体数值，不得补充、改名或臆造轴。
-- 每个动作必须是一个完整 JSON object，单独占一行；动作准备好后立即输出该行，不等待后续动作。
-- 每行只能输出以下格式之一，不要 Markdown、代码围栏、数组或行外文字：
+- 流式输出一个完整的 JSON 对象，格式如下：
   {"decision":"none"}
   {"decision":"emit","intent_tags":["..."],"motion_steps":[{"axis_values":{"<语义轴 ID>":12.5},"duration_weight":1}],"duration_hint_ms":4000}
-- 只输出一行 emit；如果当前状态没有值得补充的动作，只输出一行 none。
-- intent_tags 是可选元数据，提供时使用简短语义标签；省略时由适配器补入最小标签。
-- 某些动作模型会只输出 motion_steps 和 duration_hint_ms；只要 motion_steps 合法，这也表示一行 emit。
-- emit 必须包含 motion_steps，长度为 1 到上限；每一步必须包含 axis_values 和 duration_weight，duration_weight 必须是 1 到 3 的整数。
+- 有值得补充的动作时输出 emit，否则输出 none。
+- emit 的顶层包含 decision 和 motion_steps，可附加 duration_hint_ms 和 intent_tags。duration_hint_ms 表示整段动作时长，与 motion_steps 同级。
+- 每个 motion_steps 元素只有 axis_values 和 duration_weight。duration_weight 是 1 到 3 的整数，表示该步的相对时长。
+- intent_tags 最多 6 个。每个元素填写一个不超过 48 字符的短标签。
 - motion_steps 只放当前动作需要变化的轴，数值必须位于该轴给出的 value_range。
 - motion_steps 最多使用 """
     + str(MAX_IDLE_MOTION_STEPS)

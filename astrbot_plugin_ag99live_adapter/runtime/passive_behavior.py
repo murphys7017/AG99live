@@ -21,6 +21,7 @@ from ..motion.provider_contract import (
     normalize_provider_motion_record,
 )
 from ..prompts.passive_behavior import (
+    PASSIVE_BEHAVIOR_RESPONSE_SCHEMA,
     PASSIVE_BEHAVIOR_SYSTEM_PROMPT,
     build_passive_behavior_prompt,
 )
@@ -30,10 +31,10 @@ from .output_segment import PASSIVE_BEHAVIOR_MOTION_SOURCE
 
 
 _POLL_INTERVAL_SECONDS = 0.1
-_MAX_ACTIONS_PER_STREAM = 1
 _MAX_STREAM_CHARS = 16000
 _MAX_ACTION_LINE_CHARS = 4096
 _NONE_DECISION_LOG_INTERVAL_SECONDS = 30.0
+_INVALID_OUTPUT_LOG_INTERVAL_SECONDS = 30.0
 
 
 async def _discard_passive_output(_message: dict[str, Any]) -> bool:
@@ -65,6 +66,8 @@ class PassiveBehaviorRuntime:
         self._last_request_at = 0.0
         self._last_decision_at = float("-inf")
         self._last_none_log_at = 0.0
+        self._last_invalid_output_log_at = float("-inf")
+        self._suppressed_invalid_outputs = 0
         self._provider_identity_key: tuple[str, int] | None = None
         self._unsupported_provider_identity: tuple[str, int] | None = None
         self._consecutive_provider_failures = 0
@@ -148,6 +151,8 @@ class PassiveBehaviorRuntime:
             self._unsupported_provider_identity = None
             self._consecutive_provider_failures = 0
             self._retry_not_before = 0.0
+            self._last_invalid_output_log_at = float("-inf")
+            self._suppressed_invalid_outputs = 0
         if provider_identity == self._unsupported_provider_identity:
             return
         if now < self._retry_not_before:
@@ -204,7 +209,8 @@ class PassiveBehaviorRuntime:
             30000,
         ) / 1000
 
-        emitted_count = 0
+        decision_accepted = False
+        rejection: tuple[str, str] | None = None
         started = time.monotonic()
 
         def can_continue() -> bool:
@@ -220,31 +226,29 @@ class PassiveBehaviorRuntime:
                 return False
             return getattr(self.session_state, "current_turn_id", None) is None
 
+        def reject(reason: str, detail: str = "") -> bool:
+            nonlocal rejection
+            if rejection is None:
+                rejection = (reason, detail[:400])
+            return True
+
         async def process_line(raw_line: str) -> bool:
-            nonlocal emitted_count
+            nonlocal decision_accepted
             line = raw_line.strip()
             if not line:
                 return True
             if len(line) > _MAX_ACTION_LINE_CHARS:
-                logger.warning(
-                    "NeuroBrain passive action line rejected: reason=line_too_large length=%s",
-                    len(line),
-                )
-                return True
+                return reject("line_too_large", f"length={len(line)}")
             try:
                 action = json.loads(line)
-            except json.JSONDecodeError:
-                logger.warning(
-                    "NeuroBrain passive action line rejected: reason=invalid_json record=%r",
-                    line[:240],
-                )
-                return True
+            except json.JSONDecodeError as exc:
+                return reject("invalid_json", f"{exc.msg} at {exc.pos}")
             if not isinstance(action, dict):
-                logger.warning("NeuroBrain passive action line rejected: reason=not_object")
-                return True
+                return reject("not_object", describe_provider_motion_record(action))
 
             decision = action.get("decision")
             if decision == "none" and set(action) == {"decision"}:
+                decision_accepted = True
                 now = time.monotonic()
                 self._last_decision_at = now
                 if (
@@ -262,23 +266,12 @@ class PassiveBehaviorRuntime:
                     infer_emit_decision=True,
                 )
             except ValueError as exc:
-                logger.warning(
-                    "NeuroBrain passive action line rejected: reason=record_invalid "
-                    "error=%s shape=%s",
-                    exc,
-                    describe_provider_motion_record(action),
+                return reject(
+                    "record_invalid", f"{exc} shape={describe_provider_motion_record(action)}"
                 )
-                return True
             decision = action.get("decision")
             if decision != "emit":
-                logger.warning(
-                    "NeuroBrain passive action line rejected: reason=decision_invalid "
-                    "decision=%s fields=%s record=%r",
-                    repr(decision)[:80],
-                    ",".join(sorted(action)),
-                    line[:240],
-                )
-                return True
+                return reject("decision_invalid", describe_provider_motion_record(action))
             allowed_fields = {
                 "decision",
                 "intent_tags",
@@ -287,25 +280,17 @@ class PassiveBehaviorRuntime:
             }
             unknown_fields = sorted(set(action) - allowed_fields)
             if unknown_fields:
-                logger.warning(
-                    "NeuroBrain passive action line rejected: reason=unknown_fields fields=%s",
-                    ",".join(unknown_fields),
-                )
-                return True
+                return reject("unknown_fields", ",".join(unknown_fields))
             try:
                 motion_payload = _normalize_motion_action(action, profile, self.runtime_state)
             except (TypeError, ValueError) as exc:
-                logger.warning(
-                    "NeuroBrain passive action line rejected: reason=motion_invalid "
-                    "provider=%s error=%s shape=%s",
-                    self.runtime_state.passive_behavior_provider_id or "<unknown>",
-                    exc,
-                    describe_provider_motion_record(action),
+                return reject(
+                    "motion_invalid", f"{exc} shape={describe_provider_motion_record(action)}"
                 )
-                return True
             if not can_continue():
                 return False
 
+            decision_accepted = True
             message_id = f"idle_action:{uuid4().hex}"
             sent = await self._send_json(build_message_envelope(
                 "output.idle_motion",
@@ -321,7 +306,6 @@ class PassiveBehaviorRuntime:
             ))
             if not sent:
                 return False
-            emitted_count += 1
             self._last_decision_at = time.monotonic()
             logger.info(
                 "WIRING passive_behavior.action_streamed message_id=%s "
@@ -339,7 +323,7 @@ class PassiveBehaviorRuntime:
                 ),
                 int((time.monotonic() - started) * 1000),
             )
-            return emitted_count < _MAX_ACTIONS_PER_STREAM
+            return False
 
         async def run_stream() -> None:
             await _consume_provider_stream(
@@ -347,6 +331,7 @@ class PassiveBehaviorRuntime:
                 prompt=prompt,
                 system_prompt=PASSIVE_BEHAVIOR_SYSTEM_PROMPT,
                 on_line=process_line,
+                on_rejection=reject,
                 should_continue=can_continue,
             )
 
@@ -363,8 +348,21 @@ class PassiveBehaviorRuntime:
         provider_identity = self._get_provider_identity(provider)
         try:
             await stream_task
-            self._consecutive_provider_failures = 0
-            self._retry_not_before = 0.0
+            if decision_accepted:
+                self._consecutive_provider_failures = 0
+                self._retry_not_before = 0.0
+                if self._suppressed_invalid_outputs:
+                    logger.info(
+                        "NeuroBrain passive behavior recovered: provider=%s suppressed_failures=%s",
+                        provider_id or "<unknown>",
+                        self._suppressed_invalid_outputs,
+                    )
+                self._last_invalid_output_log_at = float("-inf")
+                self._suppressed_invalid_outputs = 0
+            elif can_continue():
+                self._schedule_retry()
+                reason, detail = rejection or ("no_valid_decision", "")
+                self._log_invalid_output(provider_id, reason, detail)
         except asyncio.CancelledError:
             raise
         except asyncio.TimeoutError:
@@ -400,6 +398,24 @@ class PassiveBehaviorRuntime:
         self._consecutive_provider_failures += 1
         delay = min(60.0, 0.5 * (2 ** min(self._consecutive_provider_failures - 1, 7)))
         self._retry_not_before = time.monotonic() + delay
+
+    def _log_invalid_output(self, provider_id: str, reason: str, detail: str) -> None:
+        now = time.monotonic()
+        if now - self._last_invalid_output_log_at < _INVALID_OUTPUT_LOG_INTERVAL_SECONDS:
+            self._suppressed_invalid_outputs += 1
+            return
+        logger.warning(
+            "NeuroBrain passive behavior output rejected: provider=%s reason=%s detail=%r "
+            "consecutive_failures=%s retry_backoff_s=%.1f suppressed_failures=%s",
+            provider_id or "<unknown>",
+            reason,
+            detail,
+            self._consecutive_provider_failures,
+            max(0.0, self._retry_not_before - now),
+            self._suppressed_invalid_outputs,
+        )
+        self._last_invalid_output_log_at = now
+        self._suppressed_invalid_outputs = 0
 
     def _get_provider_identity(self, provider: Any) -> tuple[str, int]:
         provider_id = str(
@@ -459,11 +475,24 @@ async def _consume_provider_stream(
     prompt: str,
     system_prompt: str,
     on_line: Callable[[str], Awaitable[bool]],
+    on_rejection: Callable[[str, str], bool],
     should_continue: Callable[[], bool],
 ) -> None:
+    options = {}
+    provider_config = getattr(provider, "provider_config", {})
+    if isinstance(provider_config, dict) and provider_config.get("type") == "ollama_chat_completion":
+        # AstrBot forwards extra_body through text_chat_stream and translates
+        # response_format into Ollama's native format for this request.
+        options["extra_body"] = {
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {"schema": PASSIVE_BEHAVIOR_RESPONSE_SCHEMA},
+            },
+        }
     stream = provider.text_chat_stream(
         prompt=prompt,
         system_prompt=system_prompt,
+        **options,
     )
     pending = ""
     decoder = json.JSONDecoder()
@@ -475,7 +504,7 @@ async def _consume_provider_stream(
         if not value:
             return True
         if len(streamed_text) + len(value) > _MAX_STREAM_CHARS:
-            logger.warning("NeuroBrain passive behavior stream stopped: reason=output_too_large")
+            on_rejection("output_too_large", "")
             return False
         streamed_text += value
         pending += value
@@ -512,10 +541,7 @@ async def _consume_provider_stream(
             if not chunk_text:
                 continue
             if not saw_text_chunk:
-                logger.warning(
-                    "NeuroBrain passive behavior skipped: provider returned a final "
-                    "response without streamed text chunks"
-                )
+                on_rejection("no_streamed_text", "")
                 return
             if chunk_text.startswith(streamed_text):
                 if not await accept_text(chunk_text[len(streamed_text) :]):
