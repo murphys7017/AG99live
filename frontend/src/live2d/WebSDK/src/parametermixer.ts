@@ -337,13 +337,20 @@ export class ActiveParameterMixer {
       ...interactionGaze.contributions,
       ...lipSyncContributions,
     ];
-    if (directPlan.releaseEligible) {
+    let remainingBindings: DirectSemanticParameterBinding[] | undefined;
+    if (input.directPlan && directPlan.releaseEligible) {
       // Its blend-out is over. A parameter taken over by another source now
       // settles on that source's clock and cannot delay the segment terminal.
       for (const contribution of contributions) {
         if (contribution.weight > 0) claimedParameters.add(contribution.parameterIndex);
       }
-      directPlan.contributions = directPlan.contributions.filter((c) => !claimedParameters.has(c.parameterIndex));
+      const remaining = directPlan.contributions.filter((c) => !claimedParameters.has(c.parameterIndex));
+      if (remaining.length < directPlan.contributions.length) {
+        directPlan.contributions = remaining;
+        remainingBindings = input.directPlan.semanticBindings.filter(
+          (binding) => !claimedParameters.has(binding.parameterIndex),
+        );
+      }
     }
     contributions.push(...directPlan.contributions);
     // Once a source has gone, finish its visible response on the render clock.
@@ -422,6 +429,11 @@ export class ActiveParameterMixer {
       }
     }
 
+    // Commit the handoff after the frame succeeds. A retry can still use the
+    // original bindings, but a later frame cannot reclaim a released axis.
+    if (input.directPlan && remainingBindings) {
+      input.directPlan.semanticBindings = remainingBindings;
+    }
     return {
       ok: true,
       parameters: resolution.parameters,
