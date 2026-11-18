@@ -342,7 +342,7 @@ export class ActiveParameterMixer {
       // Its blend-out is over. A parameter taken over by another source now
       // settles on that source's clock and cannot delay the segment terminal.
       for (const contribution of contributions) {
-        if (contribution.weight > 0) claimedParameters.add(contribution.parameterIndex);
+        if (contribution.owner !== "lip_sync" && contribution.weight > 0) claimedParameters.add(contribution.parameterIndex);
       }
       const remaining = directPlan.contributions.filter((c) => !claimedParameters.has(c.parameterIndex));
       if (remaining.length < directPlan.contributions.length) {
@@ -355,7 +355,9 @@ export class ActiveParameterMixer {
     contributions.push(...directPlan.contributions);
     // Once a source has gone, finish its visible response on the render clock.
     // This also covers ambient plans whose timed fade ends before the pose settles.
-    for (const contribution of contributions) claimedParameters.add(contribution.parameterIndex);
+    for (const contribution of contributions) {
+      if (contribution.owner !== "lip_sync") claimedParameters.add(contribution.parameterIndex);
+    }
     for (const [parameterIndex, previous] of this.lastPresentations) {
       if ((!previous.node.drivenOffset && !previous.node.velocity)
         || claimedParameters.has(parameterIndex)) {
@@ -537,7 +539,6 @@ export class ActiveParameterMixer {
         };
       }
 
-      let mixedTargetValue = baseValue;
       let directOnlyTargetValue = baseValue;
       const resolvedContributions: ResolvedParameterContribution[] = [];
       const orderedContributions = group.contributions.sort((left, right) => {
@@ -549,7 +550,8 @@ export class ActiveParameterMixer {
         return sourceOrder !== 0 ? sourceOrder : left.sequence - right.sequence;
       });
       for (const contribution of orderedContributions) {
-        const resolvedValue = resolveContributionValue(mixedTargetValue, contribution);
+        if (contribution.owner === "lip_sync") continue;
+        const resolvedValue = resolveContributionValue(directOnlyTargetValue, contribution);
         resolvedContributions.push({
           owner: contribution.owner,
           source: contribution.source,
@@ -558,19 +560,10 @@ export class ActiveParameterMixer {
           priority: contribution.priority,
           resolvedValue,
         });
-        mixedTargetValue = resolvedValue;
-        if (contribution.owner !== "lip_sync") {
-          directOnlyTargetValue = resolveContributionValue(
-            directOnlyTargetValue,
-            contribution,
-          );
-        }
+        directOnlyTargetValue = resolvedValue;
       }
       // Lip sync is intentionally immediate; active response dynamics only
       // apply after all non-lip contributions have been synthesized.
-      const hasLipSyncContribution = orderedContributions.some(
-        (contribution) => contribution.owner === "lip_sync",
-      );
       const presentationContributions = orderedContributions
         .filter((contribution) => contribution.owner !== "lip_sync" && contribution.presentation);
       const presentationContribution = presentationContributions.length > 0
@@ -585,11 +578,9 @@ export class ActiveParameterMixer {
           node.velocity = previous.node.velocity;
           node.lastElapsedMs = null;
         }
-        if (!hasLipSyncContribution) {
-          nextPresentations.set(parameterIndex, {
-            node, elapsedMs: presentationContribution.presentation.elapsedMs,
-          });
-        }
+        nextPresentations.set(parameterIndex, {
+          node, elapsedMs: presentationContribution.presentation.elapsedMs,
+        });
         const presentation = resolveParameterPresentationFrame(
           presentationContribution.presentation.node,
           directOnlyTargetValue,
@@ -602,8 +593,13 @@ export class ActiveParameterMixer {
           directPresentationSettled &&= presentation.settled;
         }
       }
-      // Keep the active response state current, but never delay lip-sync output.
-      const finalValue = hasLipSyncContribution ? mixedTargetValue : presentedValue;
+      // Speech uses the opening still available above the displayed expression.
+      let finalValue = presentedValue;
+      for (const contribution of orderedContributions) {
+        if (contribution.owner !== "lip_sync") continue;
+        finalValue = resolveContributionValue(finalValue, contribution);
+        resolvedContributions.push({ ...contribution, resolvedValue: finalValue });
+      }
       const value = clamp(finalValue, minValue, maxValue);
 
       parameters.push({
@@ -800,8 +796,8 @@ export class ActiveParameterMixer {
         parameterIndex,
         owner: "lip_sync",
         source: "lip_sync",
-        value: defaultValue + (maxValue - defaultValue) * input.lipSyncIntensity,
-        weight: 1,
+        value: maxValue,
+        weight: input.lipSyncIntensity,
         priority: PARAMETER_MIX_PRIORITY.lipSync,
       });
     }
