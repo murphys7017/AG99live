@@ -441,6 +441,11 @@ class SpeechIngressService:
             raise ValueError(
                 f"binary_audio_capture_mode_changed:{stream_id}:{stream.capture_mode}:{frame_capture_mode}"
             )
+        if stream.capture_mode in {"manual", "auto"} and not stream.vad_speech_active:
+            # Quiet PCM is consumed by VAD. An utterance's safety budget starts
+            # at the last quiet frame, independently of the capture's lifetime.
+            stream.started_at_monotonic = time.monotonic()
+            stream.received_bytes = 0
         limit_reason = self._audio_stream_limit_reason(
             stream,
             incoming_bytes=len(frame.payload),
@@ -771,8 +776,12 @@ class SpeechIngressService:
         )
 
     async def _expire_active_input(self, stream: AudioStreamState) -> None:
-        await asyncio.sleep(MAX_AUDIO_STREAM_DURATION_SECONDS)
-        if self._audio_streams.get(stream.stream_id) is not stream or stream.sealed:
+        while self._audio_streams.get(stream.stream_id) is stream and not stream.sealed:
+            remaining = MAX_AUDIO_STREAM_DURATION_SECONDS - (time.monotonic() - stream.started_at_monotonic)
+            if remaining <= 0:
+                break
+            await asyncio.sleep(remaining)
+        else:
             return
         await self._discard_active_audio_stream(
             stream,

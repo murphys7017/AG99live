@@ -474,6 +474,8 @@ def test_handle_manual_binary_audio_stream_chunk_uses_vad_segments(
         stream_id="mic:manual",
         capture_mode="manual",
     )
+    # The continuous capture can have been quiet for longer than a PTT turn.
+    service._audio_streams["mic:manual"].started_at_monotonic -= 180
     result = asyncio.run(
         service.handle_audio_stream_binary_chunk(
             BinaryAudioChunkFrame(
