@@ -406,11 +406,11 @@ class SpeechIngressService:
             raise ValueError(f"binary_audio_chunk_after_seal:{stream_id}")
 
         if frame.seq <= stream.last_seq:
-            self._cancel_capture_timeout(stream)
-            self._audio_streams.pop(stream_id, None)
-            raise ValueError(
-                f"binary_audio_chunk_sequence_invalid:{stream_id}:{frame.seq}:{stream.last_seq}"
+            await self._discard_active_audio_stream(
+                stream,
+                error_message=f"binary_audio_chunk_sequence_invalid:{stream_id}:{frame.seq}:{stream.last_seq}",
             )
+            return None
 
         if stream.sample_rate != frame.sample_rate or stream.channels != frame.channels:
             logger.warning(
@@ -421,13 +421,8 @@ class SpeechIngressService:
                 frame.sample_rate,
                 frame.channels,
             )
-            self._cancel_capture_timeout(stream)
-            self._audio_streams.pop(stream_id, None)
-            await self._send_json(
-                build_control_error(
-                    turn_id=frame.turn_id,
-                    message="Audio stream format changed during capture.",
-                )
+            await self._discard_active_audio_stream(
+                stream, error_message="Audio stream format changed during capture.",
             )
             return
 
@@ -436,11 +431,11 @@ class SpeechIngressService:
             default=stream.capture_mode,
         )
         if frame_capture_mode != stream.capture_mode:
-            self._cancel_capture_timeout(stream)
-            self._audio_streams.pop(stream_id, None)
-            raise ValueError(
-                f"binary_audio_capture_mode_changed:{stream_id}:{stream.capture_mode}:{frame_capture_mode}"
+            await self._discard_active_audio_stream(
+                stream,
+                error_message=f"binary_audio_capture_mode_changed:{stream_id}:{stream.capture_mode}:{frame_capture_mode}",
             )
+            return None
         if stream.capture_mode in {"manual", "auto"} and not stream.vad_speech_active:
             # Quiet PCM is consumed by VAD. An utterance's safety budget starts
             # at the last quiet frame, independently of the capture's lifetime.
@@ -590,6 +585,8 @@ class SpeechIngressService:
                     timeout_task.cancel()
                     timeout_tasks.append(timeout_task)
         try:
+            if stream is not None:
+                await self._set_vad_activity(stream, active=False)
             return await self._finish_audio_stream(message, stream, stream_id)
         finally:
             tasks = list(timeout_tasks)
@@ -824,12 +821,6 @@ class SpeechIngressService:
             turn_id=stream.capture_turn_id,
             error_message=error_message,
         )
-
-    @staticmethod
-    def _cancel_capture_timeout(stream: AudioStreamState) -> None:
-        if stream.capture_timeout_task is not None:
-            stream.capture_timeout_task.cancel()
-            stream.capture_timeout_task = None
 
     @staticmethod
     def _audio_stream_limit_reason(

@@ -561,6 +561,56 @@ def test_vad_speech_end_callback_runs_when_transcription_has_no_message(
     assert started == ["capture:no-message"]
     assert ended == ["capture:no-message"]
 
+@pytest.mark.parametrize("ending", ["stop", "duplicate_chunk"])
+def test_continuous_capture_releases_listening_on_stream_loss(install_fake_astrbot, ending):
+    install_fake_astrbot()
+    from astrbot_plugin_ag99live_adapter.protocol.binary_audio import BinaryAudioChunkFrame
+    from astrbot_plugin_ag99live_adapter.services.speech_service import SpeechIngressService
+
+    async def run():
+        sent = []
+        abandoned = []
+
+        async def send(message):
+            sent.append(message)
+
+        async def abandon(turn_id):
+            abandoned.append(turn_id)
+
+        turn = "capture:review"
+        stream = "mic:review"
+        service = SpeechIngressService(
+            media_service=MediaServiceStub(),
+            runtime_state=SimpleNamespace(fast_asr_enabled=False),
+            create_vad_engine=lambda: VadEngineStub([[b"<|PAUSE|>"]]),
+            send_json=send,
+            build_message_object=lambda **_: None,
+            on_vad_speech_started=ignore_vad_speech_started,
+            on_capture_abandoned=abandon,
+        )
+        await service.handle_audio_stream_start(MessageStub(turn_id=turn, payload={
+            "stream_id": stream, "capture_mode": "manual", "sample_rate": 16000,
+            "channels": 1, "encoding": "pcm16le",
+        }))
+        frame = BinaryAudioChunkFrame(
+            stream_id=stream, turn_id=turn, seq=0, encoding="pcm16le",
+            sample_rate=16000, channels=1, payload=bytes(1024), metadata={},
+        )
+        await service.handle_audio_stream_binary_chunk(frame)
+        if ending == "stop":
+            await service.handle_audio_stream_end(MessageStub(turn_id=turn, payload={
+                "stream_id": stream, "capture_mode": "manual", "last_seq": 0,
+            }))
+        else:
+            await service.handle_audio_stream_binary_chunk(frame)
+            assert abandoned == [turn]
+        assert [(m["turn_id"], m["payload"]["active"]) for m in sent
+                if m["type"] == "control.speech_activity"] == [(turn, True), (turn, False)]
+        assert [m["turn_id"] for m in sent if m["type"] == "control.error"] == [turn]
+
+    asyncio.run(run())
+
+
 def test_handle_binary_audio_stream_end_dropped_reports_input_error(
     install_fake_astrbot,
 ) -> None:
