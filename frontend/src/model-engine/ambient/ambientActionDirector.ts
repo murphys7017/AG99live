@@ -17,7 +17,7 @@ export interface AmbientActionContext {
   modelReady: boolean;
   ambientMotionEnabled: boolean;
   audioPlaying: boolean;
-  microphoneCapturing: boolean;
+  pushToTalkActive: boolean;
   conversationPreparing: boolean;
   conversationActive: boolean;
   manualPreviewActive: boolean;
@@ -184,10 +184,10 @@ export function createAmbientActionDirector(
 
     const context = dependencies.getContext();
     const contextReason = getContextRejectionReason(context);
-    // Conversation, audio, microphone, and preview states block new plans but
-    // leave existing contributions available for priority mixing and natural release.
+    // A PTT press explicitly requests attention. Conversation playback and
+    // previews can still blend with an existing ambient contribution.
     if (shouldReleaseForContext(contextReason) && active.size > 0) {
-      releaseAll("ambient_context_changed");
+      releaseAll(contextReason === "ambient_action_microphone_active" ? contextReason : "ambient_context_changed");
     }
     const currentTime = now();
     for (const [candidateId, entry] of active) {
@@ -329,7 +329,8 @@ function shouldReleaseForContext(
 ): boolean {
   return reason === "ambient_action_disconnected"
     || reason === "ambient_action_model_unavailable"
-    || reason === "ambient_action_disabled";
+    || reason === "ambient_action_disabled"
+    || reason === "ambient_action_microphone_active";
 }
 
 export function isAmbientActionContextAdmissible(context: AmbientActionContext): boolean {
@@ -348,11 +349,11 @@ function getContextRejectionReason(
   if (!context.ambientMotionEnabled) {
     return "ambient_action_disabled";
   }
+  if (context.pushToTalkActive) {
+    return "ambient_action_microphone_active";
+  }
   if (context.audioPlaying) {
     return "ambient_action_audio_active";
-  }
-  if (context.microphoneCapturing) {
-    return "ambient_action_microphone_active";
   }
   if (context.conversationPreparing) {
     return "ambient_action_conversation_preparing";

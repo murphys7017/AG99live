@@ -554,7 +554,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
         && selectedModel.value !== null,
       ambientMotionEnabled: live2dPresentationSettings.ambientMotionEnabled,
       audioPlaying: s.isPlayingAudio,
-      microphoneCapturing: s.micCapturing && !s.microphoneStandby,
+      pushToTalkActive: s.pttModeEnabled && s.micCapturing,
       conversationPreparing: presence.conversationPhase === "preparing",
       conversationActive: Boolean(
         (s.currentTurnId && s.turnFinishedTurnId !== s.currentTurnId)
@@ -823,7 +823,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       s.status,
       s.isPlayingAudio,
       s.micCapturing,
-      s.microphoneStandby,
+      s.pttModeEnabled,
       s.currentTurnId,
       s.turnFinishedTurnId,
       manualPreviewText.value,

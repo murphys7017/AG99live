@@ -308,6 +308,7 @@ export function createAdapterMicrophoneRuntime(
     audioSequenceBroken = false;
     activeMicTurnId = createRootInputTurnId();
     micCaptureOrigin = origin;
+    deps.state.microphoneStandby = false;
     deps.state.micCapturing = true;
     deps.state.lastError = "";
     lastStartFailureReason = "none";
@@ -459,6 +460,8 @@ export function createAdapterMicrophoneRuntime(
       }
     }
     deps.state.micCapturing = false;
+    deps.state.microphoneStandby = !request.releaseRuntime && deps.state.pttModeEnabled
+      && isMicrophoneCaptureRuntimeActive();
     const inputTurnId = activeMicTurnId ?? createRootInputTurnId();
     const inputStreamId = activeMicStreamId;
     reportLatencyStage("capture_stop_requested", inputTurnId, inputStreamId);
@@ -667,7 +670,7 @@ export function createAdapterMicrophoneRuntime(
           return false;
         }
         deps.state.lastError = "";
-        deps.state.microphoneStandby = true;
+        deps.state.microphoneStandby = deps.state.pttModeEnabled && !deps.state.micCapturing;
         void refreshMicrophoneDevices({ requestPermission: false });
         if (!deps.state.micCapturing) {
           deps.state.statusMessage = "按键说话已就绪，麦克风保持开启。";
