@@ -154,7 +154,7 @@ export class ActiveParameterRuntime {
     lipSyncParameterIds: csmVector<CubismIdHandle>;
   }): ActiveParameterFrameResult {
     if (this.interactionSway) {
-      this.interactionSway.elapsedMs += Math.max(0, input.deltaTimeSeconds) * 1000;
+      this.interactionSway.elapsedMs = performance.now() - this.interactionSway.startedAtMs;
       const { elapsedMs, delayMs, attackMs, holdMs } = this.interactionSway;
       if (elapsedMs >= delayMs + attackMs + holdMs) {
         this.interactionSway = null;

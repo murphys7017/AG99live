@@ -98,6 +98,7 @@ export interface ActiveInteractionSwayBinding {
 }
 
 export interface ActiveInteractionSwayState {
+  startedAtMs: number;
   delayMs: number;
   attackMs: number;
   holdMs: number;

@@ -2144,6 +2144,7 @@ export class LAppModel extends CubismUserModel {
     const excursion = 0.35;
     if (Math.abs(lean) >= excursion) return false;
     this._activeParameterRuntime.startInteractionSway({
+      startedAtMs: performance.now(),
       delayMs: input.delayMs,
       attackMs: input.attackMs,
       holdMs: input.holdMs,

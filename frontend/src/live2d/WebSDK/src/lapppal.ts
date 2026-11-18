@@ -34,19 +34,19 @@ export class LAppPal {
 
   /**
    * デルタ時間（前回フレームとの差分）を取得する
-   * @return デルタ時間[ms]
+   * @return デルタ時間[秒]
    * 
    * 获取增量时间（与上一帧的差异）
    */
   public static getDeltaTime(): number {
-    return this.s_deltaTime;
+    return this.deltaSeconds;
   }
 
   public static updateTime(modifyLastFrameTime: boolean = true): void {
-    this.s_currentFrame = Date.now();
-    this.s_deltaTime = (this.s_currentFrame - this.s_lastFrame) / 1000;
-    if (modifyLastFrameTime === true) {
-      this.s_lastFrame = this.s_currentFrame;
+    const nowMs = performance.now();
+    this.deltaSeconds = this.lastFrameMs === null ? 0 : (nowMs - this.lastFrameMs) / 1000;
+    if (modifyLastFrameTime) {
+      this.lastFrameMs = nowMs;
     }
   }
 
@@ -60,9 +60,6 @@ export class LAppPal {
     console.log(message);
   }
 
-  static lastUpdate = Date.now();
-
-  static s_currentFrame = 0.0;
-  static s_lastFrame = 0.0;
-  static s_deltaTime = 0.0;
+  private static lastFrameMs: number | null = null;
+  private static deltaSeconds = 0;
 }

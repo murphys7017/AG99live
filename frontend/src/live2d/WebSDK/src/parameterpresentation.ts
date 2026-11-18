@@ -4,6 +4,9 @@ import type {
 } from "./directparameterplan";
 
 const MAX_SPRING_STEP_SECONDS = 1 / 120;
+// One second covers a normal frame at the lowest supported background rate.
+// Bound only spring integration; the playback clock still selects the current target.
+const MAX_SPRING_CATCH_UP_SECONDS = 1;
 const SETTLED_VALUE_EPSILON = 0.001;
 const SETTLED_VELOCITY_EPSILON = 0.001;
 
@@ -234,11 +237,12 @@ function advanceSpringParameterDynamics(
   frequencyHz: number,
   dampingRatio: number,
 ): { value: number; velocity: number } {
+  const simulatedSeconds = Math.min(deltaSeconds, MAX_SPRING_CATCH_UP_SECONDS);
   const stepCount = Math.max(
     1,
-    Math.ceil(deltaSeconds / MAX_SPRING_STEP_SECONDS),
+    Math.ceil(simulatedSeconds / MAX_SPRING_STEP_SECONDS),
   );
-  const stepSeconds = deltaSeconds / stepCount;
+  const stepSeconds = simulatedSeconds / stepCount;
   let value = previousValue;
   let velocity = previousVelocity;
   for (let index = 0; index < stepCount; index += 1) {
@@ -254,6 +258,7 @@ function advanceSpringParameterDynamics(
     );
     value = next.value;
     velocity = next.velocity;
+    if (value === targetValue && velocity === 0) break;
   }
   return { value, velocity };
 }
