@@ -236,7 +236,7 @@ export type ActiveParameterFrameExecution =
  */
 export class ActiveParameterMixer {
   private lastPresentations = new Map<number, {
-    node: ParameterPresentationNode; elapsedMs: number; owner: ParameterContributionOwner;
+    node: ParameterPresentationNode; elapsedMs: number;
   }>();
 
   public reset(): void { this.lastPresentations.clear(); }
@@ -346,13 +346,11 @@ export class ActiveParameterMixer {
       directPlan.contributions = directPlan.contributions.filter((c) => !claimedParameters.has(c.parameterIndex));
     }
     contributions.push(...directPlan.contributions);
-    // A stopped plan has already emitted its terminal. Its visible parameters
-    // can still settle against the current base pose on the render clock.
+    // Once a source has gone, finish its visible response on the render clock.
+    // This also covers ambient plans whose timed fade ends before the pose settles.
     for (const contribution of contributions) claimedParameters.add(contribution.parameterIndex);
     for (const [parameterIndex, previous] of this.lastPresentations) {
-      if ((previous.owner !== "interaction_gaze" && previous.owner !== "interaction_sway"
-          && previous.owner !== "direct_plan" && previous.owner !== "pose_release")
-        || (!previous.node.drivenOffset && !previous.node.velocity)
+      if ((!previous.node.drivenOffset && !previous.node.velocity)
         || claimedParameters.has(parameterIndex)) {
         continue;
       }
@@ -577,7 +575,7 @@ export class ActiveParameterMixer {
         }
         if (!hasLipSyncContribution) {
           nextPresentations.set(parameterIndex, {
-            node, elapsedMs: presentationContribution.presentation.elapsedMs, owner: presentationContribution.owner,
+            node, elapsedMs: presentationContribution.presentation.elapsedMs,
           });
         }
         const presentation = resolveParameterPresentationFrame(
