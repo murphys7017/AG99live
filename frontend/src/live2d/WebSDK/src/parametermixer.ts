@@ -98,13 +98,12 @@ export interface ActiveInteractionSwayBinding {
 }
 
 export interface ActiveInteractionSwayState {
-  cycleMs: number;
+  delayMs: number;
   attackMs: number;
-  releaseMs: number;
+  holdMs: number;
+  targetRatio: number;
   elapsedMs: number;
-  releaseStartedAtMs: number | null;
   bindings: ActiveInteractionSwayBinding[];
-  timing: DirectParameterExecutionPlan["timing"];
 }
 
 export interface ActiveInteractionGazeState {
@@ -342,8 +341,8 @@ export class ActiveParameterMixer {
     // can still settle against the current base pose on the render clock.
     for (const contribution of contributions) claimedParameters.add(contribution.parameterIndex);
     for (const [parameterIndex, previous] of this.lastPresentations) {
-      if ((previous.owner !== "interaction_gaze" && previous.owner !== "direct_plan"
-          && previous.owner !== "pose_release")
+      if ((previous.owner !== "interaction_gaze" && previous.owner !== "interaction_sway"
+          && previous.owner !== "direct_plan" && previous.owner !== "pose_release")
         || (!previous.node.drivenOffset && !previous.node.velocity)
         || claimedParameters.has(parameterIndex)) {
         continue;
@@ -688,38 +687,27 @@ export class ActiveParameterMixer {
   private collectInteractionSwayContributions(
     sway: ActiveInteractionSwayState | null,
   ): { contributions: ParameterContribution[] } {
-    if (!sway) {
-      return { contributions: [] };
-    }
-    const releaseElapsedMs = sway.releaseStartedAtMs === null
-      ? null
-      : sway.elapsedMs - sway.releaseStartedAtMs;
-    if (releaseElapsedMs !== null && releaseElapsedMs >= sway.releaseMs) {
+    if (!sway || sway.elapsedMs <= sway.delayMs) {
       return { contributions: [] };
     }
     const attackWeight = sway.attackMs <= 0
       ? 1
-      : smoothstep(Math.min(1, sway.elapsedMs / sway.attackMs));
-    const releaseWeight = releaseElapsedMs === null || sway.releaseMs <= 0
-      ? 1
-      : smoothstep(1 - Math.max(0, releaseElapsedMs) / sway.releaseMs);
-    const phase = (sway.elapsedMs % sway.cycleMs) / sway.cycleMs;
-    const lateralOffset = Math.sin(phase * Math.PI * 2);
+      : smoothstep((sway.elapsedMs - sway.delayMs) / sway.attackMs);
     return {
-      contributions: sway.bindings.map((binding) => ({
+      contributions: sway.bindings.map((binding): ParameterContribution => ({
         parameterIdRaw: binding.parameterIdRaw,
         parameterIndex: binding.parameterIndex,
-        owner: "interaction_sway" as const,
+        owner: "interaction_sway",
         source: `interaction_sway:${binding.axisId}`,
-        value: lateralOffset >= 0
-          ? interpolate(binding.neutralValue, binding.positiveValue, lateralOffset)
-          : interpolate(binding.neutralValue, binding.negativeValue, -lateralOffset),
-        weight: binding.weight * attackWeight * releaseWeight,
+        value: sway.targetRatio >= 0
+          ? interpolate(binding.neutralValue, binding.positiveValue, sway.targetRatio)
+          : interpolate(binding.neutralValue, binding.negativeValue, -sway.targetRatio),
+        weight: binding.weight * attackWeight,
         priority: PARAMETER_MIX_PRIORITY.interactionSway,
         presentation: {
           node: binding.presentation,
           elapsedMs: sway.elapsedMs,
-          timing: sway.timing,
+          timing: null,
         },
       })),
     };

@@ -90,6 +90,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
   let activePlaybackPlanRunId: string | null = null;
   let continuityEnvelope: ContinuityEnvelope | null = null;
   let thinkingSwayTurnId: string | null = null;
+  let lastThinkingTurnId: string | null = null;
   const preparedSemanticMotions = new Map<string, PreparedSemanticMotionEntry>();
   const preparedMotionExpiryTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
@@ -885,11 +886,14 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
   }
 
   function startThinkingSway(turnId: string): boolean {
-    if (activePlaybackRun?.origin === "pre_action") return false;
     const normalizedTurnId = normalizeTurnId(turnId);
     if (!normalizedTurnId) {
       return false;
     }
+    if (normalizedTurnId === lastThinkingTurnId) return thinkingSwayTurnId === normalizedTurnId;
+    releaseThinkingSway();
+    lastThinkingTurnId = normalizedTurnId;
+    if (activePlaybackRun?.origin === "pre_action" || activePlaybackRun?.turnId === normalizedTurnId) return false;
     const selectedModel = dependencies.getSelectedModel();
     if (!selectedModel) {
       return false;
@@ -899,7 +903,6 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
       console.warn("[InteractionSway] no usable lateral semantic axis.", { turnId: normalizedTurnId });
       return false;
     }
-    releaseThinkingSway();
     const started = dependencies.startInteractionSway(input);
     if (started) {
       thinkingSwayTurnId = normalizedTurnId;
@@ -915,7 +918,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
 
   function releaseThinkingSway(turnId: string | null = null): void {
     const normalizedTurnId = normalizeTurnId(turnId);
-    if (thinkingSwayTurnId && normalizedTurnId && thinkingSwayTurnId !== normalizedTurnId) {
+    if (!thinkingSwayTurnId || (normalizedTurnId && thinkingSwayTurnId !== normalizedTurnId)) {
       return;
     }
     dependencies.stopInteractionSway();
@@ -986,6 +989,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     runtimeScheduler.clearAllPendingPayloads();
     clearPreparedSemanticMotions();
     releaseThinkingSway();
+    lastThinkingTurnId = null;
     stopActivePlayback(
       reason,
       reason === "stopped"

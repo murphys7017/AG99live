@@ -55,11 +55,9 @@ export function buildThinkingSwayInput(model: ModelSummary): InteractionSwayInpu
   }
   return {
     axisId: axis.id,
-    // A complete left-right cycle takes four seconds; this remains visibly alive
-    // without competing with an eventual reply gesture.
-    cycleMs: 4000,
+    delayMs: 350,
     attackMs: 500,
-    releaseMs: 650,
+    holdMs: 450,
     bindings,
   };
 }
@@ -156,15 +154,19 @@ function selectCursorGazeAxes(profile: SemanticAxisProfile) {
 }
 
 function selectLateralAxis(profile: SemanticAxisProfile): SemanticAxisDefinition | null {
-  return profile.axes
-    .filter((axis) => (
-      (axis.control_role === "primary" || axis.control_role === "hint")
-      && hasLateralAnchors(axis)
-      && axis.parameter_bindings.length > 0
-      && lateralAxisPriority(axis) !== null
-    ))
-    .sort((left, right) => lateralAxisPriority(left)! - lateralAxisPriority(right)!)[0]
-    ?? null;
+  let best: SemanticAxisDefinition | null = null;
+  let bestPriority = Infinity;
+  for (const axis of profile.axes) {
+    if ((axis.control_role !== "primary" && axis.control_role !== "hint")
+      || !hasLateralAnchors(axis) || !axis.parameter_bindings.length) continue;
+    const priority = lateralAxisPriority(axis);
+    if (priority === null) continue;
+    if (!best || priority < bestPriority || (priority === bestPriority && axis.id < best.id)) {
+      best = axis;
+      bestPriority = priority;
+    }
+  }
+  return best;
 }
 
 function hasLateralAnchors(axis: SemanticAxisDefinition): boolean {
@@ -176,11 +178,14 @@ function hasLateralAnchors(axis: SemanticAxisDefinition): boolean {
 
 function lateralAxisPriority(axis: SemanticAxisDefinition): number | null {
   const id = axis.id.toLowerCase();
-  const text = `${axis.label} ${axis.description} ${axis.usage_notes}`.toLowerCase();
-  if (id === "gaze_x" || id === "head_yaw") return 0;
-  if (id === "head_roll") return 1;
-  if (id === "body_yaw" || id === "body_roll") return 2;
-  if (/(?:gaze|yaw|roll|左右|扭头|摇摆)/u.test(`${id} ${text}`)) return 3;
+  const binds = (parameter: string) => axis.parameter_bindings.some((binding) => binding.parameter_id === parameter);
+  if (id === "head_roll" || binds("ParamAngleZ")) return 0;
+  if (id === "head_yaw" || binds("ParamAngleX")) return 1;
+  if (id === "body_roll" || id === "body_yaw" || binds("ParamBodyAngleZ") || binds("ParamBodyAngleX")) return 2;
+  if ((axis.semantic_group === "head" || axis.semantic_group === "body")
+    && /yaw|roll|侧倾|左右|扭头/iu.test(`${id} ${axis.label}`)) return 3;
+  if (id === "gaze_x" || binds("ParamEyeBallX")
+    || (axis.semantic_group === "gaze" && /horizontal|left[-_ ]right|左右/iu.test(`${id} ${axis.label}`))) return 4;
   return null;
 }
 

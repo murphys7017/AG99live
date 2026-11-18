@@ -42,9 +42,9 @@ export interface InteractionParameterBinding {
 
 export interface InteractionSwayInput {
   axisId: string;
-  cycleMs: number;
+  delayMs: number;
   attackMs: number;
-  releaseMs: number;
+  holdMs: number;
   bindings: InteractionParameterBinding[];
 }
 

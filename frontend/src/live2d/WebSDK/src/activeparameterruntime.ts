@@ -101,9 +101,7 @@ export class ActiveParameterRuntime {
   }
 
   public stopInteractionSway(): void {
-    if (this.interactionSway && this.interactionSway.releaseStartedAtMs === null) {
-      this.interactionSway.releaseStartedAtMs = this.interactionSway.elapsedMs;
-    }
+    this.interactionSway = null;
   }
 
   public startInteractionGaze(state: ActiveInteractionGazeState): void {
@@ -157,11 +155,8 @@ export class ActiveParameterRuntime {
   }): ActiveParameterFrameResult {
     if (this.interactionSway) {
       this.interactionSway.elapsedMs += Math.max(0, input.deltaTimeSeconds) * 1000;
-      if (
-        this.interactionSway.releaseStartedAtMs !== null
-        && this.interactionSway.elapsedMs
-          >= this.interactionSway.releaseStartedAtMs + this.interactionSway.releaseMs
-      ) {
+      const { elapsedMs, delayMs, attackMs, holdMs } = this.interactionSway;
+      if (elapsedMs >= delayMs + attackMs + holdMs) {
         this.interactionSway = null;
       }
     }

@@ -31,6 +31,7 @@ export interface PlaybackTimelineComposition {
   audioControl: ConversationPlaybackAudioRuntime;
 }
 export interface PlaybackTimelineMotionEnginePort {
+  releaseThinkingSway(turnId: string): void;
   ingestNormalizedPayload: PlaybackTimelineMotionSink["start"];
   interruptPlaybackSegment(turnId: string | null, messageId: string, reason: string): void;
   handoffPlaybackSegment(turnId: string | null, messageId: string): boolean;
@@ -200,6 +201,7 @@ export function configurePlaybackTimelineMotionRuntime(options: {
       onMissingPlaybackTimeline?.(normalizedTurnId, normalizedMessageId);
       return;
     }
+    motionEngine.releaseThinkingSway(normalizedTurnId);
     const motionSink = currentTimeline.sinks.find((sink) => sink.id === "motion");
     if (!motionSink) {
       // Short PCM can finish production before its first sample is presented;

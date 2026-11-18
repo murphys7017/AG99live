@@ -2125,24 +2125,31 @@ export class LAppModel extends CubismUserModel {
       return false;
     }
     const bindings = this.createInteractionBindings(input);
-    if (!bindings.length || !Number.isFinite(input.cycleMs) || input.cycleMs <= 0) {
+    if (!bindings.length || ![input.delayMs, input.attackMs, input.holdMs]
+      .every((ms) => Number.isFinite(ms) && ms >= 0)) {
       return false;
     }
+    // Use the pose that was visible when the turn began. Keep a pronounced
+    // pose undisturbed; for a small lean, continue in its semantic direction.
+    let lean = 0;
+    for (const binding of bindings) {
+      if (binding.weight === 0) continue;
+      const offset = binding.presentation.initialValue - binding.neutralValue;
+      const positive = binding.positiveValue - binding.neutralValue;
+      const negative = binding.negativeValue - binding.neutralValue;
+      const ratio = offset * positive > 0 ? offset / positive
+        : offset * negative > 0 ? -offset / negative : 0;
+      if (Math.abs(ratio) > Math.abs(lean)) lean = ratio;
+    }
+    const excursion = 0.35;
+    if (Math.abs(lean) >= excursion) return false;
     this._activeParameterRuntime.startInteractionSway({
-      cycleMs: input.cycleMs,
-      attackMs: Math.max(0, input.attackMs),
-      releaseMs: Math.max(0, input.releaseMs),
+      delayMs: input.delayMs,
+      attackMs: input.attackMs,
+      holdMs: input.holdMs,
+      targetRatio: lean < 0 ? -excursion : excursion,
       elapsedMs: 0,
-      releaseStartedAtMs: null,
       bindings,
-      timing: {
-        durationMs: Number.MAX_SAFE_INTEGER,
-        blendInMs: 0,
-        holdMs: Number.MAX_SAFE_INTEGER,
-        blendOutMs: 0,
-        curvePreset: "smooth_hold",
-        totalMs: Number.MAX_SAFE_INTEGER,
-      },
     });
     return true;
   }
