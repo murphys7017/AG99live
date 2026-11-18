@@ -854,6 +854,10 @@ class TurnCoordinator:
     def has_active_speech_input(self) -> bool:
         return bool(self._active_speech_capture_turns)
 
+    @property
+    def has_pending_user_input(self) -> bool:
+        return bool(self._preparing_inputs or self._active_speech_capture_turns)
+
     def set_passive_behavior_interrupt_handler(
         self,
         handler: Callable[[], Awaitable[None]] | None,
@@ -1070,14 +1074,24 @@ class TurnCoordinator:
         turn_id: str | None = None,
         event: Any | None = None,
         commit_event: Callable[[Any], None] | None = None,
-    ) -> None:
-        self.observation_window.note_input()
+        can_admit: Callable[[], bool] | None = None,
+    ) -> bool:
+        if can_admit is None:
+            self.observation_window.note_input()
         async with self._turn_lock:
+            if can_admit is not None and not can_admit():
+                return False
             normalized_turn_id = self._require_turn_id_value(turn_id)
             await self._interrupt_passive_work()
-            await self._abort_active_frontend_turn_before_new_input(
-                next_turn_id=normalized_turn_id,
-            )
+            if can_admit is None:
+                await self._abort_active_frontend_turn_before_new_input(
+                    next_turn_id=normalized_turn_id,
+                )
+            else:
+                # Passive cleanup can yield. Recheck before reserving playback.
+                if not can_admit():
+                    return False
+                self.observation_window.note_input()
             backend_turn_id = self._resolve_backend_turn_id(
                 message_obj,
                 frontend_turn_id=normalized_turn_id,
@@ -1204,6 +1218,7 @@ class TurnCoordinator:
                 len(message_obj.message_str or ""),
                 current_turn_id,
             )
+            return True
 
     async def _abort_active_frontend_turn_before_new_input(
         self,

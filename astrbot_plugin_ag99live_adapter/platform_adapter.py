@@ -477,7 +477,7 @@ class OLVPetPlatformAdapter(Platform):
         return (
             self.transport._ws_client is not None
             and not self.session_state.current_turn_id
-            and not self.turn_coordinator.has_active_speech_input
+            and not self.turn_coordinator.has_pending_user_input
         )
 
     def create_runtime_output(self, event):
@@ -591,12 +591,13 @@ class OLVPetPlatformAdapter(Platform):
         session_id: str,
         event_extras: dict[str, Any],
         commit_event: Callable[[Any], None],
-    ) -> str:
+    ) -> str | None:
         """Bind an external source to OLV playback, then use its Core queue.
 
         The input adapter retains source identity and queue ownership. OLV
         admits the playback turn and binds Core/delivery IDs before that queue
-        sees the event, exactly as it does for a desktop input turn.
+        sees the event. Return None if playback can't be reserved under the
+        turn lock, so a live event never preempts an active desktop turn.
         """
         delivery_turn_id = uuid4().hex
         message_obj.raw_message = {
@@ -612,13 +613,14 @@ class OLVPetPlatformAdapter(Platform):
         )
         for key, value in event_extras.items():
             event.set_extra(key, value)
-        await self.turn_coordinator._commit_inbound_message(
+        admitted = await self.turn_coordinator._commit_inbound_message(
             message_obj,
             turn_id=delivery_turn_id,
             event=event,
             commit_event=commit_event,
+            can_admit=self.is_proactive_output_available,
         )
-        return delivery_turn_id
+        return delivery_turn_id if admitted else None
 
     async def handle_msg(self, message: dict[str, Any]):
         self._record_desktop_frame_from_message(message)
