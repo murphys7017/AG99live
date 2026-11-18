@@ -18,10 +18,11 @@ export function buildThinkingSwayInput(model: ModelSummary): InteractionSwayInpu
   if (!profile) {
     return null;
   }
-  const axis = selectLateralAxis(profile);
-  if (!axis) {
+  const match = selectLateralAxis(profile);
+  if (!match) {
     return null;
   }
+  const { axis, parameterBindings } = match;
   const negativeValue = axis.level_anchors?.["-1"];
   const positiveValue = axis.level_anchors?.["1"];
   if (!Number.isFinite(negativeValue) || !Number.isFinite(positiveValue)) {
@@ -31,7 +32,7 @@ export function buildThinkingSwayInput(model: ModelSummary): InteractionSwayInpu
   const resolvedPositiveValue = Number(positiveValue);
 
   const bindings: InteractionSwayInput["bindings"] = [];
-  for (const binding of axis.parameter_bindings) {
+  for (const binding of parameterBindings) {
     const neutral = mapSemanticBindingValue(axis, binding, axis.neutral);
     const negative = mapSemanticBindingValue(axis, binding, resolvedNegativeValue);
     const positive = mapSemanticBindingValue(axis, binding, resolvedPositiveValue);
@@ -118,95 +119,86 @@ export function buildCursorGazeInput(
   };
 }
 
-const standardGazeParameters = new Set(["ParamEyeBallX", "ParamEyeBallY", "ParamAngleX", "ParamAngleY"]);
-
-function selectCursorGazeAxes(profile: SemanticAxisProfile, stage: "eyes" | "full") {
-  const eligible = profile.axes.filter((axis) =>
-    (axis.control_role === "primary" || axis.control_role === "hint")
-    && hasLateralAnchors(axis) && axis.parameter_bindings.length > 0)
-    .sort((left, right) => Number(left.control_role !== "primary") - Number(right.control_role !== "primary")
-      || left.id.localeCompare(right.id, "en"));
-  const result: Array<{
-    axis: SemanticAxisDefinition;
-    parameterBindings: SemanticAxisDefinition["parameter_bindings"];
-    targetComponent: keyof GazeTarget;
-    targetRatioScale: number;
-  }> = [];
-  const resolve = (id: string, parameter: string, group: "gaze" | "head", direction: RegExp) => {
-    let best: Pick<typeof result[number], "axis" | "parameterBindings"> | undefined;
-    let bestRank = Infinity;
-    for (const axis of eligible) {
-      const named = axis.id.toLowerCase() === id;
-      const described = axis.semantic_group === group && direction.test(`${axis.id} ${axis.label}`);
-      const parameterBindings = axis.parameter_bindings.filter((binding) =>
-        binding.default_weight > 0 && (binding.parameter_id === parameter
-          || ((named || described) && !standardGazeParameters.has(binding.parameter_id))));
-      if (!parameterBindings.length) continue;
-      const rank = named ? 0 : parameterBindings.some((binding) => binding.parameter_id === parameter) ? 1 : 2;
-      if (rank < bestRank) {
-        bestRank = rank;
-        best = { axis, parameterBindings };
-      }
-    }
-    return best;
-  };
-  const addDirection = (
-    targetComponent: keyof GazeTarget,
-    eye: ReturnType<typeof resolve>,
-    head: ReturnType<typeof resolve>,
-  ) => {
-    if (eye) {
-      result.push({ ...eye, targetComponent, targetRatioScale: 1 });
-    }
-    if (stage === "full" && head) {
-      result.push({ ...head, targetComponent, targetRatioScale: eye ? 0.58 : 0.72 });
-    }
-  };
-  const horizontal = /horizontal|left[-_ ]right|左右/iu;
-  const vertical = /vertical|up[-_ ]down|上下/iu;
-  addDirection("horizontalRatio",
-    resolve("gaze_x", "ParamEyeBallX", "gaze", horizontal),
-    resolve("head_yaw", "ParamAngleX", "head", /yaw|horizontal|左右|扭头/iu));
-  addDirection("verticalRatio",
-    resolve("gaze_y", "ParamEyeBallY", "gaze", vertical),
-    resolve("head_pitch", "ParamAngleY", "head", /pitch|vertical|上下|俯仰/iu));
-  return result;
+interface InteractionAxisRole {
+  axisId: string;
+  parameter: string;
+  group: string;
+  direction: RegExp;
 }
 
-function selectLateralAxis(profile: SemanticAxisProfile): SemanticAxisDefinition | null {
-  let best: SemanticAxisDefinition | null = null;
-  let bestPriority = Infinity;
-  for (const axis of profile.axes) {
-    if ((axis.control_role !== "primary" && axis.control_role !== "hint")
-      || !hasLateralAnchors(axis) || !axis.parameter_bindings.length) continue;
-    const priority = lateralAxisPriority(axis);
-    if (priority === null) continue;
-    if (!best || priority < bestPriority || (priority === bestPriority && axis.id < best.id)) {
-      best = axis;
-      bestPriority = priority;
-    }
+const yaw = /yaw|horizontal|左右|扭头/iu;
+const roll = /roll|侧倾/iu;
+const headRoll = { axisId: "head_roll", parameter: "ParamAngleZ", group: "head", direction: roll };
+const headYaw = { axisId: "head_yaw", parameter: "ParamAngleX", group: "head", direction: yaw };
+const headPitch = { axisId: "head_pitch", parameter: "ParamAngleY", group: "head", direction: /pitch|vertical|上下|俯仰/iu };
+const bodyRoll = { axisId: "body_roll", parameter: "ParamBodyAngleZ", group: "body", direction: roll };
+const bodyYaw = { axisId: "body_yaw", parameter: "ParamBodyAngleX", group: "body", direction: yaw };
+const gazeX = { axisId: "gaze_x", parameter: "ParamEyeBallX", group: "gaze", direction: /horizontal|left[-_ ]right|左右/iu };
+const gazeY = { axisId: "gaze_y", parameter: "ParamEyeBallY", group: "gaze", direction: /vertical|up[-_ ]down|上下/iu };
+const standardParameters = new Set([
+  headRoll.parameter, headYaw.parameter, headPitch.parameter, bodyRoll.parameter, bodyYaw.parameter,
+  "ParamBodyAngleY", gazeX.parameter, gazeY.parameter,
+]);
+
+function eligibleInteractionAxes(profile: SemanticAxisProfile) {
+  return profile.axes.filter((axis) =>
+    (axis.control_role === "primary" || axis.control_role === "hint")
+    && ["-1", "1"].every((level) => Number.isFinite(axis.level_anchors?.[level]))
+    && axis.parameter_bindings.length > 0)
+    .sort((left, right) => Number(left.control_role !== "primary") - Number(right.control_role !== "primary")
+      || left.id.localeCompare(right.id, "en"));
+}
+
+interface InteractionAxisMatch {
+  axis: SemanticAxisDefinition;
+  parameterBindings: SemanticAxisDefinition["parameter_bindings"];
+  rank: number;
+}
+
+function matchInteractionAxis(axes: SemanticAxisDefinition[], role: InteractionAxisRole) {
+  let best: InteractionAxisMatch | undefined;
+  for (const axis of axes) {
+    const named = axis.id.toLowerCase() === role.axisId;
+    const described = axis.semantic_group === role.group && role.direction.test(`${axis.id} ${axis.label}`);
+    const parameterBindings = axis.parameter_bindings.filter((binding) =>
+      binding.default_weight > 0 && (binding.parameter_id === role.parameter
+        || ((named || described) && !standardParameters.has(binding.parameter_id))));
+    if (!parameterBindings.length) continue;
+    const standard = parameterBindings.some((binding) => binding.parameter_id === role.parameter);
+    const rank = named ? 0 : standard ? 1 : 2;
+    if (!best || rank < best.rank) best = { axis, parameterBindings, rank };
   }
   return best;
 }
 
-function hasLateralAnchors(axis: SemanticAxisDefinition): boolean {
-  return ["-1", "1"].every((level) => (
-    typeof axis.level_anchors?.[level] === "number"
-    && Number.isFinite(axis.level_anchors[level])
-  ));
+function selectLateralAxis(profile: SemanticAxisProfile) {
+  const axes = eligibleInteractionAxes(profile);
+  let described: InteractionAxisMatch | undefined;
+  for (const role of [headRoll, headYaw, bodyRoll, bodyYaw]) {
+    const match = matchInteractionAxis(axes, role);
+    if (match && match.rank < 2) return match;
+    described ??= match;
+  }
+  return described ?? matchInteractionAxis(axes, gazeX);
 }
 
-function lateralAxisPriority(axis: SemanticAxisDefinition): number | null {
-  const id = axis.id.toLowerCase();
-  const binds = (parameter: string) => axis.parameter_bindings.some((binding) => binding.parameter_id === parameter);
-  if (id === "head_roll" || binds("ParamAngleZ")) return 0;
-  if (id === "head_yaw" || binds("ParamAngleX")) return 1;
-  if (id === "body_roll" || id === "body_yaw" || binds("ParamBodyAngleZ") || binds("ParamBodyAngleX")) return 2;
-  if ((axis.semantic_group === "head" || axis.semantic_group === "body")
-    && /yaw|roll|侧倾|左右|扭头/iu.test(`${id} ${axis.label}`)) return 3;
-  if (id === "gaze_x" || binds("ParamEyeBallX")
-    || (axis.semantic_group === "gaze" && /horizontal|left[-_ ]right|左右/iu.test(`${id} ${axis.label}`))) return 4;
-  return null;
+function selectCursorGazeAxes(profile: SemanticAxisProfile, stage: "eyes" | "full") {
+  const axes = eligibleInteractionAxes(profile);
+  const result: Array<InteractionAxisMatch & {
+    targetComponent: keyof GazeTarget;
+    targetRatioScale: number;
+  }> = [];
+  function addDirection(targetComponent: keyof GazeTarget, eyeRole: InteractionAxisRole, headRole: InteractionAxisRole) {
+    const eye = matchInteractionAxis(axes, eyeRole);
+    if (eye) result.push({ ...eye, targetComponent, targetRatioScale: 1 });
+    if (stage === "full") {
+      const head = matchInteractionAxis(axes, headRole);
+      if (head) result.push({ ...head, targetComponent, targetRatioScale: eye ? 0.58 : 0.72 });
+    }
+  }
+  addDirection("horizontalRatio", gazeX, headYaw);
+  addDirection("verticalRatio", gazeY, headPitch);
+  return result;
 }
 
 function resolveCursorGazeDynamics(
