@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import math
+from collections.abc import Callable
 from copy import copy
 from typing import Any, Protocol
 
@@ -76,6 +77,10 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         session_id,
         adapter: PlatformEventAdapterPort,
     ):
+        self._presentation_callbacks: dict[tuple[str, int], Callable[[], None]] = {}
+        self._presentation_segments: dict[str, tuple[str, int]] = {}
+        self._presented_segments: set[tuple[str, int]] = set()
+        self._presentation_cancel: dict[str, Callable[[], None]] = {}
         self._adapter_internal_state = AdapterEventContext()
         super().__init__(message_str, message_obj, platform_meta, session_id)
         self.adapter = adapter
@@ -584,6 +589,9 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         elif not grouped_persona_delivery:
             self._register_message_child(parent_message_id, message_id)
         if persona_segment is not None:
+            result_id = resolved_platform_extras.get("persona_result_id")
+            if result_id:
+                self._presentation_segments[message_id] = (result_id, persona_segment[0])
             self._remember_persona_segment(
                 parent_message_id=parent_message_id,
                 persona_result_id=str(
@@ -1206,6 +1214,36 @@ class OLVPetPlatformEvent(AstrMessageEvent):
             resolved_metadata = dict(metadata)
             resolved_metadata.pop("ag99live_motion_schedule", None)
             platform_extras["metadata"] = resolved_metadata
+
+    def defer_segment_presentation(
+        self, result_id: str, index: int, message_id: str | None,
+        on_presented: Callable[[], None], on_interrupted: Callable[[], None],
+    ) -> None:
+        key = (result_id, index)
+        if not result_id or index < 0 or key in self._presented_segments:
+            return
+        if message_id:
+            self._presentation_segments[message_id] = key
+        self._presentation_callbacks[key] = on_presented
+        self._presentation_cancel[result_id] = on_interrupted
+
+    def segment_presented(self, message_id: str) -> None:
+        key = self._presentation_segments.get(message_id)
+        if key is None or key in self._presented_segments:
+            return
+        callback = self._presentation_callbacks.pop(key, None)
+        if callback is not None:
+            self._presented_segments.add(key)
+            callback()
+
+    def retire_segment_presentations(self, *, interrupted: bool) -> None:
+        if interrupted:
+            for cancel in self._presentation_cancel.values():
+                cancel()
+        self._presentation_callbacks.clear()
+        self._presentation_segments.clear()
+        self._presented_segments.clear()
+        self._presentation_cancel.clear()
 
     @staticmethod
     def _persona_child_message_id(parent_message_id: str, segment_index: int) -> str:

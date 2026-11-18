@@ -297,7 +297,11 @@ class TurnCoordinator:
     ) -> None:
         """Release AstrBot/runtime-owned resources after neutral terminal commit."""
 
-        self.observation_window.note_output_finished(turn_id, self._turn_terminal_results[turn_id])
+        terminal_result = self._turn_terminal_results[turn_id]
+        self.observation_window.note_output_finished(turn_id, terminal_result)
+        retire = getattr(event, "retire_segment_presentations", None)
+        if callable(retire):
+            retire(interrupted=not terminal_result[0])
         self._prune_turn_terminal_results()
         self.turn_identity_map.clear_frontend_turn(turn_id)
         if self.session_state.current_turn_id == turn_id:
@@ -363,6 +367,9 @@ class TurnCoordinator:
         if message.type == "system.segment_presented":
             if message.turn_id and message.turn_id == self.session_state.current_turn_id:
                 self.observation_window.note_presentation(message.turn_id, message.payload["kind"])
+                observe = getattr(self._events_by_turn_id.get(message.turn_id), "segment_presented", None)
+                if callable(observe):
+                    observe(message.payload["segment_id"])
             return
         if message.type in {
             "system.history_create",
@@ -660,6 +667,9 @@ class TurnCoordinator:
         """Stop one AstrBot event for the Orchestrator's disconnect owner."""
 
         failures: list[str] = []
+        retire = getattr(event, "retire_segment_presentations", None)
+        if callable(retire):
+            retire(interrupted=True)
         self._cancel_turn_owned_motion_task(
             event,
             turn_id=turn_id,
@@ -1382,6 +1392,9 @@ class TurnCoordinator:
 
         self._turn_terminal_results[resolved_turn_id] = terminal_result
         self.observation_window.note_output_finished(resolved_turn_id, terminal_result)
+        retire = getattr(event, "retire_segment_presentations", None)
+        if callable(retire):
+            retire(interrupted=not success)
         for waiter in self._turn_terminal_waiters.pop(resolved_turn_id, []):
             if not waiter.done():
                 waiter.set_result(terminal_result)
