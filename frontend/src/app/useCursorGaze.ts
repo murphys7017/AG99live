@@ -142,7 +142,7 @@ export function useCursorGaze(
 
   function start(): void {
     if (mounted && listening?.value && !document.hidden && selectedModel.value) {
-      const input = buildCursorGazeInput(selectedModel.value, { horizontalRatio: 0, verticalRatio: 0.45 }, "eyes");
+      const input = buildCursorGazeInput(selectedModel.value, { horizontalRatio: 0, verticalRatio: 0.45 }, "listening");
       if (input && runtime.startInteractionGaze(input)) {
         stage = "eyes";
         reportAttentionChanged(true);

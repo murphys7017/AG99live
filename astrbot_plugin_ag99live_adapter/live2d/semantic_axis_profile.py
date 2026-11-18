@@ -16,6 +16,7 @@ from ..protocol.schema_versions import (
 SEMANTIC_AXIS_PROFILE_DIRNAME = "ag99"
 SEMANTIC_AXIS_PROFILE_FILENAME = "semantic_axis_profile.json"
 ALLOWED_CONTROL_ROLES = {"primary", "hint", "derived", "runtime", "ambient", "debug"}
+ALLOWED_INTERACTION_ROLES = {"gaze_x", "gaze_y", "head_yaw", "head_pitch", "head_roll", "body_yaw", "body_roll", "listening"}
 ALLOWED_RELATION_MODES = {"same_direction", "opposite_direction"}
 ALLOWED_RELATION_RULE_KINDS = {"derive", "bounded_ratio"}
 AXIS_ID_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,63}$")
@@ -40,6 +41,7 @@ class SemanticAxisParameterBinding(TypedDict):
     output_range: list[float]
     default_weight: float
     invert: bool
+    interaction_role: NotRequired[str]
     parameter_name: NotRequired[str]
 
 
@@ -969,6 +971,11 @@ def validate_semantic_axis_profile(
                     field_name=f"{axis_id}.parameter_bindings.invert",
                 ),
             }
+            if "interaction_role" in raw_binding:
+                binding["interaction_role"] = _require_allowed_string(
+                    raw_binding["interaction_role"], field_name=f"{axis_id}.{parameter_id}.interaction_role",
+                    allowed_values=ALLOWED_INTERACTION_ROLES,
+                )
             parameter_name = str(raw_binding.get("parameter_name") or "").strip()
             if parameter_name:
                 binding["parameter_name"] = parameter_name

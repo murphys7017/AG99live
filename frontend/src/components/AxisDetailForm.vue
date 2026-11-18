@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { INTERACTION_ROLES } from "../types/semantic-axis-profile";
+import { mapSemanticBindingValue } from "../model-engine/compiler/semanticParameterBinding";
 import type {
   SemanticAxisDefinition,
   SemanticAxisParameterBinding,
@@ -63,6 +65,25 @@ function updateBindingRange(
   if (value === null) return;
   binding[rangeKey][index] = value;
   emit("markDirty");
+}
+
+function changeInteractionRole(binding: SemanticAxisParameterBinding, event: Event): void {
+  const value = (event.target as HTMLSelectElement).value;
+  if (Object.prototype.hasOwnProperty.call(INTERACTION_ROLES, value)) {
+    binding.interaction_role = value as keyof typeof INTERACTION_ROLES;
+  } else {
+    delete binding.interaction_role;
+  }
+  emit("markDirty");
+}
+
+function previewBinding(binding: SemanticAxisParameterBinding): string {
+  return ["-1", "0", "1"].map(level => {
+    const anchor = level === "0" ? props.axis.neutral : props.axis.level_anchors?.[level];
+    if (anchor === undefined) return "—";
+    const result = mapSemanticBindingValue(props.axis, binding, anchor);
+    return result.ok ? String(Number(result.targetValue.toFixed(3))) : "—";
+  }).join(" / ");
 }
 
 function updateBindingWeight(binding: SemanticAxisParameterBinding, event: Event): void {
@@ -438,6 +459,15 @@ function onRemoveBinding(index: number): void {
                   @input="updateBindingRange(binding, 'output_range', 1, $event)"
                 />
               </div>
+            </label>
+            <label class="action-preview__field">
+              <span>桌宠交互角色</span>
+              <select class="settings-card__input" :value="binding.interaction_role ?? ''" @change="changeInteractionRole(binding, $event)">
+                <option value="">自动识别</option>
+                <option v-for="(label, role) in INTERACTION_ROLES" :key="role" :value="role">{{ label }}</option>
+              </select>
+              <small v-if="binding.interaction_role && !['primary', 'hint'].includes(axis.control_role)">将轴设为 primary 或 hint 后，交互角色生效。</small>
+              <small v-if="binding.interaction_role">参数预览（负向 / 中立 / 正向） {{ previewBinding(binding) }}</small>
             </label>
             <label class="action-preview__field">
               <span>Weight（默认强度）</span>

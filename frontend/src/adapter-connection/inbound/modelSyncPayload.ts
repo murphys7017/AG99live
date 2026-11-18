@@ -1,3 +1,4 @@
+import { INTERACTION_ROLES } from "../../types/semantic-axis-profile.js";
 import type {
   ExpressionConstraint,
   ModelSummary,
@@ -956,6 +957,10 @@ function validateSemanticAxis(
       invert: "boolean",
     });
     if (!bindingShape.ok) return bindingShape;
+    if (binding.interaction_role !== undefined && (typeof binding.interaction_role !== "string"
+      || !Object.prototype.hasOwnProperty.call(INTERACTION_ROLES, binding.interaction_role))) {
+      return invalidPayload(type, `${bindingPath}.interaction_role`, "known interaction role");
+    }
     const rawParameterId = String(binding.parameter_id);
     const parameterId = rawParameterId.trim();
     if (!parameterId) {

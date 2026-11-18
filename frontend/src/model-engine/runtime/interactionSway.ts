@@ -66,7 +66,7 @@ export function buildThinkingSwayInput(model: ModelSummary): InteractionSwayInpu
 export function buildCursorGazeInput(
   model: ModelSummary,
   target: GazeTarget,
-  stage: "eyes" | "full" = "full",
+  stage: "eyes" | "full" | "listening" = "full",
 ): InteractionGazeInput | null {
   const profile = model.semantic_axis_profile;
   const axes = profile ? selectCursorGazeAxes(profile, stage) : [];
@@ -160,12 +160,13 @@ function matchInteractionAxis(axes: SemanticAxisDefinition[], role: InteractionA
   for (const axis of axes) {
     const named = axis.id.toLowerCase() === role.axisId;
     const described = axis.semantic_group === role.group && role.direction.test(`${axis.id} ${axis.label}`);
-    const parameterBindings = axis.parameter_bindings.filter((binding) =>
-      binding.default_weight > 0 && (binding.parameter_id === role.parameter
+    const explicit = axis.parameter_bindings.filter(binding => binding.default_weight > 0 && binding.interaction_role === role.axisId);
+    const parameterBindings = explicit.length ? explicit : axis.parameter_bindings.filter((binding) =>
+      !binding.interaction_role && binding.default_weight > 0 && (binding.parameter_id === role.parameter
         || ((named || described) && !standardParameters.has(binding.parameter_id))));
     if (!parameterBindings.length) continue;
     const standard = parameterBindings.some((binding) => binding.parameter_id === role.parameter);
-    const rank = named ? 0 : standard ? 1 : 2;
+    const rank = explicit.length ? -1 : named ? 0 : standard ? 1 : 2;
     if (!best || rank < best.rank) best = { axis, parameterBindings, rank };
   }
   return best;
@@ -182,12 +183,19 @@ function selectLateralAxis(profile: SemanticAxisProfile) {
   return described ?? matchInteractionAxis(axes, gazeX);
 }
 
-function selectCursorGazeAxes(profile: SemanticAxisProfile, stage: "eyes" | "full") {
+function selectCursorGazeAxes(profile: SemanticAxisProfile, stage: "eyes" | "full" | "listening") {
   const axes = eligibleInteractionAxes(profile);
   const result: Array<InteractionAxisMatch & {
     targetComponent: keyof GazeTarget;
     targetRatioScale: number;
   }> = [];
+  if (stage === "listening") {
+    for (const axis of axes) {
+      const parameterBindings = axis.parameter_bindings.filter(b => b.interaction_role === "listening" && b.default_weight > 0);
+      if (parameterBindings.length) result.push({ axis, parameterBindings, rank: -1, targetComponent: "verticalRatio", targetRatioScale: 1 });
+    }
+    if (result.length) return result;
+  }
   function addDirection(targetComponent: keyof GazeTarget, eyeRole: InteractionAxisRole, headRole: InteractionAxisRole) {
     const eye = matchInteractionAxis(axes, eyeRole);
     if (eye) result.push({ ...eye, targetComponent, targetRatioScale: 1 });

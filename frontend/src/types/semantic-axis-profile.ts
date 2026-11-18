@@ -20,7 +20,13 @@ export type SemanticAxisProfileStatus =
   | "user_modified"
   | "stale";
 
+export const INTERACTION_ROLES = {
+  gaze_x: "眼球左右", gaze_y: "眼球上下", head_yaw: "头部左右", head_pitch: "头部俯仰",
+  head_roll: "头部侧倾", body_yaw: "身体左右", body_roll: "身体侧倾", listening: "开口倾听",
+} as const;
+
 export interface SemanticAxisParameterBinding {
+  interaction_role?: keyof typeof INTERACTION_ROLES;
   parameter_id: string;
   parameter_name?: string;
   input_range: [number, number];
