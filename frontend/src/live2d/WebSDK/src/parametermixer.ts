@@ -281,7 +281,7 @@ export class ActiveParameterMixer {
       return { ok: false, owner: "direct_plan", reason: directPlan.failure };
     }
     const claimedParameters = new Set(
-      directPlan.contributions.map((contribution) => contribution.parameterIndex),
+      directPlan.releaseEligible ? [] : directPlan.contributions.map((contribution) => contribution.parameterIndex),
     );
     const idlePlanCollections: Array<{
       state: ActiveDirectParameterFrameState;
@@ -335,9 +335,17 @@ export class ActiveParameterMixer {
       ...idlePlanCollections.flatMap(({ collection }) => collection.contributions),
       ...interactionSway.contributions,
       ...interactionGaze.contributions,
-      ...directPlan.contributions,
       ...lipSyncContributions,
     ];
+    if (directPlan.releaseEligible) {
+      // Its blend-out is over. A parameter taken over by another source now
+      // settles on that source's clock and cannot delay the segment terminal.
+      for (const contribution of contributions) {
+        if (contribution.weight > 0) claimedParameters.add(contribution.parameterIndex);
+      }
+      directPlan.contributions = directPlan.contributions.filter((c) => !claimedParameters.has(c.parameterIndex));
+    }
+    contributions.push(...directPlan.contributions);
     // A stopped plan has already emitted its terminal. Its visible parameters
     // can still settle against the current base pose on the render clock.
     for (const contribution of contributions) claimedParameters.add(contribution.parameterIndex);
