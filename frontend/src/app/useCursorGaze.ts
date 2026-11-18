@@ -73,11 +73,20 @@ export function useCursorGaze(
         revision !== pollRevision
         || !canPoll()
         || selectedModel.value !== model
-        || !target
+      ) {
+        return;
+      }
+      if (
+        !target
         || !Number.isFinite(target.x)
         || !Number.isFinite(target.y)
         || !Number.isFinite(target.horizontalRatio)
       ) {
+        stop();
+        return;
+      }
+      if (active) {
+        runtime.updateInteractionGaze(target.horizontalRatio);
         return;
       }
 
@@ -87,35 +96,22 @@ export function useCursorGaze(
       if (moved) {
         candidate = target;
         candidateSinceMs = now;
-        // Keep the current gaze while the cursor settles on its next target.
-        // The response dynamics will carry the eyes and head to the new point
-        // after the dwell completes.
         return;
       }
-      candidate = target;
       if (now - candidateSinceMs < settings.dwellMs) {
         return;
       }
-      if (!active) {
-        const input = buildCursorGazeInput(model, target.horizontalRatio);
-        if (!input) {
-          return;
-        }
-        const started = runtime.startInteractionGaze(input);
-        if (started !== active) {
-          active = started;
-          reportAttentionChanged(active);
-        }
-        if (started) {
-          console.info("[CursorGaze] dwell gaze started.", {
-            axisId: input.axisId,
-            targetRatio: input.targetRatio,
-            bindingCount: input.bindings.length,
-          });
-        }
+      const input = buildCursorGazeInput(model, target.horizontalRatio);
+      if (!input || !runtime.startInteractionGaze(input)) {
         return;
       }
-      runtime.updateInteractionGaze(target.horizontalRatio);
+      active = true;
+      reportAttentionChanged(true);
+      console.info("[CursorGaze] dwell gaze started.", {
+        axisId: input.axisId,
+        targetRatio: input.targetRatio,
+        bindingCount: input.bindings.length,
+      });
     } catch {
       return;
     } finally {
