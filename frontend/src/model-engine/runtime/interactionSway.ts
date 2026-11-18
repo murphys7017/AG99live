@@ -72,15 +72,15 @@ export function buildCursorGazeInput(
   if (!axes.length || !Number.isFinite(target.horizontalRatio) || !Number.isFinite(target.verticalRatio)) {
     return null;
   }
-  const bindings: InteractionGazeInput["bindings"] = [];
+  const bindings: Array<InteractionGazeInput["bindings"][number] & { axisId: string }> = [];
   const boundParameters = new Set<string>();
-  for (const { axis, targetComponent, targetRatioScale } of axes) {
+  for (const { axis, parameterBindings, targetComponent, targetRatioScale } of axes) {
     const negativeValue = axis.level_anchors?.["-1"];
     const positiveValue = axis.level_anchors?.["1"];
     if (!Number.isFinite(negativeValue) || !Number.isFinite(positiveValue)) {
       continue;
     }
-    for (const binding of axis.parameter_bindings) {
+    for (const binding of parameterBindings) {
       if (boundParameters.has(binding.parameter_id)) continue;
       const neutral = mapSemanticBindingValue(axis, binding, axis.neutral);
       const negative = mapSemanticBindingValue(axis, binding, Number(negativeValue));
@@ -112,35 +112,54 @@ export function buildCursorGazeInput(
     return null;
   }
   return {
-    axisId: axes[0].axis.id,
+    axisId: bindings[0].axisId,
     target: { horizontalRatio: target.horizontalRatio, verticalRatio: target.verticalRatio },
     bindings,
   };
 }
 
+const standardGazeParameters = new Set(["ParamEyeBallX", "ParamEyeBallY", "ParamAngleX", "ParamAngleY"]);
+
 function selectCursorGazeAxes(profile: SemanticAxisProfile, stage: "eyes" | "full") {
   const eligible = profile.axes.filter((axis) =>
     (axis.control_role === "primary" || axis.control_role === "hint")
-    && hasLateralAnchors(axis) && axis.parameter_bindings.length > 0);
+    && hasLateralAnchors(axis) && axis.parameter_bindings.length > 0)
+    .sort((left, right) => Number(left.control_role !== "primary") - Number(right.control_role !== "primary")
+      || left.id.localeCompare(right.id, "en"));
   const result: Array<{
     axis: SemanticAxisDefinition;
+    parameterBindings: SemanticAxisDefinition["parameter_bindings"];
     targetComponent: keyof GazeTarget;
     targetRatioScale: number;
   }> = [];
-  const resolve = (id: string, parameter: string, group: "gaze" | "head", direction: RegExp) =>
-      eligible.find((axis) => axis.id.toLowerCase() === id)
-      ?? eligible.find((axis) => axis.parameter_bindings.some((binding) => binding.parameter_id === parameter))
-      ?? eligible.find((axis) => axis.semantic_group === group && direction.test(`${axis.id} ${axis.label}`));
+  const resolve = (id: string, parameter: string, group: "gaze" | "head", direction: RegExp) => {
+    let best: Pick<typeof result[number], "axis" | "parameterBindings"> | undefined;
+    let bestRank = Infinity;
+    for (const axis of eligible) {
+      const named = axis.id.toLowerCase() === id;
+      const described = axis.semantic_group === group && direction.test(`${axis.id} ${axis.label}`);
+      const parameterBindings = axis.parameter_bindings.filter((binding) =>
+        binding.default_weight > 0 && (binding.parameter_id === parameter
+          || ((named || described) && !standardGazeParameters.has(binding.parameter_id))));
+      if (!parameterBindings.length) continue;
+      const rank = named ? 0 : parameterBindings.some((binding) => binding.parameter_id === parameter) ? 1 : 2;
+      if (rank < bestRank) {
+        bestRank = rank;
+        best = { axis, parameterBindings };
+      }
+    }
+    return best;
+  };
   const addDirection = (
     targetComponent: keyof GazeTarget,
-    eye: SemanticAxisDefinition | undefined,
-    head: SemanticAxisDefinition | undefined,
+    eye: ReturnType<typeof resolve>,
+    head: ReturnType<typeof resolve>,
   ) => {
     if (eye) {
-      result.push({ axis: eye, targetComponent, targetRatioScale: 1 });
+      result.push({ ...eye, targetComponent, targetRatioScale: 1 });
     }
-    if (stage === "full" && head && head !== eye) {
-      result.push({ axis: head, targetComponent, targetRatioScale: eye ? 0.58 : 0.72 });
+    if (stage === "full" && head) {
+      result.push({ ...head, targetComponent, targetRatioScale: eye ? 0.58 : 0.72 });
     }
   };
   const horizontal = /horizontal|left[-_ ]right|左右/iu;
