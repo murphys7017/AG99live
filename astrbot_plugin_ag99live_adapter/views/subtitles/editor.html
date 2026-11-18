@@ -14,10 +14,10 @@
       <div class="panel-heading"><div><h2>自定义 CSS</h2><p>输入时预览，保存后同步到所有已打开的 OBS 字幕页。</p></div><button id="save" type="button" disabled>保存并应用</button></div>
       <label for="css">在默认样式之后覆盖</label>
       <textarea id="css" spellcheck="false" aria-describedby="css-help" disabled></textarea>
-      <p id="css-help">常用变量：<code>--subtitle-font-size</code>、<code>--subtitle-background</code>、<code>--subtitle-color</code>。也可以覆盖 <code>.subtitle-card</code> 等类。</p>
+      <p id="css-help">常用变量：<code>--subtitle-font-size</code>、<code>--subtitle-card-background</code>、<code>--subtitle-color</code>。也可以覆盖 <code>.subtitle-card</code> 等类。</p>
       <div class="actions"><button id="example" type="button">插入变量示例</button><button id="reset" type="button">恢复默认样式</button><span id="result" role="status" aria-live="polite">正在加载…</span></div>
     </section>
-    <section class="setup-panel"><h2>添加到 OBS</h2><p>新建浏览器源，复制下面的地址。建议尺寸 1200 × 260，背景透明；无字幕时整个页面隐藏。</p><div class="url-row"><input id="obs-url" readonly aria-label="OBS 浏览器源地址"><button id="copy" type="button">复制地址</button></div><p>CSS 文件：<code id="css-path"></code>。直接修改文件也会自动应用。</p><p>这里的预览始终展示示例文字，直播页仅显示实际回复。</p></section>
+    <section class="setup-panel"><h2>添加到 OBS</h2><p>新建浏览器源，复制下面的地址。建议尺寸 1200 × 260，字幕源在画面里尽量铺到约八成宽。长字幕可增加源高度。</p><div class="url-row"><input id="obs-url" readonly aria-label="OBS 浏览器源地址"><button id="copy" type="button">复制地址</button></div><p>CSS 文件：<code id="css-path"></code>。直接修改文件也会自动应用。</p><p>这里的预览始终展示示例文字，直播页仅显示实际回复。</p></section>
   </main>
 </body>
 </html>

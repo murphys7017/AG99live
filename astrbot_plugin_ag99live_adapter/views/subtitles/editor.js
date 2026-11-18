@@ -6,7 +6,7 @@
   const preview = document.getElementById("preview");
   const url = document.getElementById("obs-url");
   url.value = `${location.origin}/subtitle/`;
-  const example = ":root {\n  --subtitle-font-size: 20px;\n  --subtitle-background: #141326;\n  --subtitle-card-background: #2c2345;\n  --subtitle-color: #faf8ff;\n}\n\n/* .subtitle-footer { display: none; } */\n";
+  const example = ":root {\n  --subtitle-font-size: clamp(26px, 5.3vw, 64px);\n  --subtitle-card-background: #2c2345;\n  --subtitle-color: #faf8ff;\n}\n";
   let saved = "";
   function showDraft() { preview.contentWindow?.postMessage({ type: "subtitle.css-preview", css: css.value }, location.origin); }
   css.addEventListener("input", () => { result.textContent = "预览已更新，尚未保存"; showDraft(); });

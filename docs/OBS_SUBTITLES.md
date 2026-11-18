@@ -6,10 +6,12 @@
 
 1. 更新 Adapter，并运行更新后的 TypeScript 桌面端或 Native 桌面端。
 2. 重启或重新加载 Adapter。默认字幕地址为 `http://127.0.0.1:18765/subtitle/`。
-3. OBS 新建浏览器源，填写字幕地址。建议尺寸 **1200 × 260**；长文字或大字体需要增加高度。
+3. OBS 新建浏览器源，填写字幕地址。建议尺寸 **1200 × 260**，字幕源在画面里约占八成宽。把来源的下边缘对准希望的字幕位置，字幕换行时向上扩展。字幕较长时可增加来源高度，再把下边缘对回所需位置。
 4. 打开 `http://127.0.0.1:18765/subtitle/editor` 修改 CSS，输入即时预览，点击“保存并应用”同步到 OBS。无需重新加载 OBS。
 
 `?preview=1` 始终显示设计示例，方便调样式；**OBS 请使用不含此参数的直播地址**。直播页无字幕时完全隐藏，背景透明，不显示预览示例或编辑控件。
+
+默认字幕条只显示正文，宽度随文字伸缩。在 1200 px 宽的浏览器源中，默认正文是 60 px。OBS 浏览器源的自定义 CSS 如果设过 `--subtitle-font-size`，可删去该声明以使用新的默认字号。
 
 平台适配器配置新增 `subtitle_port`，默认 `18765`，监听 `127.0.0.1`。存在多个 Adapter 实例时分别配置端口。角色名沿用平台的 `speaker_name`。
 
@@ -19,8 +21,7 @@ CSS 保存于 AstrBot 插件数据目录 `astrbot_plugin_ag99live_adapter/subtit
 
 ```css
 :root {
-  --subtitle-font-size: 22px;
-  --subtitle-background: #141326;
+  --subtitle-font-size: clamp(26px, 5.3vw, 64px);
   --subtitle-card-background: #2c2345;
   --subtitle-border: #8870bb;
   --subtitle-color: #faf8ff;
@@ -30,9 +31,8 @@ CSS 保存于 AstrBot 插件数据目录 `astrbot_plugin_ag99live_adapter/subtit
   --subtitle-max-width: 1100px;
 }
 
-/* 仅保留角色、状态和正文 */
-.subtitle-header, .subtitle-footer { display: none; }
-.subtitle-card { margin-top: 0; }
+/* 需要显示角色和播放状态时启用 */
+/* .subtitle-speaker-row { display: flex; } */
 ```
 
 稳定类名包括 `.subtitle-shell`、`.subtitle-header`、`.subtitle-brand`、`.subtitle-wave`、`.subtitle-card`、`.subtitle-speaker-row`、`.subtitle-avatar`、`.subtitle-speaker`、`.subtitle-status`、`.subtitle-text`、`.subtitle-footer`。
