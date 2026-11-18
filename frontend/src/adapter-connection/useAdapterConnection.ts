@@ -529,6 +529,7 @@ export function createAdapterConnection(
     findActiveAudioSegment: () => findActiveAudioSegment(),
     acknowledgeMotionLabRawEventPersisted: (eventId) =>
       motionLabRawEventRecordedHandler?.(eventId),
+    setSpeechActivity: microphoneRuntime.setSpeechActivity,
     startMicrophoneCapture: (origin) => startMicrophoneCapture(origin),
     stopMicrophoneCapture: (reason) => stopMicrophoneCapture(reason),
     normalizeMotionPayload: options.normalizeMotionPayload,

@@ -38,6 +38,7 @@ export interface AdapterMicrophoneRuntimeState {
   microphoneDeviceId: string;
   microphoneDevices: MicrophoneDeviceInfo[];
   micCapturing: boolean;
+  vadSpeechActive: boolean;
   microphoneStandby: boolean;
   pttModeEnabled: boolean;
   pttKeyBinding: DesktopPttKeyBinding;
@@ -68,6 +69,7 @@ export interface AdapterMicrophoneRuntime {
   setMicrophoneDevices: (devices: readonly MicrophoneDeviceInfo[]) => void;
   refreshMicrophoneDevices: (options?: RefreshMicrophoneDevicesOptions) => Promise<void>;
   toggleMicrophoneCapture: () => Promise<boolean>;
+  setSpeechActivity: (turnId: string, active: boolean) => void;
   startMicrophoneCapture: (origin?: MicrophoneCaptureOrigin) => Promise<boolean>;
   stopMicrophoneCapture: (reason?: string) => Promise<boolean>;
   setPttMode: (enabled: boolean) => void;
@@ -459,6 +461,7 @@ export function createAdapterMicrophoneRuntime(
         audioSequenceBroken = true;
       }
     }
+    deps.state.vadSpeechActive = false;
     deps.state.micCapturing = false;
     deps.state.microphoneStandby = !request.releaseRuntime && deps.state.pttModeEnabled
       && isMicrophoneCaptureRuntimeActive();
@@ -742,6 +745,7 @@ export function createAdapterMicrophoneRuntime(
   }
 
   function clearMicCaptureSession(): void {
+    deps.state.vadSpeechActive = false;
     activeMicTurnId = null;
     activeMicStreamId = null;
     activeMicSeq = 0;
@@ -750,7 +754,14 @@ export function createAdapterMicrophoneRuntime(
     audioSequenceBroken = false;
   }
 
+  function setSpeechActivity(turnId: string, active: boolean): void {
+    if (deps.state.micCapturing && !deps.state.pttModeEnabled && activeMicTurnId === turnId) {
+      deps.state.vadSpeechActive = active;
+    }
+  }
+
   return {
+    setSpeechActivity,
     setMicrophoneDevice,
     setMicrophoneDevices,
     refreshMicrophoneDevices,

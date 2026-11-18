@@ -23,6 +23,7 @@ from .constants import (
     SOURCE_ADAPTER,
     TYPE_CONTROL_ERROR,
     TYPE_CONTROL_INTERRUPT,
+    TYPE_CONTROL_SPEECH_ACTIVITY,
     TYPE_CONTROL_START_MIC,
     TYPE_CONTROL_SYNTH_FINISHED,
     TYPE_CONTROL_TURN_FINISHED,
@@ -353,6 +354,15 @@ def build_control_turn_finished(
         turn_id=turn_id,
         source=SOURCE_ADAPTER,
         payload=payload,
+    )
+
+
+def build_control_speech_activity(turn_id: str, *, active: bool) -> dict[str, Any]:
+    return build_message_envelope(
+        TYPE_CONTROL_SPEECH_ACTIVITY,
+        source=SOURCE_ADAPTER,
+        turn_id=turn_id,
+        payload={"active": active},
     )
 
 

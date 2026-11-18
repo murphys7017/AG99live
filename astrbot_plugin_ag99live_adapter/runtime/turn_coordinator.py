@@ -1461,17 +1461,11 @@ class TurnCoordinator:
             self._input_preparation.cancel()
             self._input_preparation.start(normalized_capture_turn_id)
         self._active_speech_capture_turns.add(normalized_capture_turn_id)
-        active_turn_id = self._active_vad_turn_by_capture_turn.get(
+        active_turn_id = self.session_state.current_turn_id or self._active_vad_turn_by_capture_turn.get(
             normalized_capture_turn_id
         )
-        if active_turn_id:
-            if active_turn_id in self._events_by_turn_id:
-                await self._handle_interrupt_signal(active_turn_id)
-            else:
-                self._active_vad_turn_by_capture_turn.pop(
-                    normalized_capture_turn_id,
-                    None,
-                )
+        if active_turn_id and active_turn_id in self._events_by_turn_id:
+            await self.abort_turn_from_backend(turn_id=active_turn_id, reason="interrupted")
 
         async with self._turn_lock:
             await self._interrupt_passive_work()

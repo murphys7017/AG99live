@@ -51,6 +51,7 @@ export interface AdapterInboundRuntimeDeps {
   markDesktopSettingsSyncComplete: (
     envelope: ProtocolEnvelope<SystemDesktopSettingsSyncCompletePayload>,
   ) => void;
+  setSpeechActivity: (turnId: string, active: boolean) => void;
   startMicrophoneCapture: (origin?: "manual" | "ptt" | "auto") => Promise<boolean>;
   stopMicrophoneCapture: (reason?: string) => Promise<boolean>;
   normalizeMotionPayload: MotionPayloadNormalizer;
@@ -231,6 +232,7 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
         deps.reportOutputSegmentRejected(message, envelope),
       findActiveAudioSegment: () => deps.findActiveAudioSegment(),
       normalizeMotionPayload: deps.normalizeMotionPayload,
+      setSpeechActivity: deps.setSpeechActivity,
       startMicrophoneCapture: (origin) => deps.startMicrophoneCapture(origin),
       stopMicrophoneCapture: (reason) => deps.stopMicrophoneCapture(reason),
       notifyTurnLifecycle: (event) => {

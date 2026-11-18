@@ -4,6 +4,7 @@ export interface ConnectionRuntimeState {
   serverInfo: unknown;
   activeWsAddress: string;
   micCapturing: boolean;
+  vadSpeechActive: boolean;
   microphoneStandby: boolean;
   assistantTextDeliveryTurnId: string | null;
   turnFinishedTurnId: string | null;
@@ -51,6 +52,7 @@ export async function resetConnectionRuntimeState(
     s.currentTurnId = null;
     s.serverInfo = null;
     s.activeWsAddress = "";
+    s.vadSpeechActive = false;
     s.micCapturing = false;
     s.assistantTextDeliveryTurnId = null;
     s.turnFinishedTurnId = null;

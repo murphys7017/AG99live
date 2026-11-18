@@ -17,7 +17,7 @@ export interface AmbientActionContext {
   modelReady: boolean;
   ambientMotionEnabled: boolean;
   audioPlaying: boolean;
-  pushToTalkActive: boolean;
+  speechInputActive: boolean;
   conversationPreparing: boolean;
   conversationActive: boolean;
   manualPreviewActive: boolean;
@@ -349,7 +349,7 @@ function getContextRejectionReason(
   if (!context.ambientMotionEnabled) {
     return "ambient_action_disabled";
   }
-  if (context.pushToTalkActive) {
+  if (context.speechInputActive) {
     return "ambient_action_microphone_active";
   }
   if (context.audioPlaying) {

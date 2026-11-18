@@ -19,6 +19,7 @@ export const INBOUND_MESSAGE_TYPES = {
   CONTROL_TURN_STARTED: "control.turn_started",
   CONTROL_TURN_FINISHED: "control.turn_finished",
   CONTROL_INTERRUPT: "control.interrupt",
+  CONTROL_SPEECH_ACTIVITY: "control.speech_activity",
   CONTROL_START_MIC: "control.start_mic",
   CONTROL_SYNTH_FINISHED: "control.synth_finished",
   CONTROL_ERROR: "control.error",

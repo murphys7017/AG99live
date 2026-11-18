@@ -9,6 +9,7 @@ export function useCursorGaze(
   selectedModel: Ref<ModelSummary | null>,
   runtime: Live2dRuntimePort,
   onAttentionChanged?: (active: boolean) => void,
+  listening?: Readonly<Ref<boolean>>,
 ): void {
   const settings = useCursorGazeSettings();
   let timer: number | null = null;
@@ -30,6 +31,7 @@ export function useCursorGaze(
 
   function canPoll(): boolean {
     return mounted
+      && !listening?.value
       && settings.enabled
       && !document.hidden
       && selectedModel.value !== null
@@ -139,6 +141,14 @@ export function useCursorGaze(
   }
 
   function start(): void {
+    if (mounted && listening?.value && !document.hidden && selectedModel.value) {
+      const input = buildCursorGazeInput(selectedModel.value, { horizontalRatio: 0, verticalRatio: 0.45 }, "eyes");
+      if (input && runtime.startInteractionGaze(input)) {
+        stage = "eyes";
+        reportAttentionChanged(true);
+      }
+      return;
+    }
     if (!canPoll()) {
       return;
     }
@@ -153,7 +163,7 @@ export function useCursorGaze(
     }
   }
 
-  watch(selectedModel, () => {
+  watch([selectedModel, () => listening?.value], () => {
     stop();
     start();
   }, { flush: "sync" });

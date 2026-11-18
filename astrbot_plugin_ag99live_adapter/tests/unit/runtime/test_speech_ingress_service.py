@@ -267,7 +267,8 @@ def test_fast_asr_streams_partial_text_and_flushes_audio_tail(
             ))
 
         assert result["text"] == "complete final"
-        assert sent_messages[0]["payload"] == {
+        transcriptions = [item for item in sent_messages if item["type"] == "output.transcription"]
+        assert transcriptions[0]["payload"] == {
             "text": "live partial",
             "stage": "streaming",
         }
@@ -492,8 +493,12 @@ def test_handle_manual_binary_audio_stream_chunk_uses_vad_segments(
     assert result["raw_message"]["turn_id"] == "input:manual-binary:vad:1"
     assert result["raw_message"]["payload"]["stream_id"] == "mic:manual"
     assert vad_started_turn_ids == ["input:manual-binary"]
-    assert sent_messages[0]["type"] == "output.transcription"
-    assert sent_messages[0]["turn_id"] == "input:manual-binary:vad:1"
+    assert [(item["type"], item["turn_id"]) for item in sent_messages] == [
+        ("control.speech_activity", "input:manual-binary"),
+        ("control.speech_activity", "input:manual-binary"),
+        ("output.transcription", "input:manual-binary:vad:1"),
+    ]
+    assert [item["payload"]["active"] for item in sent_messages[:2]] == [True, False]
 
 
 def test_vad_speech_end_callback_runs_when_transcription_has_no_message(

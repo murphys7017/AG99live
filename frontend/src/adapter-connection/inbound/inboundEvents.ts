@@ -141,6 +141,7 @@ type InboundPassthroughEvent =
   | { kind: "output_transcription"; envelope: ProtocolEnvelope<OutputTranscriptionPayload> }
   | { kind: "output_execution"; envelope: ProtocolEnvelope<OutputExecutionPayload> }
   | { kind: "control_error"; envelope: ProtocolEnvelope<ControlErrorPayload> }
+  | { kind: "speech_activity"; turnId: string; active: boolean; envelope: ProtocolEnvelope<unknown> }
   | { kind: "start_mic"; envelope: ProtocolEnvelope<unknown> }
   | {
     kind: "protocol_error";
@@ -410,6 +411,17 @@ export function mapInboundEnvelopeToEvent(
           envelope,
         };
       }
+    case INBOUND_MESSAGE_TYPES.CONTROL_SPEECH_ACTIVITY: {
+      const turn = requireTurnId(envelope);
+      if (!turn.ok) return turn.event;
+      const payload = envelope.payload;
+      if (!payload || typeof payload !== "object" || !("active" in payload) || typeof payload.active !== "boolean") {
+        return protocolPayloadError(envelope, {
+          code: "invalid_payload", path: "active", message: "speech_activity requires a boolean active field",
+        });
+      }
+      return { kind: "speech_activity", turnId: turn.turnId, active: payload.active, envelope };
+    }
     case INBOUND_MESSAGE_TYPES.CONTROL_START_MIC:
       return {
         kind: "start_mic",

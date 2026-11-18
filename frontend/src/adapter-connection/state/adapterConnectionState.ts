@@ -49,6 +49,7 @@ export function createAdapterConnectionState() {
     lastImageCount: 0,
     currentTurnId: null as string | null,
     micCapturing: false,
+    vadSpeechActive: false,
     microphoneStandby: false,
     pttModeEnabled: loadStoredPttModeEnabled(),
     pttKeyBinding: loadStoredPttKeyBinding(),

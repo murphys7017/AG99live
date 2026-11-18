@@ -354,6 +354,16 @@ def test_vad_speech_start_cancels_idle_request_without_interrupting_turn(
         await TurnCoordinator._handle_vad_speech_ended(runtime, "capture-1")
         assert not runtime._active_speech_capture_turns
 
+        async def abort_visible_turn(*, turn_id: str, reason: str) -> None:
+            assert reason == "interrupted"
+            interrupted_turns.append(turn_id)
+
+        runtime.abort_turn_from_backend = abort_visible_turn
+        runtime._events_by_turn_id[session_state.current_turn_id] = object()
+        await TurnCoordinator._handle_vad_speech_started(runtime, "another-capture")
+        assert interrupted_turns == ["dialogue:turn-1"]
+        assert runtime._active_speech_capture_turns == {"another-capture"}
+
     asyncio.run(run_case())
 
 

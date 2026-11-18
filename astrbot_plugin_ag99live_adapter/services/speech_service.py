@@ -25,6 +25,7 @@ from astrbot.api import logger
 from ..protocol.binary_audio import BinaryAudioChunkFrame
 from ..protocol.builder import (
     build_control_error,
+    build_control_speech_activity,
     build_output_transcription,
 )
 from ..providers.contracts import SttResult, SttSessionOptions
@@ -149,6 +150,7 @@ class AudioStreamState:
     streaming_asr: StreamingASR | None = None
     streaming_asr_pending_pcm: bytearray = field(default_factory=bytearray)
     streaming_text: str = ""
+    vad_speech_active: bool = False
     vad_pcm_chunks: list[bytes] = field(default_factory=list)
     fast_final_text: str = ""
     sealed: bool = False
@@ -740,6 +742,7 @@ class SpeechIngressService:
             if turn_id is not None and stream.capture_turn_id != turn_id:
                 continue
             self._audio_streams.pop(key, None)
+            await self._set_vad_activity(stream, active=False)
             self._review_audio.pop(str(stream.capture_turn_id or "").strip(), None)
             for task in (
                 stream.transcription_task,
@@ -805,6 +808,7 @@ class SpeechIngressService:
         stream.streaming_asr_pending_pcm.clear()
         stream.streaming_text = ""
         stream.fast_final_text = ""
+        await self._set_vad_activity(stream, active=False)
         if self._on_capture_abandoned is not None and stream.capture_turn_id is not None:
             await self._on_capture_abandoned(stream.capture_turn_id)
         await self._emit_input_error(
@@ -879,10 +883,12 @@ class SpeechIngressService:
                 stream.streaming_text = ""
                 if stream.streaming_asr is not None:
                     stream.streaming_asr.reset()
+                await self._set_vad_activity(stream, active=True)
                 await self._notify_vad_speech_started(message)
             elif audio_bytes == b"<|RESUME|>":
                 continue
             elif len(audio_bytes) > 1024:
+                await self._set_vad_activity(stream, active=False)
                 stream.vad_pcm_chunks.append(audio_bytes)
                 chunk = (
                     np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
@@ -903,6 +909,12 @@ class SpeechIngressService:
                 if built_message is not None:
                     return built_message
         return None
+
+    async def _set_vad_activity(self, stream: AudioStreamState, *, active: bool) -> None:
+        if stream.vad_speech_active == active or not stream.capture_turn_id:
+            return
+        stream.vad_speech_active = active
+        await self._send_json(build_control_speech_activity(stream.capture_turn_id, active=active))
 
     async def _notify_vad_speech_started(self, message) -> None:
         capture_turn_id = str(getattr(message, "turn_id", "") or "").strip()

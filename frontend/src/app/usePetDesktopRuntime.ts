@@ -134,14 +134,15 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     });
     activePresencePreparation = null;
   }
+  const { adapter, playbackTimeline } = conversationPlayback;
+  const listening = computed(() => adapter.state.micCapturing && (adapter.state.pttModeEnabled || adapter.state.vadSpeechActive));
   useCursorGaze(selectedModel, live2dRuntime, (active) => {
     presenceStateStore.dispatch({
       source: "cursor_gaze",
       type: "attention.changed",
       active,
     });
-  });
-  const { adapter, playbackTimeline } = conversationPlayback;
+  }, listening);
   watch(
     () => adapter.state.status,
     (status) => {
@@ -154,7 +155,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     { immediate: true },
   );
   watch(
-    () => [adapter.state.micCapturing, adapter.state.microphoneStandby] as const,
+    () => [listening.value, adapter.state.microphoneStandby || (adapter.state.micCapturing && !listening.value)] as const,
     ([capturing, standby]) => {
       presenceStateStore.dispatch({
         source: "adapter_microphone",
@@ -554,7 +555,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
         && selectedModel.value !== null,
       ambientMotionEnabled: live2dPresentationSettings.ambientMotionEnabled,
       audioPlaying: s.isPlayingAudio,
-      pushToTalkActive: s.pttModeEnabled && s.micCapturing,
+      speechInputActive: listening.value,
       conversationPreparing: presence.conversationPhase === "preparing",
       conversationActive: Boolean(
         (s.currentTurnId && s.turnFinishedTurnId !== s.currentTurnId)
@@ -824,6 +825,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       s.isPlayingAudio,
       s.micCapturing,
       s.pttModeEnabled,
+      s.vadSpeechActive,
       s.currentTurnId,
       s.turnFinishedTurnId,
       manualPreviewText.value,

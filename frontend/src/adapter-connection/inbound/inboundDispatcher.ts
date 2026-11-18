@@ -116,6 +116,7 @@ export interface InboundDispatchDeps {
     | { ok: true; payload: NormalizedMotionPayload }
     | { ok: false; reason: string };
   // mic
+  setSpeechActivity: (turnId: string, active: boolean) => void;
   startMicrophoneCapture: (origin?: "manual" | "ptt" | "auto") => Promise<boolean>;
   stopMicrophoneCapture: (reason?: string) => Promise<boolean>;
   notifyTurnLifecycle: (event: { phase: "started" | "terminal"; turnId: string }) => void;
@@ -177,6 +178,9 @@ export async function dispatchInboundEvent(
       deps.state.statusMessage = `执行：${payload.name}（${payload.phase}）`;
       return;
     }
+    case "speech_activity":
+      deps.setSpeechActivity(event.turnId, event.active);
+      return;
     case "turn_started":
     case "turn_finished":
     case "interrupt":
