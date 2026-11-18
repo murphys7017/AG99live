@@ -15,7 +15,13 @@ export type MotionPlaybackStartResult =
   | { status: "rejected"; reason: string }
   | { status: "started"; runId: string };
 
+export interface GazeTarget {
+  horizontalRatio: number;
+  verticalRatio: number;
+}
+
 export interface InteractionParameterBinding {
+  targetComponent?: keyof GazeTarget;
   /** Optional semantic axis owner for mixed gaze inputs. */
   axisId?: string;
   /** Scales the target excursion around the binding's neutral value. */
@@ -44,7 +50,7 @@ export interface InteractionSwayInput {
 
 export interface InteractionGazeInput {
   axisId: string;
-  targetRatio: number;
+  target: GazeTarget;
   bindings: InteractionSwayInput["bindings"];
 }
 
@@ -92,7 +98,7 @@ declare global {
       startInteractionSway?: (input: InteractionSwayInput) => boolean;
       stopInteractionSway?: () => void;
       startInteractionGaze?: (input: InteractionGazeInput) => boolean;
-      updateInteractionGaze?: (targetRatio: number) => void;
+      updateInteractionGaze?: (target: GazeTarget) => boolean;
       stopInteractionGaze?: () => void;
       beginExternalAudioSignalSource?: (
         sourceId: string,

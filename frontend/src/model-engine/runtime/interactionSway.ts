@@ -1,5 +1,6 @@
 import type { ModelSummary } from "../../types/protocol.js";
 import type {
+  GazeTarget,
   InteractionGazeInput,
   InteractionSwayInput,
 } from "../../types/live2d-runtime.d.ts";
@@ -65,21 +66,23 @@ export function buildThinkingSwayInput(model: ModelSummary): InteractionSwayInpu
 
 export function buildCursorGazeInput(
   model: ModelSummary,
-  targetRatio: number,
+  target: GazeTarget,
 ): InteractionGazeInput | null {
   const profile = model.semantic_axis_profile;
   const axes = profile ? selectCursorGazeAxes(profile) : [];
-  if (!axes.length || !Number.isFinite(targetRatio)) {
+  if (!axes.length || !Number.isFinite(target.horizontalRatio) || !Number.isFinite(target.verticalRatio)) {
     return null;
   }
   const bindings: InteractionGazeInput["bindings"] = [];
-  for (const { axis, targetRatioScale } of axes) {
+  const boundParameters = new Set<string>();
+  for (const { axis, targetComponent, targetRatioScale } of axes) {
     const negativeValue = axis.level_anchors?.["-1"];
     const positiveValue = axis.level_anchors?.["1"];
     if (!Number.isFinite(negativeValue) || !Number.isFinite(positiveValue)) {
       continue;
     }
     for (const binding of axis.parameter_bindings) {
+      if (boundParameters.has(binding.parameter_id)) continue;
       const neutral = mapSemanticBindingValue(axis, binding, axis.neutral);
       const negative = mapSemanticBindingValue(axis, binding, Number(negativeValue));
       const positive = mapSemanticBindingValue(axis, binding, Number(positiveValue));
@@ -90,8 +93,10 @@ export function buildCursorGazeInput(
         axis,
         mapSemanticBindingDynamics(axis, binding),
       );
+      boundParameters.add(binding.parameter_id);
       bindings.push({
         axisId: axis.id,
+        targetComponent,
         targetRatioScale,
         parameterId: binding.parameter_id,
         neutralValue: neutral.targetValue,
@@ -109,29 +114,45 @@ export function buildCursorGazeInput(
   }
   return {
     axisId: axes[0].axis.id,
-    targetRatio: Math.max(-1, Math.min(1, targetRatio)),
+    target: { horizontalRatio: target.horizontalRatio, verticalRatio: target.verticalRatio },
     bindings,
   };
 }
 
-function selectCursorGazeAxes(
-  profile: SemanticAxisProfile,
-): Array<{ axis: SemanticAxisDefinition; targetRatioScale: number }> {
-  const gazeAxis = selectGazeAxis(profile);
-  const headAxis = selectHeadGazeAxis(profile, gazeAxis?.id ?? null);
-  if (gazeAxis && headAxis) {
-    return [
-      { axis: gazeAxis, targetRatioScale: 1 },
-      { axis: headAxis, targetRatioScale: 0.58 },
-    ];
-  }
-  if (gazeAxis) {
-    return [{ axis: gazeAxis, targetRatioScale: 1 }];
-  }
-  if (headAxis) {
-    return [{ axis: headAxis, targetRatioScale: 0.72 }];
-  }
-  return [];
+function selectCursorGazeAxes(profile: SemanticAxisProfile) {
+  const eligible = profile.axes.filter((axis) =>
+    (axis.control_role === "primary" || axis.control_role === "hint")
+    && hasLateralAnchors(axis) && axis.parameter_bindings.length > 0);
+  const result: Array<{
+    axis: SemanticAxisDefinition;
+    targetComponent: keyof GazeTarget;
+    targetRatioScale: number;
+  }> = [];
+  const resolve = (id: string, parameter: string, group: "gaze" | "head", direction: RegExp) =>
+      eligible.find((axis) => axis.id.toLowerCase() === id)
+      ?? eligible.find((axis) => axis.parameter_bindings.some((binding) => binding.parameter_id === parameter))
+      ?? eligible.find((axis) => axis.semantic_group === group && direction.test(`${axis.id} ${axis.label}`));
+  const addDirection = (
+    targetComponent: keyof GazeTarget,
+    eye: SemanticAxisDefinition | undefined,
+    head: SemanticAxisDefinition | undefined,
+  ) => {
+    if (eye) {
+      result.push({ axis: eye, targetComponent, targetRatioScale: 1 });
+    }
+    if (head && head !== eye) {
+      result.push({ axis: head, targetComponent, targetRatioScale: eye ? 0.58 : 0.72 });
+    }
+  };
+  const horizontal = /horizontal|left[-_ ]right|左右/iu;
+  const vertical = /vertical|up[-_ ]down|上下/iu;
+  addDirection("horizontalRatio",
+    resolve("gaze_x", "ParamEyeBallX", "gaze", horizontal),
+    resolve("head_yaw", "ParamAngleX", "head", /yaw|horizontal|左右|扭头/iu));
+  addDirection("verticalRatio",
+    resolve("gaze_y", "ParamEyeBallY", "gaze", vertical),
+    resolve("head_pitch", "ParamAngleY", "head", /pitch|vertical|上下|俯仰/iu));
+  return result;
 }
 
 function selectLateralAxis(profile: SemanticAxisProfile): SemanticAxisDefinition | null {
@@ -143,34 +164,6 @@ function selectLateralAxis(profile: SemanticAxisProfile): SemanticAxisDefinition
       && lateralAxisPriority(axis) !== null
     ))
     .sort((left, right) => lateralAxisPriority(left)! - lateralAxisPriority(right)!)[0]
-    ?? null;
-}
-
-function selectGazeAxis(profile: SemanticAxisProfile): SemanticAxisDefinition | null {
-  return profile.axes
-    .filter((axis) => (
-      (axis.control_role === "primary" || axis.control_role === "hint")
-      && hasLateralAnchors(axis)
-      && axis.parameter_bindings.length > 0
-      && gazeAxisPriority(axis) !== null
-    ))
-    .sort((left, right) => gazeAxisPriority(left)! - gazeAxisPriority(right)!)[0]
-    ?? null;
-}
-
-function selectHeadGazeAxis(
-  profile: SemanticAxisProfile,
-  excludedAxisId: string | null,
-): SemanticAxisDefinition | null {
-  return profile.axes
-    .filter((axis) => (
-      axis.id !== excludedAxisId
-      && (axis.control_role === "primary" || axis.control_role === "hint")
-      && hasLateralAnchors(axis)
-      && axis.parameter_bindings.length > 0
-      && headGazeAxisPriority(axis) !== null
-    ))
-    .sort((left, right) => headGazeAxisPriority(left)! - headGazeAxisPriority(right)!)[0]
     ?? null;
 }
 
@@ -188,25 +181,6 @@ function lateralAxisPriority(axis: SemanticAxisDefinition): number | null {
   if (id === "head_roll") return 1;
   if (id === "body_yaw" || id === "body_roll") return 2;
   if (/(?:gaze|yaw|roll|左右|扭头|摇摆)/u.test(`${id} ${text}`)) return 3;
-  return null;
-}
-
-function gazeAxisPriority(axis: SemanticAxisDefinition): number | null {
-  const id = axis.id.toLowerCase();
-  const text = `${axis.label} ${axis.description} ${axis.usage_notes}`.toLowerCase();
-  if (id === "gaze_x") return 0;
-  if (/(?:gaze|视线|眼神)/u.test(`${id} ${text}`)) return 1;
-  return null;
-}
-
-function headGazeAxisPriority(axis: SemanticAxisDefinition): number | null {
-  const id = axis.id.toLowerCase();
-  const text = `${axis.label} ${axis.description} ${axis.usage_notes}`.toLowerCase();
-  if (id === "head_yaw") return 0;
-  if (/(?:yaw|扭头|左右)/u.test(`${id} ${text}`)
-    && axis.semantic_group === "head") {
-    return 1;
-  }
   return null;
 }
 

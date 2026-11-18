@@ -1,4 +1,5 @@
 import type { CubismIdHandle } from "@framework/id/cubismid";
+import type { GazeTarget } from "../../../types/live2d-runtime";
 import type { CubismModel } from "@framework/model/cubismmodel";
 import type { csmVector } from "@framework/type/csmvector";
 import {
@@ -109,10 +110,11 @@ export class ActiveParameterRuntime {
     this.interactionGaze = state;
   }
 
-  public updateInteractionGaze(targetRatio: number): void {
-    if (this.interactionGaze && Number.isFinite(targetRatio)) {
-      this.interactionGaze.targetRatio = Math.max(-1, Math.min(1, targetRatio));
-    }
+  public updateInteractionGaze(target: GazeTarget): boolean {
+    if (!this.interactionGaze || !Number.isFinite(target.horizontalRatio)
+        || !Number.isFinite(target.verticalRatio)) return false;
+    this.interactionGaze.target = target;
+    return true;
   }
 
   public stopInteractionGaze(): void {

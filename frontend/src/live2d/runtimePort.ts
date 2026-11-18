@@ -2,6 +2,7 @@ import type {
   DirectParameterPlanInput,
   DirectParameterPlanStartOptions,
   DirectParameterPlanTerminalStatus,
+  GazeTarget,
   InteractionGazeInput,
   InteractionSwayInput,
   MotionResourceLifecycleCallbacks,
@@ -40,7 +41,7 @@ export interface Live2dRuntimePort {
   startInteractionSway(input: InteractionSwayInput): boolean;
   stopInteractionSway(): void;
   startInteractionGaze(input: InteractionGazeInput): boolean;
-  updateInteractionGaze(targetRatio: number): void;
+  updateInteractionGaze(target: GazeTarget): boolean;
   stopInteractionGaze(): void;
   beginExternalAudioSignalSource(
     sourceId: string,
@@ -107,8 +108,8 @@ export function createWindowLive2dRuntimePort(): Live2dRuntimePort {
     startInteractionGaze(input) {
       return getAdapter()?.startInteractionGaze?.(input) ?? false;
     },
-    updateInteractionGaze(targetRatio) {
-      getAdapter()?.updateInteractionGaze?.(targetRatio);
+    updateInteractionGaze(target) {
+      return getAdapter()?.updateInteractionGaze?.(target) ?? false;
     },
     stopInteractionGaze() {
       getAdapter()?.stopInteractionGaze?.();

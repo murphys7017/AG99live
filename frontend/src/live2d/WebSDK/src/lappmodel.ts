@@ -56,7 +56,7 @@ import {
   type ActiveInteractionSwayState,
   type DirectSemanticParameterBinding,
 } from "./parametermixer";
-import type { InteractionGazeInput, InteractionSwayInput } from "../../../types/live2d-runtime";
+import type { GazeTarget, InteractionGazeInput, InteractionSwayInput } from "../../../types/live2d-runtime";
 import {
   ActiveParameterRuntime,
   type ActiveParameterFrameFailure,
@@ -2180,7 +2180,8 @@ export class LAppModel extends CubismUserModel {
   }
 
   public startInteractionGaze(input: InteractionGazeInput): boolean {
-    if (!this._model || this._state != LoadStep.CompleteSetup || !Number.isFinite(input.targetRatio)) {
+    if (!this._model || this._state != LoadStep.CompleteSetup
+        || !Number.isFinite(input.target.horizontalRatio) || !Number.isFinite(input.target.verticalRatio)) {
       return false;
     }
     const bindings = this.createInteractionBindings(input);
@@ -2188,7 +2189,7 @@ export class LAppModel extends CubismUserModel {
       return false;
     }
     this._activeParameterRuntime.startInteractionGaze({
-      targetRatio: Math.max(-1, Math.min(1, input.targetRatio)),
+      target: input.target,
       elapsedMs: 0,
       bindings,
       timing: this.createPersistentInteractionTiming(),
@@ -2196,8 +2197,8 @@ export class LAppModel extends CubismUserModel {
     return true;
   }
 
-  public updateInteractionGaze(targetRatio: number): void {
-    this._activeParameterRuntime.updateInteractionGaze(targetRatio);
+  public updateInteractionGaze(target: GazeTarget): boolean {
+    return this._activeParameterRuntime.updateInteractionGaze(target);
   }
 
   public stopInteractionGaze(): void {
@@ -2240,6 +2241,7 @@ export class LAppModel extends CubismUserModel {
       }
       seenParameterIndices.add(parameterIndex);
       bindings.push({
+        targetComponent: binding.targetComponent,
         axisId,
         parameterIdRaw,
         parameterIndex,

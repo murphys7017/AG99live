@@ -5,12 +5,6 @@ import type { Live2dRuntimePort } from "../live2d/runtimePort.js";
 import { desktopHostPort } from "../desktop-bridge/desktopHostPort.js";
 import { useCursorGazeSettings } from "./cursorGazeSettings";
 
-interface CursorTarget {
-  x: number;
-  y: number;
-  horizontalRatio: number;
-}
-
 export function useCursorGaze(
   selectedModel: Ref<ModelSummary | null>,
   runtime: Live2dRuntimePort,
@@ -18,7 +12,7 @@ export function useCursorGaze(
 ): void {
   const settings = useCursorGazeSettings();
   let timer: number | null = null;
-  let candidate: CursorTarget | null = null;
+  let candidate: { x: number; y: number } | null = null;
   let candidateSinceMs = 0;
   let active = false;
   let mounted = false;
@@ -81,12 +75,13 @@ export function useCursorGaze(
         || !Number.isFinite(target.x)
         || !Number.isFinite(target.y)
         || !Number.isFinite(target.horizontalRatio)
+        || !Number.isFinite(target.verticalRatio)
       ) {
         stop();
         return;
       }
       if (active) {
-        runtime.updateInteractionGaze(target.horizontalRatio);
+        if (!runtime.updateInteractionGaze(target)) stop();
         return;
       }
 
@@ -101,7 +96,7 @@ export function useCursorGaze(
       if (now - candidateSinceMs < settings.dwellMs) {
         return;
       }
-      const input = buildCursorGazeInput(model, target.horizontalRatio);
+      const input = buildCursorGazeInput(model, target);
       if (!input || !runtime.startInteractionGaze(input)) {
         return;
       }
@@ -109,11 +104,11 @@ export function useCursorGaze(
       reportAttentionChanged(true);
       console.info("[CursorGaze] dwell gaze started.", {
         axisId: input.axisId,
-        targetRatio: input.targetRatio,
+        target: input.target,
         bindingCount: input.bindings.length,
       });
     } catch {
-      return;
+      if (revision === pollRevision) stop();
     } finally {
       pollInFlight = false;
       schedulePoll();

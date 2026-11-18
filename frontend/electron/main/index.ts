@@ -523,7 +523,11 @@ function setupIpc(): void {
         (cursor.x - (bounds.x + bounds.width / 2)) / Math.max(1, bounds.width * 1.5),
       ),
     );
-    return { x: cursor.x, y: cursor.y, horizontalRatio };
+    // Screen y increases downwards. The model's positive vertical target is up.
+    const verticalRatio = Math.max(-1, Math.min(1,
+      (bounds.y + bounds.height / 2 - cursor.y) / Math.max(1, bounds.height * 1.5),
+    ));
+    return { x: cursor.x, y: cursor.y, horizontalRatio, verticalRatio };
   });
 
   ipcMain.on("desktop:runtime-bridge-message", (event, payload: unknown) => {

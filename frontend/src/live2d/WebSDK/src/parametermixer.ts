@@ -1,4 +1,5 @@
 import type { CubismIdHandle } from "@framework/id/cubismid";
+import type { GazeTarget } from "../../../types/live2d-runtime";
 import type { CubismModel } from "@framework/model/cubismmodel";
 import type { csmVector } from "@framework/type/csmvector";
 import type { DirectParameterExecutionPlan } from "./directparameterplan";
@@ -85,6 +86,7 @@ export interface ActiveIdlePlan {
 }
 
 export interface ActiveInteractionSwayBinding {
+  targetComponent?: keyof GazeTarget;
   axisId: string;
   parameterIdRaw: string;
   parameterIndex: number;
@@ -106,7 +108,7 @@ export interface ActiveInteractionSwayState {
 }
 
 export interface ActiveInteractionGazeState {
-  targetRatio: number;
+  target: GazeTarget;
   elapsedMs: number;
   bindings: ActiveInteractionSwayBinding[];
   timing: DirectParameterExecutionPlan["timing"];
@@ -700,24 +702,26 @@ export class ActiveParameterMixer {
     if (!gaze) {
       return { contributions: [] };
     }
-    const targetRatio = Math.max(-1, Math.min(1, gaze.targetRatio));
     return {
-      contributions: gaze.bindings.map((binding) => ({
-        parameterIdRaw: binding.parameterIdRaw,
-        parameterIndex: binding.parameterIndex,
-        owner: "interaction_gaze" as const,
-        source: `interaction_gaze:${binding.axisId}`,
-        value: targetRatio >= 0
-          ? interpolate(binding.neutralValue, binding.positiveValue, targetRatio)
-          : interpolate(binding.neutralValue, binding.negativeValue, -targetRatio),
-        weight: binding.weight,
-        priority: PARAMETER_MIX_PRIORITY.interactionGaze,
-        presentation: {
-          node: binding.presentation,
-          elapsedMs: gaze.elapsedMs,
-          timing: gaze.timing,
-        },
-      })),
+      contributions: gaze.bindings.map((binding) => {
+        const ratio = Math.max(-1, Math.min(1, gaze.target[binding.targetComponent ?? "horizontalRatio"]));
+        return {
+          parameterIdRaw: binding.parameterIdRaw,
+          parameterIndex: binding.parameterIndex,
+          owner: "interaction_gaze" as const,
+          source: `interaction_gaze:${binding.axisId}`,
+          value: ratio >= 0
+            ? interpolate(binding.neutralValue, binding.positiveValue, ratio)
+            : interpolate(binding.neutralValue, binding.negativeValue, -ratio),
+          weight: binding.weight,
+          priority: PARAMETER_MIX_PRIORITY.interactionGaze,
+          presentation: {
+            node: binding.presentation,
+            elapsedMs: gaze.elapsedMs,
+            timing: gaze.timing,
+          },
+        };
+      }),
     };
   }
 

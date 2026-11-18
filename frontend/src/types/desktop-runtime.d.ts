@@ -1,3 +1,4 @@
+import type { GazeTarget } from "./live2d-runtime";
 import type {
   BilibiliDanmakuInfoResult,
   BilibiliLiveSettings,
@@ -21,11 +22,10 @@ export interface Ag99DesktopApi {
   getWebControlUrl: () => Promise<string>;
   setWebControlUrl: (value: string) => Promise<string>;
   openWebControlPanel: () => Promise<boolean>;
-  getPetCursorTarget: () => Promise<{
+  getPetCursorTarget: () => Promise<(GazeTarget & {
     x: number;
     y: number;
-    horizontalRatio: number;
-  } | null>;
+  }) | null>;
   showContextMenu: (position?: {
     x?: number;
     y?: number;
