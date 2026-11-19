@@ -1890,8 +1890,7 @@ export class LAppModel extends CubismUserModel {
     if (this._activeMotionResourceHandle !== InvalidMotionQueueEntryHandleValue) {
       // Resource motions use Cubism's configured fade instead of losing their
       // queue entry and lifecycle callback at the speech boundary.
-      this._motionManager.fadeOutAllMotions();
-      this._motionManager.setCurrentPriority(0);
+      this._motionManager.releaseCurrentMotion();
       released = true;
     }
     return released;

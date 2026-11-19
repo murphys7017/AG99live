@@ -51,6 +51,12 @@ export class CubismMotionManager extends CubismMotionQueueManager {
     this._reservePriority = val;
   }
 
+  /** Allow the next motion to start while the current queue fades out. */
+  public releaseCurrentMotion(): void {
+    this.fadeOutAllMotions();
+    this._currentPriority = 0;
+  }
+
   public stopAllMotions(): void {
     super.stopAllMotions();
     this._currentPriority = 0;
