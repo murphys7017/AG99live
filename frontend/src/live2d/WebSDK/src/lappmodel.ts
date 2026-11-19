@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Copyright(c) Live2D Inc. All rights reserved.
  *
@@ -56,7 +55,9 @@ import {
   type ActiveInteractionSwayState,
   type DirectSemanticParameterBinding,
 } from "./parametermixer";
-import type { GazeTarget, InteractionGazeInput, InteractionSwayInput } from "../../../types/live2d-runtime";
+import type {
+  GazeTarget, InteractionGazeInput, InteractionSwayInput, MotionResourceLifecycleCallbacks,
+} from "../../../types/live2d-runtime";
 import {
   ActiveParameterRuntime,
   type ActiveParameterFrameFailure,
@@ -73,14 +74,6 @@ import {
   markLive2DModelFailed,
   markLive2DModelReady,
 } from "./modelreadiness";
-
-interface MotionResourceLifecycleCallbacks {
-  playbackClockReader?: { getElapsedMs: () => number | null };
-  onStarted?: () => void;
-  onFinished?: () => void;
-  onFailed?: (reason: string) => void;
-  onInterrupted?: (reason: string) => void;
-}
 
 enum LoadStep {
   LoadAssets,
@@ -996,8 +989,8 @@ export class LAppModel extends CubismUserModel {
     priority: number,
     callbacks?: MotionResourceLifecycleCallbacks | FinishedMotionCallback
   ): CubismMotionQueueEntryHandle {
-    const lifecycleCallbacks = typeof callbacks === "function"
-      ? { onFinished: callbacks }
+    const lifecycleCallbacks: MotionResourceLifecycleCallbacks | undefined = typeof callbacks === "function"
+      ? { onFinished: () => callbacks(motion) }
       : callbacks;
     let terminalSettled = false;
     let activeStop: ((reason: string) => void) | null = null;
@@ -1036,32 +1029,6 @@ export class LAppModel extends CubismUserModel {
       clearOwnedMotionResourceState();
       notifyLifecycle("failed", () => lifecycleCallbacks?.onFailed?.(reason));
     };
-    const start = () => {
-      if (terminalSettled) {
-        return;
-      }
-      const clockReader = lifecycleCallbacks?.playbackClockReader;
-      if (clockReader) {
-        const elapsedMs = clockReader.getElapsedMs();
-        if (elapsedMs === null || !Number.isFinite(elapsedMs)) {
-          fail("motion_resource_clock_unavailable");
-          this._motionManager.stopAllMotions();
-          this._motionManager.setReservePriority(0);
-          return;
-        }
-        this._activeMotionResourceClockReader = clockReader;
-        this._activeMotionResourceClockElapsedMs = elapsedMs;
-      }
-      console.info("[LAppModel] motion resource lifecycle started.", {
-        group,
-        index: no,
-        priority,
-        handle: this._activeMotionResourceHandle,
-        elapsedMs: this._activeMotionResourceClockElapsedMs,
-        state: this._state,
-      });
-      notifyLifecycle("started", lifecycleCallbacks?.onStarted);
-    };
     this._motionStartError = "";
     console.info("[LAppModel] motion resource start entered.", {
       group,
@@ -1096,18 +1063,16 @@ export class LAppModel extends CubismUserModel {
       return InvalidMotionQueueEntryHandleValue;
     }
     const requestedClockReader = lifecycleCallbacks?.playbackClockReader;
-    if (requestedClockReader) {
-      const elapsedMs = requestedClockReader.getElapsedMs();
-      if (elapsedMs === null || !Number.isFinite(elapsedMs)) {
-        this._motionStartError = "motion_resource_clock_unavailable";
-        console.warn("[LAppModel] motion resource start rejected.", {
-          group,
-          index: no,
-          reason: this._motionStartError,
-        });
-        fail(this._motionStartError);
-        return InvalidMotionQueueEntryHandleValue;
-      }
+    const clockOriginMs = requestedClockReader?.getElapsedMs() ?? null;
+    if (requestedClockReader && (clockOriginMs === null || !Number.isFinite(clockOriginMs))) {
+      this._motionStartError = "motion_resource_clock_unavailable";
+      console.warn("[LAppModel] motion resource start rejected.", {
+        group,
+        index: no,
+        reason: this._motionStartError,
+      });
+      fail(this._motionStartError);
+      return InvalidMotionQueueEntryHandleValue;
     }
 
     const name = `${group}_${no}`;
@@ -1129,9 +1094,13 @@ export class LAppModel extends CubismUserModel {
       console.log(`[APP] startMotion: Attempting to start tap motion. Group: '${group}', Index: ${no}`);
     }
 
+    // A player replacement may take the foreground at the same priority.
+    // Keep the old queue playing until Cubism admits and starts the new resource.
+    const replaceCurrent = Boolean(requestedClockReader
+      && (this._activeMotionResourceClockReader || this._directParameterPlanState));
     if (priority == LAppDefine.PriorityForce) {
       this._motionManager.setReservePriority(priority);
-    } else if (!this._motionManager.reserveMotion(priority)) {
+    } else if (!this._motionManager.reserveMotion(priority, replaceCurrent)) {
       if (this._debugMode) {
         LAppPal.printMessage("[APP]can't start motion.");
       }
@@ -1188,7 +1157,13 @@ export class LAppModel extends CubismUserModel {
       this._activeMotionResourceHandle = handle;
       this._activeMotionResourceFinish = finish;
       this._activeMotionResourceFirstFrameLogged = false;
-      start();
+      this._activeMotionResourceClockReader = requestedClockReader ?? null;
+      this._activeMotionResourceClockElapsedMs = clockOriginMs;
+      if (requestedClockReader) this.releaseDirectParameterPlan();
+      console.info("[LAppModel] motion resource lifecycle started.", {
+        group, index: no, priority, handle, elapsedMs: clockOriginMs, state: this._state,
+      });
+      notifyLifecycle("started", lifecycleCallbacks?.onStarted);
     }
     return handle;
   }
@@ -1816,7 +1791,7 @@ export class LAppModel extends CubismUserModel {
       onTerminal,
       playbackClockReader,
     );
-    if (!candidate.ok) {
+    if (candidate.ok === false) {
       console.error("[LAppModel] direct parameter plan validation failed.", {
         runId,
         reason: candidate.reason,
@@ -1844,6 +1819,7 @@ export class LAppModel extends CubismUserModel {
       if (!expressionId) this.stopExpression();
     }
 
+    if (this._activeMotionResourceClockReader) this._motionManager.releaseCurrentMotion();
     const previousState = this._directParameterPlanState;
     this._directParameterPlanState = null;
     if (previousState?.expressionId && !expressionId) {
@@ -1875,25 +1851,23 @@ export class LAppModel extends CubismUserModel {
 
   /** Begin a parameter-weight release without resetting presentation state. */
   public releaseActiveMotion(): boolean {
-    let released = false;
+    const releasedPlan = this.releaseDirectParameterPlan();
+    if (this._activeMotionResourceHandle === InvalidMotionQueueEntryHandleValue) return releasedPlan;
+    this._motionManager.releaseCurrentMotion();
+    return true;
+  }
+
+  private releaseDirectParameterPlan(): boolean {
     const state = this._directParameterPlanState;
-    if (state) {
-      if (state.releaseStartedAtMs === null) {
-        const clockMs = state.playbackClockReader.getElapsedMs();
-        state.releaseStartedAtMs = Math.max(
-          state.presentationElapsedMs,
-          clockMs !== null && Number.isFinite(clockMs) ? clockMs : 0,
-        );
-      }
-      released = true;
+    if (!state) return false;
+    if (state.releaseStartedAtMs === null) {
+      const clockMs = state.playbackClockReader.getElapsedMs();
+      state.releaseStartedAtMs = Math.max(
+        state.presentationElapsedMs,
+        clockMs !== null && Number.isFinite(clockMs) ? clockMs : 0,
+      );
     }
-    if (this._activeMotionResourceHandle !== InvalidMotionQueueEntryHandleValue) {
-      // Resource motions use Cubism's configured fade instead of losing their
-      // queue entry and lifecycle callback at the speech boundary.
-      this._motionManager.releaseCurrentMotion();
-      released = true;
-    }
-    return released;
+    return true;
   }
 
   public stopDirectParameterPlan(

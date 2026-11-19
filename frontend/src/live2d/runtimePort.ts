@@ -91,7 +91,7 @@ export function createWindowLive2dRuntimePort(): Live2dRuntimePort {
       getAdapter()?.releaseIdleParameterPlan?.(actionId);
     },
     startMotion(group, no, priority, callbacks) {
-      return getAdapter()?.startMotion?.(group, no, priority, callbacks);
+      return getAdapter()?.startMotion?.(group, no, priority, callbacks) ?? -1;
     },
     stopMotion(reason) {
       getAdapter()?.stopMotion?.(reason);

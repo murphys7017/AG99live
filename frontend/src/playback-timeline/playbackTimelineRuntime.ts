@@ -28,7 +28,7 @@ import {
   normalizeIdentityPart,
   segmentIdentityKey,
 } from "../turn-playback/identity.js";
-import { isSinkTerminal } from "../turn-playback/terminals.js";
+import { isSinkTerminal, SPEECH_MOTION_HANDOFF_FAILED } from "../turn-playback/terminals.js";
 
 export type {
   PlaybackTimelineAudioSessionPort,
@@ -1236,8 +1236,25 @@ export function createPlaybackTimelineRuntime<TMotionPayload = unknown>(
       rejectMotionBeforeStart(turnId, messageId, "deferred_motion_speech_window_ended");
       return false;
     }
-    if (!deps.segmentExecution.motionSink.handoff(turnId, messageId)) {
-      throw new Error(`motion_handoff_owner_missing:${messageId}`);
+    const motionSink = deps.segmentExecution.motionSink;
+    try {
+      if (!motionSink.handoff(turnId, messageId)) {
+        throw new Error("motion_handoff_owner_missing");
+      }
+    } catch (error) {
+      console.warn("[PlaybackTimelineRuntime] retiring previous speech motion after failed handoff.", {
+        turnId, messageId, error,
+      });
+      try {
+        motionSink.interrupt(turnId, messageId, SPEECH_MOTION_HANDOFF_FAILED);
+      } catch (stopError) {
+        console.error("[PlaybackTimelineRuntime] failed to stop previous speech motion.", { turnId, messageId, stopError });
+      }
+      // Interrupt may synchronously deliver the terminal callback and close this timeline.
+      if (getTimeline(turnId, messageId) === timeline && hasOpenSink(timeline, MOTION_TIMELINE_SINK_ID)) {
+        markMotionTimelineTerminal(turnId, messageId, "failed", SPEECH_MOTION_HANDOFF_FAILED);
+      }
+      return false;
     }
     // Unblock the successor while the previous run eases out. Completion still
     // waits for its real terminal; a replacement inherits presentation state.

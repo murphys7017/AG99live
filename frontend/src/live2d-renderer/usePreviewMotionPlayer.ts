@@ -193,10 +193,6 @@ export function usePreviewMotionPlayer(runtime: Live2dRuntimePort) {
       profileRevision: playbackPlan.plan.profile_revision,
     });
 
-    if (activeMotionResourceRunId && !runtime.releaseActiveMotion()) {
-      return { status: "rejected", reason: "motion_replacement_release_failed" };
-    }
-
     const playbackRunId = `motion-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const previousDirectPlanRunId = activeDirectPlanRunId;
     activeDirectPlanRunId = playbackRunId;
@@ -218,6 +214,8 @@ export function usePreviewMotionPlayer(runtime: Live2dRuntimePort) {
         const isActiveRun = activeDirectPlanRunId === playbackRunId;
         if (isActiveRun) {
           activeDirectPlanRunId = "";
+        }
+        if (isActiveRun && !activeMotionResourceRunId) {
           if (event.status === "stopped") {
             state.status = "idle";
             state.message = "参数计划已停止。";
@@ -247,7 +245,7 @@ export function usePreviewMotionPlayer(runtime: Live2dRuntimePort) {
         ? `动作计划执行失败：${runtimeReason}`
         : "动作计划执行失败：Direct Parameter 计划被运行时拒绝。";
       console.warn("[MotionPlayer]", reason);
-      if (!previousDirectPlanRunId) {
+      if (!hadActivePlayback) {
         state.status = "failed";
         state.message = reason;
         state.finishedAt = new Date().toISOString();
@@ -321,12 +319,6 @@ export function usePreviewMotionPlayer(runtime: Live2dRuntimePort) {
       }
       return { status: "rejected", reason };
     }
-    if (hadActivePlayback) {
-      if (!runtime.releaseActiveMotion()) {
-        return { status: "rejected", reason: "motion_replacement_release_failed" };
-      }
-    }
-
     const playbackRunId = `motion-resource-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
     const getMotionStartError = (): string => runtime.getMotionStartError();
@@ -413,9 +405,11 @@ export function usePreviewMotionPlayer(runtime: Live2dRuntimePort) {
         ? `完整动作资源执行失败：${motion.motion_id}（${motionStartError}）。`
         : `完整动作资源执行失败：${motion.motion_id}。`;
       console.warn("[MotionPlayer]", reason);
-      state.status = "failed";
-      state.message = reason;
-      state.finishedAt = new Date().toISOString();
+      if (!hadActivePlayback) {
+        state.status = "failed";
+        state.message = reason;
+        state.finishedAt = new Date().toISOString();
+      }
       return { status: "rejected", reason: failureReason };
     }
     if (!lifecycleStarted || activeMotionResourceRunId !== playbackRunId) {

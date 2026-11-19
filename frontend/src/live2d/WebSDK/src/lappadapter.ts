@@ -11,15 +11,9 @@ import type {
   DirectParameterPlanStartOptions,
   DirectParameterPlanTerminalStatus,
 } from "./directparameterplan";
-import type { GazeTarget, InteractionGazeInput, InteractionSwayInput } from "../../../types/live2d-runtime";
-
-export interface MotionResourceLifecycleCallbacks {
-  playbackClockReader?: { getElapsedMs: () => number | null };
-  onStarted?: () => void;
-  onFinished?: () => void;
-  onFailed?: (reason: string) => void;
-  onInterrupted?: (reason: string) => void;
-}
+import type {
+  GazeTarget, InteractionGazeInput, InteractionSwayInput, MotionResourceLifecycleCallbacks,
+} from "../../../types/live2d-runtime";
 
 let s_adapter_instance: LAppAdapter | null | undefined = null;
 

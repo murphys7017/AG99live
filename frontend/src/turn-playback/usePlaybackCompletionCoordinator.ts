@@ -1,6 +1,7 @@
 import { watch, type DeepReadonly } from "vue";
 import type { TurnPlaybackSessionPort } from "./sessionStorePort.js";
 import { isPlaybackLocallySettled } from "./selectors.js";
+import { SPEECH_MOTION_HANDOFF_FAILED } from "./terminals.js";
 import type { TurnPlaybackSession } from "./session.js";
 import type { PlaybackAckPort } from "./ports.js";
 import type { PlaybackTimelineRuntime } from "../playback-timeline/playbackTimelineRuntime.js";
@@ -203,6 +204,9 @@ function resolvePlaybackFailureReason(
       return segment.audio.reason || `audio_playback_failed:${segmentId}`;
     }
     if (segment.motion.failed) {
+      if (segment.audio.terminal === "completed" && segment.motion.reason === SPEECH_MOTION_HANDOFF_FAILED) {
+        continue;
+      }
       // A missing optional motion must not fail text/audio already delivered.
       // Keep actual motion playback errors and failed motion-only output visible.
       const coreOutputDelivered = (

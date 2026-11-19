@@ -1,4 +1,5 @@
 export type TurnTerminal = "completed" | "failed" | "interrupted";
+export const SPEECH_MOTION_HANDOFF_FAILED = "speech_motion_handoff_failed";
 export type SinkTerminal =
   | "idle"
   | "started"

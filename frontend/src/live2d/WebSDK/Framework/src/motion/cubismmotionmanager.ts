@@ -9,7 +9,8 @@ import { CubismModel } from '../model/cubismmodel';
 import { ACubismMotion } from './acubismmotion';
 import {
   CubismMotionQueueEntryHandle,
-  CubismMotionQueueManager
+  CubismMotionQueueManager,
+  InvalidMotionQueueEntryHandleValue
 } from './cubismmotionqueuemanager';
 
 /**
@@ -80,9 +81,11 @@ export class CubismMotionManager extends CubismMotionQueueManager {
       this._reservePriority = 0; // 予約を解除
     }
 
-    this._currentPriority = priority; // 再生中モーションの優先度を設定
-
-    return super.startMotion(motion, autoDelete);
+    const handle = super.startMotion(motion, autoDelete);
+    if (handle !== InvalidMotionQueueEntryHandleValue) {
+      this._currentPriority = priority;
+    }
+    return handle;
   }
 
   /**
@@ -112,10 +115,10 @@ export class CubismMotionManager extends CubismMotionQueueManager {
    * @return  true    予約できた
    * @return  false   予約できなかった
    */
-  public reserveMotion(priority: number): boolean {
+  public reserveMotion(priority: number, replaceCurrent = false): boolean {
     if (
       priority <= this._reservePriority ||
-      priority <= this._currentPriority
+      (!replaceCurrent && priority <= this._currentPriority)
     ) {
       return false;
     }
