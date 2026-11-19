@@ -75,7 +75,7 @@ export function buildCursorGazeInput(
   }
   const bindings: Array<InteractionGazeInput["bindings"][number] & { axisId: string }> = [];
   const boundParameters = new Set<string>();
-  for (const { axis, parameterBindings, targetComponent, targetRatioScale } of axes) {
+  for (const { axis, parameterBindings, targetComponent, targetRatioScale, onsetDelayMs } of axes) {
     const negativeValue = axis.level_anchors?.["-1"];
     const positiveValue = axis.level_anchors?.["1"];
     if (!Number.isFinite(negativeValue) || !Number.isFinite(positiveValue)) {
@@ -98,6 +98,7 @@ export function buildCursorGazeInput(
         axisId: axis.id,
         targetComponent,
         targetRatioScale,
+        onsetDelayMs,
         parameterId: binding.parameter_id,
         neutralValue: neutral.targetValue,
         negativeValue: negative.targetValue,
@@ -188,6 +189,7 @@ function selectCursorGazeAxes(profile: SemanticAxisProfile, stage: "eyes" | "ful
   const result: Array<InteractionAxisMatch & {
     targetComponent: keyof GazeTarget;
     targetRatioScale: number;
+    onsetDelayMs?: number;
   }> = [];
   if (stage === "listening") {
     for (const axis of axes) {
@@ -199,9 +201,16 @@ function selectCursorGazeAxes(profile: SemanticAxisProfile, stage: "eyes" | "ful
   function addDirection(targetComponent: keyof GazeTarget, eyeRole: InteractionAxisRole, headRole: InteractionAxisRole) {
     const eye = matchInteractionAxis(axes, eyeRole);
     if (eye) result.push({ ...eye, targetComponent, targetRatioScale: 1 });
-    if (stage === "full") {
+    const listeningPitch = stage === "listening" && targetComponent === "verticalRatio";
+    if (stage === "full" || listeningPitch) {
       const head = matchInteractionAxis(axes, headRole);
-      if (head) result.push({ ...head, targetComponent, targetRatioScale: eye ? 0.58 : 0.72 });
+      if (head) result.push({
+        ...head,
+        targetComponent,
+        targetRatioScale: eye ? 0.58 : 0.72,
+        // A short utterance can register in the eyes alone.
+        onsetDelayMs: listeningPitch && eye ? 250 : 0,
+      });
     }
   }
   addDirection("horizontalRatio", gazeX, headYaw);

@@ -22,6 +22,7 @@ export interface GazeTarget {
 
 export interface InteractionParameterBinding {
   targetComponent?: keyof GazeTarget;
+  onsetDelayMs?: number;
   /** Optional semantic axis owner for mixed gaze inputs. */
   axisId?: string;
   /** Scales the target excursion around the binding's neutral value. */

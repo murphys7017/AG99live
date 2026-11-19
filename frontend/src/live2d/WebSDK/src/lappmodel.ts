@@ -2222,6 +2222,7 @@ export class LAppModel extends CubismUserModel {
       seenParameterIndices.add(parameterIndex);
       bindings.push({
         targetComponent: binding.targetComponent,
+        onsetDelayMs: binding.onsetDelayMs,
         axisId,
         parameterIdRaw,
         parameterIndex,

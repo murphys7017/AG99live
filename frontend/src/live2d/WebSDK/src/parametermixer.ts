@@ -87,6 +87,7 @@ export interface ActiveIdlePlan {
 
 export interface ActiveInteractionSwayBinding {
   targetComponent?: keyof GazeTarget;
+  onsetDelayMs?: number;
   axisId: string;
   parameterIdRaw: string;
   parameterIndex: number;
@@ -734,27 +735,29 @@ export class ActiveParameterMixer {
     if (!gaze) {
       return { contributions: [] };
     }
-    return {
-      contributions: gaze.bindings.map((binding) => {
-        const ratio = Math.max(-1, Math.min(1, gaze.target[binding.targetComponent ?? "horizontalRatio"]));
-        return {
-          parameterIdRaw: binding.parameterIdRaw,
-          parameterIndex: binding.parameterIndex,
-          owner: "interaction_gaze" as const,
-          source: `interaction_gaze:${binding.axisId}`,
-          value: ratio >= 0
-            ? interpolate(binding.neutralValue, binding.positiveValue, ratio)
-            : interpolate(binding.neutralValue, binding.negativeValue, -ratio),
-          weight: binding.weight,
-          priority: PARAMETER_MIX_PRIORITY.interactionGaze,
-          presentation: {
-            node: binding.presentation,
-            elapsedMs: gaze.elapsedMs,
-            timing: gaze.timing,
-          },
-        };
-      }),
-    };
+    const contributions: ParameterContribution[] = [];
+    for (const binding of gaze.bindings) {
+      const elapsedMs = gaze.elapsedMs - (binding.onsetDelayMs ?? 0);
+      if (elapsedMs < 0) continue;
+      const ratio = Math.max(-1, Math.min(1, gaze.target[binding.targetComponent ?? "horizontalRatio"]));
+      contributions.push({
+        parameterIdRaw: binding.parameterIdRaw,
+        parameterIndex: binding.parameterIndex,
+        owner: "interaction_gaze",
+        source: `interaction_gaze:${binding.axisId}`,
+        value: ratio >= 0
+          ? interpolate(binding.neutralValue, binding.positiveValue, ratio)
+          : interpolate(binding.neutralValue, binding.negativeValue, -ratio),
+        weight: binding.weight,
+        priority: PARAMETER_MIX_PRIORITY.interactionGaze,
+        presentation: {
+          node: binding.presentation,
+          elapsedMs,
+          timing: gaze.timing,
+        },
+      });
+    }
+    return { contributions };
   }
 
   private collectLipSyncContributions(
