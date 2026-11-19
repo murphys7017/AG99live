@@ -9,6 +9,14 @@ from .motion_selector_examples import MotionReferenceExamplesResolution, select_
 # Signed fractions of the travel from neutral to the corresponding endpoint.
 # Each example pairs the actual line with only its visible changes.
 _SCENES = (
+    ("explain", "你看右边那盏灯。刚才还暗着呢，现在亮起来了。嗯，这下我也看清了。", (
+        (220, {"gaze_x": .50}),
+        (680, {"head_yaw": .30}),
+        (1050, {"head_roll": .18}),
+        (510, {"head_roll": 0, "mouth_smile": .24}),
+        (980, {"gaze_x": 0, "head_yaw": .10}),
+        (760, {"head_yaw": 0, "mouth_smile": .43}),
+    )),
     ("neutral", "嗯，我在听。", ((260, {"mouth_smile": .18}),)),
     ("confused", "咦，你说的是右边那个？", (
         (140, {"gaze_x": .42}), (280, {"head_yaw": .24, "head_roll": .14}),
