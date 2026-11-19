@@ -279,7 +279,7 @@ class SubtitleWebService:
         view = self._reading_views.get(body["renderer"])
         fields = ("session_id", "visit_id", "display_revision")
         if (
-            payload is None or view is None or key != view.key
+            payload is None or payload.get("mode") == "bookmark" or view is None or key != view.key
             or any(body.get(field) != payload[field] for field in fields)
         ):
             raise web.HTTPConflict()

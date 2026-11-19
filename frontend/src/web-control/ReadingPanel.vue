@@ -10,7 +10,9 @@ type ActiveReading = {
   position: number;
   total: number;
   rendered: boolean;
+  can_comment?: boolean;
   auto_advance: boolean;
+  activity?: string;
   waiting_for_audience?: boolean;
   hold_seconds: number;
   interaction_seconds: number;
@@ -51,6 +53,11 @@ const outputLabels: Record<string, string> = {
   ready: "角色空闲", busy: "角色忙碌", presentation_offline: "桌面端离线",
   commentary_target_unavailable: "角色暂不支持共读",
   presentation_session_mismatch: "直播配置与桌面端会话不一致",
+};
+const activityLabels: Record<string, string> = {
+  audience: "等待观众活动 · 已留书签", obs: "等待 OBS 展示当前段",
+  conversation: "正在闲聊 · 已留书签", discussion: "正在聊这一段",
+  reading: "OBS 已展示 · 阅读中",
 };
 const locked = computed(() => !props.platformId || busy.value || view.value?.phase === "unavailable");
 let generation = 0;
@@ -235,8 +242,7 @@ async function copyUrl() {
         </div>
         <p class="reading-original">{{ current.text }}</p>
         <p v-if="current.comment" class="reading-comment">{{ current.comment }}</p>
-        <p role="status">{{ current.rendered ? "OBS 已展示" : "等待 OBS 展示" }} · {{ commentLabels[current.comment_status] || current.comment_status }}</p>
-        <p v-if="current.waiting_for_audience" role="status">自动共读等待观众活动，当前段保持展示。</p>
+        <p role="status">{{ activityLabels[current.activity || ""] || (current.phase === "running" ? (current.rendered ? "OBS 已展示" : "等待 OBS 展示当前段") : phaseLabels[current.phase]) }}<template v-if="current.comment_status !== 'pending'"> · {{ commentLabels[current.comment_status] || current.comment_status }}</template></p>
         <p v-if="current.pending_position">本轮结束后切到第 {{ current.pending_position }} 段。</p>
         <p v-if="current.error" class="reading-error" role="alert">{{ current.error === "playback_receipt_unconfirmed" ? "播放回执缺失，本轮结果待确认。" : current.error }}</p>
         <p v-if="current.comment_status === 'unknown' && current.delivery_turn_id">播放轮次 <code>{{ current.delivery_turn_id }}</code></p>
@@ -248,7 +254,7 @@ async function copyUrl() {
         </label>
         <div class="reading-row reading-options">
           <label><input v-model="auto" type="checkbox" :disabled="locked"> 自动共读</label>
-          <label>展示停留 <input v-model.number="hold" type="number" min="5" max="300" :disabled="locked"> 秒</label>
+          <label>最短阅读时间 <input v-model.number="hold" type="number" min="5" max="300" :disabled="locked"> 秒</label>
           <label>互动窗口 <input v-model.number="gap" type="number" min="1" max="30" :disabled="locked"> 秒</label>
         </div>
         <div v-if="current.persistence_pending" class="reading-row">
@@ -260,7 +266,7 @@ async function copyUrl() {
           <button type="button" :disabled="locked || current.phase !== 'running'" @click="command('pause')">暂停</button>
           <button type="button" :disabled="locked || (current.pending_position ?? current.position) <= 1" @click="command('previous')">上一段</button>
           <button type="button" :disabled="locked || (current.pending_position ?? current.position) >= current.total" @click="command('next')">下一段</button>
-          <button type="button" :disabled="locked || !current.rendered || current.output_status !== 'ready' || current.phase !== 'running' || current.comment_status === 'generating' || current.pending_position !== null" @click="command('comment')">{{ current.comment_status === "pending" ? "评论当前段" : "再评论一次" }}</button>
+          <button type="button" :disabled="locked || !(current.can_comment ?? current.rendered) || current.output_status !== 'ready' || current.phase !== 'running' || current.comment_status === 'generating' || current.pending_position !== null" @click="command('comment')">{{ current.comment_status === "pending" ? "评论当前段" : "再评论一次" }}</button>
           <button type="button" :disabled="locked || current.phase === 'finished'" @click="command('end')">结束</button>
         </div>
       </section>

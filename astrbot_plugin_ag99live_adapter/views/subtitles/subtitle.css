@@ -66,4 +66,13 @@ body:where(:has(> .reading-card[hidden])) {
 @media (max-width: 480px) {
   body { padding: 8px; }
 }
+.co-reading {
+  display: flex; flex-direction: column; align-items: flex-start;
+  justify-content: space-between; gap: 8px; height: 100vh;
+}
+.co-reading .reading-card { margin: 0; flex: 0 0 auto; }
+.co-reading .reading-card[data-mode="bookmark"] { width: fit-content; padding: 8px 14px; }
+.co-reading .reading-card[data-mode="quote"] { border-inline-start: 4px solid var(--subtitle-accent); }
+.co-reading .subtitle-shell { margin: auto auto 0; width: 100%; }
+.co-reading .subtitle-text { font-size: min(var(--subtitle-font-size), 6.5vh); line-height: 1.22; }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
