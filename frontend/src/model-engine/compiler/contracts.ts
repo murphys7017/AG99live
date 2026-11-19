@@ -23,6 +23,7 @@ export interface CompileOptions {
   speechCues?: readonly OutputSegmentSpeechCue[];
   targetDurationMs?: number | null;
   speechActive?: boolean;
+  conversationExpression?: boolean;
   source?: string;
   motionSource?: string | null;
   settings?: Partial<ModelEngineSettings>;

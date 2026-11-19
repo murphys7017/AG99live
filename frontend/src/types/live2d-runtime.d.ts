@@ -55,6 +55,13 @@ export interface InteractionGazeInput {
   bindings: InteractionSwayInput["bindings"];
 }
 
+export interface ExternalAudioSignalSourceOptions {
+  lipSyncEnabled?: boolean;
+  postureBindings?: InteractionParameterBinding[];
+  onFailed?: (reason: string) => void;
+  onLipSyncUnavailable?: (reason: string) => void;
+}
+
 export interface MotionResourceLifecycleCallbacks {
   playbackClockReader?: { getElapsedMs: () => number | null };
   onStarted?: () => void;
@@ -103,11 +110,7 @@ declare global {
       stopInteractionGaze?: () => void;
       beginExternalAudioSignalSource?: (
         sourceId: string,
-        options?: {
-          lipSyncEnabled?: boolean;
-          onFailed?: (reason: string) => void;
-          onLipSyncUnavailable?: (reason: string) => void;
-        },
+        options?: ExternalAudioSignalSourceOptions,
       ) => void;
       writeExternalAudioSignalSource?: (
         sourceId: string,

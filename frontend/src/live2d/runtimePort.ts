@@ -5,6 +5,7 @@ import type {
   GazeTarget,
   InteractionGazeInput,
   InteractionSwayInput,
+  ExternalAudioSignalSourceOptions,
   MotionResourceLifecycleCallbacks,
 } from "../types/live2d-runtime.d.ts";
 
@@ -45,11 +46,7 @@ export interface Live2dRuntimePort {
   stopInteractionGaze(): void;
   beginExternalAudioSignalSource(
     sourceId: string,
-    options?: {
-      lipSyncEnabled?: boolean;
-      onFailed?: (reason: string) => void;
-      onLipSyncUnavailable?: (reason: string) => void;
-    },
+    options?: ExternalAudioSignalSourceOptions,
   ): void;
   writeExternalAudioSignalSource(
     sourceId: string,
@@ -67,7 +64,9 @@ export interface Live2dRuntimePort {
 
 type WindowAdapter = NonNullable<ReturnType<NonNullable<Window["getLAppAdapter"]>>>;
 
-export function createWindowLive2dRuntimePort(): Live2dRuntimePort {
+export function createWindowLive2dRuntimePort(
+  getSpeechPostureBindings?: () => InteractionSwayInput["bindings"],
+): Live2dRuntimePort {
   const getAdapter = (): WindowAdapter | null => window.getLAppAdapter?.() ?? null;
 
   return {
@@ -117,7 +116,10 @@ export function createWindowLive2dRuntimePort(): Live2dRuntimePort {
       getAdapter()?.stopInteractionGaze?.();
     },
     beginExternalAudioSignalSource(sourceId, options) {
-      getAdapter()?.beginExternalAudioSignalSource?.(sourceId, options);
+      getAdapter()?.beginExternalAudioSignalSource?.(sourceId, {
+        ...options,
+        postureBindings: options?.postureBindings ?? getSpeechPostureBindings?.(),
+      });
     },
     writeExternalAudioSignalSource(sourceId, values) {
       getAdapter()?.writeExternalAudioSignalSource?.(sourceId, values);

@@ -1,3 +1,6 @@
+import type { ExternalAudioSignalSourceOptions } from "../../../types/live2d-runtime";
+export type { ExternalAudioSignalSourceOptions } from "../../../types/live2d-runtime";
+
 export interface ExternalAudioSignalValues {
   lipSyncIntensity?: number;
   mouthRound?: number;
@@ -6,15 +9,10 @@ export interface ExternalAudioSignalValues {
   speechEmphasisValue?: number;
 }
 
-export interface ExternalAudioSignalSourceOptions {
-  lipSyncEnabled?: boolean;
-  onFailed?: (reason: string) => void;
-  onLipSyncUnavailable?: (reason: string) => void;
-}
-
 export interface SpeechAudioFrame {
   sourceActive: boolean;
   voiced: boolean;
+  posture: { phase: number; strength: number } | null;
   lipSyncActive: boolean;
   lipSyncIntensity: number;
   mouthRound: number;
@@ -60,6 +58,8 @@ export class SpeechSignalRuntime {
   private speechBodyEnvelope = 0;
   private speechEmphasisEnvelope = 0;
   private speechVoiced = false;
+  private posturePhase = 0;
+  private postureStrength = 0;
   private lipSyncEnabled = false;
   private lipSyncDiagnosticFrameCount = 0;
   private activeSourceFailureHandler: ((reason: string) => void) | null = null;
@@ -183,6 +183,7 @@ export class SpeechSignalRuntime {
     this.clearActiveSource();
     this.speechHeadEnvelope = 0;
     this.speechBodyEnvelope = 0;
+    this.posturePhase = 0;
   }
 
   public advanceFrame(deltaTimeSeconds: number, includeLipSync: boolean): SpeechAudioFrame {
@@ -246,12 +247,23 @@ export class SpeechSignalRuntime {
       this.speechEmphasisEnvelope = 0;
     }
 
+    // Advance on voiced time. A pause settles the current lean and a new
+    // segment continues from the previous direction instead of restarting it.
+    if (this.speechVoiced) {
+      this.posturePhase = (this.posturePhase + Math.min(deltaTimeSeconds, 0.25)
+        * (2.8 + this.speechHeadEnvelope * 2.4)) % (2 * Math.PI);
+    }
+    this.postureStrength = advanceEnvelope(this.postureStrength,
+      this.speechVoiced ? Math.min(0.8, 0.46 + this.speechHeadEnvelope * 0.38) : 0,
+      deltaTimeSeconds, 9, 4);
     const lipSyncActive = includeLipSync
       && this.activeSourceId !== null
       && this.lipSyncEnabled;
     return {
       sourceActive: this.activeSourceId !== null,
       voiced: this.speechVoiced,
+      posture: this.activeSourceId !== null && this.postureStrength > 0.01
+        ? { phase: this.posturePhase, strength: this.postureStrength } : null,
       lipSyncActive,
       mouthRound: lipSyncActive ? this.mouthRound : 0,
       mouthWide: lipSyncActive ? this.mouthWide : 0,
@@ -316,6 +328,7 @@ export class SpeechSignalRuntime {
 
   private clearActiveSource(): void {
     this.activeSourceId = null;
+    this.postureStrength = 0;
     this.activeSourceFailureHandler = null;
     this.activeLipSyncUnavailableHandler = null;
     this.lipSyncEnabled = false;

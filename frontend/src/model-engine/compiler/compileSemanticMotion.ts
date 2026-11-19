@@ -145,6 +145,7 @@ function compileSemanticSequence(
   ));
   const diagnostics: CompileDiagnostics = {
     ...first.diagnostics,
+    intensityApplied: successfulSteps.some(step => step.diagnostics.intensityApplied),
     timingSource: first.context.state.timing!.timingSource,
     transformTrace: first.diagnostics.transformTrace && {
       ...first.diagnostics.transformTrace, rawMotionSteps: intent.motion_steps,
@@ -214,11 +215,7 @@ function compileSemanticPoseContext(
     ok: true,
     context,
     axes,
-    diagnostics: finalizeCompileDiagnostics(context, {
-      intensityApplied: (context.intent.mode === "expressive"
-        || context.options.source === "idle_motion")
-        && context.settings.motionIntensityScale !== 1,
-    }),
+    diagnostics: finalizeCompileDiagnostics(context),
   };
 }
 

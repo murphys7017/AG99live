@@ -2,6 +2,7 @@ import { reactive } from "vue";
 import type { DesktopRuntimeSettingsAccess } from "../adapter-connection/features/desktopSettings.js";
 import { createModelSync } from "../adapter-connection/model-sync/useModelSync";
 import { useDesktopBridge } from "../desktop-bridge/useDesktopBridge";
+import { buildSpeechPostureBindings } from "../model-engine/runtime/interactionSway.js";
 import { createWindowLive2dRuntimePort } from "../live2d/runtimePort.js";
 import {
   applyLive2dPresentationSettingsSnapshot,
@@ -32,7 +33,9 @@ export interface DesktopRuntimeFoundation {
 export function createDesktopRuntimeFoundation(): DesktopRuntimeFoundation {
   const sessionStore = useTurnPlaybackSessionStore({ normalizeMotionPayload });
   const modelSync = createModelSync();
-  const live2dRuntime = createWindowLive2dRuntimePort();
+  const live2dRuntime = createWindowLive2dRuntimePort(
+    () => buildSpeechPostureBindings(modelSync.selectedModel.value),
+  );
   const bridge = useDesktopBridge();
   const motionEngineSettings = reactive(
     cloneModelEngineSettings(bridge.state.snapshot.motionEngineSettings),

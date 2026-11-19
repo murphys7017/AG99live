@@ -4,6 +4,8 @@ import type { CubismModel } from "@framework/model/cubismmodel";
 import type { csmVector } from "@framework/type/csmvector";
 import {
   ActiveParameterMixer,
+  PARAMETER_MIX_PRIORITY,
+  type ParameterContribution,
   resolveIdlePlanPriority,
   type ActiveIdlePlan,
   type ActiveDirectParameterFrameState,
@@ -15,6 +17,7 @@ import {
   SpeechSignalRuntime,
   type ExternalAudioSignalSourceOptions,
   type ExternalAudioSignalValues,
+  type SpeechAudioFrame,
 } from "./speechsignalruntime";
 import type { ResolvedParameterFrameEntry } from "./parametermixer";
 
@@ -46,6 +49,7 @@ export class ActiveParameterRuntime {
   private readonly speechSignals = new SpeechSignalRuntime();
   private readonly getSpeechAudioGain = (axisId: string): number =>
     this.speechSignals.getSpeechAudioGain(axisId);
+  private speechBindings: ActiveInteractionSwayState["bindings"] = [];
   private interactionSway: ActiveInteractionSwayState | null = null;
   private interactionGaze: ActiveInteractionGazeState | null = null;
   private readonly idlePlans = new Map<string, ActiveIdlePlan>();
@@ -90,6 +94,7 @@ export class ActiveParameterRuntime {
 
   public reset(): void {
     this.speechSignals.reset();
+    this.speechBindings = [];
     this.interactionSway = null;
     this.interactionGaze = null;
     this.idlePlans.clear();
@@ -137,8 +142,10 @@ export class ActiveParameterRuntime {
   public beginExternalAudioSignalSource(
     sourceId: string,
     options?: ExternalAudioSignalSourceOptions,
+    bindings: ActiveInteractionSwayState["bindings"] = [],
   ): void {
     this.speechSignals.beginSource(sourceId, options);
+    this.speechBindings = bindings;
   }
 
   public writeExternalAudioSignalSource(
@@ -164,6 +171,7 @@ export class ActiveParameterRuntime {
     directPlan: ActiveDirectParameterFrameState | null;
     deltaTimeSeconds: number;
     lipSyncEnabled: boolean;
+    posture?: SpeechAudioFrame["posture"];
     lipSyncActive: boolean;
     lipSyncIntensity: number;
     mouthRound?: number;
@@ -180,8 +188,26 @@ export class ActiveParameterRuntime {
     if (this.interactionGaze) {
       this.interactionGaze.elapsedMs = performance.now() - this.interactionGaze.startedAtMs;
     }
+    const posture = input.posture;
+    const elapsedMs = performance.now();
+    const speechPosture: ParameterContribution[] = posture ? this.speechBindings.map((binding): ParameterContribution => {
+      const phaseLag = (binding.onsetDelayMs ?? 0) * 0.003;
+      const ratio = Math.sin(posture.phase - phaseLag);
+      const endpoint = ratio < 0 ? binding.negativeValue : binding.positiveValue;
+      return {
+        parameterIdRaw: binding.parameterIdRaw,
+        parameterIndex: binding.parameterIndex,
+        owner: "speech_posture",
+        source: binding.axisId,
+        priority: PARAMETER_MIX_PRIORITY.speechPosture,
+        value: binding.neutralValue + (endpoint - binding.neutralValue) * Math.abs(ratio),
+        weight: binding.weight * posture.strength,
+        presentation: { node: binding.presentation, elapsedMs, timing: null },
+      };
+    }) : [];
     let execution = this.mixer.resolveActiveFrame({
       ...input,
+      speechPosture,
       idlePlans: [...this.idlePlans.values()],
       interactionSway: this.interactionSway,
       interactionGaze: this.interactionGaze,
@@ -194,6 +220,7 @@ export class ActiveParameterRuntime {
       }
       execution = this.mixer.resolveActiveFrame({
         ...input,
+        speechPosture,
         deltaTimeSeconds: 0,
         idlePlans: [...this.idlePlans.values()],
         interactionSway: this.interactionSway,

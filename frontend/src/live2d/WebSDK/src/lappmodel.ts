@@ -769,6 +769,8 @@ export class LAppModel extends CubismUserModel {
         directPlan: this._directParameterPlanState,
         deltaTimeSeconds,
         lipSyncEnabled: this._lipsync === true,
+        posture: this._motionManager.getCurrentPriority() > LAppDefine.PriorityIdle
+          ? null : audioSignals.posture,
         lipSyncActive: audioSignals.lipSyncActive,
         lipSyncIntensity: audioSignals.lipSyncIntensity,
         mouthRound: audioSignals.mouthRound,
@@ -2095,7 +2097,10 @@ export class LAppModel extends CubismUserModel {
     sourceId: string,
     options?: ExternalAudioSignalSourceOptions,
   ): void {
-    this._activeParameterRuntime.beginExternalAudioSignalSource(sourceId, options);
+    const bindings = this.createInteractionBindings({
+      axisId: "speech", bindings: options?.postureBindings ?? [],
+    });
+    this._activeParameterRuntime.beginExternalAudioSignalSource(sourceId, options, bindings);
   }
 
   public writeExternalAudioSignalSource(

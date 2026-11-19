@@ -687,6 +687,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
         playbackTurnId: playbackClock.turnId,
         playbackOrigin: "conversation",
         startReason: "speech_only_preparing",
+        motionSource: "speech_only",
         queuedDelayMs: 0,
         playbackClock,
       };

@@ -1,3 +1,4 @@
+import { SPEECH_BODY_FOLLOW_SCALE } from "../constants.js";
 import type { ModelSummary } from "../../types/protocol.js";
 import type {
   GazeTarget,
@@ -22,11 +23,30 @@ export function buildThinkingSwayInput(model: ModelSummary): InteractionSwayInpu
   if (!match) {
     return null;
   }
-  const { axis, parameterBindings } = match;
-  const negativeValue = axis.level_anchors?.["-1"];
-  const positiveValue = axis.level_anchors?.["1"];
-  if (!Number.isFinite(negativeValue) || !Number.isFinite(positiveValue)) {
+  const { axis } = match;
+  const bindings = mapPostureBindings(
+    axis, match.parameterBindings, axis.level_anchors?.["-1"], axis.level_anchors?.["1"],
+  );
+  if (!bindings.length) {
     return null;
+  }
+  return {
+    axisId: axis.id,
+    delayMs: 350,
+    attackMs: 500,
+    holdMs: 450,
+    bindings,
+  };
+}
+
+function mapPostureBindings(
+  axis: SemanticAxisDefinition,
+  parameterBindings: SemanticAxisDefinition["parameter_bindings"],
+  negativeValue: number | undefined,
+  positiveValue: number | undefined,
+): InteractionSwayInput["bindings"] {
+  if (!Number.isFinite(negativeValue) || !Number.isFinite(positiveValue)) {
+    return [];
   }
   const resolvedNegativeValue = Number(negativeValue);
   const resolvedPositiveValue = Number(positiveValue);
@@ -37,7 +57,7 @@ export function buildThinkingSwayInput(model: ModelSummary): InteractionSwayInpu
     const negative = mapSemanticBindingValue(axis, binding, resolvedNegativeValue);
     const positive = mapSemanticBindingValue(axis, binding, resolvedPositiveValue);
     if (!neutral.ok || !negative.ok || !positive.ok) {
-      return null;
+      return [];
     }
     const dynamics = mapSemanticBindingDynamics(axis, binding);
     bindings.push({
@@ -51,16 +71,47 @@ export function buildThinkingSwayInput(model: ModelSummary): InteractionSwayInpu
       response: dynamics.response,
     });
   }
-  if (!bindings.length) {
-    return null;
+  return bindings;
+}
+
+export function buildSpeechPostureBindings(model: ModelSummary | null): InteractionSwayInput["bindings"] {
+  const profile = model?.semantic_axis_profile;
+  const channels = model?.voice_following_profile?.channels;
+  if (!profile || !channels) return [];
+
+  const result: InteractionSwayInput["bindings"] = [];
+  const used = new Set<string>();
+  for (const alternatives of [["head_roll", "head_yaw", "head_pitch"], ["body_roll", "body_yaw"]]) {
+    for (const name of alternatives) {
+      const channel = channels[name];
+      if (!channel || !(channel.amplitude_ratio > 0)) continue;
+      const axis = profile.axes.find(item => item.id === channel.semantic_axis_id);
+      if (!axis) continue;
+      const [minimum, maximum] = axis.value_range;
+      const excursion = (maximum - minimum) * axis.dynamics.max_speech_offset_ratio;
+      if (!(excursion > 0)) continue;
+      const activeBindings = axis.parameter_bindings.filter(binding => binding.default_weight > 0);
+      if (!activeBindings.length) continue;
+      // One semantic pose must be reachable by every participating parameter.
+      const low = Math.max(minimum, axis.neutral - excursion, ...activeBindings.map(b => b.input_range[0]));
+      const high = Math.min(maximum, axis.neutral + excursion, ...activeBindings.map(b => b.input_range[1]));
+      if (low > axis.neutral || high < axis.neutral || low === high) continue;
+      const bindings = mapPostureBindings(axis, activeBindings, low, high);
+      const before = result.length;
+      for (const binding of bindings) {
+        if (!binding.weight || used.has(binding.parameterId)) continue;
+        used.add(binding.parameterId);
+        result.push({
+          ...binding,
+          axisId: axis.id,
+          targetRatioScale: channel.amplitude_ratio * (channel.layer === "body" ? SPEECH_BODY_FOLLOW_SCALE : 1),
+          onsetDelayMs: channel.follow_delay_ms,
+        });
+      }
+      if (result.length > before) break;
+    }
   }
-  return {
-    axisId: axis.id,
-    delayMs: 350,
-    attackMs: 500,
-    holdMs: 450,
-    bindings,
-  };
+  return result;
 }
 
 export function buildCursorGazeInput(

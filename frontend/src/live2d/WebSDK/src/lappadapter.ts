@@ -12,7 +12,7 @@ import type {
   DirectParameterPlanTerminalStatus,
 } from "./directparameterplan";
 import type {
-  GazeTarget, InteractionGazeInput, InteractionSwayInput, MotionResourceLifecycleCallbacks,
+  ExternalAudioSignalSourceOptions, GazeTarget, InteractionGazeInput, InteractionSwayInput, MotionResourceLifecycleCallbacks,
 } from "../../../types/live2d-runtime";
 
 let s_adapter_instance: LAppAdapter | null | undefined = null;
@@ -137,11 +137,7 @@ export class LAppAdapter {
 
   public beginExternalAudioSignalSource(
     sourceId: string,
-    options?: {
-      lipSyncEnabled?: boolean;
-      onFailed?: (reason: string) => void;
-      onLipSyncUnavailable?: (reason: string) => void;
-    },
+    options?: ExternalAudioSignalSourceOptions,
   ): void {
     const model = this.getModel();
     if (!model) {

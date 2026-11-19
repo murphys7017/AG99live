@@ -16,6 +16,7 @@ export const PARAMETER_MIX_PRIORITY = {
   ambientMaterial: 26,
   ambientModelPassive: 32,
   idleMotion: 20,
+  speechPosture: 45,
   interactionSway: 50,
   interactionGaze: 60,
   directPlan: 100,
@@ -35,7 +36,7 @@ export function resolveIdlePlanPriority(source: string): number {
   }
 }
 
-export type ParameterContributionOwner = "idle_motion" | "interaction_sway" | "interaction_gaze" | "direct_plan" | "pose_release" | "lip_sync";
+export type ParameterContributionOwner = "idle_motion" | "speech_posture" | "interaction_sway" | "interaction_gaze" | "direct_plan" | "pose_release" | "lip_sync";
 export type ParameterFrameOwner = ParameterContributionOwner | "mixed";
 
 export interface DirectSemanticParameterBinding {
@@ -205,6 +206,7 @@ const EMPTY_PARAMETER_BASE_SNAPSHOTS: ReadonlyMap<number, ParameterBaseSnapshot>
 
 export interface ActiveParameterFrameInput {
   idlePlans?: readonly ActiveIdlePlan[];
+  speechPosture?: readonly ParameterContribution[];
   model: CubismModel | null;
   directPlan: ActiveDirectParameterFrameState | null;
   deltaTimeSeconds: number;
@@ -240,6 +242,9 @@ export type ActiveParameterFrameExecution =
  * pass, one frozen Cubism base snapshot, and the final pre-Physics parameter write.
  */
 export class ActiveParameterMixer {
+  // Bindings are per audio attachment. A short tail can settle naturally
+  // before a longer voiced tail gradually takes back the released parameter.
+  private speechClaimedAt = new WeakMap<ParameterPresentationNode, number>();
   private lastPresentations = new Map<number, {
     node: ParameterPresentationNode; elapsedMs: number;
   }>();
@@ -262,6 +267,7 @@ export class ActiveParameterMixer {
       && idleStates.length === 0
       && input.interactionSway === null
       && input.interactionGaze === null
+      && !input.speechPosture?.length
       && !hasLipSyncSource
       && this.lastPresentations.size === 0
     ) {
@@ -336,8 +342,21 @@ export class ActiveParameterMixer {
       return { ok: false, owner: "lip_sync", reason: lipSyncContributions };
     }
 
+    const speechPosture: ParameterContribution[] = [];
+    for (const contribution of input.speechPosture ?? []) {
+      const frame = contribution.presentation;
+      if (!frame) continue;
+      if (claimedParameters.has(contribution.parameterIndex)) {
+        this.speechClaimedAt.set(frame.node, frame.elapsedMs);
+        continue;
+      }
+      const claimedAt = this.speechClaimedAt.get(frame.node);
+      const weight = claimedAt === undefined ? 1 : smoothstep((frame.elapsedMs - claimedAt - 300) / 300);
+      if (weight > 0) speechPosture.push({ ...contribution, weight: contribution.weight * weight });
+    }
     const contributions = [
       ...idlePlanCollections.flatMap(({ collection }) => collection.contributions),
+      ...speechPosture,
       ...interactionSway.contributions,
       ...interactionGaze.contributions,
       ...lipSyncContributions,
@@ -931,6 +950,7 @@ function isParameterContributionOwner(
   owner: unknown,
 ): owner is ParameterContributionOwner {
   return owner === "idle_motion"
+    || owner === "speech_posture"
     || owner === "pose_release"
     || owner === "interaction_sway"
     || owner === "interaction_gaze"

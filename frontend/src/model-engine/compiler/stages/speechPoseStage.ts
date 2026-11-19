@@ -3,6 +3,7 @@ import type {
   VoiceFollowingChannelProfile,
   VoiceFollowingProfile,
 } from "../../../types/protocol.js";
+import { SPEECH_BODY_FOLLOW_SCALE } from "../../constants.js";
 import { SCHEMA_VOICE_FOLLOWING_PROFILE_V3 } from "../../../types/protocol.js";
 import type {
   ModelParameterCompileContext,
@@ -103,10 +104,14 @@ export function runSpeechPoseStage(
     resolveSpeechGestureLateralFamily(context, preset),
     durationMs,
   );
-  const selectedChannels = selection.channels;
-  if (selectedChannels.length === 0) {
+  if (selection.channels.length === 0) {
     return { ok: false, reason: `speech_gesture_channels_unavailable:${preset}` };
   }
+  const poseAxes = context.semanticSequenceStepAxes ?? [context.semanticMotion.axes];
+  const selectedChannels = context.options.conversationExpression
+    ? selection.channels.filter(channel =>
+        !poseAxes.some(axes => axes.some(axis => axis.axisId === channel.semantic_axis_id)))
+    : selection.channels;
   for (const channel of selectedChannels) {
     if (context.state.pendingSpeechGestures[channel.semantic_axis_id]) {
       return { ok: false, reason: `speech_gesture_axis_duplicate:${channel.semantic_axis_id}` };
@@ -214,7 +219,7 @@ function buildGestureTrack(
     ok: true,
     track: {
       preset,
-      amplitudeRatio: channel.amplitude_ratio,
+      amplitudeRatio: channel.amplitude_ratio * (channel.layer === "body" ? SPEECH_BODY_FOLLOW_SCALE : 1),
       delayMs: channel.follow_delay_ms,
       points,
     },

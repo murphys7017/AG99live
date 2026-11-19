@@ -196,6 +196,7 @@ function compileMotionSequenceIntent(
   ));
   const diagnostics = {
     ...stepResults[0].diagnostics,
+    intensityApplied: semanticMotion.diagnostics.intensityApplied,
     compiledParameterCount: trackGraph.parameters.length,
     compiledParameters: trackGraph.parameters.map((item) => item.parameter_id),
     warnings: [...warnings, ...trackGraph.warnings],

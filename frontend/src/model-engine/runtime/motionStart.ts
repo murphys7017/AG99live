@@ -271,6 +271,7 @@ function prepareCompilableMotionPayload(
     speechCues: context.speechCues,
     targetDurationMs,
     speechActive,
+    conversationExpression: context.playbackOrigin === "conversation" && payload.kind === "semantic_intent",
     source: context.startReason,
     motionSource: context.motionSource,
     settings: dependencies.getSettings(),

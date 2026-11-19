@@ -1,4 +1,6 @@
 export const DEFAULT_MOTION_INTENT_DURATION_MS = 1000;
+// Automatic speech gestures leave most of the torso range for explicit poses.
+export const SPEECH_BODY_FOLLOW_SCALE = 0.4;
 export const MIN_MOTION_DURATION_MS = 320;
 export const MAX_MOTION_DURATION_MS = 15000;
 // Foreground semantic actions can use a longer sparse sequence. Ambient
