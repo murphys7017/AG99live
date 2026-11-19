@@ -5,7 +5,8 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, Callable
 
-from ...motion.motion_intent import MAX_MOTION_STEPS
+from ...motion.motion_intent import MAX_MOTION_STEPS, normalize_motion_steps
+from ...motion.payload_validation import find_out_of_range_axis_values
 from ...prompts.semantic_axis_prompt import profile_prompt_axes
 from ...protocol.schema_versions import (
     MOTION_TUNING_SAMPLE_SCHEMA_VERSION,
@@ -303,7 +304,7 @@ class MotionTuningStore:
         *,
         allowed_axis_ids: set[str],
         axis_by_id: dict[str, dict[str, Any]],
-    ) -> tuple[dict[str, Any] | None, str]:
+    ) -> tuple[dict[str, Any] | list[dict[str, Any]] | None, str]:
         compiled_motion = sample.get("compiled_semantic_motion")
         intent_tags = self._build_sample_intent_tags(sample)
         reference_error = self._validate_reference_effect_fields(
@@ -349,6 +350,16 @@ class MotionTuningStore:
 
         if compiled_motion.get("kind") != "sequence":
             return None, "compiled_semantic_motion_kind_invalid"
+        if any("window" in step for step in compiled_motion.get("steps", [])):
+            trace = compiled_motion.get("diagnostics", {}).get("transformTrace", {})
+            steps, reason = normalize_motion_steps(trace.get("rawMotionSteps"))
+            if steps is None or any("ms" not in step for step in steps):
+                return None, reason or "timed_expression_source_missing"
+            if any(axis not in allowed_axis_ids for step in steps for axis in step["axis_values"]):
+                return None, "timed_expression_axis_unavailable"
+            if find_out_of_range_axis_values(motion_steps=steps, axis_by_id=axis_by_id):
+                return None, "timed_expression_axis_out_of_range"
+            return [{"ms": step["ms"], **step["axis_values"]} for step in steps], ""
         motion_steps, sequence_error = self._project_sequence_motion_steps(
             compiled_motion,
             allowed_axis_ids=allowed_axis_ids,
@@ -654,7 +665,7 @@ class MotionTuningStore:
             self._validate_compiled_motion_axes(motion_payload.get("axes"))
         else:
             steps = motion_payload.get("steps")
-            if not isinstance(steps, list) or not 2 <= len(steps) <= MAX_MOTION_STEPS:
+            if not isinstance(steps, list) or not 1 <= len(steps) <= MAX_MOTION_STEPS:
                 raise ValueError("motion_tuning_sample_compiled_semantic_motion_steps_invalid")
             for step in steps:
                 if not isinstance(step, dict):

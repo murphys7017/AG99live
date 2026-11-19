@@ -1,3 +1,4 @@
+import { MAX_MOTION_DURATION_MS, MIN_MOTION_DURATION_MS } from "../constants.js";
 import { semanticStages } from "./stages.js";
 import type {
   NormalizedSemanticMotionIntentV4,
@@ -68,7 +69,22 @@ function compileSemanticSequence(
   },
   options: CompileOptions,
 ): CompileSemanticMotionResult {
-  const compiledSteps = intent.motion_steps.map((step) =>
+  let elapsedMs = 0;
+  const poses = intent.motion_steps.flatMap((step) => {
+    const window = step.ms === undefined ? undefined : { startMs: elapsedMs, durationMs: step.ms };
+    elapsedMs += step.ms ?? 0;
+    return window && !Object.keys(step.axis_values).length ? [] : [{ step, window }];
+  });
+  if (!poses.length) {
+    return {
+      ok: false,
+      motion: null,
+      reason: "expression_hold",
+      diagnostics: buildBaseCompileDiagnostics(options, normalizeModelEngineSettings(options.settings)),
+      feedback: { code: "expression_hold", message: "expression_hold", fields: [] },
+    };
+  }
+  const compiledSteps = poses.map(({ step }) =>
     compileSemanticPoseContext(
       {
         ...intent,
@@ -100,7 +116,7 @@ function compileSemanticSequence(
   const signatures = successfulSteps.map((step) =>
     JSON.stringify(step.axes.map((axis) => [axis.axisId, axis.value])),
   );
-  if (successfulSteps.length > 1 && signatures.every((signature) => signature === signatures[0])) {
+  if (!elapsedMs && successfulSteps.length > 1 && signatures.every((signature) => signature === signatures[0])) {
     return failSemanticCompile(
       "semantic_sequence_has_no_transition",
       successfulSteps[0].context,
@@ -108,11 +124,31 @@ function compileSemanticSequence(
   }
 
   const first = successfulSteps[0];
+  if (elapsedMs) {
+    // Release ownership after the last requested beat. A short fade hands a
+    // non-neutral final pose back to idle without moving its keyframe earlier.
+    const releaseMs = Math.min(120, MAX_MOTION_DURATION_MS - elapsedMs);
+    const duration = Math.max(MIN_MOTION_DURATION_MS, elapsedMs + releaseMs);
+    first.context.state.timing = {
+      resolvedDurationMs: duration,
+      timingSource: "hint",
+      timing: {
+        duration_ms: duration,
+        blend_in_ms: 0,
+        hold_ms: duration - releaseMs,
+        blend_out_ms: releaseMs,
+      },
+    };
+  }
   const warnings = Array.from(new Set(
     successfulSteps.flatMap((step) => step.diagnostics.warnings ?? []),
   ));
   const diagnostics: CompileDiagnostics = {
     ...first.diagnostics,
+    timingSource: first.context.state.timing!.timingSource,
+    transformTrace: first.diagnostics.transformTrace && {
+      ...first.diagnostics.transformTrace, rawMotionSteps: intent.motion_steps,
+    },
     warnings: [...warnings, `semantic_sequence_compiled:${successfulSteps.length}`],
   };
   return {
@@ -121,7 +157,8 @@ function compileSemanticSequence(
     motion: buildMotionBase(first.context, diagnostics, {
       kind: "sequence",
       steps: successfulSteps.map((step, index) => ({
-        durationWeight: intent.motion_steps[index].duration_weight,
+        durationWeight: poses[index].step.duration_weight ?? 1,
+        window: poses[index].window,
         axes: step.axes,
         diagnostics: step.diagnostics,
       })),

@@ -183,7 +183,7 @@ export function compilePerformanceSchedule(options: {
     : { phrases, mappings: [] };
   const resolvedPhrases = speechCueResult.phrases;
   const semanticStepsResult = compileSemanticStepSlots(
-    options.sequenceSteps?.map((step) => step.durationWeight),
+    options.sequenceSteps,
     options.durationMs,
   );
   if (!semanticStepsResult.ok) {

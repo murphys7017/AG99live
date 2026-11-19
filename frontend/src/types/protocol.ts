@@ -444,10 +444,10 @@ export interface MotionAxisLevelStep {
   axis_levels: MotionAxisLevelMap;
   duration_weight: 1 | 2 | 3;
 }
-export interface MotionAxisValueStep {
-  axis_values: MotionAxisValueMap;
-  duration_weight: 1 | 2 | 3;
-}
+export type MotionAxisValueStep = { axis_values: MotionAxisValueMap } & (
+  | { ms: number; duration_weight?: never }
+  | { duration_weight: 1 | 2 | 3; ms?: never }
+);
 
 interface NormalizedSemanticMotionIntentBase {
   profile_id: string;

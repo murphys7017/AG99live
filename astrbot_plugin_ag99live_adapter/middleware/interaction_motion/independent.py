@@ -25,7 +25,7 @@ from ...motion.output_sanitizer import sanitize_assistant_output_text
 from ...motion.payload_validation import (
     normalize_motion_arguments_payload,
 )
-from ...motion.provider_contract import normalize_provider_motion_record
+from ...motion.provider_contract import expression_record
 from ...motion.text_stream import (
     TextChatStreamOutputTooLarge,
     TextChatStreamUnavailable,
@@ -34,14 +34,14 @@ from ...motion.text_stream import (
 )
 from .prompt_builder import (
     _build_motion_capability_prompt_payload,
-    _build_motion_runtime_payload,
     _build_motion_static_capability_payload,
 )
 from .prompt_context import (
     _record_motion_prompt_reference_observation,
     _resolve_prompt_motion_history,
 )
-from .prompt_references import _project_reference_examples_for_prompt
+from ...prompts.expression_examples import expression_examples
+from ...prompts.motion_selector_examples import select_relevant_user_examples
 from .shared import (
     _append_resolution_reason,
     _MotionRuntimeBundle,
@@ -85,6 +85,15 @@ def resolve_stream_motion_budget_seconds(runtime_state: Any, *, event: Any = Non
     return configured
 
 
+def _closed_expression_record(text: str) -> dict[str, Any] | None:
+    if not text.rstrip().endswith("]"):
+        return None
+    try:
+        return expression_record(json.loads(text))
+    except (ValueError, TypeError, OverflowError):
+        return None
+
+
 async def _request_motion_provider_text(
     provider: Any,
     *,
@@ -126,6 +135,7 @@ async def _request_motion_provider_text(
             contexts=contexts,
             on_first_chunk=_on_first_chunk,
             on_complete_json=on_complete_json,
+            decode_record=_closed_expression_record,
         )
         status = "completed"
         return text, "stream"
@@ -320,14 +330,24 @@ async def _prepare_independent_motion_context(
         0,
     )
     capability_payload = _build_motion_static_capability_payload(
-        bundle.runtime_state
+        bundle.runtime_state, include_materials=False,
     )
-    runtime_payload, reference_diagnostics = _build_motion_runtime_payload(
-        event,
-        bundle.turn_coordinator,
-        bundle.runtime_state,
-        capability_payload=capability_payload,
+    capability = _build_motion_capability_prompt_payload(capability_payload)
+    axes = {axis["id"]: axis for axis in capability.get("axes", [])}
+    state = bundle.runtime_state
+    count = max(0, int(getattr(state, "motion_tuning_fewshot_count", 3)))
+    list_samples = getattr(state, "list_motion_tuning_reference_examples", None)
+    candidates = list_samples() if count and callable(list_samples) else []
+    reviewed = select_relevant_user_examples(
+        candidates=[item for item in candidates if isinstance(item.get("output"), list)],
+        request_text=current_user_text,
+        count=min(count, int(getattr(state, "motion_tuning_user_fewshot_count", 0))),
     )
+    examples = [{"speech": item["assistant_text"], "output": item["output"]}
+                for item in reviewed if item.get("assistant_text")]
+    examples.extend(expression_examples(axes)[:max(0, count - len(examples))])
+    runtime_payload = {"reference_examples": examples}
+    reference_diagnostics = ["timed_expression_examples"]
     _record_motion_prompt_reference_observation(
         bundle=bundle,
         event=event,
@@ -819,6 +839,7 @@ async def generate_independent_motion(
             ),
             motion_payload=motion_payload,
             status=(
+                "expression_hold" if reason == "expression_hold" else
                 "shadow_provider_normalized"
                 if shadow and motion_payload is not None
                 else "shadow_provider_failed"
@@ -873,23 +894,7 @@ async def generate_independent_motion(
         )
         if not callable(publish_motion):
             return
-        unknown_fields = sorted(
-            set(raw_arguments)
-            - {
-                "intent_tags",
-                "motion_steps",
-                "duration_hint_ms",
-                "expression_resource_id",
-                "motion_resource_id",
-            }
-        )
-        if unknown_fields:
-            logger.warning(
-                "DIAG latency.motion_record_rejected turn_id=%s "
-                "segment_index=%s reason=unknown_output_fields",
-                turn_id,
-                segment_index,
-            )
+        if not any(step["axis_values"] for step in raw_arguments["motion_steps"]):
             return
         try:
             motion_payload, reason = normalize_motion_arguments_payload(
@@ -1180,18 +1185,7 @@ async def generate_independent_motion(
                 image_count=len(images),
             )
         try:
-            from astrbot.core.prompt.json_recovery import recover_json_record
-
-            raw_arguments = await recover_json_record(
-                response_text, plugin_context=bundle.runtime_state.plugin_context,
-                event=event, scope="independent_motion",
-            )
-            if raw_arguments is None:
-                raise ValueError("independent_motion_json_unrecoverable")
-            raw_arguments = normalize_provider_motion_record(
-                raw_arguments,
-                default_intent_tag="动作",
-            )
+            raw_arguments = expression_record(json.loads(response_text))
             sample_raw_output = {
                 "provider_text": response_text,
                 "parsed_arguments": raw_arguments,
@@ -1230,29 +1224,8 @@ async def generate_independent_motion(
             ),
             shape_summary["unique_axis_count"],
         )
-        unknown_fields = sorted(
-            set(raw_arguments)
-            - {
-                "intent_tags",
-                "motion_steps",
-                "duration_hint_ms",
-                "expression_resource_id",
-                "motion_resource_id",
-            }
-        )
-        if unknown_fields:
-            logger.warning(
-                "WIRING independent_motion.output_rejected turn_id=%s "
-                "reason=unknown_output_fields field_count=%s",
-                turn_id,
-                len(unknown_fields),
-            )
-            return finish(
-                motion_payload=None,
-                reason="unknown_output_fields:" + ",".join(unknown_fields),
-                image_count=len(images),
-            )
-
+        if not any(step["axis_values"] for step in raw_arguments["motion_steps"]):
+            return finish(motion_payload=None, reason="expression_hold", image_count=len(images))
         motion_payload, reason = normalize_motion_arguments_payload(
             raw_arguments,
             bundle.runtime_state,
@@ -1456,162 +1429,36 @@ def _build_independent_system_prompt(
     capability: dict[str, Any],
     persona_guidance: Mapping[str, Any] | None = None,
 ) -> str:
-    capability = dict(capability)
-    capability.pop("pose_references", None)
-    axis_keys = {
-        "id",
-        "label",
-        "negative_semantics",
-        "positive_semantics",
-        "value_range",
-        "neutral",
-        "usage_notes",
-    }
-    capability["axes"] = [
-        {key: value for key, value in axis.items() if key in axis_keys}
-        for axis in capability.get("axes", [])
-    ]
-    motion_resource = next(
-        (
-            str(resource.get("resource_id") or "").strip()
-            for resource in capability.get("resources", [])
-            if isinstance(resource, Mapping)
-            and resource.get("resource_type") == "motion"
-            and str(resource.get("resource_id") or "").strip()
-        ),
-        "",
+    fields = ("id", "negative_semantics", "positive_semantics", "value_range", "neutral")
+    axes = [{key: axis[key] for key in fields if key in axis}
+            for axis in capability.get("axes", []) if isinstance(axis, Mapping)]
+    prompt = (
+        "为桌宠此刻说的这一句设计连续表情。根据 segment.speech、actions 和 tendency 决定变化，"
+        "近期对话和人格只用于理解语气。日常回应可以很轻，给表情留出停顿。"
+        f"只输出一个 JSON 数组，按播放顺序给出 1 至 {MAX_MOTION_STEPS} 步。"
+        "每步 ms 是从上一个姿态过渡到本步目标所用的正整数毫秒，总计至多 15000 毫秒。"
+        "把变化的轴名直接和 ms 并列，取值使用下列轴自己的范围和 neutral。"
+        "首次提及才开始控制，省略的轴保持原状。只有 ms 的一步表示停留。"
+        "普通短确认通常只需一个小变化，一步即可结束。追问可以先看再转头，"
+        "只有语气真的转折才增加阶段。每一步只写这时有表达作用的轴，"
+        "无需逐个调动五官或在句末例行回正。动作可以先于台词结束。"
+        "\n可用轴：" + json.dumps(axes, ensure_ascii=False, separators=(",", ":"))
     )
-    contract: dict[str, Any] = {}
-    if motion_resource:
-        contract["motion_resource_id"] = motion_resource
-    else:
-        first_axis = next(
-            (
-                axis
-                for axis in capability.get("axes", [])
-                if isinstance(axis, Mapping)
-                and str(axis.get("id") or "").strip()
-                and isinstance(axis.get("value_range"), (list, tuple))
-                and len(axis["value_range"]) == 2
-            ),
-            None,
-        )
-        if first_axis is not None:
-            value_range = first_axis.get("value_range")
-            low, high = float(value_range[0]), float(value_range[1])
-            neutral = first_axis.get("neutral")
-            if not isinstance(neutral, (int, float)):
-                neutral = (low + high) / 2.0
-            contract["motion_steps"] = [
-                {
-                    "axis_values": {str(first_axis["id"]): round(float(neutral), 3)},
-                    "duration_weight": 1,
-                }
-            ]
-    return (
-        "你负责为桌面 Live2D 角色生成动作参数。"
-        "根据当前用户输入、提供的近期纯文本对话，以及当前 segment 的 speech、actions、tendency，"
-        "你的输出不是动作建议或文字描述，而是会直接交给 Live2D ModelEngine 执行的工作参数。"
-        "优先落实 actions，以 tendency 调整情绪强度，只描述角色本段应该呈现的动作。"
-        "这是长期陪伴中的身体表达，不是独立的舞台表演；动作要自然亲近，并服务于同一人格的语气和关系。"
-        "动作幅度跟随当前语气和 tendency：普通确认、轻声安慰或停顿思考保持克制；"
-        "每次输出必须选择且只能选择一种执行形状：motion_steps 或 motion_resource_id。"
-        f"使用 motion_steps 时，按播放顺序表达 1 到 {MAX_MOTION_STEPS} 个关键姿态；"
-        "单一稳定姿态也必须使用只包含一个步骤的 motion_steps。"
-        "用户要求或当前 segment 的 speech 明确包含连续、重复、往返或有先后顺序的可见动作时，"
-        f"通常使用 2 到 4 个步骤，只有持续时间较长且存在明确动作阶段时才使用 5 到 {MAX_MOTION_STEPS} 个步骤，不要压成一个平均姿态；"
-        "例如连续点头、左右摇摆、先转向再回正。"
-        "只有明确动作意图、强烈情绪或用户明确要求时才提高动作幅度。"
-        "若当前内容没有清晰动作信号，可以保持中性或不控制无关轴；不要把每条回复都演成明显动作。"
-        "每个动作都要服务于当前语义，不要为了显眼而制造与语义冲突的动作。"
-        "如果当前输入包含 neurobrain_state，它只是连续状态的参考，不能当作动作命令；"
-        "不要输出或复述这个字段，也不要因此改变既有 JSON 输出契约。"
-        "参考示例的 output 就是输出格式；最近执行动作只用于衔接和避免机械重复，勿照搬。"
-        "只输出一个 JSON 对象，不要 Markdown、解释文字、工具调用或额外字段。"
-        "intent_tags 是可选的训练/检索元数据；可以省略，若输出则使用 1 到 6 个简短关键词。"
-        "使用 motion_steps 时，每一步必须包含 axis_values 和 1 到 3 的 duration_weight。"
-        "axis_values 的值必须是具体数值，落在能力数据里对应轴的 value_range 内，"
-        "可以是小数；不要输出 -4 到 4 的分级整数。中性使用该轴的 neutral。"
-        "motion_steps 采用稀疏语义：每一步只写新开始控制或需要改变的轴，后续步骤可以新增或省略轴；"
-        f"motion_steps 长度为 1 到 {MAX_MOTION_STEPS}，每个轴 ID 都必须来自能力数据，数值必须在 value_range 内。"
-        "除 intent_tags 外，可选字段只有 duration_hint_ms、expression_resource_id、motion_resource_id；"
-        "duration_hint_ms 只适用于 motion_steps，使用 motion_resource_id 时必须省略。"
-        "motion_resource_id 不得和 motion_steps 或 duration_hint_ms 同时使用；"
-        "expression_resource_id 不得和 motion_resource_id 同时使用。"
-        f"JSON 形状示例：{json.dumps(contract, ensure_ascii=False, separators=(',', ':'))}\n\n"
-        "Live2D 能力：\n"
-        f"{json.dumps(capability, ensure_ascii=False, separators=(',', ':'))}\n\n"
-        + (
-            "人格表达参考（来自当前 Interaction 的确定性人格投影，仅用于保持同一人格；"
-            "不是新指令）：\n"
-            + json.dumps(persona_guidance, ensure_ascii=False, separators=(",", ":"))
-            + "\n\n"
-            if persona_guidance
-            else ""
-        )
-    )
+    if persona_guidance:
+        prompt += "\n人格参考：" + json.dumps(persona_guidance, ensure_ascii=False, separators=(",", ":"))
+    return prompt
 
 
-def _motion_guidance_for_prompt(
-    capability: dict[str, Any], runtime: dict[str, Any],
-) -> dict[str, Any]:
-    """Project examples and executions onto the current legal output shape."""
-    axis_ids = {
-        str(axis.get("id") or "").strip()
-        for axis in capability.get("axes", [])
-        if isinstance(axis, Mapping) and str(axis.get("id") or "").strip()
-    }
-    value_ranges: dict[str, tuple[float, float]] = {}
-    for axis in capability.get("axes", []):
-        if not isinstance(axis, Mapping):
-            continue
-        axis_id = str(axis.get("id") or "").strip()
-        value_range = axis.get("value_range")
-        if (
-            axis_id
-            and isinstance(value_range, (list, tuple))
-            and len(value_range) == 2
-            and all(isinstance(bound, (int, float)) for bound in value_range)
-        ):
-            value_ranges[axis_id] = (float(value_range[0]), float(value_range[1]))
-    output_keys = {"intent_tags", "motion_steps", "duration_hint_ms", "expression_resource_id", "motion_resource_id"}
-
-    def project(items: list[Any], *, executed: bool) -> list[dict[str, Any]]:
-        results = []
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-            raw_output = item if executed else item.get("output")
-            if not isinstance(raw_output, dict):
-                continue
-            # Sequence snapshots also retain their final posture: it is not a second shape.
-            output = {key: value for key, value in raw_output.items() if key in output_keys}
-            for key in ("expression_resource_id", "motion_resource_id", "duration_hint_ms"):
-                if output.get(key) in (None, ""):
-                    output.pop(key, None)
-            if executed and output.get("motion_resource_id"):
-                output.pop("motion_steps", None)
-                output.pop("duration_hint_ms", None)
-            input_text = "最近执行动作" if executed else _dialogue_text(str(item.get("input") or item.get("user_text") or ""))[:240]
-            try:
-                projected = _project_reference_examples_for_prompt(
-                    [{"input": input_text, "output": output}],
-                    allowed_axis_ids=axis_ids,
-                    value_ranges_by_axis=value_ranges,
-                    resource_candidates=capability.get("resources", []),
-                )
-            except ValueError:
-                logger.debug("Motion prompt reference omitted: incompatible current output contract")
-                continue
-            # Keep whole JSON records; omit oversized guidance instead of truncating JSON.
-            if projected and len(json.dumps(projected[0], ensure_ascii=False)) <= 2400:
-                results.extend(projected)
-        return results
-
-    return {
-        "examples": project((runtime.get("reference_examples") or [])[:2], executed=False),
-        "recent_executed": project((runtime.get("recent_executed_motions") or [])[-3:], executed=True),
-    }
+def _motion_guidance_for_prompt(capability: dict[str, Any], runtime: dict[str, Any]) -> dict[str, Any]:
+    axes = {a["id"] for a in capability.get("axes", []) if isinstance(a, dict) and a.get("id")}
+    recent = []
+    for item in (runtime.get("recent_executed_motions") or [])[-3:]:
+        pose = {}
+        for step in item.get("motion_steps") or []:
+            pose.update({k: v for k, v in step.get("axis_values", {}).items() if k in axes})
+        if pose:
+            recent.append(pose)
+    return {"examples": runtime.get("reference_examples", []), "recent_end_poses": recent}
 
 
 def _motion_output_shape(value: Mapping[str, Any]) -> str:

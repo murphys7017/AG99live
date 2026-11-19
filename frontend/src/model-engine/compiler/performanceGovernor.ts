@@ -187,7 +187,7 @@ export class PerformanceGovernor {
         ),
       };
     } else {
-      const sourceSteps = motion.steps.slice(0, this.budget.maxSequenceSteps);
+      const sourceSteps = motion.steps[0]?.window ? motion.steps : motion.steps.slice(0, this.budget.maxSequenceSteps);
       const truncatedStepCount = motion.steps.length - sourceSteps.length;
       if (truncatedStepCount > 0) {
         appendWarning(warnings, `performance_budget_steps_truncated:${truncatedStepCount}`);
@@ -218,7 +218,7 @@ export class PerformanceGovernor {
       version: GOVERNOR_VERSION,
       budget: this.budget,
       truncatedAxisIds: [...new Set(truncatedAxisIds)].sort(),
-      truncatedStepCount: motion.kind === "sequence"
+      truncatedStepCount: motion.kind === "sequence" && !motion.steps[0]?.window
         ? Math.max(0, motion.steps.length - this.budget.maxSequenceSteps)
         : 0,
       repeatedDirectionAxisIds: [...new Set(repeatedDirectionAxisIds)].sort(),

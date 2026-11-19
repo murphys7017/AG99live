@@ -50,9 +50,22 @@ function normalizeMotionStepsV4(value: unknown): MotionAxisValueStep[] | null {
     return null;
   }
   const steps: MotionAxisValueStep[] = [];
+  const timed = isObject(value[0]) && "ms" in value[0];
+  let elapsedMs = 0;
   for (const rawStep of value) {
     if (!isObject(rawStep)) {
       return null;
+    }
+    if (timed) {
+      const ms = rawStep.ms;
+      if (Object.keys(rawStep).length !== 2 || !isObject(rawStep.axis_values)
+        || !isFiniteNumber(ms) || !Number.isInteger(ms) || ms < 1
+        || elapsedMs + ms > MAX_MOTION_DURATION_MS) return null;
+      const axes = Object.keys(rawStep.axis_values).length ? normalizeAxisValuesV4(rawStep.axis_values) : {};
+      if (!axes) return null;
+      steps.push({ ms, axis_values: axes });
+      elapsedMs += ms;
+      continue;
     }
     const unknownFields = Object.keys(rawStep).filter(
       (field) => field !== "axis_values" && field !== "duration_weight",

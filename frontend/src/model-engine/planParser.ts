@@ -280,12 +280,15 @@ function normalizeParameterKeyframes(
     const transitionMs = item.transition_ms;
     const targetValue = item.target_value;
     const inputValue = item.input_value;
+    const startsAtAnchor = keyframes.length === 1 && atMs === activationAtMs
+      && isFiniteNumber(transitionMs) && transitionMs > 0;
     if (
       !isFiniteNumber(atMs)
       || !Number.isInteger(atMs)
       || atMs < 0
       || atMs > durationMs
-      || atMs <= previousAtMs
+      || atMs < previousAtMs
+      || (atMs === previousAtMs && !startsAtAnchor)
       || atMs < previousTransitionEndMs
       || !isFiniteNumber(transitionMs)
       || !Number.isInteger(transitionMs)

@@ -171,6 +171,7 @@ function compileMotionSequenceIntent(
     schedule: performanceSchedule,
     stepPlans: plans,
     profile,
+    timed: semanticMotion.steps[0]?.window !== undefined,
   });
   if (!trackGraph.ok) {
     const failedStepIndex = Math.min(trackGraph.stepIndex, stepResults.length - 1);
@@ -204,7 +205,7 @@ function compileMotionSequenceIntent(
           ...stepResults[0].diagnostics.transformTrace,
           rawAxisLevels: undefined,
           compiledParameters: trackGraph.parameters.map((item) => item.parameter_id),
-          rawMotionSteps: undefined,
+          rawMotionSteps: semanticMotion.diagnostics.transformTrace?.rawMotionSteps,
           performanceSchedule: buildPerformanceScheduleTrace(performanceSchedule),
           sequenceSteps: stepResults.map((result, index) => ({
             index,

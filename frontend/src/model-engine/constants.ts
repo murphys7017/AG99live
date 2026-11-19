@@ -9,7 +9,7 @@ export const MAX_IDLE_MOTION_STEPS = 4;
 // This is the compiler's per-parameter track capacity, not the ambient
 // admission limit.
 export const MIN_PARAMETER_KEYFRAME_COUNT = 2;
-export const MAX_PARAMETER_KEYFRAME_COUNT = MAX_MOTION_SEQUENCE_STEPS;
+export const MAX_PARAMETER_KEYFRAME_COUNT = MAX_MOTION_SEQUENCE_STEPS + 1; // Includes the initial activation point.
 // Model-engine wait budget: an audio-synced motion payload must receive a
 // matching playback timeline within this window, otherwise it fails visibly.
 // This is separate from the orchestrator's wider startup aggregation window.

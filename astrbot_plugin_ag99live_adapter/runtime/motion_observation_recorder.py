@@ -108,7 +108,7 @@ class MotionObservationRecorder:
             snapshot["motion_steps"] = [
                 {
                     "axis_values": dict(step.get("axis_values") or {}),
-                    "duration_weight": step.get("duration_weight"),
+                    **({"ms": step["ms"]} if "ms" in step else {"duration_weight": step.get("duration_weight")}),
                 }
                 for step in motion_steps
                 if isinstance(step, dict)

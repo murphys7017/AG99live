@@ -274,7 +274,7 @@ def resolve_motion_reference_examples(
     raw_user_examples = [
         item
         for item in runtime_state.list_motion_tuning_reference_examples()
-        if isinstance(item, dict)
+        if isinstance(item, dict) and isinstance(item.get("output"), dict)
     ]
     user_example_count = int(runtime_state.motion_tuning_user_fewshot_count)
     user_example_count = max(0, min(count, user_example_count))

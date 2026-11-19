@@ -275,6 +275,7 @@ export interface CompiledSemanticAxis {
 }
 
 export interface CompiledSemanticMotionStep {
+  window?: { startMs: number; durationMs: number };
   durationWeight: number;
   axes: CompiledSemanticAxis[];
   diagnostics: CompileDiagnostics;

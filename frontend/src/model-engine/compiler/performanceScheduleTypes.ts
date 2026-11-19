@@ -62,6 +62,7 @@ export interface PerformanceHesitationWindow {
 }
 
 export interface PerformanceSequenceStepInput {
+  readonly window?: { startMs: number; durationMs: number };
   readonly durationWeight: number;
   readonly axes: readonly {
     readonly axisId: string;

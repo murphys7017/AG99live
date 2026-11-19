@@ -238,7 +238,11 @@ def normalize_motion_axis_values(
         if isinstance(raw_value, bool) or not isinstance(raw_value, (int, float)):
             rejected_values.append(axis_id)
             continue
-        number = float(raw_value)
+        try:
+            number = float(raw_value)
+        except OverflowError:
+            rejected_values.append(axis_id)
+            continue
         if not math.isfinite(number):
             rejected_values.append(axis_id)
             continue
@@ -267,9 +271,23 @@ def normalize_motion_steps(
     ):
         return None, "motion_steps_count_invalid"
     normalized_steps: list[dict[str, Any]] = []
+    timed = isinstance(value[0], dict) and "ms" in value[0]
+    elapsed_ms = 0
     for index, step in enumerate(value):
         if not isinstance(step, dict):
             return None, f"motion_step_not_object:{index}"
+        if timed:
+            if set(step) != {"axis_values", "ms"} or not isinstance(step["axis_values"], dict):
+                return None, f"motion_step_timed_shape_invalid:{index}"
+            ms = step["ms"]
+            if type(ms) is not int or ms < 1 or elapsed_ms + ms > 15000:
+                return None, f"motion_step_ms_invalid:{index}"
+            axes, rejected = normalize_motion_axis_values(step["axis_values"])
+            if rejected or len(axes or {}) != len(step["axis_values"]):
+                return None, f"motion_step_timed_axes_invalid:{index}"
+            normalized_steps.append({"axis_values": axes or {}, "ms": ms})
+            elapsed_ms += ms
+            continue
         unknown_fields = sorted(set(step) - {"axis_values", "duration_weight"})
         if unknown_fields:
             return (

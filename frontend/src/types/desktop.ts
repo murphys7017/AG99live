@@ -1,5 +1,6 @@
 import type {
   MotionResourcePayload,
+  MotionAxisValueStep,
   MotionPlanPayload,
 } from "./protocol";
 import { SCHEMA_MOTION_TUNING_SAMPLE_V2 } from "./protocol";
@@ -194,10 +195,7 @@ export interface DesktopMotionCompileDiagnostics {
     profileHash: string;
     rawAxes: Record<string, number>;
     rawAxisValues?: Record<string, number>;
-    rawMotionSteps?: Array<{
-      axis_values: Record<string, number>;
-      duration_weight: number;
-    }>;
+    rawMotionSteps?: MotionAxisValueStep[];
     axisSampling?: {
       seed: string;
       sharedRandom: number;

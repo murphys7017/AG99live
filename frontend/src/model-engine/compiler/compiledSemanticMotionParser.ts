@@ -43,6 +43,9 @@ export function cloneCompiledSemanticMotion(value: unknown): CompiledSemanticMot
 
 function isCompiledStep(value: unknown): value is CompiledSemanticMotionStep {
   if (!isObject(value)
+    || (value.window !== undefined && (!isObject(value.window)
+      || !Number.isSafeInteger(value.window.startMs) || Number(value.window.startMs) < 0
+      || !isPositiveInteger(value.window.durationMs)))
     || !isPositiveFiniteNumber(value.durationWeight)
     || !isCompileDiagnostics(value.diagnostics)
   ) {

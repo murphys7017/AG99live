@@ -1965,6 +1965,10 @@ export class LAppModel extends CubismUserModel {
             value: Number(keyframe.target_value),
           }))
         : [];
+      // A ramp starting on its activation anchor picks up the visible pose.
+      if (keyframes.length >= 2 && keyframes[0].atMs === keyframes[1].atMs) {
+        keyframes[0].value = this._model.getParameterValueByIndex(parameterIndex);
+      }
       if (keyframes.some((keyframe) => keyframe.value < minValue || keyframe.value > maxValue)) {
         return { ok: false, reason: `parameter_plan_keyframe_out_of_runtime_range:${parameterIdRaw}` };
       }

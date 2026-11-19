@@ -660,12 +660,7 @@ def test_segment_motion_reads_current_neurobrain_state(
     monkeypatch.setattr(
         module,
         "_build_motion_static_capability_payload",
-        lambda _state: {},
-    )
-    monkeypatch.setattr(
-        module,
-        "_build_motion_runtime_payload",
-        lambda *_args, **_kwargs: ({}, []),
+        lambda _state, **_kwargs: {},
     )
     monkeypatch.setattr(
         module,
@@ -1053,7 +1048,7 @@ def test_independent_motion_request_uses_text_memory_and_segment_without_images(
         async def text_chat_stream(self, **kwargs):
             calls.append(kwargs)
             completion = (
-                '{"intent_tags":["平和"],"motion_steps":[{"axis_values":{"head_roll":50},"duration_weight":1}]}'
+                '[{"ms":260,"head_roll":50}]'
             )
             yield types.SimpleNamespace(
                 role="assistant",
@@ -1069,14 +1064,7 @@ def test_independent_motion_request_uses_text_memory_and_segment_without_images(
     monkeypatch.setattr(
         module,
         "_build_motion_static_capability_payload",
-        lambda _state: {"axes": [], "resources": []},
-    )
-    monkeypatch.setattr(
-        module,
-        "_build_motion_runtime_payload",
-        lambda *args, **kwargs: ({"reference_examples": [{
-            "input": "自然点头", "output": {"intent_tags": ["点头"], "motion_steps": [{"axis_values": {"head_roll": 50}, "duration_weight": 1}]},
-        }]}, []),
+        lambda _state, **_kwargs: {"axes": [], "resources": []},
     )
     monkeypatch.setattr(
         module,
@@ -1155,8 +1143,8 @@ def test_independent_motion_request_uses_text_memory_and_segment_without_images(
     assert request_input["user"] == "本轮输入"
     assert request_input["segment"] == {"speech": "回复文本", "actions": ["nod"], "tendency": {"Joy": 4}}
     assert "private-id" not in calls[0]["prompt"]
-    assert '"examples":[{"input":"自然点头"' in calls[0]["prompt"]
-    assert '"recent_executed":[{"input":"最近执行动作"' in calls[0]["prompt"]
+    assert request_input["motion_guidance"]["examples"][0]["output"] == [{"ms": 280, "head_roll": 60}]
+    assert request_input["motion_guidance"]["recent_end_poses"] == [{"head_roll": 50}]
     assert "motion_guidance" not in calls[0]["system_prompt"]
     assert "谨慎，遇事先观察。" in calls[0]["system_prompt"]
     assert "自然点头" not in calls[0]["system_prompt"]

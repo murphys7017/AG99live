@@ -66,6 +66,7 @@ async def read_text_chat_stream(
     contexts: list[dict[str, str]] | tuple[dict[str, str], ...] | None = None,
     on_first_chunk: Callable[[], None] | None = None,
     on_complete_json: Callable[[dict[str, Any]], Awaitable[None] | None] | None = None,
+    decode_record: Callable[[str], dict[str, Any] | None] | None = None,
     stop_after_complete_json: bool = False,
     request_options: dict[str, Any] | None = None,
 ) -> str:
@@ -92,7 +93,7 @@ async def read_text_chat_stream(
         nonlocal complete_json_reported
         if complete_json_reported or on_complete_json is None:
             return
-        candidate = _first_complete_json_object(streamed_text)
+        candidate = (decode_record or _first_complete_json_object)(streamed_text)
         if candidate is None:
             return
         complete_json_reported = True

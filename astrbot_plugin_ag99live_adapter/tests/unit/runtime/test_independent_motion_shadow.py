@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import importlib
-import sys
-import types
 from types import SimpleNamespace
 
 
@@ -59,15 +57,9 @@ def test_shadow_motion_uses_primary_prompt_and_never_replaces_primary_result(
             both_requests_started.set()
         await asyncio.wait_for(both_requests_started.wait(), timeout=1)
         return (
-            '{"intent_tags":["安慰"],"motion_steps":[{"axis_values":{"head_pitch":65},"duration_weight":1}]}',
+            '[{"ms":220,"head_pitch":65}]',
             "stream",
         )
-
-    async def recover_json(_text, **_kwargs):
-        return {
-            "intent_tags": ["安慰"],
-            "motion_steps": [{"axis_values": {"head_pitch": 65}, "duration_weight": 1}],
-        }
 
     def record_sample(_recorder, **kwargs):
         samples.append(kwargs)
@@ -87,25 +79,13 @@ def test_shadow_motion_uses_primary_prompt_and_never_replaces_primary_result(
         module,
         "normalize_motion_arguments_payload",
         lambda *_args, **_kwargs: (
-            {"schema_version": "engine.motion_intent.v4", "motion_steps": [{"axis_values": {"head_pitch": 65}, "duration_weight": 1}]},
+            {"schema_version": "engine.motion_intent.v4", "motion_steps": [{"axis_values": {"head_pitch": 65}, "ms": 220}]},
             "ok",
         ),
     )
     monkeypatch.setattr(module, "record_persona_motion_sample", record_sample)
     monkeypatch.setattr(module, "resolve_persona_delivery_mode", lambda _event: "M2_olv_incremental")
     monkeypatch.setattr(module, "resolve_persona_core_turn_id", lambda _event: "core-turn-1")
-    astrbot_core = types.ModuleType("astrbot.core")
-    astrbot_prompt = types.ModuleType("astrbot.core.prompt")
-    json_recovery = types.ModuleType("astrbot.core.prompt.json_recovery")
-    json_recovery.recover_json_record = recover_json
-    monkeypatch.setitem(sys.modules, "astrbot.core", astrbot_core)
-    monkeypatch.setitem(sys.modules, "astrbot.core.prompt", astrbot_prompt)
-    monkeypatch.setitem(
-        sys.modules,
-        "astrbot.core.prompt.json_recovery",
-        json_recovery,
-    )
-
     async def run() -> None:
         shadow_tasks: set[asyncio.Task] = set()
         result = await module.generate_independent_motion(
@@ -126,7 +106,7 @@ def test_shadow_motion_uses_primary_prompt_and_never_replaces_primary_result(
 
         assert result.motion_payload == {
             "schema_version": "engine.motion_intent.v4",
-            "motion_steps": [{"axis_values": {"head_pitch": 65}, "duration_weight": 1}],
+            "motion_steps": [{"axis_values": {"head_pitch": 65}, "ms": 220}],
         }
         assert len(requests) == 2
         primary_request = next(item for item in requests if item["provider"] is primary)
@@ -228,7 +208,7 @@ def test_motion_dataset_keeps_shadow_output_as_candidate_only() -> None:
                     "candidate_role": "primary",
                     "provider_final": True,
                     "status": "provider_normalized",
-                    "accepted_payload": {"motion_steps": [{"axis_values": {"head_pitch": 65}, "duration_weight": 1}]},
+                    "accepted_payload": {"motion_steps": [{"axis_values": {"head_pitch": 65}, "ms": 220}]},
                 },
             ),
             event(
@@ -240,7 +220,7 @@ def test_motion_dataset_keeps_shadow_output_as_candidate_only() -> None:
                     "candidate_role": "shadow",
                     "provider_final": False,
                     "status": "shadow_provider_normalized",
-                    "accepted_payload": {"motion_steps": [{"axis_values": {"head_pitch": 35}, "duration_weight": 1}]},
+                    "accepted_payload": {"motion_steps": [{"axis_values": {"head_pitch": 35}, "ms": 220}]},
                     "raw_output": "shadow raw JSON",
                 },
             ),
@@ -248,7 +228,7 @@ def test_motion_dataset_keeps_shadow_output_as_candidate_only() -> None:
     )
 
     assert merged["collection_status"] == "closed"
-    assert merged["final_payload"] == {"motion_steps": [{"axis_values": {"head_pitch": 65}, "duration_weight": 1}]}
+    assert merged["final_payload"] == {"motion_steps": [{"axis_values": {"head_pitch": 65}, "ms": 220}]}
     assert merged["input"]["motion_request"]["provider_id"] == "deepseek-provider"
     assert merged["provider_candidates"] == [
         {
@@ -256,7 +236,7 @@ def test_motion_dataset_keeps_shadow_output_as_candidate_only() -> None:
             "provider_id": "spark-v5-provider",
             "candidate_role": "shadow",
             "status": "shadow_provider_normalized",
-            "accepted_payload": {"motion_steps": [{"axis_values": {"head_pitch": 35}, "duration_weight": 1}]},
+            "accepted_payload": {"motion_steps": [{"axis_values": {"head_pitch": 35}, "ms": 220}]},
             "raw_output": "shadow raw JSON",
             "generation_elapsed_ms": None,
             "provider_elapsed_ms": None,

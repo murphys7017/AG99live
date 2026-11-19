@@ -1,3 +1,9 @@
+timed_expression_generation_20261119:
+  scope: Independent formal speech segments in the AstrBot adapter and Electron desktop.
+  contract: Sparse timed axis arrays from the provider, validated and delivered once the array closes.
+  evidence: DeepSeek Flash synthetic dialogue, isolated Mk6 renderer with playback clock, tuning sample round trip.
+  pending: Joint live session with real TTS, per-step delivery during decoding, and evaluation with the target 2B model.
+
 proactive_output_followup_20261118:
   class: bugfix
   risk: high

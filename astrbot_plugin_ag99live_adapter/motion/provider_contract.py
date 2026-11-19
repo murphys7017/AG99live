@@ -12,7 +12,24 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from .motion_intent import normalize_motion_intent_tags
+from .motion_intent import normalize_motion_intent_tags, normalize_motion_steps
+
+
+def expression_record(value: Any) -> dict[str, Any]:
+    """Expand the model's sparse timed poses into the runtime envelope."""
+    if not isinstance(value, list):
+        raise ValueError("expression_array_required")
+    steps = []
+    for point in value:
+        if not isinstance(point, dict) or "ms" not in point:
+            raise ValueError("expression_step_ms_required")
+        steps.append({"ms": point["ms"], "axis_values": {
+            axis: target for axis, target in point.items() if axis != "ms"
+        }})
+    normalized, reason = normalize_motion_steps(steps)
+    if normalized is None:
+        raise ValueError(reason)
+    return {"motion_steps": normalized, "intent_tags": ["动作"]}
 
 
 def normalize_provider_motion_record(

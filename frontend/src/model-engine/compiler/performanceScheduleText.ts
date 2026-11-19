@@ -5,6 +5,7 @@ import type {
   PerformancePhraseStepAlignment,
   PerformanceScheduleCompileResult,
   PerformanceSemanticStepSlot,
+  PerformanceSequenceStepInput,
   PerformanceSpeechCueMapping,
   PerformanceSpeechPhraseGroup,
 } from "./performanceScheduleTypes.js";
@@ -108,19 +109,20 @@ export function applySpeechCuesToPhrases(
 }
 
 export function compileSemanticStepSlots(
-  durationWeights: readonly number[] | undefined,
+  steps: readonly PerformanceSequenceStepInput[] | undefined,
   durationMs: number,
 ):
   | { ok: true; semanticSteps: PerformanceSemanticStepSlot[] }
   | Extract<PerformanceScheduleCompileResult, { ok: false }> {
-  if (durationWeights === undefined) {
+  if (steps === undefined) {
     return { ok: true, semanticSteps: [] };
   }
   if (
-    durationWeights.length < MIN_MOTION_SEQUENCE_STEPS
-    || durationWeights.length > MAX_MOTION_SEQUENCE_STEPS
-    || durationWeights.some(
-      (weight) => !Number.isInteger(weight) || weight < 1 || weight > 3,
+    steps.length < MIN_MOTION_SEQUENCE_STEPS
+    || steps.length > MAX_MOTION_SEQUENCE_STEPS
+    || steps.some(({ durationWeight, window }) =>
+      !Number.isInteger(durationWeight) || durationWeight < 1 || durationWeight > 3
+      || Boolean(window) !== Boolean(steps[0].window),
     )
   ) {
     return {
@@ -129,11 +131,12 @@ export function compileSemanticStepSlots(
       reason: "performance_schedule_sequence_shape_invalid",
     };
   }
-  const totalWeight = durationWeights.reduce((sum, weight) => sum + weight, 0);
-  const startTimes = resolveStepStartTimes(durationWeights, totalWeight, durationMs);
-  const semanticSteps = durationWeights.map((durationWeight, index) => {
-    const startMs = startTimes[index];
-    const endMs = startTimes[index + 1] ?? durationMs;
+  const startTimes = steps[0].window ? [] : resolveStepStartTimes(
+    steps.map((step) => step.durationWeight), durationMs,
+  );
+  const semanticSteps = steps.map(({ durationWeight, window }, index) => {
+    const startMs = window?.startMs ?? startTimes[index];
+    const endMs = window ? startMs + window.durationMs : startTimes[index + 1] ?? durationMs;
     return {
       index,
       durationWeight,
@@ -143,7 +146,11 @@ export function compileSemanticStepSlots(
       endRatio: endMs / durationMs,
     };
   });
-  if (semanticSteps.some((step) => step.endMs <= step.startMs)) {
+  if (semanticSteps.some((step, i) =>
+    !Number.isSafeInteger(step.startMs) || !Number.isSafeInteger(step.endMs)
+    || step.startMs < (semanticSteps[i - 1]?.endMs ?? 0)
+    || step.endMs <= step.startMs || step.endMs > durationMs,
+  )) {
     return {
       ok: false,
       schedule: null,
@@ -374,9 +381,9 @@ function isEffectiveSpeechCharacter(character: string): boolean {
 
 function resolveStepStartTimes(
   durationWeights: readonly number[],
-  totalWeight: number,
   durationMs: number,
 ): number[] {
+  const totalWeight = durationWeights.reduce((sum, weight) => sum + weight, 0);
   const startTimes = [0];
   let elapsedWeight = durationWeights[0];
   for (let index = 1; index < durationWeights.length; index += 1) {

@@ -33,6 +33,7 @@ interface ParameterTrackGraphInput {
   schedule: PerformanceSchedule;
   stepPlans: SemanticParameterPlan[];
   profile: SemanticAxisProfile;
+  timed?: boolean;
 }
 
 type ParameterTrackBuildResult =
@@ -81,6 +82,9 @@ export function compileParameterSequenceTrackGraph(
     };
   }
   const scheduleDurationMs = schedule.durationMs;
+  if (input.timed) {
+    return compileTimedTracks(stepPlans, schedule, profile);
+  }
   const axisById = new Map(profile.axes.map((axis) => [axis.id, axis]));
   const parameterStepsResult = resolveParameterSteps(stepPlans);
   if (!parameterStepsResult.ok) {
@@ -287,6 +291,49 @@ export function compileParameterSequenceTrackGraph(
     parameters,
     warnings,
   };
+}
+
+function compileTimedTracks(
+  plans: SemanticParameterPlan[], schedule: PerformanceSchedule, profile: SemanticAxisProfile,
+): ParameterTrackGraphCompileResult {
+  const tracks = new Map<string, SemanticParameterPlanEntry>();
+  const explicitlyControlled = new Set<string>();
+  const neutralByAxis = new Map(profile.axes.map((axis) => [axis.id, axis.neutral]));
+  for (const [index, plan] of plans.entries()) {
+    const { startMs, endMs } = schedule.semanticSteps[index];
+    for (const parameter of plan.parameters) {
+      if (parameter.source === "speech_pose") {
+        if (!tracks.has(parameter.parameter_id)) {
+          tracks.set(parameter.parameter_id, parameter);
+        }
+        continue;
+      }
+      if (parameter.source === "relation_graph" && explicitlyControlled.has(parameter.axis_id)) {
+        continue;
+      }
+      if (parameter.source === "semantic_axis") {
+        explicitlyControlled.add(parameter.axis_id);
+      }
+      let points = tracks.get(parameter.parameter_id)?.keyframes;
+      if (!points) {
+        points = [{
+          at_ms: startMs,
+          transition_ms: 0,
+          target_value: parameter.neutral_target_value,
+          input_value: neutralByAxis.get(parameter.axis_id),
+        }];
+        tracks.set(parameter.parameter_id, { ...parameter, activation_at_ms: startMs, keyframes: points });
+      }
+      points.push({
+        at_ms: startMs,
+        transition_ms: endMs - startMs,
+        target_value: parameter.target_value,
+        input_value: parameter.input_value,
+      });
+    }
+  }
+  return { ok: true, timing: plans[0].timing, parameters: [...tracks.values()],
+    warnings: ["timed_expression_tracks"] };
 }
 
 function resolveParameterSteps(

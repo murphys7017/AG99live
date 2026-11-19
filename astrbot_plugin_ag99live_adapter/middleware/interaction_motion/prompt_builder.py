@@ -15,13 +15,17 @@ from ...motion.pose_reference import build_pose_reference_candidates
 from ...motion.resource_catalog import build_motion_resource_candidates
 from ...motion.motion_intent import MAX_MOTION_STEPS
 
-def _build_motion_static_capability_payload(runtime_state: Any) -> dict[str, Any]:
+def _build_motion_static_capability_payload(
+    runtime_state: Any, *, include_materials: bool = True,
+) -> dict[str, Any]:
     capability_payload: dict[str, Any] = {}
     profile_payload = _summarize_semantic_profile(runtime_state)
     raw_profile = profile_payload.pop("raw_profile", None)
     if not isinstance(raw_profile, dict):
         raise RuntimeError("semantic_motion_prompt_profile_payload_invalid")
     capability_payload["semantic_profile"] = profile_payload
+    if not include_materials:
+        return capability_payload
     pose_reference_candidates = build_pose_reference_candidates(
         runtime_state=runtime_state,
         semantic_profile=raw_profile,

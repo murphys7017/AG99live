@@ -50,11 +50,17 @@ AG99 Persona
 
 动作生成依赖 AG99 Persona 扩展或兼容的 Persona 生命周期能力；官方 Core 不支持这些扩展时，Adapter 仍可转发对话和 TTS，但不生成动作。
 
-参数动作统一使用稀疏 `motion_steps`，长度为 1 到 8；即使只有一个稳定姿态也必须使用一个 step。普通动作通常使用 2 到 4 步，持续时间较长且存在明确动作阶段时才使用 5 到 8 步。每个 step 只包含 `axis_values` 和 `duration_weight`，轴值是对应 `value_range` 内的具体数值。完整动作资源仍单独使用 `motion_resource_id`。未知轴、越界数值、空 step、形态冲突和无效资源会明确失败；Adapter 不补轴、不改名、不生成 neutral pose。
+桌面端按当前角色的语义轴和取值范围校验表情。Mk6 的多条轴以 50 为中性，每个角色的具体中性值以 `neutral` 为准。
 
 ### 动作生成模式
 
-动作提示始终把参数动作写成 `motion_steps`；单一稳定姿态使用 1 个 step，用户要求或本段文本明确包含连续、重复、往返或有顺序的动作时，通常按播放顺序表达 2 到 4 个关键姿态变化。只有持续时间较长且存在明确动作阶段时才使用 5 到 8 步，不按词语、停顿或语音节奏拆分。
+Persona Effect 使用 `motion_steps` 编排 1 到 8 个带 `axis_values` 和 `duration_weight` 的姿态，也可以用 `motion_resource_id` 选择完整动作资源。独立 Provider 为正式台词段生成表情时，直接返回 1 到 8 步的 JSON 数组。例如，下面的 Mk6 表情先移开视线，停留片刻，再看回来。
+
+```json
+[{"ms":140,"gaze_x":65},{"ms":300},{"ms":220,"gaze_x":50}]
+```
+
+每个 `ms` 是过渡到本步目标的时长。第一次出现的轴在该步开始时接管，之后省略该轴表示保持已有目标。只含 `ms` 的一步保留停顿。末步结束后，播放器用最多 120 毫秒把控制交回基础动作。整段只有停顿时沿用原来的表现。Adapter 收到完整数组即可校验并交付，Motion Lab 保留 Provider 原文和已接受的动作。
 
 `independent_motion.enabled` 默认关闭。关闭时由 Persona Effect 为 Persona 回复段生成动作。开启后停用 Persona Effect，改由单独选择的聊天 Provider 为每个非空 `segments[].speech` 分别生成动作，并绑定到同索引的 TTS/输出段。独立动作没有整回复生成模式；旧配置中的 `per_speech_segment` 会在启动时清除，不再决定动作粒度。
 
@@ -64,9 +70,9 @@ AG99 Persona
 
 `parallel` 控制非流式 Persona 结果中的逐段动作请求是并发还是串行；并发数由 `max_concurrency` 限制。独立动作 Provider 使用 `text_chat_stream()`。OLV Persona 段流开启且 Core 能力检查通过时，默认等当前 `speech` 段完成后再启动对应动作请求，确保模型看到真实段文本；`stream_preview_enabled` 可显式开启旧的提前预览模式，以降低首帧等待但允许在 speech 为空时先生成。每段使用同一绝对时限约束上下文准备和 Provider 请求。Provider 不支持聊天流、请求超时或失败时，该段跳过动作并保留失败原因，核心文本/TTS 继续。TTS 身份到达后 Adapter 按 `turn_id`、`persona_result_id` 和分段索引绑定动作；支持段级物料化时，Core 最多并发准备 2 段语音，每段只等待对应动作 Future，按序提交并 flush 原子 `output.segment`，首段不等待其余段的动作。Persona 段流未启用或能力检查未通过时，不请求增量动作，继续使用 Core 的普通 Persona 输出流程。段索引决定对应关系，Provider 的返回先后不决定播放顺序。
 
-`shadow_enabled` 默认关闭。开启后，Adapter 使用 `shadow_provider_id` 与主动作 Provider 并行生成，发送完全相同的 system prompt、user prompt 和文本上下文；影子结果只经过相同的 JSON 恢复和动作契约校验并写入 Motion Lab，不参与 Live2D 播放，也不等待影子请求完成后再继续主链路。`shadow_timeout_seconds` 默认 5 秒，超时记录失败候选。训练/评估时以主动作 Provider 的已接受结果作为目标，影子候选保留 Provider ID、归一化动作、原始输出和耗时供对比。
+`shadow_enabled` 默认关闭。开启后，Adapter 使用 `shadow_provider_id` 与主动作 Provider 并行生成，发送完全相同的 system prompt、user prompt 和文本上下文；影子结果只经过相同的 JSON 数组解析和动作契约校验并写入 Motion Lab，不参与 Live2D 播放，也不等待影子请求完成后再继续主链路。`shadow_timeout_seconds` 默认 5 秒，超时记录失败候选。训练/评估时以主动作 Provider 的已接受结果作为目标，影子候选保留 Provider ID、归一化动作、原始输出和耗时供对比。
 
-`history_turns` 控制附带的最近纯文本对话轮数（默认 6，范围 0–20）。动作 Provider 不接收图片、截图上下文说明、工具消息或 memory slot；主回复模型的图片输入不受影响。每段动作输入只包含当前用户文本和当前 `speech`、`actions`、`tendency`；历史仅通过上述有界的纯文本对话轮次提供，不额外检索或注入记忆。Prompt 保留合法轴、具体 `value_range` 和资源约束。另保留最多 2 个相关示例和最近 3 个执行动作，全部投影为当前输出契约的 input/output 结构；移除运行标识，跳过不兼容或超过 2400 字符的单条参考，不截断 JSON。当前 actions 优先于参考。`intent_tags` 是可选元数据；Provider 省略时 Adapter 为 v4 补入最小标签，不影响动作字段校验。`max_concurrency` 默认 4、最大 8；`segment_timeout_seconds` 默认 5 秒、最大 60 秒，0 表示不限制非流式单段请求。完整 Core 汇合仍受 30 秒上限约束。详细 WIRING 过程日志使用 DEBUG，分段生成摘要和最终投递保留 INFO，异常保留 WARN/ERROR。
+`history_turns` 控制附带的最近纯文本对话轮数（默认 6，范围 0–20）。动作 Provider 不接收图片、截图上下文说明、工具消息或 memory slot；主回复模型的图片输入不受影响。每段动作输入只包含当前用户文本和当前 `speech`、`actions`、`tendency`；历史仅通过上述有界的纯文本对话轮次提供，不额外检索或注入记忆。提示词提供当前可用轴的方向、范围和中性值。内置示例演示短确认、带方向的追问和从惊讶到高兴的变化。示例数量服从 few-shot 配置，匹配的已启用毫秒样本优先。最近 3 段的结束姿态用于动作衔接。`max_concurrency` 默认 4、最大 8；`segment_timeout_seconds` 默认 5 秒、最大 60 秒，0 表示不限制非流式单段请求。完整 Core 汇合仍受 30 秒上限约束。详细 WIRING 过程日志使用 DEBUG，分段生成摘要和最终投递保留 INFO，异常保留 WARN/ERROR。
 
 ### NeuroBrain 状态上下文
 
