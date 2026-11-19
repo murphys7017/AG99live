@@ -705,9 +705,8 @@ function formatEffectiveExampleSource(example: DesktopMotionTuningEffectiveExamp
 function extractEffectiveExampleAxes(
   example: DesktopMotionTuningEffectiveExample,
 ): Record<string, number> {
-  return example.output.motionSteps?.[0]?.axisValues
-    ? { ...example.output.motionSteps[0].axisValues }
-    : {};
+  const pose = example.output.motionSteps?.find((step) => Object.keys(step.axisValues).length);
+  return { ...pose?.axisValues };
 }
 
 function getDraftTags(source: MotionDraftSource): string[] {

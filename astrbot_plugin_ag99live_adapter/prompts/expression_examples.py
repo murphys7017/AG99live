@@ -4,15 +4,17 @@ from __future__ import annotations
 
 from typing import Any
 
+from .motion_selector_examples import MotionReferenceExamplesResolution, select_relevant_user_examples
+
 # Signed fractions of the travel from neutral to the corresponding endpoint.
 # Each example pairs the actual line with only its visible changes.
 _SCENES = (
-    ("嗯，我在听。", ((260, {"mouth_smile": .18}),)),
-    ("咦，你说的是右边那个？", (
+    ("neutral", "嗯，我在听。", ((260, {"mouth_smile": .18}),)),
+    ("confused", "咦，你说的是右边那个？", (
         (140, {"gaze_x": .42}), (280, {"head_yaw": .24, "head_roll": .14}),
         (320, {}), (190, {"gaze_x": 0}),
     )),
-    ("真的？……太好了。", (
+    ("surprised", "真的？……太好了。", (
         (140, {"eye_open_left": .4, "eye_open_right": .4}), (210, {}),
         (330, {"eye_open_left": 0, "eye_open_right": 0, "mouth_smile": .52}),
     )),
@@ -20,7 +22,8 @@ _SCENES = (
 
 
 def _example(
-    speech: str, beats: tuple[tuple[int, dict[str, float]], ...], axes: dict[str, dict[str, Any]],
+    category: str, speech: str, beats: tuple[tuple[int, dict[str, float]], ...],
+    axes: dict[str, dict[str, Any]],
 ) -> dict[str, Any] | None:
     output = []
     for ms, targets in beats:
@@ -39,15 +42,36 @@ def _example(
                 return None
             point[key] = round(neutral + abs(amount) * (endpoint - neutral), 3)
         output.append(point)
-    return {"speech": speech, "output": output}
+    return {"category": category, "input": speech, "assistant_text": speech, "output": output}
 
 
-def expression_examples(axes: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
-    examples = [
-        example for speech, beats in _SCENES
-        if (example := _example(speech, beats, axes)) is not None
+def resolve_expression_examples(
+    state: Any, axes: dict[str, dict[str, Any]], request_text: str,
+) -> MotionReferenceExamplesResolution:
+    count = max(0, int(getattr(state, "motion_tuning_fewshot_count", 3)))
+    if not count or not getattr(state, "motion_tuning_fewshot_enabled", True):
+        return {"examples": [], "diagnostics": []}
+    list_samples = getattr(state, "list_motion_tuning_reference_examples", None)
+    candidates = list_samples() if callable(list_samples) else []
+    reviewed = select_relevant_user_examples(
+        candidates=[
+            item for item in candidates
+            if isinstance(item.get("output"), list) and item.get("assistant_text")
+        ],
+        request_text=request_text,
+        count=min(count, int(getattr(state, "motion_tuning_user_fewshot_count", 0))),
+    )
+    defaults = [
+        example for category, speech, beats in _SCENES
+        if (example := _example(category, speech, beats, axes)) is not None
     ]
-    if examples:
-        return examples
-    tilt = _example("嗯？", ((280, {"head_roll": .2}),), axes)
-    return [tilt or {"speech": "我陪你安静一会儿。", "output": [{"ms": 600}]}]
+    if not defaults:
+        tilt = _example("confused", "嗯？", ((280, {"head_roll": .2}),), axes)
+        quiet_line = "我陪你安静一会儿。"
+        defaults.append(tilt or {
+            "category": "neutral",
+            "input": quiet_line,
+            "assistant_text": quiet_line,
+            "output": [{"ms": 600}],
+        })
+    return {"examples": (reviewed + defaults)[:count], "diagnostics": ["timed_expression_examples"]}

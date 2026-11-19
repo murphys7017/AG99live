@@ -28,6 +28,8 @@ from ..live2d.semantic_axis_profile import (
 )
 from ..motion.performance_curve import PerformanceCurveRuntime
 from ..motion.material_catalog import build_motion_material_catalog
+from ..prompts.expression_examples import resolve_expression_examples
+from ..prompts.semantic_axis_prompt import profile_prompt_axes
 from ..prompts.motion_selector import (
     MotionReferenceExamplesResolution,
     resolve_motion_reference_examples,
@@ -814,6 +816,15 @@ class RuntimeState:
         self,
         request_text: str = "",
     ) -> MotionReferenceExamplesResolution:
+        if self.independent_motion_enabled:
+            profile = self._get_selected_semantic_axis_profile()
+            if not profile:
+                return {"examples": [], "diagnostics": []}
+            try:
+                axes = {axis["id"]: axis for axis in profile_prompt_axes(profile)}
+            except ValueError as exc:
+                return {"examples": [], "diagnostics": [str(exc)]}
+            return resolve_expression_examples(self, axes, request_text)
         return resolve_motion_reference_examples(
             runtime_state=self,
             request_text=request_text,

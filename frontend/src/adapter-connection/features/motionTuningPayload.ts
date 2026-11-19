@@ -7,6 +7,7 @@ import type {
 import type { MotionTuningSampleProtocolPayload } from "../../types/protocol.js";
 import { cloneCompiledSemanticMotion } from "../../model-engine/compiler/compiledSemanticMotionParser.js";
 import { MAX_MOTION_SEQUENCE_STEPS } from "../../model-engine/constants.js";
+import { normalizeMotionStepsV4 } from "../../model-engine/normalize.js";
 import { SCHEMA_MOTION_TUNING_SAMPLE_V2 } from "../../types/protocolSchema.generated.js";
 import { isObject, isPresent, normalizeText } from "../../utils/guards.js";
 
@@ -212,11 +213,17 @@ export function normalizeMotionTuningSamplesStatePayload(value: unknown): {
 export function normalizeMotionTuningEffectiveExamplePayload(
   value: unknown,
 ): DesktopMotionTuningEffectiveExample | null {
-  if (!isObject(value) || !isObject(value.output)) {
+  if (!isObject(value)) {
     return null;
   }
-  const output = value.output;
-  const motionSteps = normalizeMotionTuningMotionSteps(output.motion_steps);
+  const output = isObject(value.output) ? value.output : {};
+  const motionSteps = Array.isArray(value.output)
+    ? normalizeTimedTuningSteps(value.output.map((point) => {
+        if (!isObject(point)) return null;
+        const { ms, ...axes } = point;
+        return { ms, axis_values: axes };
+      }))
+    : normalizeMotionTuningMotionSteps(output.motion_steps);
   if (!motionSteps?.length) {
     return null;
   }
@@ -240,6 +247,19 @@ export function normalizeMotionTuningEffectiveExamplePayload(
       ? value.tags.map(normalizeText).filter(Boolean)
       : [],
   };
+}
+
+export function normalizeTimedTuningSteps(
+  value: unknown,
+): DesktopMotionTuningEffectiveExample["output"]["motionSteps"] {
+  const steps = normalizeMotionStepsV4(value);
+  if (!steps) return undefined;
+  const result = [];
+  for (const step of steps) {
+    if (step.ms === undefined) return undefined;
+    result.push({ axisValues: step.axis_values, ms: step.ms });
+  }
+  return result;
 }
 
 function normalizeMotionTuningMotionSteps(

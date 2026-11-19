@@ -5,6 +5,7 @@ import type {
 } from "../../types/desktop.js";
 import { cloneCompiledSemanticMotion } from "../../model-engine/compiler/compiledSemanticMotionParser.js";
 import { MAX_MOTION_SEQUENCE_STEPS } from "../../model-engine/constants.js";
+import { normalizeTimedTuningSteps } from "../../adapter-connection/features/motionTuningPayload.js";
 import {
   cloneNumericRecord,
   isObject,
@@ -80,6 +81,11 @@ function cloneMotionTuningMotionSteps(
 ): DesktopMotionTuningEffectiveExample["output"]["motionSteps"] {
   if (!Array.isArray(value) || value.length < 1 || value.length > MAX_MOTION_SEQUENCE_STEPS) {
     return undefined;
+  }
+  if (isObject(value[0]) && "ms" in value[0]) {
+    return normalizeTimedTuningSteps(value.map((step) =>
+      isObject(step) ? { ms: step.ms, axis_values: step.axisValues } : null,
+    ));
   }
   const steps = value.map((item) => {
     if (!isObject(item)) {

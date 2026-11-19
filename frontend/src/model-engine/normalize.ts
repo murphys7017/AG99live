@@ -41,7 +41,7 @@ function normalizeAxisValuesV4(value: unknown): MotionAxisValueMap | null {
   return Object.keys(axisValues).length > 0 ? axisValues : null;
 }
 
-function normalizeMotionStepsV4(value: unknown): MotionAxisValueStep[] | null {
+export function normalizeMotionStepsV4(value: unknown): MotionAxisValueStep[] | null {
   if (
     !Array.isArray(value)
     || value.length < MIN_MOTION_SEQUENCE_STEPS

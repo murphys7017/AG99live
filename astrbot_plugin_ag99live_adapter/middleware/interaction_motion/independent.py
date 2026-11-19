@@ -42,8 +42,7 @@ from .prompt_context import (
     _record_motion_prompt_reference_observation,
     _resolve_prompt_motion_history,
 )
-from ...prompts.expression_examples import expression_examples
-from ...prompts.motion_selector_examples import select_relevant_user_examples
+from ...prompts.expression_examples import resolve_expression_examples
 from .shared import (
     _append_resolution_reason,
     _MotionRuntimeBundle,
@@ -336,20 +335,11 @@ async def _prepare_independent_motion_context(
     )
     capability = _build_motion_capability_prompt_payload(capability_payload)
     axes = {axis["id"]: axis for axis in capability.get("axes", [])}
-    state = bundle.runtime_state
-    count = max(0, int(getattr(state, "motion_tuning_fewshot_count", 3)))
-    list_samples = getattr(state, "list_motion_tuning_reference_examples", None)
-    candidates = list_samples() if count and callable(list_samples) else []
-    reviewed = select_relevant_user_examples(
-        candidates=[item for item in candidates if isinstance(item.get("output"), list)],
-        request_text=current_user_text,
-        count=min(count, int(getattr(state, "motion_tuning_user_fewshot_count", 0))),
-    )
+    resolution = resolve_expression_examples(bundle.runtime_state, axes, current_user_text)
     examples = [{"speech": item["assistant_text"], "output": item["output"]}
-                for item in reviewed if item.get("assistant_text")]
-    examples.extend(expression_examples(axes)[:max(0, count - len(examples))])
+                for item in resolution["examples"]]
     runtime_payload = {"reference_examples": examples}
-    reference_diagnostics = ["timed_expression_examples"]
+    reference_diagnostics = resolution["diagnostics"]
     _record_motion_prompt_reference_observation(
         bundle=bundle,
         event=event,

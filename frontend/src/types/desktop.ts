@@ -291,10 +291,9 @@ export interface DesktopMotionTuningEffectiveExample {
   output: {
     intentTags: readonly string[];
     durationHintMs: number | null;
-    motionSteps?: readonly {
+    motionSteps?: readonly ({
       axisValues: Record<string, number>;
-      durationWeight: number;
-    }[];
+    } & ({ ms: number } | { durationWeight: number }))[];
     expressionResourceId?: string;
     motionResourceId?: string;
   };
