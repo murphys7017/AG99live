@@ -102,6 +102,12 @@ def _resolve_frontend_identity_snapshot(
     event_frontend_turn_id = None
     if isinstance(raw_message, dict):
         event_frontend_turn_id = _normalize_optional_string(raw_message.get("turn_id"))
+    if event_frontend_turn_id is None:
+        getter = getattr(event, "get_extra", None)
+        if callable(getter) and getter("_runtime_observation_event"):
+            event_frontend_turn_id = _normalize_optional_string(
+                getter("output_correlation_id")
+            )
     return _FrontendIdentitySnapshot(
         event_frontend_turn_id=event_frontend_turn_id,
     )

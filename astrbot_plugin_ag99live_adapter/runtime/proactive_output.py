@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 
+from .persona_lifecycle import PersonaTurnIdentity
+
 
 class ProactiveOutput:
     def __init__(self, adapter, event):
@@ -86,9 +88,15 @@ class ProactiveOutput:
         self.closed = True
 
     async def abort(self, reason):
-        if self.started and not self.closed:
+        if self.closed:
+            return
+        if self.started:
             await self.adapter.turn_coordinator.abort_turn_from_backend(
                 turn_id=self.turn_id,
                 reason=reason,
+            )
+        else:
+            self.adapter.runtime_state.persona_sessions.clear_turn(
+                PersonaTurnIdentity(self.turn_id)
             )
         self.closed = True

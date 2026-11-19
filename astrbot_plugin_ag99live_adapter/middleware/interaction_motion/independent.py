@@ -276,7 +276,10 @@ def persona_motion_phase(request: Any) -> str | None:
     kind = str(intent.get("kind") or "").strip()
     if kind == "reply" and phase in {"immediate", "final"}:
         return phase
-    if kind == phase == "proactive" and intent.get("source") == "reading_commentary":
+    if kind == phase == "proactive" and intent.get("source") in {
+        "reading_commentary",
+        "runtime_observation",
+    }:
         return "immediate"
     return None
 
