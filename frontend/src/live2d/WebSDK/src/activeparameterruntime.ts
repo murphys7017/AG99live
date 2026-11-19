@@ -104,6 +104,21 @@ export class ActiveParameterRuntime {
     this.interactionSway = null;
   }
 
+  public ownsEyeParameters(ids: ReadonlySet<string>): boolean {
+    const matches = (binding: { parameterIdRaw: string }) => ids.has(binding.parameterIdRaw);
+    if (this.interactionGaze?.bindings.some(matches) || this.interactionSway?.bindings.some(matches)) {
+      return true;
+    }
+    for (const plan of this.idlePlans.values()) {
+      if (plan.state.semanticBindings.some(matches)) return true;
+    }
+    return false;
+  }
+
+  public get hasInteractionGaze(): boolean {
+    return this.interactionGaze !== null;
+  }
+
   public startInteractionGaze(state: ActiveInteractionGazeState): void {
     this.interactionGaze = state;
   }

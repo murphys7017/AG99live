@@ -21,6 +21,9 @@ import {
   ACubismMotion,
   FinishedMotionCallback,
 } from "@framework/motion/acubismmotion";
+import { CubismExpressionMotion } from "@framework/motion/cubismexpressionmotion";
+import { CubismMotionCurveTarget } from "@framework/motion/cubismmotioninternal";
+import { SpeechGaze } from "./speechgaze";
 import { CubismMotion } from "@framework/motion/cubismmotion";
 import { CubismPhysicsJson } from "@framework/physics/cubismphysicsjson";
 import {
@@ -85,7 +88,6 @@ enum LoadStep {
   WaitLoadPhysics,
   LoadPose,
   WaitLoadPose,
-  SetupEyeBlink,
   SetupBreath,
   LoadUserData,
   WaitLoadUserData,
@@ -126,6 +128,10 @@ type DirectParameterPlanCandidate =
 export class LAppModel extends CubismUserModel {
   private readonly _loadGeneration = getLive2DModelLoadState().generation;
   private _released = false;
+  private readonly blinkParameters = new Set<string>();
+  private readonly gazeParameters = new Set(["ParamEyeBallX", "ParamEyeBallY"]);
+  private readonly resourceParameters = new WeakMap<ACubismMotion, Set<string>>();
+  private readonly speechGaze = new SpeechGaze();
   private _activeMotionResourceStop: ((reason: string) => void) | null = null;
   private _activeMotionResourceHandle = InvalidMotionQueueEntryHandleValue;
   private _activeMotionResourceFinish: (() => void) | null = null;
@@ -355,30 +361,19 @@ export class LAppModel extends CubismUserModel {
           .then((arrayBuffer) => {
             this.loadPose(arrayBuffer, arrayBuffer.byteLength);
 
-            this._state = LoadStep.SetupEyeBlink;
+            this._state = LoadStep.SetupBreath;
 
             // callback
-            setupEyeBlink();
+            setupBreath();
           })
           .catch((error) => this.failModelLoad("live2d_pose_load_failed", error));
         this._state = LoadStep.WaitLoadPose;
       } else {
-        this._state = LoadStep.SetupEyeBlink;
+        this._state = LoadStep.SetupBreath;
 
         // callback
-        setupEyeBlink();
+        setupBreath();
       }
-    };
-
-    // EyeBlink
-    const setupEyeBlink = (): void => {
-      if (this._modelSetting.getEyeBlinkParameterCount() > 0) {
-        this._eyeBlink = CubismEyeBlink.create(this._modelSetting);
-        this._state = LoadStep.SetupBreath;
-      }
-
-      // callback
-      setupBreath();
     };
 
     // Breath
@@ -454,6 +449,21 @@ export class LAppModel extends CubismUserModel {
         );
       }
 
+      if (eyeBlinkIdCount === 0) {
+        const lids = ["ParamEyeLOpen", "ParamEyeROpen"].map(
+          id => CubismFramework.getIdManager().getId(id),
+        );
+        if (lids.every(id => this.isParameterIndexWritable(this._model.getParameterIndex(id)))) {
+          for (const id of lids) this._eyeBlinkIds.pushBack(id);
+        }
+      }
+      if (this._eyeBlinkIds.getSize() > 0) {
+        this._eyeBlink = CubismEyeBlink.create();
+        this._eyeBlink.setParameterIds(this._eyeBlinkIds);
+        for (let i = 0; i < this._eyeBlinkIds.getSize(); i++) {
+          this.blinkParameters.add(this._eyeBlinkIds.at(i).getString().s);
+        }
+      }
       this._state = LoadStep.SetupLipSyncIds;
 
       // callback
@@ -709,11 +719,8 @@ export class LAppModel extends CubismUserModel {
     //--------------------------------------------------------------------------
 
     // まばたき
-    if (ambientMotionEnabled && !motionUpdated) {
-      if (this._eyeBlink != null) {
-        // メインモーションの更新がないとき
-        this._eyeBlink.updateParameters(this._model, deltaTimeSeconds); // 目パチ
-      }
+    if (ambientMotionEnabled && this._eyeBlink && !this.eyesOwned(this.blinkParameters)) {
+      this._eyeBlink.updateParameters(this._model, deltaTimeSeconds);
     }
 
     if (this._expressionManager != null) {
@@ -738,6 +745,16 @@ export class LAppModel extends CubismUserModel {
     // ドラッグによる目の向きの調整
     this.addNormalizedParameterValue(this._idParamEyeBallX, this._dragX);
     this.addNormalizedParameterValue(this._idParamEyeBallY, this._dragY);
+
+    const allowGlance = ambientMotionEnabled
+      && Math.abs(this._dragX) + Math.abs(this._dragY) < 0.001
+      && !this._activeParameterRuntime.hasInteractionGaze
+      && !this.eyesOwned(this.gazeParameters);
+    this.speechGaze.advance(deltaTimeSeconds, allowGlance, audioSignals.sourceActive, audioSignals.voiced);
+    if (this.speechGaze.x || this.speechGaze.y) {
+      this.addNormalizedParameterValue(this._idParamEyeBallX, this.speechGaze.x);
+      this.addNormalizedParameterValue(this._idParamEyeBallY, this.speechGaze.y);
+    }
 
     // 呼吸など
     if (ambientMotionEnabled && this._breath != null) {
@@ -2280,6 +2297,42 @@ export class LAppModel extends CubismUserModel {
       delayMs: modulation.delayMs,
       points: modulation.points,
     };
+  }
+
+  private eyesOwned(ids: ReadonlySet<string>): boolean {
+    if (this._directParameterPlanState?.semanticBindings.some(binding => ids.has(binding.parameterIdRaw))
+      || this._activeParameterRuntime.ownsEyeParameters(ids)) return true;
+
+    for (const manager of [this._motionManager, this._expressionManager]) {
+      const entries = manager?.getCubismMotionQueueEntries();
+      for (let i = 0; entries && i < entries.getSize(); i++) {
+        const entry = entries.at(i);
+        if (!entry?.isAvailable() || entry.isFinished()) continue;
+        const motion = entry.getCubismMotion();
+        if (!motion) continue;
+        let parameters = this.resourceParameters.get(motion);
+        if (!parameters) {
+          parameters = new Set<string>();
+          if (motion instanceof CubismMotion) {
+            const curves = motion._motionData.curves;
+            for (let j = 0; j < curves.getSize(); j++) {
+              const curve = curves.at(j);
+              const id = curve.id.getString().s;
+              if (curve.type === CubismMotionCurveTarget.CubismMotionCurveTarget_Parameter) parameters.add(id);
+              if (curve.type === CubismMotionCurveTarget.CubismMotionCurveTarget_Model && id === "EyeBlink") {
+                for (const lid of this.blinkParameters) parameters.add(lid);
+              }
+            }
+          } else if (motion instanceof CubismExpressionMotion) {
+            const values = motion.getExpressionParameters();
+            for (let j = 0; j < values.getSize(); j++) parameters.add(values.at(j).parameterId.getString().s);
+          }
+          this.resourceParameters.set(motion, parameters);
+        }
+        for (const id of ids) if (parameters.has(id)) return true;
+      }
+    }
+    return false;
   }
 
   private isParameterIndexWritable(parameterIndex: number): boolean {

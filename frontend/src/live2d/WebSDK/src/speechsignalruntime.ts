@@ -13,6 +13,8 @@ export interface ExternalAudioSignalSourceOptions {
 }
 
 export interface SpeechAudioFrame {
+  sourceActive: boolean;
+  voiced: boolean;
   lipSyncActive: boolean;
   lipSyncIntensity: number;
   mouthRound: number;
@@ -248,6 +250,8 @@ export class SpeechSignalRuntime {
       && this.activeSourceId !== null
       && this.lipSyncEnabled;
     return {
+      sourceActive: this.activeSourceId !== null,
+      voiced: this.speechVoiced,
       lipSyncActive,
       mouthRound: lipSyncActive ? this.mouthRound : 0,
       mouthWide: lipSyncActive ? this.mouthWide : 0,
