@@ -8,7 +8,6 @@ const MAX_CHUNK_SAMPLES = 32768;
 const MAX_BUFFERED_SAMPLES = SAMPLE_RATE * 4;
 const MAX_BUFFERED_NODES = 128;
 const SCHEDULE_LEAD_SECONDS = 0.005;
-const TURN_ONSET_LEAD_SECONDS = 0.12;
 const INITIAL_PREBUFFER_SAMPLES = Math.round(SAMPLE_RATE * 0.08);
 const INITIAL_PREBUFFER_MAX_WAIT_MS = 120;
 const MIN_SCHEDULE_GAP_SAMPLES = 2;
@@ -45,7 +44,6 @@ export function createPcmOutputSession(
   input: GainNode,
   output: SpeechOutputSession,
   identity: { turnId: string; messageId: string },
-  firstInTurn: boolean,
   notBefore = 0,
 ): PcmOutputSession {
   const chunks: ScheduledChunk[] = [];
@@ -59,7 +57,7 @@ export function createPcmOutputSession(
   let appending = false;
   let wakeWriter: (() => void) | null = null;
   let firstStartTime: number | null = null;
-  let onsetPrimer: AudioBufferSourceNode | null = null;
+  let drainTimer: ReturnType<typeof setTimeout> | null = null;
   let startTimer: ReturnType<typeof setTimeout> | null = null;
   let prebufferTimer: ReturnType<typeof setTimeout> | null = null;
   let startNotified = false;
@@ -116,13 +114,26 @@ export function createPcmOutputSession(
     }
     wakeWriter?.();
     if (finished && chunks.length === 0) {
-      console.info("[PcmOutput] segment drained.", {
-        ...identity,
-        acceptedSamples,
-        drainedSamples,
-        scheduledDurationMs: scheduledDurationSamples() * 1000 / SAMPLE_RATE,
-      });
-      resolveCompleted();
+      if (disposed || drainTimer !== null) return;
+      // onended marks render completion. Allow the already-rendered tail to
+      // reach the output device before reporting completion to the timeline.
+      const { contextTime = 0, performanceTime = 0 } = context.getOutputTimestamp?.() ?? {};
+      const presentationEndMs = performanceTime > 0 && contextTime > 0
+        ? performanceTime + (tailTime - contextTime) * 1000
+        : performance.now() + ((context.baseLatency || 0) + (context.outputLatency || 0)) * 1000;
+      const remainingMs = acceptedSamples ? presentationEndMs - performance.now() : 0;
+      const complete = () => {
+        console.info("[PcmOutput] segment drained.", {
+          ...identity, acceptedSamples, drainedSamples,
+          scheduledDurationMs: scheduledDurationSamples() * 1000 / SAMPLE_RATE,
+        });
+        resolveCompleted();
+      };
+      if (remainingMs > 0) {
+        drainTimer = setTimeout(complete, remainingMs);
+      } else {
+        complete();
+      }
     }
   }
 
@@ -137,32 +148,7 @@ export function createPcmOutputSession(
     // Finish the gain ramp during the silent scheduling lead, before sample 0.
     const scheduleAt = context.currentTime + SCHEDULE_LEAD_SECONDS;
     output.start(scheduleAt);
-    let speechStart = Math.max(scheduleAt, notBefore);
-    if (firstInTurn && firstStartTime === null) {
-      // Drive the same local output path before sample zero. Keep this quiet
-      // lead outside the speech clock, wire offsets and inter-segment handoffs.
-      const buffer = context.createBuffer(1, Math.round(SAMPLE_RATE * TURN_ONSET_LEAD_SECONDS), SAMPLE_RATE);
-      const values = buffer.getChannelData(0);
-      for (let i = 0; i < values.length; i++) {
-        values[i] = Math.sin(2 * Math.PI * 50 * i / SAMPLE_RATE) * (2 / 32768);
-      }
-      const primer = context.createBufferSource();
-      primer.buffer = buffer;
-      primer.connect(input);
-      const primerStart = context.currentTime + SCHEDULE_LEAD_SECONDS;
-      try {
-        primer.start(primerStart);
-      } catch (error) {
-        primer.disconnect();
-        throw error;
-      }
-      onsetPrimer = primer;
-      primer.onended = () => {
-        primer.disconnect();
-        onsetPrimer = null;
-      };
-      speechStart = Math.max(speechStart, primerStart + buffer.duration);
-    }
+    const speechStart = Math.max(scheduleAt, notBefore);
     while (pendingChunks.length > 0) {
       const pending = pendingChunks.shift()!;
       const previousTailTime = tailTime;
@@ -247,7 +233,7 @@ export function createPcmOutputSession(
       return tailTime;
     },
     getScheduledWaitMs: () => Math.max(
-      firstInTurn ? TURN_ONSET_LEAD_SECONDS * 1000 : 0,
+      0,
       (notBefore - context.currentTime) * 1000,
     ),
     clock: {
@@ -347,12 +333,7 @@ export function createPcmOutputSession(
       disposed = true;
       if (startTimer !== null) clearTimeout(startTimer);
       clearPrebufferTimer();
-      if (onsetPrimer) {
-        onsetPrimer.onended = null;
-        onsetPrimer.stop();
-        onsetPrimer.disconnect();
-        onsetPrimer = null;
-      }
+      if (drainTimer !== null) clearTimeout(drainTimer);
       rejectStarted(new DOMException("PCM playback stopped.", "AbortError"));
       window.removeEventListener("storage", syncVolume);
       for (const chunk of chunks) {

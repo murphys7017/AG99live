@@ -3,9 +3,7 @@ import { createPcmOutputSession, type PcmOutputSession } from "./pcmOutputSessio
 // PCM ramps during its silent scheduling lead, never through spoken samples.
 const SPEECH_OUTPUT_FADE_INITIAL_GAIN = 0;
 const SPEECH_OUTPUT_FADE_DURATION_SECONDS = 0.003;
-const SPEECH_OUTPUT_PRIMER_DURATION_SECONDS = 0.35;
-const SPEECH_OUTPUT_PRIMER_READY_DELAY_MS = 10;
-const SPEECH_OUTPUT_REPRIME_IDLE_MS = 30_000;
+const SPEECH_OUTPUT_PRIMER_DURATION_SECONDS = 0.12;
 const SPEECH_OUTPUT_KEEPALIVE_GAIN = 1 / 1_000_000;
 const SPEECH_OUTPUT_KEEPALIVE_FREQUENCY_HZ = 20;
 
@@ -28,11 +26,7 @@ export function createSpeechOutputRuntime(): SpeechOutputRuntime {
   let audioContext: AudioContext | null = null;
   let activeSession: SpeechOutputSession | null = null;
   const pcmSessions = new Set<SpeechOutputSession>();
-  let lastPcmTurnId: string | null = null;
-  const startedSessions = new Set<SpeechOutputSession>();
   let outputWarmed = false;
-  let outputActive = false;
-  let lastOutputActivityAtMs: number | null = null;
   let keepAliveSource: OscillatorNode | null = null;
   let keepAliveGain: GainNode | null = null;
   let disposed = false;
@@ -69,20 +63,21 @@ export function createSpeechOutputRuntime(): SpeechOutputRuntime {
     const buffer = context.createBuffer(1, frameCount, context.sampleRate);
     // Keep the primer technically non-silent so Chromium keeps the device path active,
     // while remaining far below an audible level.
-    buffer.getChannelData(0)[0] = 1 / 32768;
+    const samples = buffer.getChannelData(0);
+    for (let i = 0; i < samples.length; i++) {
+      samples[i] = Math.sin(2 * Math.PI * 50 * i / context.sampleRate) * (2 / 32768);
+    }
     source.buffer = buffer;
     source.connect(context.destination);
 
     return new Promise<void>((resolve, reject) => {
       let settled = false;
-      let readyTimer: ReturnType<typeof setTimeout> | null = null;
       const resolveReady = () => {
         if (settled) return;
         settled = true;
         resolve();
       };
       const cancel = () => {
-        if (readyTimer !== null) clearTimeout(readyTimer);
         try {
           source.stop();
         } catch (_error) {
@@ -99,7 +94,6 @@ export function createSpeechOutputRuntime(): SpeechOutputRuntime {
       source.addEventListener(
         "ended",
         () => {
-          if (readyTimer !== null) clearTimeout(readyTimer);
           source.disconnect();
           if (cancelPrimer === cancel) cancelPrimer = null;
           resolveReady();
@@ -108,9 +102,6 @@ export function createSpeechOutputRuntime(): SpeechOutputRuntime {
       );
       try {
         source.start();
-        // Keep the longer near-silent primer running in the background, but do
-        // not make the first PCM wait for its full duration.
-        readyTimer = setTimeout(resolveReady, SPEECH_OUTPUT_PRIMER_READY_DELAY_MS);
       } catch (error) {
         cancelPrimer = null;
         source.disconnect();
@@ -146,29 +137,30 @@ export function createSpeechOutputRuntime(): SpeechOutputRuntime {
     }
     if (disposed) throw new Error("speech_output_runtime_disposed");
     ensureOutputKeepAlive(context);
-    const now = performance.now();
-    const needsPrimer = !outputWarmed
-      || resumed
-      || lastOutputActivityAtMs === null
-      || (!outputActive && now - lastOutputActivityAtMs >= SPEECH_OUTPUT_REPRIME_IDLE_MS);
+    const needsPrimer = !outputWarmed || resumed;
     if (needsPrimer) {
       await primeOutput(context);
       outputWarmed = true;
     }
     if (disposed) throw new Error("speech_output_runtime_disposed");
-    lastOutputActivityAtMs = performance.now();
     console.info("[SpeechOutput] output runtime prepared.", {
       audioContextState: context.state,
       sampleRate: context.sampleRate,
       resumed,
       primerDurationMs: needsPrimer ? SPEECH_OUTPUT_PRIMER_DURATION_SECONDS * 1000 : 0,
-      primerReadyMs: needsPrimer ? SPEECH_OUTPUT_PRIMER_READY_DELAY_MS : 0,
     });
   }
 
   async function prepare(): Promise<void> {
-    if (preparation) return preparation;
-    const pending = prepareOutput(requireAudioContext()).finally(() => {
+    const context = requireAudioContext();
+    if (preparation) {
+      // A suspended context cannot deliver the primer's ended event. A later
+      // playback request (or user gesture) can resume the pending preparation.
+      const pending = preparation;
+      if (context.state === "suspended") await context.resume();
+      return pending;
+    }
+    const pending = prepareOutput(context).finally(() => {
       if (preparation === pending) preparation = null;
     });
     preparation = pending;
@@ -200,8 +192,6 @@ export function createSpeechOutputRuntime(): SpeechOutputRuntime {
           return;
         }
         outputStarted = true;
-        startedSessions.add(session);
-        outputActive = true;
         const now = context.currentTime;
         if (atTimeSeconds !== undefined) {
           outputGain.gain.cancelScheduledValues(now);
@@ -224,9 +214,6 @@ export function createSpeechOutputRuntime(): SpeechOutputRuntime {
         if (activeSession === session) {
           activeSession = null;
         }
-        startedSessions.delete(session);
-        outputActive = startedSessions.size > 0;
-        lastOutputActivityAtMs = performance.now();
         try {
           source.disconnect();
         } catch (_error) {
@@ -258,9 +245,7 @@ export function createSpeechOutputRuntime(): SpeechOutputRuntime {
       const context = requireAudioContext();
       const input = context.createGain();
       const output = attachSource(context, input, false);
-      const firstInTurn = identity.turnId !== lastPcmTurnId;
-      const session = createPcmOutputSession(context, input, output, identity, firstInTurn, notBefore);
-      lastPcmTurnId = identity.turnId;
+      const session = createPcmOutputSession(context, input, output, identity, notBefore);
       const dispose = session.dispose.bind(session);
       session.dispose = () => { pcmSessions.delete(session); dispose(); };
       pcmSessions.add(session);

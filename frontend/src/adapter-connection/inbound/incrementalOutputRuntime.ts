@@ -29,6 +29,7 @@ type AudioJob = { id: IncrementalIdentity } & (
 
 /** Wire admission is synchronous. One bounded worker owns actual PCM playback. */
 export function createIncrementalOutputRuntime(options: {
+  prewarmSpeechOutput(): void;
   getStore(): TurnPlaybackSessionPort;
   currentTurnId(): string | null;
   openPcm(turnId: string, messageId: string): Promise<PcmTimelineStream>;
@@ -190,6 +191,7 @@ export function createIncrementalOutputRuntime(options: {
     const store = options.getStore();
     if (event.kind === "start") {
       store.startIncrementalStream(resource, id);
+      if (resource === "audio") options.prewarmSpeechOutput();
     } else if (event.kind === "delta") {
       const text = store.appendIncrementalText(id, event.text);
       if (releasedTextMessages.has(messageKey(id))) {
