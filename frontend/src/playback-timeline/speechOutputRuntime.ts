@@ -28,6 +28,7 @@ export function createSpeechOutputRuntime(): SpeechOutputRuntime {
   let audioContext: AudioContext | null = null;
   let activeSession: SpeechOutputSession | null = null;
   const pcmSessions = new Set<SpeechOutputSession>();
+  let lastPcmTurnId: string | null = null;
   const startedSessions = new Set<SpeechOutputSession>();
   let outputWarmed = false;
   let outputActive = false;
@@ -257,7 +258,9 @@ export function createSpeechOutputRuntime(): SpeechOutputRuntime {
       const context = requireAudioContext();
       const input = context.createGain();
       const output = attachSource(context, input, false);
-      const session = createPcmOutputSession(context, input, output, identity, notBefore);
+      const firstInTurn = identity.turnId !== lastPcmTurnId;
+      const session = createPcmOutputSession(context, input, output, identity, firstInTurn, notBefore);
+      lastPcmTurnId = identity.turnId;
       const dispose = session.dispose.bind(session);
       session.dispose = () => { pcmSessions.delete(session); dispose(); };
       pcmSessions.add(session);
