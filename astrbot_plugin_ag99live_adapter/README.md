@@ -72,7 +72,9 @@ Persona Effect 使用 `motion_steps` 编排 1 到 8 个带 `axis_values` 和 `du
 
 `shadow_enabled` 默认关闭。开启后，Adapter 使用 `shadow_provider_id` 与主动作 Provider 并行生成，发送完全相同的 system prompt、user prompt 和文本上下文；影子结果只经过相同的 JSON 数组解析和动作契约校验并写入 Motion Lab，不参与 Live2D 播放，也不等待影子请求完成后再继续主链路。`shadow_timeout_seconds` 默认 5 秒，超时记录失败候选。训练/评估时以主动作 Provider 的已接受结果作为目标，影子候选保留 Provider ID、归一化动作、原始输出和耗时供对比。
 
-`history_turns` 控制附带的最近纯文本对话轮数（默认 6，范围 0–20）。动作 Provider 不接收图片、截图上下文说明、工具消息或 memory slot；主回复模型的图片输入不受影响。每段动作输入只包含当前用户文本和当前 `speech`、`actions`、`tendency`；历史仅通过上述有界的纯文本对话轮次提供，不额外检索或注入记忆。提示词提供当前可用轴的方向、范围和中性值。内置示例演示短确认、带方向的追问和从惊讶到高兴的变化。示例数量服从 few-shot 配置，匹配的已启用毫秒样本优先。最近 3 段的结束姿态用于动作衔接。`max_concurrency` 默认 4、最大 8；`segment_timeout_seconds` 默认 5 秒、最大 60 秒，0 表示不限制非流式单段请求。完整 Core 汇合仍受 30 秒上限约束。详细 WIRING 过程日志使用 DEBUG，分段生成摘要和最终投递保留 INFO，异常保留 WARN/ERROR。
+`speech_ms_per_han_char` 在 Web 控制台「独立 Live2D 动作生成」中设置，默认 213 毫秒/汉字，可填 1 到 2000 的整数。每段台词的汉字数乘以此值，作为 `segment.estimated_speech_ms` 发给动作模型。标点、数字和英文字母不计入；没有汉字的段省略该字段。估值可以超过 15 秒，动作仍可提前收势。保存后从下一次动作请求起生效，MiniMax 继续按自己的语速设置合成。
+
+`history_turns` 控制附带的最近纯文本对话轮数（默认 6，范围 0–20）。动作 Provider 不接收图片、截图上下文说明、工具消息或 memory slot；主回复模型的图片输入不受影响。每段动作输入包含当前用户文本以及该段的 `speech`、`actions`、`tendency`；历史仅通过上述有界的纯文本对话轮次提供，不额外检索或注入记忆。提示词提供当前可用轴的方向、范围和中性值。内置示例演示短确认、带方向的追问和从惊讶到高兴的变化。示例数量服从 few-shot 配置，匹配的已启用毫秒样本优先。最近 3 段的结束姿态用于动作衔接。`max_concurrency` 默认 4、最大 8；`segment_timeout_seconds` 默认 5 秒、最大 60 秒，0 表示不限制非流式单段请求。完整 Core 汇合仍受 30 秒上限约束。详细 WIRING 过程日志使用 DEBUG，分段生成摘要和最终投递保留 INFO，异常保留 WARN/ERROR。
 
 ### NeuroBrain 状态上下文
 

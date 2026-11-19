@@ -4,6 +4,7 @@ import asyncio
 import json
 import math
 import re
+import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass
 from time import monotonic, perf_counter, time_ns
@@ -15,6 +16,7 @@ from astrbot.api import logger
 
 from ...runtime.adapter_event_context import resolve_adapter_event_context
 from ...runtime.persona_lifecycle import PersonaSegmentState
+from ...runtime.plugin_runtime import DEFAULT_SPEECH_MS_PER_HAN_CHAR
 from ...motion.observation import (
     record_persona_motion_sample,
     resolve_persona_core_turn_id,
@@ -1011,6 +1013,11 @@ async def generate_independent_motion(
             prompt = _build_current_turn_prompt(
                 current_user_text=current_user_text,
                 assistant_text=assistant_text,
+                speech_ms_per_han_char=getattr(
+                    bundle.runtime_state,
+                    "independent_motion_speech_ms_per_han_char",
+                    DEFAULT_SPEECH_MS_PER_HAN_CHAR,
+                ),
                 segment_intent=segment_intent,
                 neurobrain_state=neurobrain_state,
                 motion_guidance=_motion_guidance_for_prompt(
@@ -1404,6 +1411,7 @@ def _build_current_turn_prompt(
     *,
     current_user_text: str,
     assistant_text: str,
+    speech_ms_per_han_char: int,
     segment_intent: Mapping[str, Any] | None = None,
     neurobrain_state: Mapping[str, Any] | None = None,
     motion_guidance: Mapping[str, Any] | None = None,
@@ -1417,6 +1425,14 @@ def _build_current_turn_prompt(
             "tendency": intent.get("tendency", {}),
         },
     }
+    han_chars = sum(
+        char == "〇" or unicodedata.name(char, "").startswith(
+            ("CJK UNIFIED IDEOGRAPH-", "CJK COMPATIBILITY IDEOGRAPH-")
+        )
+        for char in assistant_text
+    )
+    if han_chars:
+        payload["segment"]["estimated_speech_ms"] = han_chars * speech_ms_per_han_char
     if isinstance(neurobrain_state, Mapping):
         payload["neurobrain_state"] = dict(neurobrain_state)
     if motion_guidance is not None:
@@ -1441,7 +1457,8 @@ def _build_independent_system_prompt(
         "首次提及才开始控制，省略的轴保持原状。只有 ms 的一步表示停留。"
         "普通短确认通常只需一个小变化，一步即可结束。追问可以先看再转头，"
         "只有语气真的转折才增加阶段。每一步只写这时有表达作用的轴，"
-        "无需逐个调动五官或在句末例行回正。动作可以先于台词结束。"
+        "无需逐个调动五官或在句末例行回正。segment.estimated_speech_ms 是本段预计朗读毫秒数，"
+        "仅供安排节奏。反应可以提前，动作自然完成即可。"
         "\n可用轴：" + json.dumps(axes, ensure_ascii=False, separators=(",", ":"))
     )
     if persona_guidance:

@@ -24,6 +24,8 @@ PLUGIN_CONFIG_BASENAME = "astrbot_plugin_ag99live_adapter_config.json"
 # exposes this as an override, and deployments may set an empty value to use
 # the legacy independent-motion fallback.
 DEFAULT_PRE_ACTION_PROVIDER_ID = "ollama/qwen3:1.7b"
+DEFAULT_SPEECH_MS_PER_HAN_CHAR = 213
+MAX_SPEECH_MS_PER_HAN_CHAR = 2000
 DESKTOP_SETTINGS_CONFIG_KEY = "desktop_runtime_settings"
 _RETIRED_PLUGIN_CONFIG_PATHS = {
     "independent_motion": ("per_speech_segment", "segment_stream_enabled"),

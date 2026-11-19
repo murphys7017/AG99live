@@ -47,6 +47,8 @@ from .motion_state import MotionTuningStore
 from .persona_lifecycle import PersonaTurnSessionRegistry
 from .plugin_runtime import (
     DEFAULT_PRE_ACTION_PROVIDER_ID,
+    DEFAULT_SPEECH_MS_PER_HAN_CHAR,
+    MAX_SPEECH_MS_PER_HAN_CHAR,
     PluginConfigSnapshot,
     get_config_value,
 )
@@ -126,6 +128,7 @@ class RuntimeState:
         self.independent_motion_shadow_provider_id = ""
         self.independent_motion_shadow_timeout_seconds = 5.0
         self.independent_motion_stream_preview_enabled = False
+        self.independent_motion_speech_ms_per_han_char = DEFAULT_SPEECH_MS_PER_HAN_CHAR
         self.independent_motion_history_turns = 6
         self.independent_motion_parallel = False
         self.independent_motion_max_concurrency = 4
@@ -397,6 +400,16 @@ class RuntimeState:
             )
         except (TypeError, ValueError):
             self.independent_motion_history_turns = 6
+        self.independent_motion_speech_ms_per_han_char = int(
+            _bounded_config_number(
+                independent_motion_config,
+                "speech_ms_per_han_char",
+                default=DEFAULT_SPEECH_MS_PER_HAN_CHAR,
+                minimum=1,
+                maximum=MAX_SPEECH_MS_PER_HAN_CHAR,
+                integer=True,
+            )
+        )
         self.independent_motion_parallel = bool(
             get_config_value(independent_motion_config, "parallel", False)
         )
