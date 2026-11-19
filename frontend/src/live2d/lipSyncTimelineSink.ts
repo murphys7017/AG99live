@@ -162,6 +162,10 @@ function startLiveLipSync(
     let animationFrameId: number | null = null;
     let stopped = false;
     let firstFrameLogged = false;
+    const spectrum = new Float32Array(analyser.frequencyBinCount);
+    let mouthRound = 0;
+    let mouthWide = 0;
+    let lipSyncIntensity = 0;
     let lastAnalysisAt = 0;
 
     const tick = () => {
@@ -173,6 +177,7 @@ function startLiveLipSync(
         animationFrameId = window.requestAnimationFrame(tick);
         return;
       }
+      const dt = lastAnalysisAt ? (now - lastAnalysisAt) / 1000 : 1 / 30;
       lastAnalysisAt = now;
       analyser.getByteTimeDomainData(samples);
       analyser.getByteFrequencyData(frequencyBins);
@@ -182,7 +187,17 @@ function startLiveLipSync(
         squareSum += centered * centered;
       }
       const rms = Math.sqrt(squareSum / samples.length);
-      const lipSyncIntensity = Math.max(0, Math.min(1, (rms - 0.012) * 30));
+      if (hasLipSyncParameters) {
+        analyser.getFloatFrequencyData(spectrum);
+        const shape = estimateVowelShape(samples, spectrum, speechOutput.sampleRate, rms);
+        const strength = Math.max(0, rms - 0.006);
+        const opening = strength / (strength + 0.065);
+        const blend = 1 - Math.exp(-25 * dt);
+        const shapeGain = Math.min(1, strength / 0.025);
+        mouthRound += (shapeGain * shape.round - mouthRound) * blend;
+        mouthWide += (shapeGain * shape.wide - mouthWide) * blend;
+        lipSyncIntensity += (opening * (1 - 0.42 * Math.max(shape.round, shape.wide)) - lipSyncIntensity) * blend;
+      }
       const speechEnergyValue = Math.max(0, Math.min(1, (rms - 0.008) * 5.5));
       const speechEmphasisValue = resolveSpeechEmphasisValue(
         frequencyBins,
@@ -190,7 +205,7 @@ function startLiveLipSync(
       );
       try {
         writeAudioSignalSource(sourceId, {
-          ...(hasLipSyncParameters ? { lipSyncIntensity } : {}),
+          ...(hasLipSyncParameters ? { lipSyncIntensity, mouthRound, mouthWide } : {}),
           speechEnergyValue,
           speechEmphasisValue,
         });
@@ -280,6 +295,42 @@ function resolveSpeechEmphasisValue(
         / SPEECH_EMPHASIS_RATIO_SPAN,
     ),
   );
+}
+
+function estimateVowelShape(samples: Uint8Array, spectrum: Float32Array, rate: number, rms: number) {
+  if (rms <= 0.01) return { round: 0, wide: 0 };
+  const step = Math.max(1, Math.floor(rate / 8000));
+  let periodicity = 0;
+  for (let lag = Math.floor(rate / 500); lag <= Math.min(rate / 75, samples.length / 2); lag += step) {
+    let crossProduct = 0;
+    let currentPower = 0;
+    let delayedPower = 0;
+    for (let i = lag; i < samples.length; i += step) {
+      const x = samples[i] - 128;
+      const y = samples[i - lag] - 128;
+      crossProduct += x * y;
+      currentPower += x * x;
+      delayedPower += y * y;
+    }
+    periodicity = Math.max(periodicity, crossProduct / Math.sqrt(currentPower * delayedPower + 1e-12));
+  }
+  const clamp = (x: number) => Math.max(0, Math.min(1, x));
+  const confidence = clamp((periodicity - 0.55) / 0.3);
+  let low = 0;
+  let high = 0;
+  let total = 0;
+  const binHz = rate / (2 * spectrum.length);
+  for (let bin = Math.ceil(300 / binHz); bin < spectrum.length && bin * binHz <= 3300; bin++) {
+    const hz = bin * binHz;
+    const power = 10 ** (spectrum[bin] / 10) * (hz / 1000) ** 2;
+    total += power;
+    if (hz < 1000) low += power;
+    if (hz >= 1850) high += power;
+  }
+  return {
+    round: confidence * clamp((low / (total + 1e-12) - 0.72) * 3.5),
+    wide: confidence * clamp((high / (total + 1e-12) - 0.18) * 3),
+  };
 }
 
 function resolveFrequencyBandEnergy(

@@ -151,6 +151,8 @@ export class ActiveParameterRuntime {
     lipSyncEnabled: boolean;
     lipSyncActive: boolean;
     lipSyncIntensity: number;
+    mouthRound?: number;
+    mouthWide?: number;
     lipSyncParameterIds: csmVector<CubismIdHandle>;
   }): ActiveParameterFrameResult {
     if (this.interactionSway) {

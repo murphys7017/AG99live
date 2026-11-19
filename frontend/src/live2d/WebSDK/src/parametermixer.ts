@@ -1,3 +1,4 @@
+import { CubismFramework } from "@framework/live2dcubismframework";
 import type { CubismIdHandle } from "@framework/id/cubismid";
 import type { GazeTarget } from "../../../types/live2d-runtime";
 import type { CubismModel } from "@framework/model/cubismmodel";
@@ -212,6 +213,8 @@ export interface ActiveParameterFrameInput {
   lipSyncEnabled: boolean;
   lipSyncActive: boolean;
   lipSyncIntensity: number;
+  mouthRound?: number;
+  mouthWide?: number;
   lipSyncParameterIds: csmVector<CubismIdHandle>;
   getSpeechAudioGain: (axisId: string) => number;
 }
@@ -805,6 +808,17 @@ export class ActiveParameterMixer {
         priority: PARAMETER_MIX_PRIORITY.lipSync,
       });
     }
+    const shape = (id: string, weight: number) => {
+      if (weight < 0.005 || contributions.some(item => item.parameterIdRaw === id)) return;
+      const index = model.getParameterIndex(CubismFramework.getIdManager().getId(id));
+      if (!isParameterIndexWritable(model, index)) return;
+      contributions.push({
+        parameterIdRaw: id, parameterIndex: index, owner: "lip_sync", source: "vowel_shape",
+        value: model.getParameterMaximumValue(index), weight, priority: PARAMETER_MIX_PRIORITY.lipSync,
+      });
+    };
+    shape("ParamMouthFunnel", input.mouthRound ?? 0);
+    shape("ParamMouthPunkerWiden", input.mouthWide ?? 0);
     return contributions;
   }
 

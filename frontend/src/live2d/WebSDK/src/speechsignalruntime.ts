@@ -1,5 +1,7 @@
 export interface ExternalAudioSignalValues {
   lipSyncIntensity?: number;
+  mouthRound?: number;
+  mouthWide?: number;
   speechEnergyValue?: number;
   speechEmphasisValue?: number;
 }
@@ -13,6 +15,8 @@ export interface ExternalAudioSignalSourceOptions {
 export interface SpeechAudioFrame {
   lipSyncActive: boolean;
   lipSyncIntensity: number;
+  mouthRound: number;
+  mouthWide: number;
 }
 
 const SPEECH_HEAD_ENVELOPE_ATTACK_PER_SECOND = 10.0;
@@ -46,6 +50,8 @@ const LIP_SYNC_DIAGNOSTIC_FRAME_LIMIT = 2;
 export class SpeechSignalRuntime {
   private activeSourceId: string | null = null;
   private lipSyncIntensity = 0;
+  private mouthRound = 0;
+  private mouthWide = 0;
   private speechEnergyValue = 0;
   private speechEmphasisValue = 0;
   private speechHeadEnvelope = 0;
@@ -67,6 +73,8 @@ export class SpeechSignalRuntime {
     }
     this.activeSourceId = normalizedSourceId;
     this.lipSyncIntensity = 0;
+    this.mouthRound = 0;
+    this.mouthWide = 0;
     this.speechEnergyValue = 0;
     this.speechEmphasisValue = 0;
     this.speechEmphasisEnvelope = 0;
@@ -87,6 +95,12 @@ export class SpeechSignalRuntime {
     values: ExternalAudioSignalValues,
   ): void {
     this.requireActiveSource(sourceId);
+    if (values.mouthRound !== undefined) {
+      this.mouthRound = validateNormalizedSignal(values.mouthRound, "speech_signal_invalid_round");
+    }
+    if (values.mouthWide !== undefined) {
+      this.mouthWide = validateNormalizedSignal(values.mouthWide, "speech_signal_invalid_wide");
+    }
     if (values.lipSyncIntensity !== undefined) {
       this.lipSyncIntensity = validateNormalizedSignal(
         values.lipSyncIntensity,
@@ -149,6 +163,8 @@ export class SpeechSignalRuntime {
 
     this.lipSyncEnabled = false;
     this.lipSyncIntensity = 0;
+    this.mouthRound = 0;
+    this.mouthWide = 0;
     const unavailableHandler = this.activeLipSyncUnavailableHandler;
     this.activeLipSyncUnavailableHandler = null;
     try {
@@ -233,6 +249,8 @@ export class SpeechSignalRuntime {
       && this.lipSyncEnabled;
     return {
       lipSyncActive,
+      mouthRound: lipSyncActive ? this.mouthRound : 0,
+      mouthWide: lipSyncActive ? this.mouthWide : 0,
       lipSyncIntensity: lipSyncActive
         ? this.lipSyncIntensity
         : 0,
@@ -298,6 +316,8 @@ export class SpeechSignalRuntime {
     this.activeLipSyncUnavailableHandler = null;
     this.lipSyncEnabled = false;
     this.lipSyncIntensity = 0;
+    this.mouthRound = 0;
+    this.mouthWide = 0;
     this.speechEnergyValue = 0;
     this.speechEmphasisValue = 0;
     this.speechEmphasisEnvelope = 0;

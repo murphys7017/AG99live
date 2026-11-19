@@ -754,6 +754,8 @@ export class LAppModel extends CubismUserModel {
         lipSyncEnabled: this._lipsync === true,
         lipSyncActive: audioSignals.lipSyncActive,
         lipSyncIntensity: audioSignals.lipSyncIntensity,
+        mouthRound: audioSignals.mouthRound,
+        mouthWide: audioSignals.mouthWide,
         lipSyncParameterIds: this._lipSyncIds,
       });
       parameterMixerFailure = frameResult.failure;

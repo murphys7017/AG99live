@@ -55,6 +55,8 @@ export interface Live2dRuntimePort {
     sourceId: string,
     values: {
       lipSyncIntensity?: number;
+      mouthRound?: number;
+      mouthWide?: number;
       speechEnergyValue?: number;
       speechEmphasisValue?: number;
     },

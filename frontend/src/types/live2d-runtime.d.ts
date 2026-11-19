@@ -113,6 +113,8 @@ declare global {
         sourceId: string,
         values: {
           lipSyncIntensity?: number;
+          mouthRound?: number;
+          mouthWide?: number;
           speechEnergyValue?: number;
           speechEmphasisValue?: number;
         },
