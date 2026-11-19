@@ -10,21 +10,21 @@ from .motion_selector_examples import MotionReferenceExamplesResolution, select_
 # Each example pairs the actual line with only its visible changes.
 _SCENES = (
     ("explain", "你看右边那盏灯。刚才还暗着呢，现在亮起来了。嗯，这下我也看清了。", (
-        (220, {"gaze_x": .50}),
-        (680, {"head_yaw": .30}),
-        (1050, {"head_roll": .18}),
-        (510, {"head_roll": 0, "mouth_smile": .24}),
-        (980, {"gaze_x": 0, "head_yaw": .10}),
-        (760, {"head_yaw": 0, "mouth_smile": .43}),
+        (220, {"gaze_x": .76}),
+        (680, {"head_yaw": .72}),
+        (1050, {"head_roll": -.36}),
+        (510, {"head_roll": 0, "mouth_smile": .46}),
+        (980, {"gaze_x": 0, "head_yaw": .20}),
+        (760, {"head_yaw": 0, "mouth_smile": .74}),
     )),
-    ("neutral", "嗯，我在听。", ((260, {"mouth_smile": .18}),)),
+    ("neutral", "嗯，我在听。", ((260, {"mouth_smile": .48}),)),
     ("confused", "咦，你说的是右边那个？", (
-        (140, {"gaze_x": .42}), (280, {"head_yaw": .24, "head_roll": .14}),
+        (140, {"gaze_x": .76}), (280, {"head_yaw": .48, "head_roll": .72}),
         (320, {}), (190, {"gaze_x": 0}),
     )),
     ("surprised", "真的？……太好了。", (
-        (140, {"eye_open_left": .4, "eye_open_right": .4}), (210, {}),
-        (330, {"eye_open_left": 0, "eye_open_right": 0, "mouth_smile": .52}),
+        (140, {"eye_open_left": .90, "eye_open_right": .90}), (210, {}),
+        (330, {"eye_open_left": 0, "eye_open_right": 0, "mouth_smile": .80}),
     )),
 )
 
@@ -74,7 +74,7 @@ def resolve_expression_examples(
         if (example := _example(category, speech, beats, axes)) is not None
     ]
     if not defaults:
-        tilt = _example("confused", "嗯？", ((280, {"head_roll": .2}),), axes)
+        tilt = _example("confused", "嗯？", ((280, {"head_roll": .70}),), axes)
         quiet_line = "我陪你安静一会儿。"
         defaults.append(tilt or {
             "category": "neutral",
