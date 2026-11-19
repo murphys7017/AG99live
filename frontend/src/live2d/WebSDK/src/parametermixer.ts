@@ -110,6 +110,7 @@ export interface ActiveInteractionSwayState {
 
 export interface ActiveInteractionGazeState {
   target: GazeTarget;
+  startedAtMs: number;
   elapsedMs: number;
   bindings: ActiveInteractionSwayBinding[];
   timing: DirectParameterExecutionPlan["timing"];

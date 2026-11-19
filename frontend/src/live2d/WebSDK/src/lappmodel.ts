@@ -2170,6 +2170,7 @@ export class LAppModel extends CubismUserModel {
     }
     this._activeParameterRuntime.startInteractionGaze({
       target: input.target,
+      startedAtMs: performance.now(),
       elapsedMs: 0,
       bindings,
       timing: this.createPersistentInteractionTiming(),

@@ -161,7 +161,7 @@ export class ActiveParameterRuntime {
       }
     }
     if (this.interactionGaze) {
-      this.interactionGaze.elapsedMs += Math.max(0, input.deltaTimeSeconds) * 1000;
+      this.interactionGaze.elapsedMs = performance.now() - this.interactionGaze.startedAtMs;
     }
     let execution = this.mixer.resolveActiveFrame({
       ...input,
