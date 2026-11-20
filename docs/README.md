@@ -70,6 +70,7 @@ TypeScript 是持续开发和表现迭代实现。C++ 是冻结大版本后的�
 | C++ Native Runtime 的整体模块、线程、所有权和迁移顺序 | [C++ Native Runtime 整体架构重设计](02-设计文档/16-C++原生运行时整体架构重设计.md) |
 | TypeScript 运行时的端口、身份、终态和连接就绪边界 | [TypeScript 运行时架构收口](02-设计文档/17-TypeScript运行时架构收口.md) |
 | AG99 桌面主应用与身体接入计划 | AG99 仓库 `docs/Yakumo/dev/desktop-application-and-body-integration-plan.md` |
+| 千问表情数据导出与 VTS 候选筛选 | [当前导出入口](../experiments/README.md) |
 | 小模型和 VTube Studio 原始数据的边界 | [小模型训练](05-小模型训练/01-动作小模型训练前置条件与职责边界.md) |
 | Persona 输出、M0/M1/M2 与动作意图训练样本如何归一化 | [Persona 动作意图样本归一化契约](05-小模型训练/04-Persona动作意图样本归一化契约.md) |
 | 需要可视化查看模块、时序或状态机 | [架构图集](04-流程图与分析图/README.md) |
