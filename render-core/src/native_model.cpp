@@ -596,10 +596,75 @@ public:
     return true;
   }
 
-  void CancelIdleMotion() {
+  std::string StartMotionPreview(
+      const std::string& request_id, const ag99::runtime::Json& motion,
+      double expires_at_epoch_ms) {
+    if (!std::isfinite(expires_at_epoch_ms)
+        || expires_at_epoch_ms <= CurrentEpochMilliseconds()) {
+      return "motion_preview_expired";
+    }
     std::scoped_lock lock(_motion_mutex);
-    _idle_motion.reset();
-    _idle_expires_at_epoch_ms.reset();
+    if (!_model || !_model->GetModel()) {
+      return "motion_preview_model_unavailable";
+    }
+    if (_motion_scheduler.active_motion || _motion_scheduler.pending_motion_segment
+        || _active_parameter_plan || _pending_parameter_plan || _pre_action_motion) {
+      return "motion_preview_desktop_busy";
+    }
+    const auto* profile = SelectedModelProfile();
+    if (!profile || !motion.is_object()) {
+      return "motion_preview_payload_invalid";
+    }
+    if (!motion.contains("profile_id") || !motion.contains("profile_revision")
+        || !motion.contains("model_id") || !profile->contains("profile_id")
+        || !profile->contains("revision") || !profile->contains("model_id")
+        || motion.at("profile_id") != profile->at("profile_id")
+        || motion.at("profile_revision") != profile->at("revision")
+        || motion.at("model_id") != profile->at("model_id")) {
+      return "manual_preview_recorded_plan_profile_mismatch";
+    }
+
+    ag99::runtime::OutputSegment segment;
+    segment.envelope.message_id = request_id;
+    segment.motion.state = ag99::runtime::MotionSlot::State::Present;
+    segment.motion.payload = motion;
+    NativeSegmentClock clock{
+        .message_id = request_id,
+        .started_at_seconds = services_.now_seconds(),
+        .generation = _connection_generation};
+    const auto schema = motion.find("schema_version");
+    if (schema == motion.end()) {
+      return "motion_preview_payload_invalid";
+    }
+    if (*schema == std::string(ag99::runtime::kParameterPlanSchema)) {
+      segment.motion.message_type = "engine.parameter_plan";
+      // Bind live Cubism parameters on the render thread, like conversation plans.
+      _pending_parameter_plan = std::move(segment);
+      _pending_parameter_clock = clock;
+      return {};
+    }
+    if (*schema != std::string(ag99::runtime::kMotionIntentSchema)
+        || (motion.contains("motion_resource_id") && !motion.at("motion_resource_id").is_null())
+        || (motion.contains("expression_resource_id") && !motion.at("expression_resource_id").is_null())) {
+      return "motion_preview_motion_unsupported";
+    }
+    segment.motion.message_type = "engine.motion_intent";
+    _motion_scheduler.pending_motion_segment = std::move(segment);
+    _motion_scheduler.pending_motion_clock = clock;
+    return {};
+  }
+
+  void CancelIdleAndPreviewMotion() {
+    {
+      std::scoped_lock lock(_motion_mutex);
+      if (_idle_motion) {
+        CaptureReleaseLocked(_idle_motion->tracks, _idle_motion->blend_out_ms);
+      }
+      _idle_motion.reset();
+      _idle_expires_at_epoch_ms.reset();
+    }
+    // Manual previews use an empty turn id and never report conversation terminals.
+    CancelTurn("");
   }
 
   void SetModelSync(const ag99::runtime::Json& payload) {
@@ -2304,7 +2369,14 @@ bool NativeModel::StartIdleMotion(
     const ag99::runtime::IdleMotionEvent& event) {
   return impl_->StartIdleMotion(event);
 }
-void NativeModel::CancelIdleMotion() { impl_->CancelIdleMotion(); }
+std::string NativeModel::StartMotionPreview(
+    const std::string& request_id, const ag99::runtime::Json& motion,
+    double expires_at_epoch_ms) {
+  return impl_->StartMotionPreview(request_id, motion, expires_at_epoch_ms);
+}
+void NativeModel::CancelIdleAndPreviewMotion() {
+  impl_->CancelIdleAndPreviewMotion();
+}
 std::optional<NativeSegmentClock> NativeModel::CancelTurn(const std::string& turn_id) {
   return impl_->CancelTurn(turn_id);
 }

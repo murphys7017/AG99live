@@ -4,7 +4,7 @@ import {
   type MotionAxisValueStep,
   type NormalizedSemanticMotionIntent,
 } from "../../types/protocol.js";
-import type { SemanticAxisDefinition } from "../../types/semantic-axis-profile.js";
+import type { SemanticAxisDefinition, SemanticAxisProfile } from "../../types/semantic-axis-profile.js";
 import {
   MATERIAL_COMPOSITION_RECIPES,
   composeMaterialMotion,
@@ -265,44 +265,10 @@ export function createAmbientActionScheduler(
       return null;
     }
     const template = IDLE_REACTION_ACTIONS[sequence % IDLE_REACTION_ACTIONS.length];
-    const axes = selectLocalAxes(profile.axes, template, sequence);
-    if (axes.length === 0) {
+    const intent = buildReactionMotionIntent(profile, template, sequence, IDLE_AXIS_IDS);
+    if (!intent) {
       return null;
     }
-    const targetValues: Record<string, number> = {};
-    const neutralValues: Record<string, number> = {};
-    for (const [index, axis] of axes.entries()) {
-      const direction = (sequence + index) % 2 === 0 ? 1 : -1;
-      const target = buildTargetValue(axis, direction, template.intensityScale);
-      if (target === null || target === axis.neutral) {
-        continue;
-      }
-      targetValues[axis.id] = target;
-      neutralValues[axis.id] = axis.neutral;
-    }
-    if (Object.keys(targetValues).length === 0) {
-      return null;
-    }
-
-    const durationHintMs = template.durationMs + (sequence % 3) * 150;
-    const intent: Extract<
-      NormalizedSemanticMotionIntent,
-      { motion_steps: MotionAxisValueStep[] }
-    > = {
-      schema_version: SCHEMA_MOTION_INTENT_V4,
-      profile_id: profile.profile_id,
-      profile_revision: profile.revision,
-      model_id: profile.model_id,
-      mode: "idle",
-      intent_tags: ["ambient", "local", template.id],
-      emotion_label: template.emotionLabel,
-      duration_hint_ms: durationHintMs,
-      motion_steps: [
-        { axis_values: neutralValues, duration_weight: 1 },
-        { axis_values: targetValues, duration_weight: 2 },
-        { axis_values: neutralValues, duration_weight: 1 },
-      ],
-    };
     return {
       id: `ambient:local:${template.id}:${sequence}`,
       source: "local",
@@ -311,8 +277,8 @@ export function createAmbientActionScheduler(
       metadata: {
         templateId: template.id,
         diagnostics: [
-          `axis_count:${Object.keys(targetValues).length}`,
-          `duration_ms:${durationHintMs}`,
+          `axis_count:${Object.keys(intent.motion_steps[1].axis_values).length}`,
+          `duration_ms:${intent.duration_hint_ms}`,
         ],
       },
     };
@@ -344,17 +310,61 @@ export function createAmbientActionScheduler(
   return { start, nudge, dispose };
 }
 
+export function buildReactionMotionIntent(
+  profile: SemanticAxisProfile,
+  template: ReactionActionTemplate,
+  sequence = 0,
+  allowedAxisIds: readonly string[] = template.axisIds,
+): Extract<NormalizedSemanticMotionIntent, { motion_steps: MotionAxisValueStep[] }> | null {
+  const axes = selectLocalAxes(profile.axes, template, sequence, allowedAxisIds);
+  if (axes.length === 0) {
+    return null;
+  }
+  const targetValues: Record<string, number> = {};
+  const neutralValues: Record<string, number> = {};
+  for (const [index, axis] of axes.entries()) {
+    const direction = (sequence + index) % 2 === 0 ? 1 : -1;
+    const target = buildTargetValue(axis, direction, template.intensityScale);
+    if (target === null || target === axis.neutral) {
+      continue;
+    }
+    targetValues[axis.id] = target;
+    neutralValues[axis.id] = axis.neutral;
+  }
+  if (Object.keys(targetValues).length === 0) {
+    return null;
+  }
+
+  const durationHintMs = template.durationMs + (sequence % 3) * 150;
+  return {
+    schema_version: SCHEMA_MOTION_INTENT_V4,
+    profile_id: profile.profile_id,
+    profile_revision: profile.revision,
+    model_id: profile.model_id,
+    mode: "idle",
+    intent_tags: ["ambient", "local", template.id],
+    emotion_label: template.emotionLabel,
+    duration_hint_ms: durationHintMs,
+    motion_steps: [
+      { axis_values: neutralValues, duration_weight: 1 },
+      { axis_values: targetValues, duration_weight: 2 },
+      { axis_values: neutralValues, duration_weight: 1 },
+    ],
+  };
+}
+
 function selectLocalAxes(
   axes: readonly SemanticAxisDefinition[],
   template: ReactionActionTemplate,
   sequence: number,
+  allowedAxisIds: readonly string[],
 ): SemanticAxisDefinition[] {
   const usable = axes
     .filter((axis) => axis.control_role === "primary"
       || axis.control_role === "hint"
       || axis.control_role === "ambient")
     .filter((axis) => axis.parameter_bindings.length > 0)
-    .filter((axis) => IDLE_AXIS_IDS.includes(axis.id) && template.axisIds.includes(axis.id))
+    .filter((axis) => allowedAxisIds.includes(axis.id) && template.axisIds.includes(axis.id))
     .filter((axis) => template.semanticGroups.includes(axis.semantic_group))
     .sort((left, right) => left.id.localeCompare(right.id));
   const selected: SemanticAxisDefinition[] = [];

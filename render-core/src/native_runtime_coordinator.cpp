@@ -66,6 +66,7 @@ public:
         on_turn_interrupted_(std::move(callbacks.on_turn_interrupted)),
         on_desktop_settings_query_(
             std::move(callbacks.on_desktop_settings_query)),
+        on_motion_preview_(std::move(callbacks.on_motion_preview)),
         session_({
             [this](ag99::runtime::OutputSegment segment) {
               OnSegment(std::move(segment));
@@ -179,6 +180,29 @@ public:
                 services_.set_feedback_approved(true);
                 services_.set_status_text(L"赞同已保存");
                 services_.notify_input_runtime_state_changed();
+              }
+            },
+            [this](std::string request_id, ag99::runtime::Json motion, double expires) {
+              bool busy;
+              {
+                std::scoped_lock lock(playback_mutex_);
+                busy = !playback_turns_.empty() || !last_input_turn_id_.empty();
+              }
+              std::string error = "motion_preview_unavailable";
+              if (busy || MicrophoneRunning()) {
+                error = "motion_preview_desktop_busy";
+              } else if (on_motion_preview_) {
+                error = on_motion_preview_(request_id, motion, expires);
+              }
+              auto payload = ag99::runtime::Json{
+                  {"request_id", request_id}, {"ok", error.empty()}};
+              if (!error.empty()) {
+                payload["error"] = error;
+              }
+              const auto reply = ag99::runtime::build_envelope(
+                  "system.motion_preview_result", std::move(payload), std::nullopt, "frontend");
+              if (!transport_.SendText(reply.dump())) {
+                std::cerr << "[motion-lab] preview result not delivered\n";
               }
             },
         }) {
@@ -1699,6 +1723,8 @@ private:
   std::function<std::optional<NativeSegmentClock>(const std::string&)> on_turn_interrupted_;
   std::function<ag99::runtime::DesktopSettingsResult(
       const ag99::runtime::DesktopSettingsQuery&)> on_desktop_settings_query_;
+  std::function<std::string(
+      const std::string&, const ag99::runtime::Json&, double)> on_motion_preview_;
   ag99::runtime::RuntimeProtocolSession session_;
   std::mutex session_mutex_;
   std::mutex transport_mutex_;

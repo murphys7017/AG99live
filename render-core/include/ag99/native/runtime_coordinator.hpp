@@ -40,6 +40,8 @@ struct RuntimeCoordinatorCallbacks {
   std::function<ag99::runtime::DesktopSettingsResult(
       const ag99::runtime::DesktopSettingsQuery&)>
       on_desktop_settings_query;
+  std::function<std::string(
+      const std::string&, const ag99::runtime::Json&, double)> on_motion_preview;
 };
 
 struct RuntimeCoordinatorServices {

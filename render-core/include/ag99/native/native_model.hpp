@@ -66,7 +66,10 @@ public:
       const std::string& turn_id,
       const std::string& request_id = {});
   bool StartIdleMotion(const ag99::runtime::IdleMotionEvent& event);
-  void CancelIdleMotion();
+  std::string StartMotionPreview(
+      const std::string& request_id, const ag99::runtime::Json& motion,
+      double expires_at_epoch_ms);
+  void CancelIdleAndPreviewMotion();
   std::optional<NativeSegmentClock> CancelTurn(const std::string& turn_id);
   void SetModelSync(const ag99::runtime::Json& payload);
   ag99::runtime::DesktopSettingsResult HandleDesktopSettingsQuery(

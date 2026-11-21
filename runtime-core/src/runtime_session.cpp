@@ -179,6 +179,21 @@ void RuntimeProtocolSession::ingest_text(std::string_view text_frame) {
       }
       return;
     }
+    if (envelope.type == "system.motion_preview") {
+      const auto& payload = envelope.payload;
+      if (envelope.source != "adapter" || envelope.turn_id || !payload.is_object()
+          || !payload.contains("motion") || !payload.at("motion").is_object()
+          || !payload.contains("expires_at_epoch_ms")
+          || !payload.at("expires_at_epoch_ms").is_number()) {
+        throw ProtocolError("invalid motion preview request");
+      }
+      if (callbacks_.on_motion_preview) {
+        callbacks_.on_motion_preview(
+            envelope.message_id, payload.at("motion"),
+            payload.at("expires_at_epoch_ms").get<double>());
+      }
+      return;
+    }
     if (envelope.type == "output.idle_motion") {
       auto event = parse_idle_motion(envelope);
       if (callbacks_.on_idle_motion) {

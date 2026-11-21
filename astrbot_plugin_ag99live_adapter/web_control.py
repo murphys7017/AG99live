@@ -37,6 +37,10 @@ from .runtime.plugin_runtime import (
     restore_plugin_config_if_current,
     resolve_speech_recognition_source,
 )
+from .protocol.schema_versions import (
+    MOTION_INTENT_V4_SCHEMA_VERSION,
+    PARAMETER_PLAN_V3_SCHEMA_VERSION,
+)
 from .services.history_service import HistoryNotFoundError
 from .services.remote_asr import parse_asr_endpoint
 
@@ -1244,6 +1248,7 @@ def register_web_control_page(context: Any, plugin: Any) -> bool:
         ("/reading/material", api.save_reading, ["POST"], "Save reading material"),
         ("/reading/command", api.command_reading, ["POST"], "Control a reading session"),
         ("/motion-lab/events", api.get_motion_lab_events, ["GET"], "Read Motion Lab events"),
+        ("/motion-lab/preview", api.preview_motion, ["POST"], "Preview Motion Lab motion"),
         ("/profile", api.get_profile, ["GET"], "Read a Live2D semantic profile"),
         ("/profile", api.save_profile, ["POST"], "Save a Live2D semantic profile"),
         ("/samples", api.get_samples, ["GET"], "Read motion tuning samples"),
@@ -1459,6 +1464,30 @@ class WebControlPageApi:
             "connected": bool(platform.transport._ws_client is not None),
             "events": events,
         })
+
+    async def preview_motion(self):
+        if response := _require_dashboard_user():
+            return response
+        if request.content_length is not None and request.content_length > 512 * 1024:
+            return jsonify({"ok": False, "reason": "motion_preview_payload_too_large"})
+        body = await _read_json_body()
+        if isinstance(body, tuple):
+            return body[1]
+        platform, error = _resolve_platform_from_body(body)
+        if error:
+            return error
+        motion = body.get("motion")
+        semantic_motion = body.get("semantic_motion")
+        if (
+            not isinstance(motion, dict)
+            or motion.get("schema_version") not in (
+                MOTION_INTENT_V4_SCHEMA_VERSION, PARAMETER_PLAN_V3_SCHEMA_VERSION
+            )
+            or (semantic_motion is not None and not isinstance(semantic_motion, dict))
+        ):
+            return jsonify({"ok": False, "reason": "motion_preview_payload_invalid"})
+        reason = await platform.request_motion_preview(motion, semantic_motion)
+        return jsonify({"ok": not reason, "reason": reason})
 
     async def _mutate_history(self, action: Literal["create", "load", "delete"]):
         if response := _require_dashboard_user():

@@ -556,6 +556,9 @@ int Run(
               std::cerr << "[motion] pre-action rejected by Native model\n";
             }
           } else {
+            if (event.action == "input") {
+              model.CancelIdleAndPreviewMotion();
+            }
             model.CancelPreAction(
                 event.envelope.turn_id.value_or(""), event.request_id);
           }
@@ -574,7 +577,7 @@ int Run(
           model.ResetRuntimeSegments(generation);
         },
         .on_turn_started = [&model](const std::string& turn_id) {
-          model.CancelIdleMotion();
+          model.CancelIdleAndPreviewMotion();
           model.CancelPreAction(turn_id);
           model.StartThinkingSway(turn_id);
         },
@@ -602,6 +605,11 @@ int Run(
             return spout.HandleSetting(query);
           }
           return model.HandleDesktopSettingsQuery(query);
+        },
+        .on_motion_preview = [&model](
+            const std::string& request_id, const ag99::runtime::Json& motion,
+            double expires_at_epoch_ms) {
+          return model.StartMotionPreview(request_id, motion, expires_at_epoch_ms);
         }}, std::move(services));
     g_send_text = [&runtime](std::string text) {
       if (!runtime.SendText(text)) {

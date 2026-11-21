@@ -29,6 +29,9 @@ import {
 } from "../model-engine/settings";
 import type { Live2dPresentationSettings } from "../live2d-renderer/settings";
 import { usePlaybackCompletionCoordinator } from "../turn-playback/usePlaybackCompletionCoordinator";
+import { cloneCompiledSemanticMotion } from "../model-engine/compiler/compiledSemanticMotionParser.js";
+import { normalizeMotionPayload } from "../model-engine/normalize.js";
+import { parseSemanticParameterPlan } from "../model-engine/planParser.js";
 import { useMotionPlaybackRecorder } from "../playback-integrations/useMotionPlaybackRecorder";
 import { useTurnPlaybackOrchestrator } from "../turn-playback/useTurnPlaybackOrchestrator";
 import type { TurnPlaybackSessionPort } from "../turn-playback/sessionStorePort.js";
@@ -527,6 +530,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       }
     },
     onCompileFailed: (event) => {
+      if (event.playbackOrigin === "manual_preview") return;
       sendMotionLabEvent({
         event_type: "motion.frontend_compile_failed",
         message_id: event.messageId,
@@ -621,6 +625,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
           durationMs: event.durationMs ?? null,
           emotionLabel: event.emotionLabel ?? "",
           metadata: event.metadata ? cloneJson(event.metadata) : null,
+          ...(event.motion?.kind === "semantic_intent" ? { motion: cloneJson(event.motion.intent) } : {}),
           occurredAtMs: event.atMs,
           runId: event.candidateId,
         },
@@ -784,6 +789,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
         phase: "thinking",
       });
       clearPresencePreparation(event.turnId);
+      modelEngine.cancelManualPreview();
       modelEngine.startThinkingSway(event.turnId);
       return;
     }
@@ -810,12 +816,33 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       }
       console.info("[PreAction] execution admission.", { turnId: event.turnId, requestId: event.requestId, started });
     } else if (event.action === "input") {
+      modelEngine.cancelManualPreview();
       clearPresencePreparation();
       modelEngine.cancelPreAction();
     } else {
       clearPresencePreparation(event.turnId, event.requestId);
       modelEngine.cancelPreAction(event.turnId, event.requestId);
     }
+  });
+  adapter.setMotionPreviewHandler((requestId, motion, semanticMotion) => {
+    const context = getAmbientActionContext();
+    if (context.conversationPreparing || context.conversationActive
+      || context.speechInputActive || context.audioPlaying) {
+      return "motion_preview_desktop_busy";
+    }
+    if (!context.modelReady) return "motion_preview_model_unavailable";
+
+    const plan = parseSemanticParameterPlan(motion);
+    if (plan.ok) {
+      const compiled = cloneCompiledSemanticMotion(semanticMotion);
+      if (!compiled) return "motion_preview_payload_invalid";
+      if (modelEngine.previewRecordedParameterPlan(plan.value, compiled, requestId)) return "";
+    } else {
+      const intent = normalizeMotionPayload(motion);
+      if (!intent.ok) return intent.reason;
+      if (modelEngine.previewMotionIntent(intent.payload, requestId)) return "";
+    }
+    return modelEngine.state.lastCompileReason || "motion_preview_failed";
   });
   adapter.setIdleMotionObserver((event) => {
     try {

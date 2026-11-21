@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import time
 from pathlib import Path
 from typing import Any, Callable
 from uuid import uuid4
@@ -46,7 +47,10 @@ from .protocol.constants import (
     TYPE_SYSTEM_DESKTOP_RUNTIME_SETTINGS,
     TYPE_SYSTEM_DESKTOP_SETTINGS_RESULT,
     TYPE_SYSTEM_DESKTOP_SETTINGS_UPDATE,
+    TYPE_SYSTEM_MOTION_PREVIEW,
+    TYPE_SYSTEM_MOTION_PREVIEW_RESULT,
 )
+from .protocol.parser import build_message_envelope
 from .runtime.desktop_settings_broker import DesktopSettingsBroker
 from .runtime.desktop_capture_broker import DesktopFrameBroker, SCHEMA
 from .runtime.desktop_presence_broker import DesktopPresenceBroker
@@ -273,6 +277,7 @@ class OLVPetPlatformAdapter(Platform):
             self.transport.send_json,
             self.desktop_state_store,
         )
+        self._motion_preview_pending: dict[str, asyncio.Future[str]] = {}
         self.desktop_settings_broker = DesktopSettingsBroker(
             send_json=self.transport.send_json,
             is_connected=lambda: self.transport._ws_client is not None,
@@ -832,6 +837,41 @@ class OLVPetPlatformAdapter(Platform):
             persona_result_id=persona_result_id,
         )
 
+    async def request_motion_preview(
+        self, motion: dict[str, Any], semantic_motion: dict[str, Any] | None
+    ) -> str:
+        """Return a desktop rejection reason, or an empty string on acceptance."""
+        if self._motion_preview_pending:
+            return "motion_preview_busy"
+        try:
+            send = self.transport.bind_current_client_sender()
+        except RuntimeError:
+            return "desktop_client_offline"
+        request_id = uuid4().hex
+        future = asyncio.get_running_loop().create_future()
+        self._motion_preview_pending[request_id] = future
+        payload: dict[str, Any] = {
+            "motion": motion,
+            "expires_at_epoch_ms": int(time.time() * 1000) + 3000,
+        }
+        if semantic_motion is not None:
+            payload["semantic_motion"] = semantic_motion
+        try:
+            async with asyncio.timeout(3):
+                if not await send(build_message_envelope(
+                    TYPE_SYSTEM_MOTION_PREVIEW,
+                    source="adapter",
+                    turn_id=None,
+                    message_id=request_id,
+                    payload=payload,
+                )):
+                    return "desktop_client_send_failed"
+                return await future
+        except TimeoutError:
+            return "motion_preview_timeout"
+        finally:
+            self._motion_preview_pending.pop(request_id, None)
+
     async def _handle_frontend_system(self, message: Any) -> None:
         # TurnCoordinator hands over a parsed ProtocolMessage, not the raw dict.
         if message.type == "system.subtitle_state":
@@ -870,6 +910,11 @@ class OLVPetPlatformAdapter(Platform):
                 "persona_segment_stream_enabled=%s",
                 self.desktop_persona_segment_stream_enabled,
             )
+            return
+        if message.type == TYPE_SYSTEM_MOTION_PREVIEW_RESULT:
+            preview = self._motion_preview_pending.get(message.payload["request_id"])
+            if preview is not None and not preview.done():
+                preview.set_result("" if message.payload["ok"] else message.payload["error"])
             return
         if message.type == TYPE_SYSTEM_DESKTOP_SETTINGS_RESULT:
             if not self.desktop_settings_broker.resolve(message.payload):
@@ -937,6 +982,9 @@ class OLVPetPlatformAdapter(Platform):
         desktop_state_store = getattr(self, "desktop_state_store", None)
         if desktop_state_store is not None:
             desktop_state_store.disconnect()
+        for preview in getattr(self, "_motion_preview_pending", {}).values():
+            if not preview.done():
+                preview.set_result("desktop_client_offline")
         cleanup_failures: list[tuple[str, Exception]] = []
         self.desktop_persona_segment_stream_enabled = False
         self.desktop_audio_credit_enabled = False

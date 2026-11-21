@@ -1,11 +1,19 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import type { MotionLabRawEvent } from "../types/motionLab.js";
+import { computed, ref } from "vue";
+import { readMotionLabPreview, type MotionLabPreview, type MotionLabRawEvent } from "../types/motionLab.js";
 
 const props = defineProps<{
   events: readonly MotionLabRawEvent[];
   status?: string;
+  canPreview: boolean;
+  previewPending: boolean;
+  previewStatus: string;
 }>();
+
+const emit = defineEmits<{ preview: [preview: MotionLabPreview] }>();
+const search = ref("");
+const kind = ref("all");
+const playbackStatus = ref("");
 
 type MotionRun = {
   runId: string;
@@ -35,6 +43,7 @@ type MotionSegment = {
   latestEventType: string;
   createdAt: string;
   eventCount: number;
+  preview: MotionLabPreview | null;
 };
 
 const motionEvents = computed(() => props.events
@@ -116,6 +125,7 @@ const segments = computed<MotionSegment[]>(() => {
     latestEventType: string;
     createdAt: string;
     eventCount: number;
+    preview: MotionLabPreview | null;
   }>();
   for (const event of motionEvents.value) {
     const raw = event.raw ?? {};
@@ -144,8 +154,14 @@ const segments = computed<MotionSegment[]>(() => {
       latestEventType: event.event_type,
       createdAt: event.created_at,
       eventCount: 0,
+      preview: null,
     };
     current.eventCount += 1;
+    if (event.event_type === "motion.playback_started" || event.event_type === "ambient.action_started") {
+      current.preview = readMotionLabPreview(raw) ?? current.preview;
+      current.source = stringValue(event.source_route) || current.source;
+      current.emotionLabel = stringValue(record?.emotionLabel) || stringValue(raw.emotionLabel) || current.emotionLabel;
+    }
     current.latestEventType = event.event_type;
     current.createdAt = event.created_at;
     current.assistantText ||= stringValue(event.assistant_text) || stringValue(record?.assistantText);
@@ -187,7 +203,21 @@ const segments = computed<MotionSegment[]>(() => {
       });
     });
   }
-  return indexed.sort((left, right) => right.createdAt.localeCompare(left.createdAt)).slice(0, 30);
+  return indexed.sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+});
+
+const filteredSegments = computed(() => {
+  const query = search.value.trim().toLowerCase();
+  return segments.value.filter((segment) => {
+    if (kind.value === "ambient" && !segment.ambient) return false;
+    if (kind.value === "dialogue" && segment.ambient) return false;
+    if (kind.value === "playable" && !segment.preview) return false;
+    if (playbackStatus.value && segment.status !== playbackStatus.value) return false;
+    return !query || [
+      segment.emotionLabel, segment.assistantText, segment.source,
+      segment.details, segment.messageId, segment.turnId,
+    ].some((value) => value.toLowerCase().includes(query));
+  }).slice(0, 30);
 });
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -265,13 +295,38 @@ function formatTime(value: string): string {
     <section class="motion-activity__history">
       <div class="motion-activity__section-title">
         <strong>动作历史</strong>
-        <span>消息分段与环境动作</span>
       </div>
-      <div v-if="segments.length" class="motion-activity__segment-list">
-        <article v-for="segment in segments" :key="segment.key" class="motion-activity__segment">
+      <div class="motion-activity__filters">
+        <input v-model="search" type="search" aria-label="搜索动作" placeholder="搜索动作、台词或来源" />
+        <select v-model="kind" aria-label="动作类型">
+          <option value="all">全部类型</option>
+          <option value="dialogue">对话动作</option>
+          <option value="ambient">环境动作</option>
+          <option value="playable">可重放</option>
+        </select>
+        <select v-model="playbackStatus" aria-label="播放状态">
+          <option value="">全部状态</option>
+          <option v-for="value in ['已生成', '播放中', '已完成', '失败', '未执行']" :key="value" :value="value">
+            {{ value }}
+          </option>
+        </select>
+      </div>
+      <p v-if="previewStatus" class="settings-card__hint" role="status">{{ previewStatus }}</p>
+      <div v-if="filteredSegments.length" class="motion-activity__segment-list">
+        <article v-for="segment in filteredSegments" :key="segment.key" class="motion-activity__segment">
           <div class="motion-activity__segment-header">
             <strong>{{ segment.ambient ? "环境 · " : "" }}{{ segment.emotionLabel }}</strong>
-            <span :data-status="segment.status">{{ segment.status }}</span>
+            <div class="motion-activity__segment-actions">
+              <span :data-status="segment.status">{{ segment.status }}</span>
+              <button
+                v-if="segment.preview"
+                type="button"
+                class="web-control-refresh"
+                :aria-label="`播放${segment.emotionLabel}`"
+                :disabled="!canPreview || previewPending"
+                @click="emit('preview', segment.preview)"
+              >播放</button>
+            </div>
           </div>
           <p>{{ segment.assistantText || (segment.ambient ? "待机或环境反应动作" : "暂无助手文本") }}</p>
           <small>
@@ -282,12 +337,36 @@ function formatTime(value: string): string {
           <small v-if="segment.details" class="motion-activity__segment-details">{{ segment.details }}</small>
         </article>
       </div>
-      <p v-else class="motion-activity__empty">还没有收到动作事件。</p>
+      <p v-else class="motion-activity__empty">
+        {{ segments.length ? "没有符合筛选条件的动作。" : "还没有收到动作事件。" }}
+      </p>
     </section>
   </article>
 </template>
 
 <style scoped>
+.motion-activity__filters,
+.motion-activity__segment-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.motion-activity__filters {
+  margin-bottom: 12px;
+}
+
+.motion-activity__filters input,
+.motion-activity__filters select {
+  min-height: 34px;
+  padding: 5px 9px;
+  border: 1px solid #465052;
+  border-radius: 6px;
+  color: inherit;
+  background: #202628;
+}
+
 .motion-activity__section-title {
   display: flex;
   justify-content: space-between;

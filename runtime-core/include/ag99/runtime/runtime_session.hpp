@@ -36,6 +36,7 @@ struct RuntimeSessionCallbacks {
   std::function<void()> on_start_mic;
   std::function<void(DesktopPresenceRequest)> on_desktop_presence_request;
   std::function<void(std::string, std::string)> on_motion_feedback_recorded;
+  std::function<void(std::string, Json, double)> on_motion_preview;
 };
 
 class RuntimeProtocolSession final {

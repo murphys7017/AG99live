@@ -43,6 +43,7 @@ export const OUTBOUND_MESSAGE_TYPES = {
   SYSTEM_MOTION_TUNING_SAMPLE_SAVE: "system.motion_tuning_sample_save",
   SYSTEM_MOTION_TUNING_SAMPLE_DELETE: "system.motion_tuning_sample_delete",
   SYSTEM_MOTION_LAB_RAW_EVENT: "system.motion_lab_raw_event",
+  SYSTEM_MOTION_PREVIEW_RESULT: "system.motion_preview_result",
   SYSTEM_DESKTOP_SETTINGS_RESULT: "system.desktop_settings_result",
   SYSTEM_DESKTOP_SETTINGS_UPDATE: "system.desktop_settings_update",
   SYSTEM_DESKTOP_RUNTIME_SETTINGS: "system.desktop_runtime_settings",

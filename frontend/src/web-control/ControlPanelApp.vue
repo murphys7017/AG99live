@@ -3,6 +3,8 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import MotionLabActivityPanel from "../components/MotionLabActivityPanel.vue";
 import MotionTuningPanel from "../components/MotionTuningPanel.vue";
 import ReactionActionCatalogPanel from "../components/ReactionActionCatalogPanel.vue";
+import { buildReactionMotionIntent } from "../model-engine/ambient/ambientActionScheduler.js";
+import type { ReactionActionTemplate } from "../model-engine/ambient/reactionActionCatalog.js";
 import SemanticAxisProfileEditor from "../components/SemanticAxisProfileEditor.vue";
 import SettingsForm from "./SettingsForm.vue";
 import DesktopSettingsPanel from "./DesktopSettingsPanel.vue";
@@ -34,6 +36,7 @@ import type {
 import {
   extractMotionPlaybackRecords,
   type MotionLabEventsResponse,
+  type MotionLabPreview,
   type MotionLabRawEvent,
 } from "../types/motionLab.js";
 import type { SemanticAxisProfile } from "../types/semantic-axis-profile";
@@ -79,6 +82,9 @@ const profileSaveResult = ref<DesktopSemanticAxisProfileSaveResult | null>(null)
 const motionTuningSamples = ref<DesktopMotionTuningSample[]>([]);
 const motionLabEvents = ref<MotionLabRawEvent[]>([]);
 const motionLabStatus = ref("");
+const motionLabConnected = ref(false);
+const motionPreviewPending = ref(false);
+const motionPreviewStatus = ref("");
 const motionPlaybackRecords = computed(() => extractMotionPlaybackRecords(motionLabEvents.value));
 const motionTuningStatus = ref<DesktopMotionTuningSamplesStatus>({
   rootError: "",
@@ -537,8 +543,17 @@ function onVisibilityChange(): void {
 watch(section, () => {
   if (section.value === "settings") void listDesktopSettings();
   startDesktopPolling();
-  if (section.value === "action-lab") startMotionLabPolling();
-  else stopMotionLabPolling();
+  if (section.value === "action-lab") {
+    const liveModelName = activePlatform.value?.selected_model;
+    if (liveModelName && liveModelName !== selectedModelName.value) {
+      selectedModelName.value = liveModelName;
+      profile.value = null;
+      void loadProfile();
+    }
+    startMotionLabPolling();
+  } else {
+    stopMotionLabPolling();
+  }
 });
 
 onBeforeUnmount(stopDesktopPolling);
@@ -664,11 +679,13 @@ async function loadMotionLabEvents(): Promise<void> {
     });
     if (revision !== motionLabLoadRevision || selectedPlatformId.value !== platformId) return;
     motionLabEvents.value = Array.isArray(response.events) ? response.events : [];
+    motionLabConnected.value = response.connected;
     motionLabStatus.value = response.connected
       ? "桌面端已连接，事件流每 1.5 秒刷新。"
       : "桌面端当前未连接，显示最近一次保存的事件。";
   } catch (error) {
     if (revision !== motionLabLoadRevision || selectedPlatformId.value !== platformId) return;
+    motionLabConnected.value = false;
     motionLabStatus.value = `动作事件读取失败：${error instanceof Error ? error.message : String(error)}`;
   }
 }
@@ -714,16 +731,59 @@ async function deleteSample(sampleId: string): Promise<void> {
 }
 
 function previewUnavailable(_motion: CompiledSemanticMotion): void {
-  pageNotice.value = "动作样例管理已接通。桌面实时预览需要下一步加入受认证的桌面运行桥接，目前不会触发播放。";
+  pageNotice.value = "请在桌面版动作实验室预览调整后的动作。";
   pageError.value = "";
 }
 
-function previewRecordedUnavailable(
-  _plan: SemanticParameterPlan,
-  _motion: CompiledSemanticMotion,
-  _assistantText: string,
-): void {
-  previewUnavailable(_motion);
+async function previewMotion(preview: MotionLabPreview): Promise<void> {
+  const platformId = selectedPlatformId.value;
+  if (!platformId || motionPreviewPending.value) return;
+
+  motionPreviewPending.value = true;
+  motionPreviewStatus.value = "";
+  try {
+    const result = await apiPost<{ ok: boolean; reason: string }>("control/motion-lab/preview", {
+      platform_id: platformId,
+      ...preview,
+    });
+    if (selectedPlatformId.value !== platformId) return;
+    const reasons: Record<string, string> = {
+      desktop_client_offline: "桌面端已断开连接。",
+      motion_preview_desktop_busy: "桌面端正在对话、录音或执行动作，请稍后再试。",
+      motion_preview_busy: "已有一条播放请求正在处理。",
+      manual_preview_rejected_conversation_motion_active: "对话动作正在播放，请稍后再试。",
+      motion_preview_model_unavailable: "桌面端尚未加载模型。",
+      motion_preview_timeout: "桌面端未确认播放请求，请确认客户端已更新并重新连接。",
+      manual_preview_recorded_plan_profile_mismatch: "记录的模型参数与当前模型不匹配。",
+      motion_preview_motion_unsupported: "当前桌面端无法执行这条动作记录。",
+    };
+    motionPreviewStatus.value = result.ok
+      ? "桌面端已接受播放请求。"
+      : reasons[result.reason] ?? `动作播放失败（${result.reason}）。`;
+  } catch (error) {
+    if (selectedPlatformId.value === platformId) {
+      motionPreviewStatus.value = `动作播放请求失败：${error instanceof Error ? error.message : String(error)}`;
+    }
+  } finally {
+    motionPreviewPending.value = false;
+  }
+}
+
+function previewReaction(template: ReactionActionTemplate): void {
+  if (!profile.value) return;
+  const intent = buildReactionMotionIntent(profile.value, template);
+  if (!intent) {
+    motionPreviewStatus.value = "当前模型缺少这个动作所需的语义轴。";
+    return;
+  }
+  void previewMotion({ motion: { ...intent } });
+}
+
+function previewRecorded(plan: SemanticParameterPlan, motion: CompiledSemanticMotion): void {
+  void previewMotion({
+    motion: { ...plan },
+    semantic_motion: { ...motion },
+  });
 }
 
 watch(selectedPlatformId, async (next, previous) => {
@@ -735,6 +795,8 @@ watch(selectedPlatformId, async (next, previous) => {
   motionTuningSamples.value = [];
   motionLabEvents.value = [];
   motionLabStatus.value = "";
+  motionLabConnected.value = false;
+  motionPreviewStatus.value = "";
   motionTuningStatus.value = {
     rootError: "",
     loadError: "",
@@ -886,8 +948,19 @@ onMounted(() => void loadOverview());
 
       <section v-else-if="section === 'action-lab'" class="web-control-content">
         <div class="web-control-section-heading"><div><p>MOTION / REFERENCES</p><h2>动作样例与 Prompt 参考</h2></div></div>
-        <ReactionActionCatalogPanel />
-        <MotionLabActivityPanel :events="motionLabEvents" :status="motionLabStatus" />
+        <MotionLabActivityPanel
+          :events="motionLabEvents"
+          :status="motionLabStatus"
+          :can-preview="motionLabConnected"
+          :preview-pending="motionPreviewPending"
+          :preview-status="motionPreviewStatus"
+          @preview="previewMotion"
+        />
+        <ReactionActionCatalogPanel
+          enable-preview
+          :preview-disabled="!motionLabConnected || !profile || selectedModelName !== activePlatform?.selected_model || motionPreviewPending"
+          @preview="previewReaction"
+        />
         <section class="web-control-settings-group web-control-action-preferences">
           <header>
             <h2>动作参数过滤</h2>
@@ -920,7 +993,7 @@ onMounted(() => void loadOverview());
           :effective-examples="motionTuningStatus.effectiveExamples"
           @request-motion-tuning-samples-sync="void loadSamples()"
           @preview-compiled-semantic-motion="previewUnavailable"
-          @preview-recorded-parameter-plan="previewRecordedUnavailable"
+          @preview-recorded-parameter-plan="previewRecorded"
           @save-motion-tuning-sample="saveSample"
           @delete-motion-tuning-sample="deleteSample"
         />

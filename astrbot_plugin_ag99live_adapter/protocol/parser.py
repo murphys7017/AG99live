@@ -30,6 +30,7 @@ from .constants import (
     TYPE_INPUT_TEXT,
     TYPE_SYSTEM_DESKTOP_RUNTIME_SETTINGS,
     TYPE_SYSTEM_DESKTOP_SETTINGS_RESULT,
+    TYPE_SYSTEM_MOTION_PREVIEW_RESULT,
     TYPE_SYSTEM_DESKTOP_SETTINGS_UPDATE,
     TYPE_SYSTEM_HISTORY_DELETE,
     TYPE_SYSTEM_HISTORY_LOAD,
@@ -406,6 +407,14 @@ def _validate_payload(message_type: str, payload: dict[str, Any]) -> None:
             )
         return
 
+
+    if message_type == TYPE_SYSTEM_MOTION_PREVIEW_RESULT:
+        _require_payload_string(message_type, payload, "request_id")
+        if not isinstance(payload.get("ok"), bool):
+            raise ProtocolError(f"`{message_type}` requires `payload.ok` to be a boolean.")
+        if not payload["ok"]:
+            _require_payload_string(message_type, payload, "error")
+        return
 
     if message_type == TYPE_SYSTEM_DESKTOP_SETTINGS_RESULT:
         _require_payload_string(message_type, payload, "request_id")

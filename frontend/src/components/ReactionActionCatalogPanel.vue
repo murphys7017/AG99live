@@ -2,7 +2,11 @@
 import {
   IDLE_REACTION_ACTIONS,
   REACTION_ACTION_CATALOG,
+  type ReactionActionTemplate,
 } from "../model-engine/ambient/reactionActionCatalog.js";
+
+defineProps<{ enablePreview?: boolean; previewDisabled?: boolean }>();
+const emit = defineEmits<{ preview: [template: ReactionActionTemplate] }>();
 
 function isRuntimeScheduled(action: (typeof REACTION_ACTION_CATALOG)[number]): boolean {
   return IDLE_REACTION_ACTIONS.includes(action);
@@ -26,7 +30,15 @@ function isRuntimeScheduled(action: (typeof REACTION_ACTION_CATALOG)[number]): b
       <article v-for="action in REACTION_ACTION_CATALOG" :key="action.id" class="reaction-catalog__item">
         <div class="reaction-catalog__item-header">
           <strong>{{ action.label }}</strong>
-          <code>{{ action.id }}</code>
+          <button
+            v-if="enablePreview"
+            type="button"
+            class="web-control-refresh"
+            :aria-label="`播放${action.label}`"
+            :disabled="previewDisabled"
+            @click="emit('preview', action)"
+          >播放</button>
+          <code v-else>{{ action.id }}</code>
         </div>
         <span class="reaction-catalog__status" :data-enabled="isRuntimeScheduled(action)">
           {{ isRuntimeScheduled(action) ? "已接入待机调度" : "设计模板，待接入触发器" }}

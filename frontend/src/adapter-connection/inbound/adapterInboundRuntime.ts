@@ -30,6 +30,7 @@ import type { TurnPlaybackSessionPort } from "../../turn-playback/sessionStorePo
 export interface AdapterInboundRuntimeDeps {
   prewarmSpeechOutput(): void;
   onIdleMotion?: (event: IdleMotionEvent) => void;
+  onMotionPreview?: (envelope: ProtocolEnvelope<unknown>) => void;
   onPreAction: (event: PreActionEvent) => void;
   state: AdapterConnectionState;
   getSessionStore: () => TurnPlaybackSessionPort;
@@ -136,6 +137,12 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
     }
 
     const envelope = parsed.envelope;
+    if (envelope.type === "system.motion_preview") {
+      if (deps.state.serverInfo !== null && envelope.turn_id === null) {
+        deps.onMotionPreview?.(envelope);
+      }
+      return;
+    }
     if (envelope.type === "output.idle_motion") {
       if (deps.state.serverInfo === null) return;
       try {

@@ -71,6 +71,7 @@ export type AmbientActionLifecycleEvent = {
   reason?: string;
   metadata?: AmbientActionMetadata;
   emotionLabel?: string;
+  motion?: NormalizedMotionPayload;
 };
 
 export interface AmbientActionDirectorDependencies {
@@ -288,6 +289,7 @@ export function createAmbientActionDirector(
       durationMs,
       metadata: normalizedCandidate.metadata,
       emotionLabel: getEmotionLabel(normalizedCandidate),
+      motion: normalizedCandidate.motion,
     });
     return emit({
       accepted: true,

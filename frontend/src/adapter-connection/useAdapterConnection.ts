@@ -103,10 +103,13 @@ export interface AdapterTurnLifecycleEvent {
   turnId: string;
 }
 
+type MotionPreviewHandler = (requestId: string, motion: unknown, semanticMotion: unknown) => string;
+
 export interface AdapterConnectionInstance {
   reportSegmentPresented: (turnId: string | null, messageId: string, kind: "speech" | "motion" | "text") => void;
   setPreActionObserver: (observer: ((event: PreActionEvent) => void) | null) => void;
   setIdleMotionObserver: (observer: ((event: IdleMotionEvent) => void) | null) => void;
+  setMotionPreviewHandler: (handler: MotionPreviewHandler) => void;
   readonly state: DeepReadonly<ReturnType<typeof createAdapterConnectionState>>;
   readonly modelSync: ModelSyncInstance;
   initialize: () => Promise<void>;
@@ -221,6 +224,7 @@ export function createAdapterConnection(
   let turnLifecycleObserver: ((event: AdapterTurnLifecycleEvent) => void) | null = null;
   let preActionObserver: ((event: PreActionEvent) => void) | null = null;
   let idleMotionObserver: ((event: IdleMotionEvent) => void) | null = null;
+  let motionPreviewHandler: MotionPreviewHandler | null = null;
   const receivedIdleMotionIds = new Set<string>();
   let preActionInputId: string | null = null;
   const preActionReceived = new Set<string>();
@@ -496,6 +500,29 @@ export function createAdapterConnection(
         receivedIdleMotionIds.delete(receivedIdleMotionIds.values().next().value!);
       }
       idleMotionObserver?.(event);
+    },
+    onMotionPreview: ({ message_id, payload }) => {
+      const input = payload as Record<string, unknown> | null;
+      const expires = input?.expires_at_epoch_ms;
+      let error = "motion_preview_payload_invalid";
+      if (typeof expires === "number" && Number.isFinite(expires) && input?.motion) {
+        if (Date.now() >= expires) {
+          error = "motion_preview_expired";
+        } else {
+          try {
+            error = motionPreviewHandler?.(message_id, input.motion, input.semantic_motion)
+              ?? "motion_preview_unavailable";
+          } catch (cause) {
+            console.warn("[MotionLab] desktop preview failed.", cause);
+            error = "motion_preview_failed";
+          }
+        }
+      }
+      outboundClient.send(OUTBOUND_MESSAGE_TYPES.SYSTEM_MOTION_PREVIEW_RESULT, {
+        request_id: message_id,
+        ok: !error,
+        ...(error ? { error } : {}),
+      });
     },
     onPreAction: (event) => {
       if (event.action === "ready") {
@@ -1246,6 +1273,9 @@ export function createAdapterConnection(
     },
     setIdleMotionObserver: (observer: ((event: IdleMotionEvent) => void) | null) => {
       idleMotionObserver = observer;
+    },
+    setMotionPreviewHandler: (handler) => {
+      motionPreviewHandler = handler;
     },
     interruptCurrentTurn,
     sendSemanticAxisProfileSave,

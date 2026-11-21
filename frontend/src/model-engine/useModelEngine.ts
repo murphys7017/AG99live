@@ -858,6 +858,26 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     return startCompiledPreviewPlan(result.plan, semanticMotion, requestId);
   }
 
+  function previewMotionIntent(payload: NormalizedMotionPayload, requestId: string): boolean {
+    if (activePlaybackRun?.origin === "conversation" || state.pendingCount > 0) {
+      state.lastCompileReason = "manual_preview_rejected_conversation_motion_active";
+      return false;
+    }
+    const idle = payload.intent.mode === "idle";
+    return startNormalizedMotionPayload(payload, {
+      turnId: null, messageId: requestId, playbackTurnId: null, playbackOrigin: "manual_preview",
+      assistantText: "", speechCues: [], startReason: idle ? "idle_motion" : "manual_preview",
+      motionSource: idle ? "local" : null, queuedDelayMs: 0,
+      playbackClock: null, playbackClockReader: null,
+    }, motionStartDependencies, runtimeStateController);
+  }
+
+  function cancelManualPreview(): void {
+    if (activePlaybackRun?.origin === "manual_preview") {
+      stopActivePlayback("conversation_started", "已结束动作预览。");
+    }
+  }
+
   function previewRecordedParameterPlan(
     plan: MotionPlanPayload,
     semanticMotion: CompiledSemanticMotion,
@@ -1041,6 +1061,8 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     handlePlaybackTimelineStarted,
     previewCompiledSemanticMotion,
     previewRecordedParameterPlan,
+    previewMotionIntent,
+    cancelManualPreview,
     startThinkingSway,
     releaseThinkingSway,
     handlePlaybackTerminal,
