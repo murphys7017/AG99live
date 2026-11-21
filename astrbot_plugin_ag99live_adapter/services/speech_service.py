@@ -15,7 +15,6 @@ from dataclasses import dataclass, field
 import os
 import re
 import time
-from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -29,104 +28,26 @@ from ..protocol.builder import (
     build_output_transcription,
 )
 from ..providers.contracts import SttResult, SttSessionOptions
+from .remote_asr import MAX_FRAME_BYTES, RemoteASRSession
+from .streaming_asr import StreamingASR, StreamingASRError
 
 
-class StreamingASRError(RuntimeError):
-    """Raised when the optional local recognizer cannot be initialized."""
+class LocalASRSession:
+    def __init__(self, engine: StreamingASR) -> None:
+        self.engine = engine
 
+    async def accept(self, pcm: bytes, sample_rate: int) -> str:
+        samples = np.frombuffer(pcm, dtype="<i2").astype(np.float32) / 32768.0
+        return await asyncio.to_thread(self.engine.accept, samples, sample_rate)
 
-class StreamingASR:
-    """One online decode stream backed by a shared sherpa recognizer."""
-
-    def __init__(
-        self,
-        *,
-        model_dir: str,
-        provider: str = "cpu",
-        num_threads: int = 4,
-    ) -> None:
-        try:
-            import sherpa_onnx
-        except ImportError as exc:  # pragma: no cover - depends on local install
-            raise StreamingASRError("sherpa_onnx_not_installed") from exc
-
-        directory = Path(model_dir).expanduser()
-        tokens = directory / "tokens.txt"
-        candidates = (
-            ("model.fp16.onnx", "model.onnx", "model.int8.onnx")
-            if provider == "cuda"
-            else ("model.int8.onnx", "model.onnx", "model.fp16.onnx")
-        )
-        model = next(
-            (directory / name for name in candidates if (directory / name).is_file()),
-            None,
-        )
-        if model is None or not tokens.is_file():
-            raise StreamingASRError("streaming_asr_model_files_missing")
-
-        try:
-            self._recognizer = sherpa_onnx.OnlineRecognizer.from_zipformer2_ctc(
-                tokens=str(tokens),
-                model=str(model),
-                num_threads=max(1, int(num_threads)),
-                sample_rate=16000,
-                feature_dim=80,
-                enable_endpoint_detection=False,
-                provider=provider,
-            )
-        except Exception as exc:
-            raise StreamingASRError("streaming_asr_initialization_failed") from exc
-        self.model_path = str(model)
-        self.provider = provider
-        self._stream = self._recognizer.create_stream()
-        self._last_text = ""
-        self._finished = False
-        self._sample_rate = 16000
-
-    def new_session(self) -> StreamingASR:
-        session = object.__new__(StreamingASR)
-        session._recognizer = self._recognizer
-        session._stream = self._recognizer.create_stream()
-        session.model_path = self.model_path
-        session.provider = self.provider
-        session._last_text = ""
-        session._finished = False
-        session._sample_rate = 16000
-        return session
+    async def finish(self) -> str:
+        return await asyncio.to_thread(self.engine.finish)
 
     def reset(self) -> None:
-        self._stream = self._recognizer.create_stream()
-        self._last_text = ""
-        self._finished = False
-        self._sample_rate = 16000
+        self.engine.reset()
 
-    def accept(self, samples: Any, sample_rate: int) -> str:
-        waveform = np.asarray(samples, dtype=np.float32).reshape(-1)
-        if waveform.size == 0:
-            return self._last_text
-        self._sample_rate = sample_rate
-        self._stream.accept_waveform(sample_rate, waveform)
-        self._decode_ready()
-        self._last_text = self._recognizer.get_result(self._stream).strip()
-        return self._last_text
-
-    def finish(self) -> str:
-        if self._finished:
-            return self._last_text
-        # CTC readiness still requires a complete model chunk after input_finished.
-        # Flush the right context without adding synthetic audio to the review PCM.
-        self._stream.accept_waveform(
-            self._sample_rate, np.zeros(self._sample_rate, dtype=np.float32)
-        )
-        self._stream.input_finished()
-        self._decode_ready()
-        self._last_text = self._recognizer.get_result(self._stream).strip()
-        self._finished = True
-        return self._last_text
-
-    def _decode_ready(self) -> None:
-        while self._recognizer.is_ready(self._stream):
-            self._recognizer.decode_stream(self._stream)
+    def close(self) -> None:
+        """Local streams are owned by the engine and need no transport cleanup."""
 
 
 @dataclass
@@ -147,7 +68,7 @@ class AudioStreamState:
     capture_timeout_task: asyncio.Task[None] | None = None
     context_timeout_task: asyncio.Task[None] | None = None
     sample_count: int = 0
-    streaming_asr: StreamingASR | None = None
+    streaming_asr: LocalASRSession | RemoteASRSession | None = None
     streaming_asr_pending_pcm: bytearray = field(default_factory=bytearray)
     streaming_text: str = ""
     vad_speech_active: bool = False
@@ -243,7 +164,7 @@ class SpeechIngressService:
         self._streaming_asr_creation_lock = asyncio.Lock()
         self._completed_transcription_turns = 0
 
-    def _create_streaming_asr(self) -> StreamingASR | None:
+    def _create_streaming_asr(self) -> LocalASRSession | None:
         if not bool(getattr(self.runtime_state, "fast_asr_enabled", False)):
             return None
         template_key = (
@@ -269,19 +190,28 @@ class SpeechIngressService:
             session.model_path,
             session.provider,
         )
-        return session
+        return LocalASRSession(session)
 
-    async def _create_streaming_asr_session(self) -> StreamingASR | None:
+    async def _create_streaming_asr_session(self) -> LocalASRSession | RemoteASRSession | None:
         if not bool(getattr(self.runtime_state, "fast_asr_enabled", False)):
             return None
         async with self._streaming_asr_creation_lock:
+            endpoint = getattr(self.runtime_state, "fast_asr_endpoint", "")
+            if endpoint:
+                # Release any cached local model when switching a running adapter.
+                self._streaming_asr_template = None
+                self._streaming_asr_template_key = None
+                return RemoteASRSession(endpoint)
             return await asyncio.to_thread(self._create_streaming_asr)
 
     async def prewarm_streaming_asr(self) -> None:
         if not bool(getattr(self.runtime_state, "fast_asr_enabled", False)):
             return
         try:
-            await self._create_streaming_asr_session()
+            session = await self._create_streaming_asr_session()
+            if isinstance(session, RemoteASRSession):
+                await session.check_ready()
+                logger.info("AG99live remote streaming ASR ready at %s", session.endpoint)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -310,16 +240,15 @@ class SpeechIngressService:
             flush and stream.streaming_asr_pending_pcm
         ):
             size = min(batch_bytes, len(stream.streaming_asr_pending_pcm))
+            if isinstance(recognizer, RemoteASRSession):
+                # Coalesce complete capture batches into one LAN round trip.
+                available = len(stream.streaming_asr_pending_pcm)
+                ready = available if flush else available - available % batch_bytes
+                size = min(MAX_FRAME_BYTES, ready)
             batch = bytes(stream.streaming_asr_pending_pcm[:size])
             del stream.streaming_asr_pending_pcm[:size]
             try:
-                text = (
-                    await asyncio.to_thread(
-                        recognizer.accept,
-                        self._pcm16_bytes_to_float32([batch]),
-                        stream.sample_rate,
-                    )
-                ).strip()
+                text = (await recognizer.accept(batch, stream.sample_rate)).strip()
             except Exception:
                 logger.exception(
                     "Streaming ASR decode failed for stream_id=%s",
@@ -514,9 +443,7 @@ class SpeechIngressService:
             )
         if stream.streaming_asr is not None:
             try:
-                stream.fast_final_text = (
-                    await asyncio.to_thread(stream.streaming_asr.finish)
-                ).strip()
+                stream.fast_final_text = (await stream.streaming_asr.finish()).strip()
             except Exception:
                 logger.exception("Streaming ASR seal failed: stream_id=%s", stream_id)
                 stream.streaming_asr = None
@@ -589,6 +516,8 @@ class SpeechIngressService:
                 await self._set_vad_activity(stream, active=False)
             return await self._finish_audio_stream(message, stream, stream_id)
         finally:
+            if stream is not None and stream.streaming_asr is not None:
+                stream.streaming_asr.close()
             tasks = list(timeout_tasks)
             if stream is not None and stream.transcription_task is not None:
                 stream.transcription_task.cancel()
@@ -683,7 +612,7 @@ class SpeechIngressService:
             )
         if stream.streaming_asr is not None:
             try:
-                fast_text = (await asyncio.to_thread(stream.streaming_asr.finish)).strip()
+                fast_text = (await stream.streaming_asr.finish()).strip()
             except Exception:
                 logger.exception("Streaming ASR finalization failed: stream_id=%s", stream_id)
                 stream.streaming_asr = None
@@ -722,7 +651,7 @@ class SpeechIngressService:
         if bool(getattr(self.runtime_state, "fast_asr_enabled", False)):
             await self._emit_input_error(
                 turn_id=message.turn_id,
-                error_message="Local streaming speech recognition did not produce text.",
+                error_message="Streaming speech recognition did not produce text.",
             )
             return None
         return await self._build_message_from_audio_buffer(
@@ -744,6 +673,8 @@ class SpeechIngressService:
             if turn_id is not None and stream.capture_turn_id != turn_id:
                 continue
             self._audio_streams.pop(key, None)
+            if stream.streaming_asr is not None:
+                stream.streaming_asr.close()
             await self._set_vad_activity(stream, active=False)
             self._review_audio.pop(str(stream.capture_turn_id or "").strip(), None)
             for task in (
@@ -762,6 +693,8 @@ class SpeechIngressService:
         if self._audio_streams.get(stream.stream_id) is not stream:
             return
         self._audio_streams.pop(stream.stream_id)
+        if stream.streaming_asr is not None:
+            stream.streaming_asr.close()
         if stream.transcription_task is not None:
             stream.transcription_task.cancel()
             await asyncio.gather(stream.transcription_task, return_exceptions=True)
@@ -797,6 +730,8 @@ class SpeechIngressService:
         if self._audio_streams.get(stream.stream_id) is not stream:
             return
         self._audio_streams.pop(stream.stream_id, None)
+        if stream.streaming_asr is not None:
+            stream.streaming_asr.close()
         current_task = asyncio.current_task()
         tasks = []
         for task in (
@@ -883,6 +818,8 @@ class SpeechIngressService:
                 stream.streaming_text = ""
                 if stream.streaming_asr is not None:
                     stream.streaming_asr.reset()
+                elif getattr(self.runtime_state, "fast_asr_endpoint", ""):
+                    stream.streaming_asr = await self._create_streaming_asr_session()
                 await self._set_vad_activity(stream, active=True)
                 await self._notify_vad_speech_started(message)
             elif audio_bytes == b"<|RESUME|>":
@@ -1172,7 +1109,7 @@ class SpeechIngressService:
             )
         if stream.streaming_asr is not None:
             try:
-                fast_text = (await asyncio.to_thread(stream.streaming_asr.finish)).strip()
+                fast_text = (await stream.streaming_asr.finish()).strip()
             except Exception:
                 logger.exception(
                     "Streaming ASR finalization failed for VAD stream_id=%s",
@@ -1199,7 +1136,7 @@ class SpeechIngressService:
         if bool(getattr(self.runtime_state, "fast_asr_enabled", False)):
             await self._emit_input_error(
                 turn_id=vad_turn_id,
-                error_message="Local streaming speech recognition did not produce text.",
+                error_message="Streaming speech recognition did not produce text.",
             )
             return None
 
@@ -1271,7 +1208,7 @@ class SpeechIngressService:
     ) -> SttResult:
         """Expose the existing AstrBot STT path as a neutral Provider callback.
 
-        The desktop microphone path continues to use its current VAD and local
+        The desktop microphone path continues to use its current VAD and
         streaming ASR flow. This method is only the bridge entry for callers
         that already own a complete PCM stream and want the existing
         ``runtime_state.resolve_stt_provider`` implementation.

@@ -37,6 +37,7 @@ from .runtime.plugin_runtime import (
     restore_plugin_config_if_current,
 )
 from .services.history_service import HistoryNotFoundError
+from .services.remote_asr import parse_asr_endpoint
 
 _PLUGIN_NAME = "astrbot_plugin_ag99live_adapter"
 _PAGE_API_PREFIX = "/control"
@@ -110,20 +111,29 @@ class ConfigSection:
 CONFIG_SCHEMA: tuple[ConfigSection, ...] = (
     ConfigSection(
         key="fast_asr",
-        label="本地流式语音识别",
-        description="在桌面端本地增量识别 PTT/VAD 音频；AstrBot STT 只在任务交接时复核。",
+        label="流式语音识别",
+        description="增量识别 PTT/VAD 音频；AstrBot STT 只在任务交接时复核。",
         fields=(
             ConfigField(
                 key="enabled",
                 kind="bool",
-                label="启用本地流式 ASR",
-                description="启用后，本地识别用于普通输入；Core 任务交接时再复核原始音频。",
+                label="启用流式 ASR",
+                description="启用后，流式识别用于普通输入；Core 任务交接时再复核原始音频。",
                 default=False,
+            ),
+            ConfigField(
+                key="endpoint",
+                kind="text",
+                label="识别服务器地址",
+                description="填写主机名或 IP 和端口（例如 asr.lan:6006）。留空时使用本机模型。",
+                default="",
+                max_length=255,
+                required=False,
             ),
             ConfigField(
                 key="model_dir",
                 kind="text",
-                label="Sherpa ONNX 模型目录",
+                label="本机 Sherpa ONNX 模型目录",
                 description="包含 model*.onnx 与 tokens.txt 的目录。",
                 default="",
                 max_length=1024,
@@ -132,7 +142,7 @@ CONFIG_SCHEMA: tuple[ConfigSection, ...] = (
             ConfigField(
                 key="provider",
                 kind="choice",
-                label="推理后端",
+                label="本机推理后端",
                 description="选择本地推理设备。",
                 default="cpu",
                 options=(("cpu", "CPU"), ("cuda", "CUDA")),
@@ -140,7 +150,7 @@ CONFIG_SCHEMA: tuple[ConfigSection, ...] = (
             ConfigField(
                 key="num_threads",
                 kind="int",
-                label="CPU 线程数",
+                label="本机 CPU 线程数",
                 description="CPU 推理使用的线程数。",
                 default=4,
                 minimum=1,
@@ -1033,6 +1043,11 @@ def _normalize_setting_value(path: str, field: ConfigField, value: Any) -> Any:
             raise ConfigValidationError("settings_value_too_long", path)
         if field.required and not normalized:
             raise ConfigValidationError("settings_value_required", path)
+        if path == "fast_asr.endpoint" and normalized:
+            try:
+                parse_asr_endpoint(normalized)
+            except ValueError as exc:
+                raise ConfigValidationError("settings_value_invalid", path) from exc
         return normalized
     if field.kind == "int":
         if isinstance(value, bool) or not isinstance(value, int):

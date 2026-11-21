@@ -104,7 +104,15 @@ Persona `segments[].speech` 是 TTS 文本分段，不是协议中的 speech cue
 
 Adapter 对每条输入流设置 12 MiB PCM 总量上限和 120 秒生命周期上限。超限时立即清理 PTT/VAD/ASR 缓冲，通过既有 `control_error` 报告输入丢弃，并释放对应的采集上下文；这两个限制属于 Adapter 内部资源保护，不改变音频消息格式。
 
-可选 `fast_asr` 使用 sherpa-onnx 在 Adapter 内对 PTT 和 VAD 音频做本地增量识别。在 AG99live Web 控制台设置模型目录与推理后端，并先在 AstrBot 实际运行的 Python 环境安装 `sherpa-onnx` 和 `sherpa-onnx-bin`。原有 AstrBot STT 不参与普通语音输入；只有 Core 判定需要任务交接时，才使用同一 Turn 缓存的 PCM 复核，并将修订文本用于任务规划。音频复核缓存最多保留 8 段、每段 12 MiB，120 秒过期。此功能依赖 Core 提供 `_ag99live_handoff_asr_review` 回调。
+启用 `fast_asr` 后，Adapter 会增量识别 PTT 和 VAD 音频。在 AG99live Web 控制台的「流式语音识别」中填写识别服务器的 `主机:端口`，即可将 PCM16 音频送到该服务。每次发言使用独立连接，松键或 VAD 分段结束时刷出最后一段文字。地址留空时沿用本机的模型目录、推理后端和线程数设置。
+
+服务器需要 Python 3.11 及以上、NumPy 和 sherpa-onnx。将插件的 `services/{__init__,asr_server,remote_asr,streaming_asr}.py` 放入服务器工作目录下的 `services/`，在该工作目录运行以下命令（地址和路径按部署环境替换）。服务启动时加载模型，默认监听端口为 6006，`--allow-client` 指定可连接的客户端 IP，可重复配置。
+
+```sh
+python -m services.asr_server --model-dir /path/to/zipformer-model --host SERVER_LAN_IP --allow-client ADAPTER_LAN_IP
+```
+
+原有 AstrBot STT 不参与普通语音输入；只有 Core 判定需要任务交接时，才使用同一 Turn 缓存的 PCM 复核，并将修订文本用于任务规划。音频复核缓存最多保留 8 段、每段 12 MiB，120 秒过期。此功能依赖 Core 提供 `_ag99live_handoff_asr_review` 回调。
 
 `control.interrupt` 只停止目标 Turn。连接断开时，Adapter 请求停止全部在飞 AG99 event，再独立清理 Turn、段、曲线请求和身份映射；晚到输出不会重新进入播放。
 

@@ -143,6 +143,7 @@ class RuntimeState:
         self.passive_behavior_result_ttl_ms = 2500
         self.passive_behavior_timeout_seconds = 3.0
         self.fast_asr_enabled = False
+        self.fast_asr_endpoint = ""
         self.fast_asr_model_dir = ""
         self.fast_asr_provider = "cpu"
         self.fast_asr_num_threads = 4
@@ -374,6 +375,9 @@ class RuntimeState:
             )
         )
         self.fast_asr_enabled = bool(get_config_value(fast_asr_config, "enabled", False))
+        self.fast_asr_endpoint = str(
+            get_config_value(fast_asr_config, "endpoint", "") or ""
+        ).strip()
         self.fast_asr_model_dir = str(
             get_config_value(fast_asr_config, "model_dir", "") or ""
         ).strip()
