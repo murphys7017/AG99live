@@ -60,17 +60,3 @@ export async function captureRealtimeDesktopScreenshot(
   }
   return pendingCapture;
 }
-
-// A send-time attachment shares the foreground capture, but only owns a short
-// wait budget. The adapter already resolves a missing attachment from its latest observation.
-export async function captureSendTimeScreenshot(): Promise<DesktopCaptureImagePayload | null> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      captureRealtimeDesktopScreenshot(),
-      new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), 350); }),
-    ]);
-  } finally {
-    clearTimeout(timer);
-  }
-}

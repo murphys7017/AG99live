@@ -53,6 +53,7 @@ from .protocol.constants import (
 from .protocol.parser import build_message_envelope
 from .runtime.desktop_settings_broker import DesktopSettingsBroker
 from .runtime.desktop_capture_broker import DesktopFrameBroker, SCHEMA
+from .runtime.desktop_context import DesktopScreenshotCadence
 from .runtime.desktop_presence_broker import DesktopPresenceBroker
 from .runtime.desktop_state import DesktopStateStore
 from .runtime.desktop_snapshot_reader import read_latest_desktop_frame
@@ -269,6 +270,7 @@ class OLVPetPlatformAdapter(Platform):
             synchronize_desktop_settings=self._synchronize_desktop_settings,
             on_disconnect=self._handle_transport_disconnect,
         )
+        self.desktop_screenshot_cadence = DesktopScreenshotCadence()
         self.desktop_observation = DesktopFrameBroker(
             self.transport.send_json,
             self.desktop_state_store,
@@ -973,6 +975,9 @@ class OLVPetPlatformAdapter(Platform):
         后续所有者清理。全部尝试结束后再把失败汇总交回 transport。
         """
         self.subtitle_web.clear(reset_sequence=True)
+        desktop_screenshot_cadence = getattr(self, "desktop_screenshot_cadence", None)
+        if desktop_screenshot_cadence is not None:
+            desktop_screenshot_cadence.reset()
         desktop_observation = getattr(self, "desktop_observation", None)
         if desktop_observation is not None:
             desktop_observation.disconnect()

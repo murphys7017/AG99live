@@ -27,6 +27,8 @@ from .runtime.adapter_event_context import AdapterEventContext
 from .runtime.desktop_context import (
     DESKTOP_CONTEXT_ALLOWED_EXTRA_KEY,
     DESKTOP_CONTEXT_MATCHED_KEY_EXTRA_KEY,
+    SCREENSHOT_FRESHNESS_SECONDS,
+    DesktopScreenshotCadence,
     match_desktop_context_keywords,
 )
 from .runtime.plugin_runtime import (
@@ -63,6 +65,7 @@ class OutputSegmentDeliveryPort(Protocol):
 
 
 class PlatformEventAdapterPort(Protocol):
+    desktop_screenshot_cadence: DesktopScreenshotCadence
     turn_coordinator: OutputSegmentDeliveryPort
 
     async def emit_message_chain(self, **kwargs: Any) -> None: ...
@@ -185,83 +188,82 @@ class OLVPetPlatformEvent(AstrMessageEvent):
         self._direct_output_sequence = 0
         self._logical_segment_indexes: dict[str, int] = {}
         self._next_logical_segment_index = 0
-        self._set_desktop_context_gate(message_str=message_str, message_obj=message_obj)
+        self._desktop_context_prepared = False
+        matched = (
+            match_desktop_context_keywords(
+                message_str, self._desktop_context_settings().get("trigger_keywords")
+            )
+            if _resolve_desktop_snapshot_component_indexes(message_obj)
+            else ()
+        )
+        self._set_desktop_context_gate(allow_snapshot=bool(matched), matched=matched)
         self._attach_prompt_annotations(message_obj=message_obj)
 
     def set_extra(self, key: str, value: Any) -> None:
         super().set_extra(key, value)
         self._adapter_internal_state.observe_extra(key, value)
 
-    def _set_desktop_context_gate(self, *, message_str: str, message_obj: Any) -> None:
-        """Allow desktop images in Persona only for configured visual prompts.
+    def _set_desktop_context_gate(
+        self, *, allow_snapshot: bool, matched: tuple[str, ...]
+    ) -> None:
+        # Only Adapter desktop screenshots are gated. User-provided images remain ordinary inputs.
+        indexes = _resolve_desktop_snapshot_component_indexes(self.message_obj)
+        self.set_extra(DESKTOP_CONTEXT_ALLOWED_EXTRA_KEY, allow_snapshot or not indexes)
+        self.set_extra(DESKTOP_CONTEXT_MATCHED_KEY_EXTRA_KEY, matched if indexes else ())
 
-        The raw image remains attached to the event so Core can acquire it for
-        an execution turn.  AstrBot's Persona prompt projection consumes this
-        marker to hide or retain only desktop snapshot records.
-        """
-
-        snapshot_indexes = _resolve_desktop_snapshot_component_indexes(message_obj)
-        if not snapshot_indexes:
-            # Preserve ordinary user image behavior.  The marker is only a
-            # gate for Adapter-provided desktop snapshots.
-            self.set_extra(DESKTOP_CONTEXT_ALLOWED_EXTRA_KEY, True)
-            self.set_extra(DESKTOP_CONTEXT_MATCHED_KEY_EXTRA_KEY, ())
-            return
-
-        matched = self._match_desktop_context(message_str)
-        self.set_extra(DESKTOP_CONTEXT_ALLOWED_EXTRA_KEY, bool(matched))
-        self.set_extra(DESKTOP_CONTEXT_MATCHED_KEY_EXTRA_KEY, matched)
-        logger.debug(
-            "WIRING desktop_context_gate matched=%s keyword_count=%s image_count=%s",
-            bool(matched),
-            len(matched),
-            len(snapshot_indexes),
-        )
-
-    def _match_desktop_context(self, text: str) -> tuple[str, ...]:
+    def _desktop_context_settings(self) -> dict[str, Any]:
         runtime_state = getattr(self.adapter, "runtime_state", None)
         config = getattr(runtime_state, "plugin_config", None)
         if not isinstance(config, dict):
             config = get_plugin_config_snapshot().config
-        settings = config.get("desktop_context", {})
-        return match_desktop_context_keywords(
-            text, settings.get("trigger_keywords") if isinstance(settings, dict) else None
-        )
+        settings = config.get("desktop_context")
+        return settings if isinstance(settings, dict) else {}
 
     async def prepare_inbound_media(self) -> None:
         raw = self.message_obj.raw_message
-        if self.is_stopped() or not isinstance(raw, dict):
-            return
-        payload = raw.get("payload")
         if (
-            not isinstance(payload, dict)
-            or payload.get("images")
-            or _resolve_desktop_snapshot_component_indexes(self.message_obj)
-            or not self._match_desktop_context(self.message_str)
+            self._desktop_context_prepared or self.is_stopped()
+            or not isinstance(raw, dict) or not (self.message_str or "").strip()
         ):
             return
-
+        payload = raw.get("payload")
+        if not isinstance(payload, dict):
+            return
         input_type = raw.get("type")
+        requested = payload.get("desktop_snapshot_requested")
         if input_type == TYPE_INPUT_AUDIO_STREAM_CHUNK and payload.get("transcription"):
-            settings = get_persisted_desktop_settings(self.get_platform_id())
-            screenshot_requested = (
-                settings.get("desktop_screenshot_on_send", {}).get("value") == "true"
-            )
-        elif input_type in (TYPE_INPUT_TEXT, TYPE_INPUT_AUDIO_STREAM_END):
-            screenshot_requested = payload.get("desktop_snapshot_requested") is True
-        else:
-            screenshot_requested = False
-        if not screenshot_requested:
-            logger.debug("WIRING desktop_input_capture skipped type=%s reason=not_requested", input_type)
+            if not isinstance(requested, bool):
+                settings = get_persisted_desktop_settings(self.get_platform_id())
+                requested = settings.get("desktop_screenshot_on_send", {}).get("value") == "true"
+        elif input_type not in (TYPE_INPUT_TEXT, TYPE_INPUT_AUDIO_STREAM_END) or not isinstance(requested, bool):
+            # Synthesized text and other non-desktop inputs have no screenshot opt-in.
+            return
+        self._desktop_context_prepared = True
+        cadence = self.adapter.desktop_screenshot_cadence
+        if not requested:
+            cadence.reset()
+            self._set_desktop_context_gate(allow_snapshot=False, matched=())
+            return
+
+        settings = self._desktop_context_settings()
+        mode = settings.get("screenshot_mode", "keywords")
+        if not isinstance(mode, str):
+            mode = "keywords"
+        matched = match_desktop_context_keywords(self.message_str, settings.get("trigger_keywords"))
+        allowed = cadence.should_attach(mode, keyword_matched=bool(matched))
+        self._set_desktop_context_gate(allow_snapshot=allowed, matched=matched)
+        if not allowed or payload.get("images"):
+            return
+        if _resolve_desktop_snapshot_component_indexes(self.message_obj):
             return
 
         factory = self.adapter.message_factory
-        if not factory.attach_cached_desktop_snapshot(self.message_obj):
-            broker = self.adapter.desktop_observation
+        if not factory.attach_cached_desktop_snapshot(
+            self.message_obj, max_age_seconds=SCREENSHOT_FRESHNESS_SECONDS,
+        ):
             try:
-                # The pipeline can wait here while the WebSocket receives the result.
                 async with asyncio.timeout(2):
-                    image = await broker.capture()
+                    image = await self.adapter.desktop_observation.capture(publish_to_state=False)
             except (TimeoutError, RuntimeError) as exc:
                 logger.debug(
                     "WIRING desktop_input_capture unavailable type=%s reason=%s",
@@ -275,10 +277,9 @@ class OLVPetPlatformEvent(AstrMessageEvent):
                 self.message_obj,
                 raw_message=raw,
                 images=[{"data": image, "mime_type": "image/jpeg", "source": "screen"}],
+                enforce_cooldown=False,
             )
-        self._set_desktop_context_gate(
-            message_str=self.message_str, message_obj=self.message_obj
-        )
+        self._set_desktop_context_gate(allow_snapshot=True, matched=matched)
         self._attach_prompt_annotations(message_obj=self.message_obj)
 
     async def send(self, message):

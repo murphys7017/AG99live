@@ -18,9 +18,6 @@ import {
   normalizeTurnIdForComparison,
 } from "../core/turnIds.js";
 import type { AdapterOutboundClient } from "./outboundClient.js";
-import {
-  captureSendTimeScreenshot,
-} from "./desktopCapture.js";
 
 export interface MotionLabRawEventPayload {
   event_id: string;
@@ -72,8 +69,7 @@ export interface OutboundActionContext {
  *
  * 行为：
  *   1. 为新一轮分配新的 turn_id（与 messageId 同体）。
- *   2. 若用户启用了“发送时附带桌面截图”，调用 Electron preload 抓一张 JPEG，
- *      失败时静默回退到纯文本（截图能力不可用不应阻断发消息）。
+ *   2. 将桌面截图开关传给 Adapter，由 Adapter 按频率和关键词决定是否抓图。
  *   3. 发送 `input.text` 信封，同步更新 statusMessage / 历史记录。
  *
  * 新输入与用户主动中断是两个独立操作。旧轮的播放和终态继续由 Timeline 管理，
@@ -92,13 +88,9 @@ export async function sendText(ctx: OutboundActionContext, text: string): Promis
 
   ctx.prewarmSpeechOutput();
   const desktopSnapshotRequested = ctx.state.desktopScreenshotOnSendEnabled;
-  const desktopCapture = desktopSnapshotRequested
-    ? await captureSendTimeScreenshot()
-    : null;
   const turnId = ctx.createMessageId();
   const sent = ctx.outboundClient.send("input.text", {
     text: message,
-    images: desktopCapture ? [desktopCapture] : [],
     desktop_snapshot_requested: desktopSnapshotRequested,
   }, turnId);
   if (!sent) {
@@ -109,11 +101,7 @@ export async function sendText(ctx: OutboundActionContext, text: string): Promis
   }
   ctx.state.currentTurnId = turnId;
   ctx.state.lastError = "";
-  ctx.state.statusMessage = desktopCapture
-    ? "文本和实时桌面截图已发送，等待后端回复。"
-    : desktopSnapshotRequested
-      ? "实时桌面截图抓取失败，文本已发送；后端会尝试使用最近一次桌面快照。"
-      : "文本已发送，等待后端回复。";
+  ctx.state.statusMessage = "文本已发送，等待后端回复。";
   ctx.pushHistory("user", message);
   return true;
 }

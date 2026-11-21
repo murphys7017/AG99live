@@ -17,6 +17,7 @@ const SECTION_GROUPS: Record<string, string> = {
   passive_behavior: "动作生成",
   vad: "语音输入",
   desktop_return: "主动互动",
+  desktop_context: "截图",
   desktop_observation: "主动互动",
 };
 

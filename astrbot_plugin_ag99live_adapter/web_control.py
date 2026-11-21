@@ -22,6 +22,7 @@ from .protocol.constants import (
     DESKTOP_SETTINGS_ACTION_SET,
     DESKTOP_SETTINGS_ACTIONS,
 )
+from .runtime.desktop_context import SCREENSHOT_MODE_OPTIONS
 from .runtime.desktop_settings_broker import DesktopSettingsError
 from .runtime.plugin_runtime import (
     ADAPTER_DISPLAY_NAME,
@@ -505,17 +506,22 @@ CONFIG_SCHEMA: tuple[ConfigSection, ...] = (
     ConfigSection(
         key="desktop_context",
         label="桌面视觉上下文",
-        description=(
-            "只有当前消息命中关键词时，才把本轮桌面截图交给 Persona；"
-            "关键词之间可使用空格、顿号、逗号或分号分隔。"
-        ),
+        description="控制文字和语音消息何时附带桌面截图。需开启桌面端的截图开关。",
         fields=(
+            ConfigField(
+                key="screenshot_mode",
+                kind="choice",
+                label="截图频率",
+                description="间隔模式从首条消息开始截图。命中关键词时立即截图，并从该条重新计数。",
+                default="keywords",
+                options=SCREENSHOT_MODE_OPTIONS,
+            ),
             ConfigField(
                 key="trigger_keywords",
                 kind="text",
                 label="截图触发关键词",
                 description=(
-                    "例如：桌面、屏幕；截图 看看画面。留空时普通 Persona 对话不接收桌面截图。"
+                    "用空格、逗号、顿号或分号分隔。留空时只按所选频率处理。"
                 ),
                 default="",
                 max_length=1024,
@@ -714,7 +720,7 @@ DESKTOP_SETTINGS_SPEC: tuple[DesktopSetting, ...] = (
         key="desktop_screenshot_on_send",
         group="connection",
         label="发送消息时附带桌面截图",
-        description="允许附带桌面截图。文本或语音转写命中关键词且消息未附图时，后端优先使用桌面观察缓存，缓存为空时尝试抓图。",
+        description="允许按「桌面视觉上下文」里的频率为文字和语音消息附带截图。",
         kind="toggle",
     ),
     DesktopSetting(

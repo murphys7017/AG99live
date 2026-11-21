@@ -22,7 +22,6 @@ import {
 } from "../core/pttKeyBinding.js";
 import type { DesktopPttKeyBinding } from "../../types/desktop.js";
 import { buildAudioStreamChunkFrame, float32ToPcm16le } from "./audioStreamFrame.js";
-import { captureSendTimeScreenshot } from "../outbound/desktopCapture.js";
 import { reportLatencyStage } from "./latency.js";
 
 export type MicrophoneCaptureOrigin = "manual" | "ptt" | "auto";
@@ -478,18 +477,6 @@ export function createAdapterMicrophoneRuntime(
       && shouldEndAudioStream
       && !inputSequenceBroken
       && inputSocket?.readyState === WebSocket.OPEN;
-    // Capture at release time, while device teardown/end-queue work proceeds.
-    // The end envelope still owns the image, so Persona cannot miss a late image.
-    const desktopCapturePromise = desktopSnapshotRequested
-      ? (async () => {
-          reportLatencyStage("screenshot_start", inputTurnId, inputStreamId);
-          try {
-            return await captureSendTimeScreenshot();
-          } finally {
-            reportLatencyStage("screenshot_end", inputTurnId, inputStreamId);
-          }
-        })()
-      : Promise.resolve(null);
     clearMicCaptureSession();
 
     if (request.releaseRuntime) {
@@ -523,27 +510,6 @@ export function createAdapterMicrophoneRuntime(
             ) {
               throw new Error("audio_stream_connection_changed_during_capture");
             }
-            if (desktopSnapshotRequested) {
-              // Seal PCM now so ASR overlaps capture. The end envelope below
-              // still commits the complete text + image input atomically.
-              inputSocket.send(JSON.stringify(deps.buildEnvelope(
-                "input.audio_stream_seal",
-                {
-                  stream_id: inputStreamId,
-                  last_seq: inputLastSequence,
-                  capture_mode: inputCaptureMode,
-                },
-                inputTurnId,
-              )));
-              reportLatencyStage("audio_seal_sent", inputTurnId, inputStreamId);
-            }
-            const desktopCapture = await desktopCapturePromise;
-            if (
-              deps.getSocket() !== inputSocket
-              || inputSocket.readyState !== WebSocket.OPEN
-            ) {
-              throw new Error("audio_stream_connection_changed_during_capture");
-            }
             inputSocket.send(JSON.stringify(deps.buildEnvelope(
               "input.audio_stream_end",
               {
@@ -552,7 +518,6 @@ export function createAdapterMicrophoneRuntime(
                 dropped: inputSequenceBroken,
                 last_seq: inputLastSequence,
                 capture_mode: inputCaptureMode,
-                images: desktopCapture ? [desktopCapture] : [],
                 desktop_snapshot_requested: desktopSnapshotRequested,
               },
               inputTurnId,

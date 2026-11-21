@@ -90,9 +90,12 @@ class MessageFactory:
         *,
         raw_message: dict[str, Any],
         images: list[Any],
+        enforce_cooldown: bool = True,
     ) -> None:
         """Populate image components and their metadata on an input message."""
-        accepted_images, image_diagnostics = self._apply_image_cooldown(images)
+        accepted_images, image_diagnostics = (
+            self._apply_image_cooldown(images) if enforce_cooldown else (images, [])
+        )
         if images:
             logger.info(
                 "Inbound desktop message received %s image(s); accepted_after_cooldown=%s text=%s",
@@ -105,12 +108,6 @@ class MessageFactory:
         resolved_image_inputs: list[dict[str, str]] = []
         failed_image_diagnostics: list[dict[str, Any]] = []
         desktop_snapshot_component_indexes: list[int] = []
-        payload = raw_message.get("payload")
-        desktop_snapshot_requested = (
-            isinstance(payload, dict)
-            and payload.get("desktop_snapshot_requested") is True
-        )
-
         for image_payload in accepted_images:
             image_component, diagnostic = self.media_service.convert_image_component_with_diagnostic(
                 image_payload
@@ -150,8 +147,6 @@ class MessageFactory:
         if all_image_diagnostics:
             normalized_raw_message["image_input_diagnostics"] = all_image_diagnostics
         abm.raw_message = normalized_raw_message
-        if desktop_snapshot_requested and not images:
-            self.attach_cached_desktop_snapshot(abm)
 
         if images:
             logger.info(
@@ -164,12 +159,19 @@ class MessageFactory:
                 len(failed_image_diagnostics),
             )
 
-    def attach_cached_desktop_snapshot(self, abm: AstrBotMessage) -> bool:
+    def attach_cached_desktop_snapshot(
+        self, abm: AstrBotMessage, *, max_age_seconds: float | None = None
+    ) -> bool:
         """Use the current connection's cached desktop frame for an input without images."""
         if self._latest_desktop_frame_getter is None:
             return False
         frame = self._latest_desktop_frame_getter()
         if frame is None:
+            return False
+        if (
+            max_age_seconds is not None
+            and time.monotonic() - frame.captured_at > max_age_seconds
+        ):
             return False
         snapshot, _ = self.media_service.convert_image_component_with_diagnostic(frame.image)
         if snapshot is None:

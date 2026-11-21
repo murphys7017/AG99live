@@ -537,7 +537,7 @@ onMounted(() => {
           />
           <span class="settings-toggle__control" aria-hidden="true"></span>
           <span class="settings-toggle__copy">
-            发送文本或按键说话时自动附带一张实时桌面截图，帮助模型理解当前屏幕内容。
+            允许给文字和语音消息附带桌面截图。截图频率在 Web 控制台的「桌面视觉上下文」中设置。
           </span>
         </label>
 
