@@ -2,6 +2,7 @@ import { loadSpeechVolume, SPEECH_VOLUME_KEY } from "../app/petPreferences.js";
 import { reportLatencyStage } from "../adapter-connection/runtime/latency.js";
 import type { AudioPlaybackClock } from "./contracts.js";
 import type { SpeechOutputSession } from "./speechOutputRuntime.js";
+import { onOutputPresented, presentedOutputTime } from "./outputPresentationClock.js";
 
 const SAMPLE_RATE = 32000;
 const MAX_CHUNK_SAMPLES = 32768;
@@ -15,14 +16,14 @@ const BOUNDARY_GUARD_SAMPLES = 32; // 1 ms at 32 kHz; appended only after speech
 
 export interface PcmOutputSession extends SpeechOutputSession {
   readonly clock: AudioPlaybackClock;
-  /** First consumed samples, expressed on this renderer's performance clock. */
+  /** Estimated device presentation of sample zero, on the performance clock. */
   readonly started: Promise<number>;
   /** Resolves only after production ends AND accepted audio drains. */
   readonly completed: Promise<void>;
   getScheduledEndTime(): number;
   getScheduledWaitMs(): number;
   append(sampleOffset: number, samples: Float32Array): Promise<void>;
-  finish(totalSamples: number): void;
+  finish(totalSamples: number): Promise<void>;
 }
 
 interface ScheduledChunk {
@@ -52,15 +53,16 @@ export function createPcmOutputSession(
   let drainedSamples = 0;
   let tailTime = 0;
   let finished = false;
+  let endReceived = false;
   let disposed = false;
   let prepared = false;
   let appending = false;
   let wakeWriter: (() => void) | null = null;
   let firstStartTime: number | null = null;
   let drainTimer: ReturnType<typeof setTimeout> | null = null;
-  let startTimer: ReturnType<typeof setTimeout> | null = null;
+  let cancelStartObservation: (() => void) | undefined;
   let prebufferTimer: ReturnType<typeof setTimeout> | null = null;
-  let startNotified = false;
+  let firstFlush: Promise<void> | undefined;
   let previousSample = 0;
   let resolveStarted!: (atMs: number) => void;
   let rejectStarted!: (error: Error) => void;
@@ -88,14 +90,15 @@ export function createPcmOutputSession(
 
   function assertWritable(): void {
     if (disposed) throw new DOMException("PCM playback stopped.", "AbortError");
-    if (finished) throw new Error("pcm_output_already_finished");
+    if (endReceived) throw new Error("pcm_output_already_finished");
   }
 
   function currentSamples(): number {
     let samples = drainedSamples;
+    const presented = presentedOutputTime(context);
     for (const chunk of chunks) {
       samples += Math.min(chunk.samples, Math.max(
-        0, Math.floor((context.currentTime - chunk.start) * SAMPLE_RATE),
+        0, Math.floor((presented - chunk.start) * SAMPLE_RATE),
       ));
     }
     return samples;
@@ -109,37 +112,45 @@ export function createPcmOutputSession(
   }
 
   function settleDrain(): void {
-    while (chunks[0]?.ended) {
+    if (disposed) return;
+    const presented = presentedOutputTime(context);
+    while (chunks[0]?.ended && presented >= chunks[0].end) {
       drainedSamples += chunks.shift()!.samples;
     }
     wakeWriter?.();
-    if (finished && chunks.length === 0) {
-      if (disposed || drainTimer !== null) return;
-      // onended marks render completion. Allow the already-rendered tail to
-      // reach the output device before reporting completion to the timeline.
-      const { contextTime = 0, performanceTime = 0 } = context.getOutputTimestamp?.() ?? {};
-      const presentationEndMs = performanceTime > 0 && contextTime > 0
-        ? performanceTime + (tailTime - contextTime) * 1000
-        : performance.now() + ((context.baseLatency || 0) + (context.outputLatency || 0)) * 1000;
-      const remainingMs = acceptedSamples ? presentationEndMs - performance.now() : 0;
-      const complete = () => {
-        console.info("[PcmOutput] segment drained.", {
-          ...identity, acceptedSamples, drainedSamples,
-          scheduledDurationMs: scheduledDurationSamples() * 1000 / SAMPLE_RATE,
-        });
-        resolveCompleted();
-      };
-      if (remainingMs > 0) {
-        drainTimer = setTimeout(complete, remainingMs);
-      } else {
-        complete();
+    if (chunks[0]?.ended && drainTimer === null) {
+      const remainingMs = (chunks[0].end - presented) * 1000;
+      drainTimer = setTimeout(() => {
+        drainTimer = null;
+        settleDrain();
+      }, context.state === "running" ? Math.max(4, remainingMs) : 100);
+    } else if (finished && chunks.length === 0) {
+      if (drainTimer !== null) {
+        clearTimeout(drainTimer);
+        drainTimer = null;
       }
+      console.info("[PcmOutput] segment drained.", {
+        ...identity, acceptedSamples, drainedSamples,
+        scheduledDurationMs: scheduledDurationSamples() * 1000 / SAMPLE_RATE,
+      });
+      if (acceptedSamples) void started.then(resolveCompleted, rejectCompleted);
+      else resolveCompleted();
     }
   }
 
   function scheduledDurationSamples(): number {
     if (firstStartTime === null) return 0;
     return Math.max(0, Math.floor((tailTime - firstStartTime) * SAMPLE_RATE));
+  }
+
+  function startBufferedSpeech(): Promise<void> {
+    clearPrebufferTimer();
+    // The route can change between receipt of frame zero and the end of prebuffering.
+    firstFlush ??= output.prepare().then(() => {
+      if (disposed) throw new DOMException("PCM playback stopped.", "AbortError");
+      schedulePendingChunks();
+    });
+    return firstFlush;
   }
 
   function schedulePendingChunks(contiguousOnly = false): void {
@@ -181,7 +192,6 @@ export function createPcmOutputSession(
         ended: false,
       };
       source.onended = () => {
-        observeStart();
         chunk.ended = true;
         source.disconnect();
         settleDrain();
@@ -206,24 +216,13 @@ export function createPcmOutputSession(
           baseLatencyMs: context.baseLatency * 1000,
           outputLatencyMs: context.outputLatency * 1000,
         });
-        observeStart();
+        cancelStartObservation = onOutputPresented(context, start, resolveStarted);
       }
     }
   }
 
-  function observeStart(): void {
-    if (startTimer !== null) clearTimeout(startTimer);
-    startTimer = null;
-    if (disposed || startNotified || firstStartTime === null) return;
-    if (context.state === "running" && context.currentTime > firstStartTime) {
-      startNotified = true;
-      resolveStarted(performance.now() - (context.currentTime - firstStartTime) * 1000);
-    } else {
-      startTimer = setTimeout(observeStart, 5);
-    }
-  }
-
   return {
+    context,
     analyser: output.analyser,
     sampleRate: output.sampleRate,
     completed,
@@ -244,9 +243,12 @@ export function createPcmOutputSession(
         ? acceptedSamples * 1000 / SAMPLE_RATE
         : null,
       getPlaybackRate: () => 1,
-      isPlaying: () => !disposed && context.state === "running" && chunks.some(
-        (chunk) => context.currentTime >= chunk.start && context.currentTime < chunk.end,
-      ),
+      isPlaying: () => {
+        const presented = presentedOutputTime(context);
+        return !disposed && context.state === "running" && chunks.some(
+          (chunk) => presented >= chunk.start && presented < chunk.end,
+        );
+      },
     },
     async prepare() {
       assertWritable();
@@ -288,11 +290,14 @@ export function createPcmOutputSession(
         if (firstStartTime === null) {
           const pendingSamples = pendingChunks.reduce((sum, chunk) => sum + chunk.samples, 0);
           if (pendingSamples >= INITIAL_PREBUFFER_SAMPLES) {
-            schedulePendingChunks();
+            await startBufferedSpeech();
           } else if (prebufferTimer === null) {
             prebufferTimer = setTimeout(() => {
               prebufferTimer = null;
-              schedulePendingChunks();
+              void startBufferedSpeech().catch(error => {
+                rejectStarted(error);
+                rejectCompleted(error);
+              });
             }, INITIAL_PREBUFFER_MAX_WAIT_MS);
           }
         } else {
@@ -302,12 +307,14 @@ export function createPcmOutputSession(
         appending = false;
       }
     },
-    finish(totalSamples) {
+    async finish(totalSamples) {
       assertWritable();
       if (appending || !Number.isSafeInteger(totalSamples) || totalSamples !== acceptedSamples) {
         throw new Error("pcm_output_incomplete_or_invalid_end");
       }
-      schedulePendingChunks();
+      endReceived = true;
+      if (pendingChunks.length && firstStartTime === null) await startBufferedSpeech();
+      if (disposed) throw new DOMException("PCM playback stopped.", "AbortError");
       // Schedule the final sample's return to zero before the next segment.
       // All received samples remain present; only this 1 ms guard is appended.
       if (acceptedSamples > 0 && previousSample !== 0) {
@@ -331,7 +338,7 @@ export function createPcmOutputSession(
       // Freeze the clock at the actual consumed prefix before removing sources.
       const consumed = currentSamples();
       disposed = true;
-      if (startTimer !== null) clearTimeout(startTimer);
+      cancelStartObservation?.();
       clearPrebufferTimer();
       if (drainTimer !== null) clearTimeout(drainTimer);
       rejectStarted(new DOMException("PCM playback stopped.", "AbortError"));

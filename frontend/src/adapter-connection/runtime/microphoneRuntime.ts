@@ -56,7 +56,7 @@ export interface AdapterMicrophoneRuntimeDeps {
   pushHistory: (role: Extract<DesktopHistoryEntry["role"], "system" | "error">, text: string) => void;
   createMessageId: () => string;
   setDesktopPttMode?: (enabled: boolean, binding: DesktopPttKeyBinding) => void;
-  prepareSpeechOutput?: () => Promise<void>;
+  prepareSpeechOutput?: (turnId: string) => Promise<void>;
 }
 
 export interface RefreshMicrophoneDevicesOptions {
@@ -162,7 +162,7 @@ export function createAdapterMicrophoneRuntime(
       audioStreamStarted = true;
       reportLatencyStage("capture_start", turnId, streamId);
       reportLatencyStage("output_warmup_start", turnId, streamId);
-      void deps.prepareSpeechOutput?.().then(
+      void deps.prepareSpeechOutput?.(turnId).then(
         () => reportLatencyStage("output_warmup_ready", turnId, streamId),
         (error: unknown) => {
           reportLatencyStage("output_warmup_failed", turnId, streamId);

@@ -28,7 +28,7 @@ import type { ModelSyncInstance } from "../model-sync/useModelSync.js";
 import type { TurnPlaybackSessionPort } from "../../turn-playback/sessionStorePort.js";
 
 export interface AdapterInboundRuntimeDeps {
-  prewarmSpeechOutput(): void;
+  prewarmSpeechOutput(turnId: string): void;
   onIdleMotion?: (event: IdleMotionEvent) => void;
   onMotionPreview?: (envelope: ProtocolEnvelope<unknown>) => void;
   onPreAction: (event: PreActionEvent) => void;

@@ -61,7 +61,7 @@ export function createConversationPlaybackRuntime(options: {
   };
   const speechOutputRuntime = createSpeechOutputRuntime();
   const adapter: AdapterConnectionCompositionInstance = createAdapterConnection({
-    prepareSpeechOutput: () => speechOutputRuntime.prepare(),
+    prepareSpeechOutput: (turnId) => speechOutputRuntime.prepare(turnId),
     sessionStore: options.sessionStore,
     modelSync: options.modelSync,
     normalizeMotionPayload: options.normalizeMotionPayload,

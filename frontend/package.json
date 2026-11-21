@@ -18,6 +18,7 @@
     "typecheck:renderer": "vue-tsc --noEmit -p tsconfig.json",
     "typecheck:websdk": "tsc --noEmit -p tsconfig.websdk.json",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
+    "check:speech-onset": "node scripts/check-speech-onset.cjs",
     "build": "npm run typecheck && electron-vite build",
     "package:win": "npm run build:spout-sender && npm run build && electron-builder --win --x64",
     "package:win:dir": "npm run build:spout-sender && npm run build && electron-builder --win --x64 --dir",

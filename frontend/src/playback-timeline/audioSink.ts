@@ -1,5 +1,6 @@
 import type { AudioPlaybackClock } from "./contracts.js";
 import { loadSpeechVolume, SPEECH_VOLUME_KEY } from "../app/petPreferences.js";
+import { onOutputPresented, presentedOutputTime } from "./outputPresentationClock.js";
 import type {
   SpeechOutputRuntime,
   SpeechOutputSession,
@@ -43,7 +44,7 @@ export interface PlaybackTimelineAudioStartCallbacks {
 }
 
 export interface PlaybackTimelineAudioSink {
-  start(audioUrl: string, callbacks?: PlaybackTimelineAudioStartCallbacks): Promise<void>;
+  start(audioUrl: string, turnId: string | null, callbacks?: PlaybackTimelineAudioStartCallbacks): Promise<void>;
   stop(): void;
 }
 
@@ -82,11 +83,10 @@ function adaptClock(clock: RuntimeAudioPlaybackClock): AudioPlaybackClock {
 }
 
 export function createBrowserAudioTimelineSink(options: {
-  speechOutputRuntime?: SpeechOutputRuntime;
-} = {}): PlaybackTimelineAudioSink & { dispose(): void } {
+  speechOutputRuntime: SpeechOutputRuntime;
+}): PlaybackTimelineAudioSink & { dispose(): void } {
   let activeAudioElement: HTMLAudioElement | null = null;
   let activeAudioStartCancel: (() => void) | null = null;
-  let activeSpeechOutput: SpeechOutputSession | null = null;
   const onVolumeChanged = (event: StorageEvent) => {
     if (event.key === SPEECH_VOLUME_KEY && activeAudioElement) {
       activeAudioElement.volume = loadSpeechVolume();
@@ -97,20 +97,16 @@ export function createBrowserAudioTimelineSink(options: {
   function stopBrowserAudioPlayback(): void {
     const audio = activeAudioElement;
     const cancelStart = activeAudioStartCancel;
-    const speechOutput = activeSpeechOutput;
-    activeAudioElement = null;
-    activeAudioStartCancel = null;
-    activeSpeechOutput = null;
     if (audio) {
       audio.pause();
       audio.currentTime = 0;
     }
-    speechOutput?.dispose();
     cancelStart?.();
   }
 
   async function startBrowserAudioPlayback(
     audioUrl: string,
+    turnId: string | null,
     callbacks: PlaybackTimelineAudioStartCallbacks,
   ): Promise<void> {
     stopBrowserAudioPlayback();
@@ -119,21 +115,23 @@ export function createBrowserAudioTimelineSink(options: {
     audio.volume = loadSpeechVolume();
     audio.crossOrigin = "anonymous";
     audio.src = audioUrl;
-    let speechOutput: SpeechOutputSession | null = null;
-    try {
-      speechOutput = options.speechOutputRuntime?.attach(audio) ?? null;
-    } catch (error) {
-      console.error("[SpeechOutput] output runtime attach failed; using native media output.", {
-        audioUrl,
-        error,
-      });
-    }
+    const speechOutput = options.speechOutputRuntime.attach(audio, turnId);
     activeAudioElement = audio;
-    activeSpeechOutput = speechOutput;
     const clock = adaptClock(createAudioElementPlaybackClock(audio));
+    const context = speechOutput.context;
+    let firstRender: number | undefined;
+    let renderEnd: number | undefined;
+    clock.getCurrentTimeMs = () => {
+      const queued = Math.max(0, (renderEnd ?? context.currentTime) - presentedOutputTime(context));
+      return Math.max(0, (audio.currentTime - queued * audio.playbackRate) * 1000);
+    };
+    clock.isPlaying = () => renderEnd === undefined ? !audio.paused && !audio.ended
+      : presentedOutputTime(context) < renderEnd;
     let resolvedDurationMs: number | null = null;
     let playbackStartNotified = false;
     let disposed = false;
+    let cancelStartPresentation: (() => void) | undefined;
+    let cancelEndPresentation: (() => void) | undefined;
 
     let resolveDurationReady!: () => void;
     let rejectDurationReady!: (error: unknown) => void;
@@ -142,27 +140,23 @@ export function createBrowserAudioTimelineSink(options: {
       rejectDurationReady = reject;
     });
     void durationReady.catch(() => undefined);
-    const cancelStart = () => {
-      rejectDurationReady(new DOMException("Audio playback stopped before start.", "AbortError"));
-    };
-    activeAudioStartCancel = cancelStart;
-
     const cleanup = () => {
       if (disposed) {
         return;
       }
       disposed = true;
+      cancelStartPresentation?.();
+      cancelEndPresentation?.();
       if (activeAudioElement === audio) {
         activeAudioElement = null;
-      }
-      if (activeAudioStartCancel === cancelStart) {
         activeAudioStartCancel = null;
       }
-      if (activeSpeechOutput === speechOutput) {
-        activeSpeechOutput = null;
-      }
-      speechOutput?.dispose();
+      speechOutput.dispose();
       callbacks.onAudioElementDisposed?.();
+    };
+    activeAudioStartCancel = () => {
+      rejectDurationReady(new DOMException("Audio playback stopped.", "AbortError"));
+      cleanup();
     };
 
     const syncDurationFromElement = (): boolean => {
@@ -179,15 +173,14 @@ export function createBrowserAudioTimelineSink(options: {
       return false;
     };
 
-    const markPlaybackStarted = () => {
+    const markPlaybackStarted = (startedAtMs: number) => {
       if (playbackStartNotified || activeAudioElement !== audio) {
         return;
       }
       playbackStartNotified = true;
       syncDurationFromElement();
-      speechOutput?.start();
       callbacks.onPlaybackStarted?.({
-        startedAtMs: performance.now(),
+        startedAtMs,
         durationMs: resolvedDurationMs,
         clock,
       });
@@ -213,7 +206,10 @@ export function createBrowserAudioTimelineSink(options: {
     audio.addEventListener(
       "playing",
       () => {
-        markPlaybackStarted();
+        if (activeAudioElement !== audio) return;
+        speechOutput.start();
+        firstRender = Math.max(0, context.currentTime - audio.currentTime / audio.playbackRate);
+        cancelStartPresentation = onOutputPresented(context, firstRender, markPlaybackStarted);
       },
       { once: true },
     );
@@ -224,8 +220,17 @@ export function createBrowserAudioTimelineSink(options: {
         if (activeAudioElement !== audio) {
           return;
         }
-        cleanup();
-        callbacks.onEnded?.();
+        renderEnd = context.currentTime;
+        cancelEndPresentation = onOutputPresented(context, renderEnd, () => {
+          if (activeAudioElement !== audio) return;
+          if (!playbackStartNotified && firstRender !== undefined) {
+            const elapsed = presentedOutputTime(context) - firstRender;
+            markPlaybackStarted(performance.now() - 1000 * elapsed);
+            if (activeAudioElement !== audio) return;
+          }
+          cleanup();
+          callbacks.onEnded?.();
+        });
       },
       { once: true },
     );
@@ -245,7 +250,7 @@ export function createBrowserAudioTimelineSink(options: {
         });
         rejectDurationReady(new Error("Audio metadata could not be loaded."));
         cleanup();
-        if (playbackStartNotified) {
+        if (firstRender !== undefined) {
           callbacks.onError?.();
         }
       },
@@ -257,18 +262,20 @@ export function createBrowserAudioTimelineSink(options: {
         audioUrl,
         audio,
         clock,
-        getAudioCurrentTimeSeconds: () => Number.isFinite(audio.currentTime) ? audio.currentTime : 0,
+        getAudioCurrentTimeSeconds: () => (clock.getCurrentTimeMs() ?? 0) / 1000,
         isCurrentAudio: () => activeAudioElement === audio,
         speechOutput,
       });
+      if (activeAudioElement !== audio) {
+        throw new DOMException("Audio playback stopped before load.", "AbortError");
+      }
       audio.load();
       await durationReady;
       if (activeAudioElement !== audio) {
         throw new DOMException("Audio playback stopped before start.", "AbortError");
       }
-      // Recheck after decoding: capture prewarming shares this output graph,
-      // while suspended or long-idle devices still need a fresh primer.
-      await speechOutput?.prepare();
+      // The output route may have changed while the file was loading.
+      await speechOutput.prepare();
       if (activeAudioElement !== audio) {
         throw new DOMException("Audio playback stopped before start.", "AbortError");
       }
@@ -286,8 +293,8 @@ export function createBrowserAudioTimelineSink(options: {
   }
 
   return {
-    async start(audioUrl, callbacks = {}) {
-      await startBrowserAudioPlayback(audioUrl, callbacks);
+    async start(audioUrl, turnId, callbacks = {}) {
+      await startBrowserAudioPlayback(audioUrl, turnId, callbacks);
     },
     stop() {
       stopBrowserAudioPlayback();

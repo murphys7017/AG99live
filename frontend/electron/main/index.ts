@@ -1,4 +1,4 @@
-import { app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, screen, session } from "electron";
+import { app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, powerMonitor, screen, session } from "electron";
 import { spawn } from "node:child_process";
 import { appendDesktopLatencyEvent, flushDesktopLatencyLog } from "./desktop-latency-log";
 import { MenuManager } from "./menu-manager";
@@ -272,6 +272,13 @@ function sendSpoutSenderStatus(status: DesktopSpoutSenderStatus): void {
     return;
   }
   pet.webContents.send("desktop:spout-sender-status", status);
+}
+
+function notifyPetSystemResumed(): void {
+  const pet = windowManager.getWindow("pet");
+  if (pet && !pet.isDestroyed() && !pet.webContents.isDestroyed()) {
+    pet.webContents.send("desktop:system-resumed");
+  }
 }
 
 function normalizePttKeycode(binding: unknown): number | null {
@@ -792,6 +799,7 @@ app.whenReady().then(async () => {
   spoutSender = new SpoutSender(sendSpoutSenderStatus);
   spoutSender.start();
   windowManager.createWindows();
+  powerMonitor.on("resume", notifyPetSystemResumed);
   desktopPresence = createDesktopPresenceMonitor();
   setupIpc();
   setupNativeMicrophoneIpc();
@@ -838,6 +846,7 @@ app.on("before-quit", (event) => {
     return;
   }
   desktopPresence?.stop();
+  powerMonitor.removeListener("resume", notifyPetSystemResumed);
   windowManager?.markAppQuitting();
   menuManager?.dispose();
   spoutSender?.stop();

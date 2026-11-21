@@ -16,7 +16,7 @@ export interface PcmTimelineStream {
   readonly completed: Promise<void>;
   readonly readyForNext: Promise<void>;
   append(sampleOffset: number, samples: Float32Array): Promise<void>;
-  finish(totalSamples: number, status: "completed" | "failed", reason?: string): void;
+  finish(totalSamples: number, status: "completed" | "failed", reason?: string): Promise<void>;
 }
 
 interface ActiveStream {
@@ -204,16 +204,18 @@ export function createPcmTimelinePlayback<TMotion>(options: {
           throw new PcmSegmentPlaybackError("pcm_timeline_chunk_failed", error);
         }
       },
-      finish(totalSamples, status, reason = "") {
+      async finish(totalSamples, status, reason = "") {
         if (stream.terminal) throw new PcmSegmentPlaybackError("pcm_timeline_stopped");
         try {
           if (status !== "completed" && status !== "failed") throw new Error("pcm_timeline_status_invalid");
           if (status === "failed" && !reason.trim()) throw new Error("pcm_timeline_failure_reason_missing");
           stream.productionFailure = status === "failed" ? reason : null;
-          output.finish(totalSamples);
+          await output.finish(totalSamples);
+          if (stream.terminal) throw new PcmSegmentPlaybackError("pcm_timeline_stopped");
           stream.finished = true;
           options.runtime.markAudioTimelineDuration(turnId, messageId, output.clock.getDurationMs());
         } catch (error) {
+          if (stream.terminal) throw new PcmSegmentPlaybackError("pcm_timeline_stopped", error);
           settle(stream, "failed", "pcm_timeline_end_invalid");
           throw new PcmSegmentPlaybackError("pcm_timeline_end_invalid", error);
         }

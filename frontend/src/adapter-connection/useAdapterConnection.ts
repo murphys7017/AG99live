@@ -186,7 +186,7 @@ export interface AdapterPlaybackCompositionPort {
 }
 
 interface CreateAdapterConnectionOptions {
-  prepareSpeechOutput?: () => Promise<void>;
+  prepareSpeechOutput?: (turnId: string) => Promise<void>;
   sessionStore: SessionStore;
   modelSync: ModelSyncInstance;
   normalizeMotionPayload: MotionPayloadNormalizer;
@@ -485,8 +485,8 @@ export function createAdapterConnection(
     },
   );
 
-  function prewarmSpeechOutput(): void {
-    void options.prepareSpeechOutput?.().catch(error => {
+  function prewarmSpeechOutput(turnId: string): void {
+    void options.prepareSpeechOutput?.(turnId).catch(error => {
       console.warn("[SpeechOutput] early preparation failed; playback will retry.", error);
     });
   }
@@ -590,7 +590,7 @@ export function createAdapterConnection(
       }, envelope.turn_id);
     },
     notifyTurnLifecycle: (event) => {
-      if (event.phase === "started") prewarmSpeechOutput();
+      if (event.phase === "started") prewarmSpeechOutput(event.turnId);
       if (event.phase === "terminal") {
         if (state.turnFinishedSuccess) subtitleReporter.end(event.turnId);
         else subtitleReporter.clear(event.turnId);

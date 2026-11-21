@@ -4,6 +4,7 @@ export const DESKTOP_LATENCY_STAGES = [
   "audio_end_queue_ready", "audio_seal_sent", "screenshot_start", "screenshot_end", "audio_end_sent",
   "audio_prepare_start", "audio_prepare_end", "audio_started", "audio_ended",
   "output_warmup_start", "output_warmup_ready", "output_warmup_failed",
+  "output_primer_started", "output_primer_presented",
   "motion_started", "motion_ended", "motion_failed", "motion_interrupted", "motion_handoff",
   "incremental_text_first", "incremental_pcm_first",
   "speech_posture_visible", "pcm_prepare_start", "pcm_prepare_end", "pcm_first_sample", "pcm_schedule_gap", "pcm_drained",

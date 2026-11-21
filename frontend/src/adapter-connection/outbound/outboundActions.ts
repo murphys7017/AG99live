@@ -53,7 +53,7 @@ export interface OutboundActionState {
  * 不应直接调用底层 stopAudioPlayback。
  */
 export interface OutboundActionContext {
-  prewarmSpeechOutput(): void;
+  prewarmSpeechOutput(turnId: string): void;
   state: OutboundActionState;
   outboundClient: AdapterOutboundClient;
   pushHistory: (role: string, text: string) => void;
@@ -86,9 +86,9 @@ export async function sendText(ctx: OutboundActionContext, text: string): Promis
     return false;
   }
 
-  ctx.prewarmSpeechOutput();
   const desktopSnapshotRequested = ctx.state.desktopScreenshotOnSendEnabled;
   const turnId = ctx.createMessageId();
+  ctx.prewarmSpeechOutput(turnId);
   const sent = ctx.outboundClient.send("input.text", {
     text: message,
     desktop_snapshot_requested: desktopSnapshotRequested,
