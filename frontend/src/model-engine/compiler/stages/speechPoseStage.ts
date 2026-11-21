@@ -3,7 +3,6 @@ import type {
   VoiceFollowingChannelProfile,
   VoiceFollowingProfile,
 } from "../../../types/protocol.js";
-import { SPEECH_BODY_FOLLOW_SCALE } from "../../constants.js";
 import { SCHEMA_VOICE_FOLLOWING_PROFILE_V3 } from "../../../types/protocol.js";
 import type {
   ModelParameterCompileContext,
@@ -219,7 +218,7 @@ function buildGestureTrack(
     ok: true,
     track: {
       preset,
-      amplitudeRatio: channel.amplitude_ratio * (channel.layer === "body" ? SPEECH_BODY_FOLLOW_SCALE : 1),
+      amplitudeRatio: channel.amplitude_ratio,
       delayMs: channel.follow_delay_ms,
       points,
     },

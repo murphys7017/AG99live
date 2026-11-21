@@ -10,6 +10,10 @@ timed_expression_generation_20261119:
     with the recorded 2.2 intensity. Peak yaw dropped from 35 to 9.41 with identical timing.
     Hidden-window timing and live DeepSeek/MiniMax
     coverage at desktop size still require observation.
+  stage_amplitude_20261121: >-
+    Restored stage examples and linear manual gain around each semantic axis's neutral.
+    Speech coverage and ownership stay independent of gain. In an isolated Mk6 replay
+    of the same recorded turn, minimum PhyAngleX was -12.00 at 1x and -24.01 at 2x.
   frontend_cost_review_20261121:
     risk: high
     scope: AG99live TypeScript desktop, Electron logging, and adapter timed expression delivery.

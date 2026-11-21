@@ -1,4 +1,3 @@
-import { SPEECH_BODY_FOLLOW_SCALE } from "../constants.js";
 import type { ModelSummary } from "../../types/protocol.js";
 import type {
   GazeTarget,
@@ -105,7 +104,7 @@ export function buildSpeechPostureBindings(model: ModelSummary | null): Interact
         result.push({
           ...binding,
           axisId: axis.id,
-          targetRatioScale: channel.amplitude_ratio * (channel.layer === "body" ? SPEECH_BODY_FOLLOW_SCALE : 1),
+          targetRatioScale: channel.amplitude_ratio,
           onsetDelayMs: channel.follow_delay_ms,
         });
       }
