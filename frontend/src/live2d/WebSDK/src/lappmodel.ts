@@ -129,6 +129,8 @@ export class LAppModel extends CubismUserModel {
   private readonly _loadGeneration = getLive2DModelLoadState().generation;
   private _released = false;
   private readonly blinkParameters = new Set<string>();
+  private readonly blinkParameterIndices = new Set<number>();
+  private readonly poseBeforeBlink = new Map<number, number>();
   private readonly gazeParameters = new Set(["ParamEyeBallX", "ParamEyeBallY"]);
   private readonly resourceParameters = new WeakMap<ACubismMotion, Set<string>>();
   private readonly speechGaze = new SpeechGaze();
@@ -461,7 +463,10 @@ export class LAppModel extends CubismUserModel {
         this._eyeBlink = CubismEyeBlink.create();
         this._eyeBlink.setParameterIds(this._eyeBlinkIds);
         for (let i = 0; i < this._eyeBlinkIds.getSize(); i++) {
-          this.blinkParameters.add(this._eyeBlinkIds.at(i).getString().s);
+          const id = this._eyeBlinkIds.at(i);
+          this.blinkParameters.add(id.getString().s);
+          const index = this._model.getParameterIndex(id);
+          if (this.isParameterIndexWritable(index)) this.blinkParameterIndices.add(index);
         }
       }
       this._state = LoadStep.SetupLipSyncIds;
@@ -720,11 +725,6 @@ export class LAppModel extends CubismUserModel {
     this._model.saveParameters(); // 状態を保存
     //--------------------------------------------------------------------------
 
-    // まばたき
-    if (ambientMotionEnabled && this._eyeBlink && !this.eyesOwned(this.blinkParameters)) {
-      this._eyeBlink.updateParameters(this._model, deltaTimeSeconds);
-    }
-
     if (this._expressionManager != null) {
       this._expressionManager.updateMotion(this._model, deltaTimeSeconds); // 表情でパラメータ更新（相対変化）
     }
@@ -811,6 +811,20 @@ export class LAppModel extends CubismUserModel {
         this._activeParameterRuntime.disableLipSync(parameterMixerFailure.reason);
       } else if (parameterMixerFailure.owner === "mixed") {
         this._activeParameterRuntime.failActiveSource(parameterMixerFailure.reason);
+      }
+    }
+    // A new pose can defer the next blink, but an in-flight blink must finish.
+    this.poseBeforeBlink.clear();
+    if (this._eyeBlink) {
+      const openness = this._eyeBlink.advanceOpenness(
+        deltaTimeSeconds, ambientMotionEnabled && !this.eyesOwned(this.blinkParameters),
+      );
+      if (openness < 1) {
+        for (const index of this.blinkParameterIndices) {
+          const poseValue = this._model.getParameterValueByIndex(index);
+          this.poseBeforeBlink.set(index, poseValue);
+          this._model.setParameterValueByIndex(index, poseValue * openness);
+        }
       }
     }
     // 物理演算の設定
@@ -1961,9 +1975,10 @@ export class LAppModel extends CubismUserModel {
             value: Number(keyframe.target_value),
           }))
         : [];
-      // A ramp starting on its activation anchor picks up the visible pose.
+      // Anchor the ramp to the expression, even if a blink is currently closing it.
+      const initialValue = this.poseBeforeBlink.get(parameterIndex) ?? this._model.getParameterValueByIndex(parameterIndex);
       if (keyframes.length >= 2 && keyframes[0].atMs === keyframes[1].atMs) {
-        keyframes[0].value = this._model.getParameterValueByIndex(parameterIndex);
+        keyframes[0].value = initialValue;
       }
       if (keyframes.some((keyframe) => keyframe.value < minValue || keyframe.value > maxValue)) {
         return { ok: false, reason: `parameter_plan_keyframe_out_of_runtime_range:${parameterIdRaw}` };
@@ -2005,7 +2020,7 @@ export class LAppModel extends CubismUserModel {
         parameterIndex,
         presentation: {
           parameterId: parameterIdRaw,
-          initialValue: this._model.getParameterValueByIndex(parameterIndex),
+          initialValue,
           neutralValue: neutralTargetValue,
           maxVelocity: Number(item.dynamics.max_velocity),
           maxAcceleration: Number(item.dynamics.max_acceleration),

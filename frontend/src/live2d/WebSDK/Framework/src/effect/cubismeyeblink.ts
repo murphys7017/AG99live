@@ -84,6 +84,19 @@ export class CubismEyeBlink {
    * @param deltaTimeSeconds デルタ時間[秒]
    */
   public updateParameters(model: CubismModel, deltaTimeSeconds: number): void {
+    const openness = this.advanceOpenness(deltaTimeSeconds);
+    const parameterValue = CubismEyeBlink.CloseIfZero ? openness : -openness;
+    for (let i = 0; i < this._parameterIds.getSize(); ++i) {
+      model.setParameterValueById(this._parameterIds.at(i), parameterValue);
+    }
+  }
+
+  /** Advance the blink clock and sample its open fraction independently of the lid pose. */
+  public advanceOpenness(deltaTimeSeconds: number, allowNewBlink = true): number {
+    if (!allowNewBlink && (this._blinkingState === EyeState.EyeState_Interval
+      || this._blinkingState === EyeState.EyeState_First)) {
+      return 1;
+    }
     this._userTimeSeconds += deltaTimeSeconds;
     let parameterValue: number;
     let t = 0.0;
@@ -149,13 +162,7 @@ export class CubismEyeBlink {
         break;
     }
 
-    if (!CubismEyeBlink.CloseIfZero) {
-      parameterValue = -parameterValue;
-    }
-
-    for (let i = 0; i < this._parameterIds.getSize(); ++i) {
-      model.setParameterValueById(this._parameterIds.at(i), parameterValue);
-    }
+    return parameterValue;
   }
 
   /**
