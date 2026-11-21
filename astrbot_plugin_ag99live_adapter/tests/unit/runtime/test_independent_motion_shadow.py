@@ -2,14 +2,24 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import json
+import sys
 from types import SimpleNamespace
 
+import pytest
 
-def test_shadow_motion_uses_primary_prompt_and_never_replaces_primary_result(
+
+@pytest.mark.parametrize("small_is_primary", [False, True])
+def test_each_motion_provider_receives_its_prompt_in_either_role(
     install_fake_astrbot,
     monkeypatch,
+    small_is_primary,
 ) -> None:
     install_fake_astrbot()
+    monkeypatch.setitem(
+        sys.modules, "astrbot.core.utils.astrbot_path",
+        SimpleNamespace(get_astrbot_config_path=lambda: ""),
+    )
     module = importlib.import_module(
         "astrbot_plugin_ag99live_adapter.middleware.interaction_motion.independent"
     )
@@ -22,8 +32,12 @@ def test_shadow_motion_uses_primary_prompt_and_never_replaces_primary_result(
         def __init__(self, name: str) -> None:
             self.name = name
 
-    primary = Provider("deepseek")
-    shadow = Provider("spark-v5")
+        def get_model(self):
+            return self.name
+
+    manual = Provider("deepseek-flash")
+    small = Provider("ag99-qwen35-q8:latest")
+    primary, shadow = (small, manual) if small_is_primary else (manual, small)
     context = module.IndependentMotionContext(
         current_user_text="请安慰我",
         contexts=({"role": "user", "content": "最近很累"},),
@@ -32,9 +46,9 @@ def test_shadow_motion_uses_primary_prompt_and_never_replaces_primary_result(
         reference_diagnostics=(),
     )
     runtime_state = SimpleNamespace(
-        independent_motion_provider_id="deepseek-provider",
+        independent_motion_provider_id=primary.name,
         independent_motion_shadow_enabled=True,
-        independent_motion_shadow_provider_id="spark-v5-provider",
+        independent_motion_shadow_provider_id=shadow.name,
         independent_motion_shadow_timeout_seconds=5.0,
         selected_independent_motion_shadow_provider=shadow,
         plugin_context=object(),
@@ -51,11 +65,19 @@ def test_shadow_motion_uses_primary_prompt_and_never_replaces_primary_result(
                 "_interaction_persona_segment_stream_active": True,
             }.get(key, default)
 
+    weighted_steps = [
+        {"axis_values": {"head_pitch": 50 + index}, "duration_weight": 1}
+        for index in range(9)
+    ]
+    timed_steps = [{"axis_values": {"head_pitch": 65}, "ms": 220}]
+
     async def request_text(provider, **kwargs):
         requests.append({"provider": provider, **kwargs})
         if len(requests) == 2:
             both_requests_started.set()
         await asyncio.wait_for(both_requests_started.wait(), timeout=1)
+        if provider is small:
+            return json.dumps({"duration_hint_ms": 900, "motion_steps": weighted_steps}), "stream"
         return (
             '[{"ms":220,"head_pitch":65}]',
             "stream",
@@ -72,14 +94,12 @@ def test_shadow_motion_uses_primary_prompt_and_never_replaces_primary_result(
 
     monkeypatch.setattr(module, "_request_motion_provider_text", request_text)
     monkeypatch.setattr(module, "_build_motion_capability_prompt_payload", lambda value: value)
-    monkeypatch.setattr(module, "_build_independent_system_prompt", lambda **_kwargs: "production system prompt")
-    monkeypatch.setattr(module, "_build_current_turn_prompt", lambda **_kwargs: "production user prompt")
     monkeypatch.setattr(module, "_motion_guidance_for_prompt", lambda *_args: {})
     monkeypatch.setattr(
         module,
         "normalize_motion_arguments_payload",
-        lambda *_args, **_kwargs: (
-            {"schema_version": "engine.motion_intent.v4", "motion_steps": [{"axis_values": {"head_pitch": 65}, "ms": 220}]},
+        lambda record, *_args, **_kwargs: (
+            {"schema_version": "engine.motion_intent.v4", "motion_steps": record["motion_steps"]},
             "ok",
         ),
     )
@@ -106,15 +126,20 @@ def test_shadow_motion_uses_primary_prompt_and_never_replaces_primary_result(
 
         assert result.motion_payload == {
             "schema_version": "engine.motion_intent.v4",
-            "motion_steps": [{"axis_values": {"head_pitch": 65}, "ms": 220}],
+            "motion_steps": weighted_steps if small_is_primary else timed_steps,
         }
         assert len(requests) == 2
         primary_request = next(item for item in requests if item["provider"] is primary)
         shadow_request = next(item for item in requests if item["provider"] is shadow)
-        assert primary_request["prompt"] == shadow_request["prompt"]
-        assert primary_request["system_prompt"] == shadow_request["system_prompt"]
+        trained = next(item for item in requests if item["provider"] is small)
+        general = next(item for item in requests if item["provider"] is manual)
+        assert "参数说明：" in general["system_prompt"]
+        assert "duration_weight" in trained["system_prompt"]
+        assert "max_motion_steps" not in trained["system_prompt"]
+        assert "motion_guidance" in json.loads(general["prompt"])
+        assert set(json.loads(trained["prompt"])) == {"user", "segment"}
         assert primary_request["contexts"] == shadow_request["contexts"]
-        assert callable(primary_request["on_complete_json"])
+        assert callable(primary_request["on_complete_json"]) == (not small_is_primary)
         assert shadow_request["on_complete_json"] is None
         assert any(
             item["record_stage"] == "motion_result"

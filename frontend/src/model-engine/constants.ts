@@ -4,7 +4,9 @@ export const MAX_MOTION_DURATION_MS = 15000;
 // Foreground semantic actions can use a longer sparse sequence. Ambient
 // sources keep their own smaller admission limit below.
 export const MIN_MOTION_SEQUENCE_STEPS = 1;
-export const MAX_MOTION_SEQUENCE_STEPS = 8;
+// Weighted foreground plans can use every representable millisecond.
+export const MAX_MOTION_SEQUENCE_STEPS = MAX_MOTION_DURATION_MS;
+export const MAX_TIMED_EXPRESSION_STEPS = 8;
 export const MAX_IDLE_MOTION_STEPS = 4;
 // This is the compiler's per-parameter track capacity, not the ambient
 // admission limit.

@@ -11,6 +11,8 @@
 
 namespace ag99::native::motion {
 
+constexpr int kMaxMotionDurationMs = 15000;
+
 std::optional<ParameterPlanTrackPoint> ParseTrackPoint(
     const ag99::runtime::Json& value,
     int duration_ms,
@@ -308,7 +310,7 @@ std::optional<MotionPlan> CompileMotionPlan(
   std::vector<std::pair<ag99::runtime::Json, int>> input_steps;
   const auto steps = intent.find("motion_steps");
   if (steps == intent.end() || !steps->is_array() || steps->empty()
-      || steps->size() > 8) {
+      || steps->size() > kMaxMotionDurationMs) {
     return std::nullopt;
   }
   for (const auto& step : *steps) {
@@ -333,10 +335,14 @@ std::optional<MotionPlan> CompileMotionPlan(
 
   MotionPlan plan;
   const auto duration = intent.find("duration_hint_ms");
-  if (duration != intent.end() && !json::IsIntegerInRange(*duration, 320, 15000)) {
+  if (duration != intent.end() && !json::IsIntegerInRange(*duration, 320, kMaxMotionDurationMs)) {
     return std::nullopt;
   }
   plan.duration_ms = duration == intent.end() ? 1000 : duration->get<int>();
+  const int step_count = static_cast<int>(input_steps.size());
+  if (step_count > plan.duration_ms) {
+    return std::nullopt;
+  }
   plan.blend_in_ms = std::min(140, std::max(40, plan.duration_ms / 5));
   plan.blend_out_ms = std::min(220, std::max(80, plan.duration_ms / 5));
   std::vector<AxisMap> resolved_steps;
@@ -381,6 +387,17 @@ std::optional<MotionPlan> CompileMotionPlan(
   }
   if (invalid_axis_value) {
     return std::nullopt;
+  }
+
+  // Leave one millisecond for every remaining step, just as the TS scheduler does.
+  std::vector<int> step_start_ms(step_count);
+  int elapsed_weight = 0;
+  for (int i = 1; i < step_count; ++i) {
+    elapsed_weight += input_steps[i - 1].second;
+    const int desired_ms = static_cast<int>(std::lround(
+        static_cast<double>(plan.duration_ms) * elapsed_weight / total_weight));
+    step_start_ms[i] = std::clamp(desired_ms, step_start_ms[i - 1] + 1,
+                                  plan.duration_ms - (step_count - i));
   }
 
   std::unordered_set<std::string> used_axis_ids;
@@ -437,7 +454,6 @@ std::optional<MotionPlan> CompileMotionPlan(
       std::vector<MotionTrack::Keyframe> keyframes;
       bool axis_started = false;
       AxisValue previous_value{};
-      int accumulated_weight = 0;
       for (std::size_t step_index = 0;
            step_index < resolved_steps.size();
            ++step_index) {
@@ -447,7 +463,6 @@ std::optional<MotionPlan> CompileMotionPlan(
           axis_started = true;
         }
         if (!axis_started) {
-          accumulated_weight += input_steps[step_index].second;
           continue;
         }
         const double ratio = ClampValue(
@@ -458,14 +473,9 @@ std::optional<MotionPlan> CompileMotionPlan(
         const double effective_ratio = invert ? 1.0 - ratio : ratio;
         const float target = static_cast<float>(
             output_min + (output_max - output_min) * effective_ratio);
-        const int at_ms = static_cast<int>(std::lround(
-            static_cast<double>(plan.duration_ms)
-            * static_cast<double>(accumulated_weight)
-            / static_cast<double>(total_weight)));
         if (keyframes.empty() || keyframes.back().target_value != target) {
-          keyframes.push_back(MotionTrack::Keyframe{at_ms, target});
+          keyframes.push_back(MotionTrack::Keyframe{step_start_ms[step_index], target});
         }
-        accumulated_weight += input_steps[step_index].second;
       }
       if (keyframes.empty()) {
         continue;
@@ -699,7 +709,7 @@ std::optional<ParameterPlan> ParseParameterPlan(
     if (const auto keyframes = item.find("keyframes");
         keyframes != item.end()) {
       if (!keyframes->is_array() || keyframes->size() < 2
-          || keyframes->size() > 8) {
+          || keyframes->size() > kMaxMotionDurationMs + 1) {
         return std::nullopt;
       }
       int previous_at = -1;

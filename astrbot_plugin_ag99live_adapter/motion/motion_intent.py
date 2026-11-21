@@ -13,8 +13,8 @@ from .performance_curve import normalize_performance_curve_hint
 from .resource_catalog import ModelInfoRuntimeContext
 
 DEFAULT_MOTION_INTENT_DURATION_MS = 1000
-# Foreground semantic actions may use up to eight sparse steps. Idle and
-# pre-action paths apply their smaller limits at their own ingress points.
+MAX_MOTION_DURATION_MS = 15000
+# Step budget for the timed provider. Weighted plans have millisecond resolution.
 MIN_MOTION_STEPS = 1
 MAX_MOTION_STEPS = 8
 MAX_IDLE_MOTION_STEPS = 4
@@ -264,14 +264,12 @@ def _normalize_motion_steps(value: Any) -> list[dict[str, Any]]:
 def normalize_motion_steps(
     value: Any,
 ) -> tuple[list[dict[str, Any]] | None, str]:
-    if (
-        not isinstance(value, list)
-        or len(value) < MIN_MOTION_STEPS
-        or len(value) > MAX_MOTION_STEPS
-    ):
+    if not isinstance(value, list) or len(value) < MIN_MOTION_STEPS:
         return None, "motion_steps_count_invalid"
     normalized_steps: list[dict[str, Any]] = []
     timed = isinstance(value[0], dict) and "ms" in value[0]
+    if len(value) > (MAX_MOTION_STEPS if timed else MAX_MOTION_DURATION_MS):
+        return None, "motion_steps_count_invalid"
     elapsed_ms = 0
     for index, step in enumerate(value):
         if not isinstance(step, dict):
@@ -280,7 +278,7 @@ def normalize_motion_steps(
             if set(step) != {"axis_values", "ms"} or not isinstance(step["axis_values"], dict):
                 return None, f"motion_step_timed_shape_invalid:{index}"
             ms = step["ms"]
-            if type(ms) is not int or ms < 1 or elapsed_ms + ms > 15000:
+            if type(ms) is not int or ms < 1 or elapsed_ms + ms > MAX_MOTION_DURATION_MS:
                 return None, f"motion_step_ms_invalid:{index}"
             axes, rejected = normalize_motion_axis_values(step["axis_values"])
             if rejected or len(axes or {}) != len(step["axis_values"]):
@@ -385,7 +383,7 @@ def _normalize_duration_hint_ms(value: Any) -> int:
     if not float("-inf") < number < float("inf"):
         raise ValueError("duration_hint_ms_not_finite")
     duration_hint_ms = int(round(number))
-    if duration_hint_ms < 320 or duration_hint_ms > 15000:
+    if duration_hint_ms < 320 or duration_hint_ms > MAX_MOTION_DURATION_MS:
         raise ValueError("duration_hint_ms_out_of_range")
     return duration_hint_ms
 

@@ -11,6 +11,7 @@ import {
 import {
   MAX_MOTION_DURATION_MS,
   MAX_MOTION_SEQUENCE_STEPS,
+  MAX_TIMED_EXPRESSION_STEPS,
   MIN_MOTION_DURATION_MS,
   MIN_MOTION_SEQUENCE_STEPS,
 } from "./constants.js";
@@ -51,6 +52,7 @@ export function normalizeMotionStepsV4(value: unknown): MotionAxisValueStep[] | 
   }
   const steps: MotionAxisValueStep[] = [];
   const timed = isObject(value[0]) && "ms" in value[0];
+  if (timed && value.length > MAX_TIMED_EXPRESSION_STEPS) return null;
   let elapsedMs = 0;
   for (const rawStep of value) {
     if (!isObject(rawStep)) {

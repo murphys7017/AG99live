@@ -42,7 +42,11 @@ from .prompt_context import (
     _record_motion_prompt_reference_observation,
     _resolve_prompt_motion_history,
 )
+from ...prompts.expression_axes import describe_expression_axis
 from ...prompts.expression_examples import resolve_expression_examples
+from ...prompts.trained_expression import (
+    build_trained_expression_prompts, trained_expression_record, uses_trained_expression_prompt,
+)
 from .shared import (
     _append_resolution_reason,
     _MotionRuntimeBundle,
@@ -689,16 +693,7 @@ async def generate_independent_motion(
     shadow: bool = False,
     shadow_timeout_seconds: float = 5.0,
     shadow_tasks: set[asyncio.Task[Any]] | None = None,
-    prompt_snapshot: (
-        tuple[
-            str,
-            str,
-            list[dict[str, str]],
-            dict[str, Any] | None,
-            dict[str, Any],
-        ]
-        | None
-    ) = None,
+    shadow_emotion: dict[str, Any] | None = None,
 ) -> IndependentMotionResult:
     images: list[str] = []
     motion_request_id = uuid4().hex
@@ -970,23 +965,18 @@ async def generate_independent_motion(
         capability_payload = prepared_context.capability_payload
         runtime_payload = prepared_context.runtime_payload
 
-        if prompt_snapshot is not None:
-            (
-                system_prompt,
-                prompt,
-                contexts,
-                neurobrain_state,
-                runtime_payload,
-            ) = prompt_snapshot
+        trained = uses_trained_expression_prompt(provider, provider_id)
+        neurobrain_state = shadow_emotion
+        if not shadow and segment_intent is not None:
+            neurobrain_state = read_motion_emotion(
+                bundle.runtime_state, event_context.delivery_turn_id or event_context.core_turn_id,
+            )
+        capability = _build_motion_capability_prompt_payload(capability_payload)
+        if trained:
+            system_prompt, prompt = build_trained_expression_prompts(
+                capability.get("axes", []), current_user_text, assistant_text, segment_intent,
+            )
         else:
-            neurobrain_state = (
-                read_motion_emotion(bundle.runtime_state, event_context.delivery_turn_id or event_context.core_turn_id)
-                if segment_intent is not None
-                else None
-            )
-            capability = _build_motion_capability_prompt_payload(
-                capability_payload
-            )
             system_prompt = _build_independent_system_prompt(
                 capability=capability,
                 persona_guidance=prepared_context.persona_guidance,
@@ -1018,8 +1008,13 @@ async def generate_independent_motion(
                 "candidate_role": "shadow" if shadow else "primary",
                 "prompt": prompt,
                 "system_prompt": system_prompt,
-                "neurobrain_state": neurobrain_state,
-                "runtime_references": runtime_payload,
+                "prompt_format": "trained_weighted" if trained else "timed_manual",
+                "training_axes": [
+                    {k: axis[k] for k in ("id", "negative_semantics", "positive_semantics", "value_range", "neutral") if k in axis}
+                    for axis in capability.get("axes", [])
+                ],
+                "neurobrain_state": None if trained else neurobrain_state,
+                "runtime_references": {} if trained else runtime_payload,
                 "transport": expected_transport,
                 "image_count": len(images),
                 "image_payloads_persisted": False,
@@ -1112,13 +1107,7 @@ async def generate_independent_motion(
                         segment_message_id=segment_message_id,
                         shadow=True,
                         shadow_timeout_seconds=shadow_timeout_seconds,
-                        prompt_snapshot=(
-                            system_prompt,
-                            prompt,
-                            list(contexts),
-                            neurobrain_state,
-                            dict(runtime_payload),
-                        ),
+                        shadow_emotion=neurobrain_state,
                     ),
                     name=f"ag99live-motion-shadow-{motion_request_id[:12]}",
                 )
@@ -1148,7 +1137,7 @@ async def generate_independent_motion(
             motion_request_id=motion_request_id,
             persona_result_id=persona_result_id,
             segment_index=segment_index,
-            on_complete_json=(None if shadow else publish_completed_motion_record),
+            on_complete_json=(None if shadow or trained else publish_completed_motion_record),
         )
         if shadow:
             response_text, transport = await asyncio.wait_for(
@@ -1173,7 +1162,10 @@ async def generate_independent_motion(
                 image_count=len(images),
             )
         try:
-            raw_arguments = expression_record(json.loads(response_text))
+            raw_arguments = (
+                trained_expression_record(response_text) if trained
+                else expression_record(json.loads(response_text))
+            )
             sample_raw_output = {
                 "provider_text": response_text,
                 "parsed_arguments": raw_arguments,
@@ -1426,25 +1418,24 @@ def _build_independent_system_prompt(
     capability: dict[str, Any],
     persona_guidance: Mapping[str, Any] | None = None,
 ) -> str:
-    fields = ("id", "negative_semantics", "positive_semantics", "value_range", "neutral")
-    axes = [{key: axis[key] for key in fields if key in axis}
-            for axis in capability.get("axes", []) if isinstance(axis, Mapping)]
+    axes = [
+        describe_expression_axis(axis)
+        for axis in capability.get("axes", []) if isinstance(axis, Mapping)
+    ]
     prompt = (
-        "为桌宠此刻说的这一句设计连续表情。根据 segment.speech、actions 和 tendency 决定变化，"
-        "近期对话和人格只用于理解语气。让视线、头部和表情跟着这段话的意思往下走。"
-        f"只输出一个 JSON 数组，按播放顺序给出 1 至 {MAX_MOTION_STEPS} 步。"
-        "每步 ms 是从上一个姿态过渡到本步目标所用的正整数毫秒，总计至多 15000 毫秒。"
-        "把变化的轴名直接和 ms 并列，取值使用下列轴自己的范围和 neutral。"
-        "首次提及才开始控制，省略的轴保持原状。只有 ms 的一步表示停留。"
-        "按直播小画面里的舞台表演来演：每个重音选一个主动作，让观众一眼看清转头、歪头或笑意。"
-        "主动作的峰值通常走到 neutral 至所选方向端点的六至八成，惊喜、强调可短暂到九成；"
-        "轻声回应可以小一些。配合的轴比主动作轻，峰值留一拍，再按语气收势。"
-        "按起句、句中重音、转折和尾词分配动作，最后一次可见变化落在最后一个短语。"
-        "一声短应答可用1至2步，约1至2秒用3至4步，2至4秒用5至6步，更长且有多个语意落点时尽量用7至8步。"
-        "每步只写变化的轴，停留只用在真实停顿处。"
-        "有 segment.estimated_speech_ms 时，各步 ms 之和尽量接近预计朗读时长（约九成至一倍，总长仍至多15000毫秒）。"
-        "例如预估4000毫秒，可按400、600、800、600、900、700毫秒逐步演到尾词；按实际台词调整。"
-        "预计时长缺失时按短语安排，参考样例只借姿态。"
+        "为直播角色编排 segment.speech 这句台词的动作。actions 给出本段指定的动作意图；"
+        "结合台词和 tendency 选择需要变化的部位。舞台上的主动作要让小画面里的观众看得清。\n"
+        "参数说明：id 是输出时使用的轴名，description 说明它控制的部位和动作。"
+        "数值是 value_range 内的目标位置。neutral 是该轴的自然姿态；"
+        "数值减小时看 negative_semantics，增大时看 positive_semantics。"
+        "若 neutral 就是最大值，从小值回到最大值表示解除该侧动作。\n"
+        "按部位选轴：往旁边瞥用视线，转脸用头的朝向，歪头用头的侧倾；"
+        "笑眼改变笑起来的眼形，眼睑开合改变眼睛睁开的程度。只选下表中该角色具有的轴。\n"
+        f"只输出一个 JSON 数组，按播放顺序给出 1 至 {MAX_MOTION_STEPS} 步，总长至多 15000 毫秒。"
+        "每步用正整数 ms 表示过渡到本步目标所用的毫秒数，把要改变的轴名和 ms 并列。"
+        "同一步的轴一起过渡；例如要先看过去再转脸，就把视线和转头分在前后两步。"
+        "首次写到一个轴才开始控制，之后省略该轴表示保持已有目标。只有 ms 的一步表示停留。"
+        "estimated_speech_ms 仅供估算台词时长。"
         "\n可用轴：" + json.dumps(axes, ensure_ascii=False, separators=(",", ":"))
     )
     if persona_guidance:

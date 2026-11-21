@@ -18,13 +18,19 @@ _SCENES = (
         (760, {"head_yaw": 0, "mouth_smile": .74}),
     )),
     ("neutral", "嗯，我在听。", ((260, {"mouth_smile": .48}),)),
-    ("confused", "咦，你说的是右边那个？", (
-        (140, {"gaze_x": .76}), (280, {"head_yaw": .48, "head_roll": .72}),
-        (320, {}), (190, {"gaze_x": 0}),
+    ("listening", "旁边这位，我看见你了。嗯，我听着。", (
+        (180, {"gaze_x": -.56}),
+        (420, {"head_yaw": -.50, "gaze_x": -.24}),
+        (260, {"mouth_smile": .52, "eye_smile_left": .32, "eye_smile_right": .32}),
+        (300, {}),
     )),
     ("surprised", "真的？……太好了。", (
         (140, {"eye_open_left": .90, "eye_open_right": .90}), (210, {}),
         (330, {"eye_open_left": 0, "eye_open_right": 0, "mouth_smile": .80}),
+    )),
+    ("confused", "咦，你说的是右边那个？", (
+        (140, {"gaze_x": .76}), (280, {"head_yaw": .48, "head_roll": .72}),
+        (320, {}), (190, {"gaze_x": 0}),
     )),
 )
 

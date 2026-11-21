@@ -302,7 +302,7 @@ CONFIG_SCHEMA: tuple[ConfigSection, ...] = (
                 key="shadow_enabled",
                 kind="bool",
                 label="并行记录影子动作模型",
-                description="与主动作 Provider 使用相同 prompt 并行生成；结果只校验并记录，不参与动作播放。",
+                description="用同一段台词和对话上下文并行对照。各模型使用自己的动作 Prompt，影子结果仅供记录。",
                 default=False,
             ),
             ConfigField(

@@ -54,7 +54,7 @@ AG99 Persona
 
 ### 动作生成模式
 
-Persona Effect 使用 `motion_steps` 编排 1 到 8 个带 `axis_values` 和 `duration_weight` 的姿态，也可以用 `motion_resource_id` 选择完整动作资源。独立 Provider 为正式台词段生成表情时，直接返回 1 到 8 步的 JSON 数组。例如，下面的 Mk6 表情先移开视线，停留片刻，再看回来。
+Persona Effect 使用 `motion_steps` 编排带 `axis_values` 和 `duration_weight` 的姿态，也可以用 `motion_resource_id` 选择完整动作资源。使用通用大模型作为独立 Provider 时，每段台词对应一个 1 到 8 步的毫秒数组。例如，下面的 Mk6 表情先移开视线，停留片刻，再看回来。
 
 ```json
 [{"ms":140,"gaze_x":65},{"ms":300},{"ms":220,"gaze_x":50}]
@@ -70,9 +70,11 @@ Persona Effect 使用 `motion_steps` 编排 1 到 8 个带 `axis_values` 和 `du
 
 `parallel` 控制非流式 Persona 结果中的逐段动作请求是并发还是串行；并发数由 `max_concurrency` 限制。独立动作 Provider 使用 `text_chat_stream()`。OLV Persona 段流开启且 Core 能力检查通过时，默认等当前 `speech` 段完成后再启动对应动作请求，确保模型看到真实段文本；`stream_preview_enabled` 可显式开启旧的提前预览模式，以降低首帧等待但允许在 speech 为空时先生成。每段使用同一绝对时限约束上下文准备和 Provider 请求。Provider 不支持聊天流、请求超时或失败时，该段跳过动作并保留失败原因，核心文本/TTS 继续。TTS 身份到达后 Adapter 按 `turn_id`、`persona_result_id` 和分段索引绑定动作；支持段级物料化时，Core 最多并发准备 2 段语音，每段只等待对应动作 Future，按序提交并 flush 原子 `output.segment`，首段不等待其余段的动作。Persona 段流未启用或能力检查未通过时，不请求增量动作，继续使用 Core 的普通 Persona 输出流程。段索引决定对应关系，Provider 的返回先后不决定播放顺序。
 
-`shadow_enabled` 默认关闭。开启后，Adapter 使用 `shadow_provider_id` 与主动作 Provider 并行生成，发送完全相同的 system prompt、user prompt 和文本上下文；影子结果只经过相同的 JSON 数组解析和动作契约校验并写入 Motion Lab，不参与 Live2D 播放，也不等待影子请求完成后再继续主链路。`shadow_timeout_seconds` 默认 5 秒，超时记录失败候选。训练/评估时以主动作 Provider 的已接受结果作为目标，影子候选保留 Provider ID、归一化动作、原始输出和耗时供对比。
+已发布的 AG99 Qwen3.5 动作权重（F16、Q8、Q4）沿用训练时的对话和当前角色能力表，返回 `motion_steps`、每步的 `duration_weight` 及整段 `duration_hint_ms`。步数由模型决定。通用动作 Provider 使用角色参数说明书，返回每步带 `ms` 的数组。
 
-`speech_ms_per_han_char` 在 Web 控制台「独立 Live2D 动作生成」中设置，默认 213 毫秒/汉字，可填 1 到 2000 的整数。每段台词的汉字数乘以此值，作为 `segment.estimated_speech_ms` 发给动作模型。标点、数字和英文字母不计入；没有汉字的段省略该字段。估值可以超过 15 秒，动作仍可提前收势。保存后从下一次动作请求起生效，MiniMax 继续按自己的语速设置合成。
+`shadow_enabled` 默认关闭。开启后，主模型和影子模型收到相同的台词与对话历史，各自使用对应的输入和输出格式。主模型的结果用于播放，影子结果经过校验后写入 Motion Lab 供对照。`shadow_timeout_seconds` 默认 5 秒。
+
+`speech_ms_per_han_char` 在 Web 控制台「独立 Live2D 动作生成」中设置，默认 213 毫秒/汉字，可填 1 到 2000 的整数。每段台词的汉字数乘以此值，作为 `segment.estimated_speech_ms` 发给使用毫秒数组的通用动作模型。标点、数字和英文字母不计入；没有汉字的段省略该字段。估值可以超过 15 秒，动作仍可提前收势。保存后从下一次动作请求起生效，MiniMax 继续按自己的语速设置合成。
 
 `history_turns` 控制附带的最近纯文本对话轮数（默认 6，范围 0–20）。动作 Provider 不接收图片、截图上下文说明、工具消息或 memory slot；主回复模型的图片输入不受影响。每段动作输入包含当前用户文本以及该段的 `speech`、`actions`、`tendency`；历史仅通过上述有界的纯文本对话轮次提供，不额外检索或注入记忆。提示词提供当前可用轴的方向、范围和中性值。内置示例包括六次可见变化的完整讲述、简短确认、带方向的追问和从惊讶到高兴的变化。示例数量服从 few-shot 配置，匹配的已启用毫秒样本优先。最近 3 段的结束姿态用于动作衔接。`max_concurrency` 默认 4、最大 8；`segment_timeout_seconds` 默认 5 秒、最大 60 秒，0 表示不限制非流式单段请求。完整 Core 汇合仍受 30 秒上限约束。详细 WIRING 过程日志使用 DEBUG，分段生成摘要和最终投递保留 INFO，异常保留 WARN/ERROR。
 

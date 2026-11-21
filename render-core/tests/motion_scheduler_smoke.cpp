@@ -60,9 +60,25 @@ int main() {
       || long_plan->tracks.front().keyframes.back().target_value < 4.79f) {
     return 1;
   }
-  steps.push_back(steps.front());
-  if (ag99::native::motion::CompileMotionPlan(segment, {}, context)) {
+  steps.push_back({{"axis_values", {{"head_pitch", 60}}}, {"duration_weight", 1}});
+  const auto nine_step_plan = ag99::native::motion::CompileMotionPlan(segment, {}, context);
+  if (!nine_step_plan || nine_step_plan->tracks.size() != 1
+      || nine_step_plan->tracks.front().keyframes.size() != 9
+      || std::abs(nine_step_plan->tracks.front().keyframes.back().target_value - 6.0f) > 1e-4f) {
     return 1;
+  }
+  intent["duration_hint_ms"] = 320;
+  steps.clear();
+  for (int i = 0; i < 256; ++i) {
+    steps.push_back({{"axis_values", {{"head_pitch", i % 2 ? 60 : 40}}},
+                     {"duration_weight", i % 2 ? 3 : 1}});
+  }
+  const auto dense_plan = ag99::native::motion::CompileMotionPlan(segment, {}, context);
+  if (!dense_plan || dense_plan->tracks.size() != 1) return 1;
+  const auto& dense_frames = dense_plan->tracks.front().keyframes;
+  if (dense_frames.size() != steps.size() || dense_frames.back().at_ms >= 320) return 1;
+  for (std::size_t i = 1; i < dense_frames.size(); ++i) {
+    if (dense_frames[i].at_ms <= dense_frames[i - 1].at_ms) return 1;
   }
 
   const auto resolution = ag99::native::motion::ResolveAxisValues(

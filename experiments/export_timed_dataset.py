@@ -146,11 +146,13 @@ def teacher_candidates(db, output, provider_ids):
                 raise ValueError("legacy_or_missing_timed_array")
             request = event["input"]["motion_request"]
             system = request["system_prompt"]
-            if AXES_MARKER not in system:
-                raise ValueError("missing_recorded_axes")
-            axes, _ = json.JSONDecoder().raw_decode(
-                system.split(AXES_MARKER, 1)[1].lstrip()
-            )
+            axes = request.get("training_axes")
+            if axes is None:
+                if AXES_MARKER not in system:
+                    raise ValueError("missing_recorded_axes")
+                axes, _ = json.JSONDecoder().raw_decode(
+                    system.split(AXES_MARKER, 1)[1].lstrip()
+                )
             prompt = json.loads(request["prompt"])
             segment = {
                 k: prompt["segment"][k]
