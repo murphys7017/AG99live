@@ -2,6 +2,7 @@ import { SPEECH_BODY_FOLLOW_SCALE } from "../constants.js";
 import type { ModelSummary } from "../../types/protocol.js";
 import type {
   GazeTarget,
+  GazeAlignment,
   InteractionGazeInput,
   InteractionSwayInput,
 } from "../../types/live2d-runtime.d.ts";
@@ -118,9 +119,23 @@ export function buildCursorGazeInput(
   model: ModelSummary,
   target: GazeTarget,
   stage: "eyes" | "full" | "listening" = "full",
+  alignment: GazeAlignment = { head: 0.58, body: 0.2 },
 ): InteractionGazeInput | null {
   const profile = model.semantic_axis_profile;
   const axes = profile ? selectCursorGazeAxes(profile, stage) : [];
+  const coordinated = profile?.model_id === "Mk6_1.0" && stage !== "listening"
+    && axes.some(match => match.parameterBindings.some(b => b.parameter_id === gazeX.parameter));
+  if (coordinated && stage === "full") {
+    if (![alignment.head, alignment.body].every(value => Number.isFinite(value) && value >= 0 && value <= 1)) {
+      return null;
+    }
+    const head = axes.find(match => match.parameterBindings.some(b => b.parameter_id === headYaw.parameter));
+    if (head) head.targetRatioScale = alignment.head;
+    const body = matchInteractionAxis(eligibleInteractionAxes(profile), bodyYaw);
+    if (body && alignment.body > 0) {
+      axes.push({ ...body, targetComponent: "horizontalRatio", targetRatioScale: alignment.body });
+    }
+  }
   if (!axes.length || !Number.isFinite(target.horizontalRatio) || !Number.isFinite(target.verticalRatio)) {
     return null;
   }
@@ -165,6 +180,10 @@ export function buildCursorGazeInput(
     return null;
   }
   return {
+    // Mk6: a level-one head turn (+/-11.2 on ParamAngleX) settles at
+    // +/-8.83 on PhyAngleX. Body yaw alone does not displace facial landmarks.
+    horizontalHeadFeedback: coordinated
+      ? { parameterId: "PhyAngleX", neutral: 0, eyeUnitsPerHeadUnit: 0.2 / 8.83 } : undefined,
     axisId: bindings[0].axisId,
     target: { horizontalRatio: target.horizontalRatio, verticalRatio: target.verticalRatio },
     bindings,

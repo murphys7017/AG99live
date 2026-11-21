@@ -124,6 +124,14 @@ export class ActiveParameterRuntime {
     return this.interactionGaze !== null;
   }
 
+  public observePresentedGaze(model: CubismModel): void {
+    const feedback = this.interactionGaze?.horizontalHeadFeedback;
+    if (feedback) {
+      const head = model.getParameterValueByIndex(feedback.index);
+      feedback.eyeOffset = Number.isFinite(head) ? (head - feedback.neutral) * feedback.eyeUnitsPerHeadUnit : 0;
+    }
+  }
+
   public startInteractionGaze(state: ActiveInteractionGazeState): void {
     this.interactionGaze = state;
   }

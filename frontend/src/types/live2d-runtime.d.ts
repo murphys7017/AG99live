@@ -49,7 +49,15 @@ export interface InteractionSwayInput {
   bindings: InteractionParameterBinding[];
 }
 
+/** Horizontal follow fractions at the model profile's first pose anchor. */
+export interface GazeAlignment {
+  head: number;
+  body: number;
+}
+
 export interface InteractionGazeInput {
+  /** Mk6 horizontal head pose as presented by Cubism physics. */
+  horizontalHeadFeedback?: { parameterId: string; neutral: number; eyeUnitsPerHeadUnit: number };
   axisId: string;
   target: GazeTarget;
   bindings: InteractionSwayInput["bindings"];

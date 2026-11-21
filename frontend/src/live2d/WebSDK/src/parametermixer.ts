@@ -111,6 +111,7 @@ export interface ActiveInteractionSwayState {
 }
 
 export interface ActiveInteractionGazeState {
+  horizontalHeadFeedback?: { index: number; neutral: number; eyeUnitsPerHeadUnit: number; eyeOffset: number };
   target: GazeTarget;
   startedAtMs: number;
   elapsedMs: number;
@@ -762,15 +763,23 @@ export class ActiveParameterMixer {
     for (const binding of gaze.bindings) {
       const elapsedMs = gaze.elapsedMs - (binding.onsetDelayMs ?? 0);
       if (elapsedMs < 0) continue;
-      const ratio = Math.max(-1, Math.min(1, gaze.target[binding.targetComponent ?? "horizontalRatio"]));
+      const component = binding.targetComponent ?? "horizontalRatio";
+      const ratio = clamp(gaze.target[component], -1, 1);
+      let value = ratio >= 0
+        ? interpolate(binding.neutralValue, binding.positiveValue, ratio)
+        : interpolate(binding.neutralValue, binding.negativeValue, -ratio);
+      if (gaze.horizontalHeadFeedback && component === "horizontalRatio" && binding.parameterIdRaw === "ParamEyeBallX") {
+        // Compensate in model space even when a profile reverses or rescales the eye axis.
+        value = clamp(value - gaze.horizontalHeadFeedback.eyeOffset,
+          Math.min(binding.negativeValue, binding.positiveValue, binding.neutralValue),
+          Math.max(binding.negativeValue, binding.positiveValue, binding.neutralValue));
+      }
       contributions.push({
         parameterIdRaw: binding.parameterIdRaw,
         parameterIndex: binding.parameterIndex,
         owner: "interaction_gaze",
         source: `interaction_gaze:${binding.axisId}`,
-        value: ratio >= 0
-          ? interpolate(binding.neutralValue, binding.positiveValue, ratio)
-          : interpolate(binding.neutralValue, binding.negativeValue, -ratio),
+        value,
         weight: binding.weight,
         priority: PARAMETER_MIX_PRIORITY.interactionGaze,
         presentation: {

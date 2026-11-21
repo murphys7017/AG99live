@@ -682,6 +682,8 @@ export class LAppModel extends CubismUserModel {
     let motionUpdated = false;
 
     //--------------------------------------------------------------------------
+    // Read the preceding rendered pose before motion restores its base values.
+    this._activeParameterRuntime.observePresentedGaze(this._model);
     this._model.loadParameters(); // 前回セーブされた状態をロード
     if (this._motionManager.isFinished()) {
       // モーションの再生がない場合、待機モーションの中からランダムで再生する
@@ -2169,7 +2171,12 @@ export class LAppModel extends CubismUserModel {
     if (!bindings.length) {
       return false;
     }
+    const feedback = input.horizontalHeadFeedback;
+    const index = feedback && Number.isFinite(feedback.neutral) && Number.isFinite(feedback.eyeUnitsPerHeadUnit)
+      ? this.resolveWritableParameterIndex(feedback.parameterId) : null;
     this._activeParameterRuntime.startInteractionGaze({
+      horizontalHeadFeedback: index !== null && feedback
+        ? { index, neutral: feedback.neutral, eyeUnitsPerHeadUnit: feedback.eyeUnitsPerHeadUnit, eyeOffset: 0 } : undefined,
       target: input.target,
       startedAtMs: performance.now(),
       elapsedMs: 0,
