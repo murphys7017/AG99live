@@ -145,6 +145,7 @@ export function useEsp32DisplayPipeline(options: PipelineOptions): PipelineStatu
   const active = ref(false);
 
   let running = false;
+  let alphaProbe: CompositeTarget | null = null;
   let composite: CompositeTarget | null = null;
   let lastSentAt = 0;
   let frameCountInWindow = 0;
@@ -210,7 +211,12 @@ export function useEsp32DisplayPipeline(options: PipelineOptions): PipelineStatu
         lastError.value = error instanceof Error ? error.message : "canvas_draw_failed";
         return;
       }
-      if (isMostlyTransparent(ctx.getImageData(0, 0, composite.width, composite.height).data)) {
+      alphaProbe ??= createCompositeCanvas(8);
+      if (alphaProbe) {
+        alphaProbe.context.clearRect(0, 0, 8, 8);
+        alphaProbe.context.drawImage(composite.canvas, 0, 0, 8, 8);
+      }
+      if (alphaProbe && isMostlyTransparent(alphaProbe.context.getImageData(0, 0, 8, 8).data)) {
         framesDropped.value += 1;
         return;
       }

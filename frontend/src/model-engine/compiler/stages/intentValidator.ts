@@ -1,3 +1,4 @@
+import { profileIndex } from "../profileIndex.js";
 import type { SemanticMotionIntent } from "../../../types/protocol.js";
 import { SCHEMA_MOTION_INTENT_V4 } from "../../../types/protocol.js";
 import type { SemanticAxisProfile } from "../../../types/semantic-axis-profile.js";
@@ -41,9 +42,7 @@ export function runIntentValidator(
 
   const resolvedProfile = profile as SemanticAxisProfile;
   context.state.profile = resolvedProfile;
-  context.state.axisById = new Map(
-    resolvedProfile.axes.map((axis) => [axis.id, axis]),
-  );
+  context.state.axisById = profileIndex(resolvedProfile).byId;
   if (resolvedProfile.revision !== context.intent.profile_revision) {
     return {
       ok: false,
@@ -62,21 +61,8 @@ function validateProfileForIntent(
   if (!profile) {
     return "semantic_profile_missing";
   }
-  for (const axis of profile.axes) {
-    const dynamics = axis.dynamics;
-    if (
-      !dynamics
-      || !Number.isFinite(dynamics.max_velocity)
-      || dynamics.max_velocity <= 0
-      || !Number.isFinite(dynamics.max_acceleration)
-      || dynamics.max_acceleration <= 0
-      || !Number.isFinite(dynamics.max_speech_offset_ratio)
-      || dynamics.max_speech_offset_ratio < 0
-      || dynamics.max_speech_offset_ratio > 0.5
-    ) {
-      return `semantic_axis_dynamics_invalid:${axis.id}`;
-    }
-  }
+  const failure = profileIndex(profile).dynamicsFailure;
+  if (failure) return failure;
   if (profile.profile_id !== intent.profile_id) {
     return `semantic_profile_id_mismatch:${intent.profile_id}`;
   }

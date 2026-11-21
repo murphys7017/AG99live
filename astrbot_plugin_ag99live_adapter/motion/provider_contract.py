@@ -9,6 +9,7 @@ rejected by the v4 normalizer.
 
 from __future__ import annotations
 
+import json
 import math
 from typing import Any
 
@@ -30,6 +31,54 @@ def expression_record(value: Any) -> dict[str, Any]:
     if normalized is None:
         raise ValueError(reason)
     return {"motion_steps": normalized, "intent_tags": ["动作"]}
+
+
+class ExpressionPrefixDecoder:
+    """Consume complete array elements exactly once, retaining the final text for export."""
+
+    def __init__(self) -> None:
+        self.cursor = 0
+        self.scanned = 0
+        self.points: list[dict[str, Any]] = []
+        self.closed = False
+        self.decoder = json.JSONDecoder()
+
+    def __call__(self, text: str) -> dict[str, Any] | None:
+        if self.closed:
+            return None
+        previous_length = self.scanned
+        self.scanned = len(text)
+        if text.find("}", previous_length) < 0:
+            return None
+        cursor = self.cursor
+        candidate = None
+        while cursor < len(text):
+            while cursor < len(text) and text[cursor].isspace():
+                cursor += 1
+            if cursor == len(text):
+                break
+            if self.points and text[cursor] == "]":
+                self.closed = True
+                break
+            if text[cursor] != ("," if self.points else "["):
+                self.closed = True
+                break
+            cursor += 1
+            while cursor < len(text) and text[cursor].isspace():
+                cursor += 1
+            try:
+                point, end = self.decoder.raw_decode(text, cursor)
+            except json.JSONDecodeError:
+                break
+            try:
+                record = expression_record([*self.points, point])
+            except (TypeError, ValueError, OverflowError):
+                self.closed = True
+                break
+            self.points.append(point)
+            self.cursor = cursor = end
+            candidate = record
+        return candidate
 
 
 def normalize_provider_motion_record(
@@ -132,6 +181,8 @@ def describe_provider_motion_record(value: Any) -> str:
 
 
 __all__ = [
+    "ExpressionPrefixDecoder",
+    "expression_record",
     "describe_provider_motion_record",
     "normalize_provider_motion_record",
 ]

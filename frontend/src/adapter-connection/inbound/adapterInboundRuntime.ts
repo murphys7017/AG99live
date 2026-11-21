@@ -1,7 +1,7 @@
 import type { ProtocolEnvelope, SystemModelSyncPayload, SystemDesktopSettingsQueryPayload, SystemDesktopSettingsSyncCompletePayload, SystemDesktopObservationRequestPayload } from "../../types/protocol.js";
 import type { MotionPayloadNormalizer } from "../../types/motion.js";
 import type { AdapterConnectionState } from "../state/adapterConnectionState.js";
-import { parseInboundEnvelope } from "./inboundProtocol.js";
+import type { ParsedInboundEnvelope } from "./inboundProtocol.js";
 import { applyDeferredMotion } from "./deferredMotionProtocol.js";
 import { dispatchInboundRuntimeEvent } from "./inboundRuntimeDispatcher.js";
 import { parseIncrementalOutputEvent } from "./incrementalOutputProtocol.js";
@@ -97,11 +97,11 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
     console.warn("[Connection] runtime protocol violation.", message);
   }
 
-  function tryHandlePriorityInterrupt(rawData: string | ArrayBuffer | Blob): boolean {
-    if (typeof rawData !== "string" || deps.state.serverInfo === null) return false;
+  function tryHandlePriorityInterrupt(rawData: ParsedInboundEnvelope | ArrayBuffer | Blob): boolean {
+    if (rawData instanceof ArrayBuffer || rawData instanceof Blob || deps.state.serverInfo === null) return false;
     // Full envelope and event validation still apply. Unknown/future Turns stay
     // in wire order so their turn_started cannot be overtaken by an interrupt.
-    const parsed = parseInboundEnvelope(rawData);
+    const parsed = rawData;
     if (!parsed.ok || parsed.envelope.type !== "control.interrupt") return false;
     const event = mapInboundEnvelopeToEvent(parsed.envelope);
     if (event.kind !== "interrupt" || event.turnId !== deps.state.currentTurnId) return false;
@@ -109,16 +109,16 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
     return true;
   }
 
-  async function handleSocketMessage(rawData: string | ArrayBuffer | Blob, signal?: AbortSignal): Promise<void> {
+  async function handleSocketMessage(rawData: ParsedInboundEnvelope | ArrayBuffer | Blob, signal?: AbortSignal): Promise<void> {
     signal?.throwIfAborted();
-    if (typeof rawData !== "string") {
+    if (rawData instanceof ArrayBuffer || rawData instanceof Blob) {
       if (deps.state.serverInfo === null) throw new Error("incremental_output_before_handshake");
       const buffer = rawData instanceof Blob ? await rawData.arrayBuffer() : rawData;
       signal?.throwIfAborted();
       incremental.handleAudio(buffer, signal);
       return;
     }
-    const parsed = parseInboundEnvelope(rawData);
+    const parsed = rawData;
     if (!parsed.ok) {
       if (parsed.code === "version_mismatch") {
         logProtocolError(

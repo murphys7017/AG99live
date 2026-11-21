@@ -58,7 +58,7 @@ export const defaultSnapshot: DesktopRuntimeSnapshot = {
   _publisherId: getPublisherId(),
   _revision: nextSnapshotRevision(),
   adapterAddress: DEFAULT_ADAPTER_ADDRESS,
-  desktopScreenshotOnSendEnabled: true,
+  desktopScreenshotOnSendEnabled: false,
   microphoneDeviceId: "",
   microphoneDevices: [],
   motionEngineSettings: buildDefaultModelEngineSettings(),
@@ -105,19 +105,20 @@ export const defaultSnapshot: DesktopRuntimeSnapshot = {
 export function safeNormalizeSnapshot(
   snapshot: unknown,
   source: string,
+  previous?: DesktopRuntimeSnapshot,
 ): DesktopRuntimeSnapshot | null {
   try {
     if (!isObject(snapshot)) {
       throw new Error("snapshot_not_object");
     }
-    return normalizeSnapshot(snapshot as unknown as DesktopRuntimeSnapshot);
+    return normalizeSnapshot(snapshot as unknown as DesktopRuntimeSnapshot, previous);
   } catch (error) {
     console.warn(`[DesktopBridge] ${source} snapshot rejected.`, error);
     return null;
   }
 }
 
-export function normalizeSnapshot(snapshot: DesktopRuntimeSnapshot): DesktopRuntimeSnapshot {
+export function normalizeSnapshot(snapshot: DesktopRuntimeSnapshot, previous?: DesktopRuntimeSnapshot): DesktopRuntimeSnapshot {
   rejectUnsupportedRuntimeSnapshotFields(snapshot);
   if (typeof snapshot._publisherId !== "string" || !snapshot._publisherId.trim()) {
     throw new Error("runtime_snapshot_publisher_id_missing");
@@ -146,7 +147,8 @@ export function normalizeSnapshot(snapshot: DesktopRuntimeSnapshot): DesktopRunt
     live2dPresentationSettings: cloneLive2dPresentationSettings(
       snapshot.live2dPresentationSettings,
     ),
-    motionPlaybackRecords: Array.isArray(snapshot.motionPlaybackRecords)
+    motionPlaybackRecords: previous && previous.motionPlaybackRecords === snapshot.motionPlaybackRecords
+      ? previous.motionPlaybackRecords : Array.isArray(snapshot.motionPlaybackRecords)
       ? snapshot.motionPlaybackRecords.map(cloneMotionPlaybackRecord).filter(isPresent)
       : [],
     historyEntries: historyEntries.map((entry) => ({ ...entry })),

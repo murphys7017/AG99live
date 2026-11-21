@@ -58,6 +58,8 @@ export function createIncrementalSegmentWriter(options: {
   markReady(turnId: string): void;
   normalizeMotionPayload: MotionPayloadNormalizer;
 }) {
+  const textUnits = new WeakMap<TurnPlaybackSession, number>();
+
   function sessionFor(id: IncrementalIdentity): TurnPlaybackSession {
     const session = options.requireSession(id.turnId);
     if (!session.backend.turnStarted || session.backend.synthFinished
@@ -154,10 +156,11 @@ export function createIncrementalSegmentWriter(options: {
     const segment = segmentFor(session, id);
     const stream = streamFor(segment, "text", id);
     const current = segment.text.content ?? "";
-    const turnUnits = [...session.segments.values()].reduce((sum, value) => sum + (value.text.content?.length ?? 0), 0);
+    const turnUnits = textUnits.get(session) ?? [...session.segments.values()].reduce((sum, value) => sum + (value.text.content?.length ?? 0), 0);
     if (typeof text !== "string" || !text || current.length + text.length > MAX_SEGMENT_TEXT_UNITS
       || turnUnits + text.length > MAX_TURN_TEXT_UNITS) throw new Error("incremental_output_text_capacity_or_delta_invalid");
     segment.text.content = current + text;
+    textUnits.set(session, turnUnits + text.length);
     stream.nextSeq += 1;
     return segment.text.content;
   }
@@ -169,9 +172,12 @@ export function createIncrementalSegmentWriter(options: {
     const normalized = options.normalizeMotionPayload(payload);
     if (!normalized.ok) throw new Error(`incremental_output_motion_payload_invalid:${normalized.reason}`);
     stream.nextSeq += 1;
-    // A late production result is acknowledged but cannot reopen a local
-    // execution terminal or replace a payload already handed to the body.
-    if (segment.motion.released || segment.motion.completed || segment.motion.failed || segment.motion.absent) return;
+    if (segment.motion.completed || segment.motion.failed || segment.motion.absent) return;
+    if (segment.motion.released) {
+      // The running plan watches cumulative revisions under its original run identity.
+      segment.motion.payload = normalized.payload;
+      return;
+    }
     segment.motion.payload = normalized.payload;
     segment.motion.source = "incremental_stream";
     segment.motion.receivedAtMs = performance.now();
@@ -192,9 +198,12 @@ export function createIncrementalSegmentWriter(options: {
     const session = sessionFor(id);
     const segment = segmentFor(session, id);
     const stream = streamFor(segment, "audio", id);
-    for (const messageId of session.segmentOrder.slice(0, session.segmentOrder.indexOf(id.messageId))) {
-      const prior = session.segments.get(messageId)?.incremental?.streams.audio;
-      if (!prior || prior.status === "open") throw new Error("incremental_output_audio_segment_order_invalid");
+    if (stream.samples === 0) {
+      for (const messageId of session.segmentOrder) {
+        if (messageId === id.messageId) break;
+        const prior = session.segments.get(messageId)?.incremental?.streams.audio;
+        if (!prior || prior.status === "open") throw new Error("incremental_output_audio_segment_order_invalid");
+      }
     }
     if (!Number.isSafeInteger(offset) || offset !== stream.samples || !Number.isSafeInteger(byteLength)
       || byteLength <= 0 || byteLength > 65536 || byteLength % 2

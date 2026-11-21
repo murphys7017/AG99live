@@ -1,3 +1,4 @@
+import { motionBuildId } from "./scripts/motion-build-id";
 import path from "node:path";
 import { defineConfig, externalizeDepsPlugin } from "electron-vite";
 import vue from "@vitejs/plugin-vue";
@@ -30,6 +31,7 @@ export default defineConfig({
     },
   },
   renderer: {
+    define: { __MOTION_BUILD_ID__: JSON.stringify(motionBuildId(__dirname)) },
     resolve: {
       alias: {
         "@": path.resolve(__dirname, "./src"),

@@ -198,7 +198,7 @@ export class VtsParameterSink {
     }
   }
 
-  private isEnabled(): boolean {
+  public isEnabled(): boolean {
     return VTS_OUTPUT_EXPERIMENTAL_ENABLED
       && this.readStorage(VTS_ENABLED_KEY).toLowerCase() === "true";
   }

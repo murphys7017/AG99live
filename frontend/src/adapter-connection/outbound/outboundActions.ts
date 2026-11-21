@@ -19,7 +19,7 @@ import {
 } from "../core/turnIds.js";
 import type { AdapterOutboundClient } from "./outboundClient.js";
 import {
-  captureRealtimeDesktopScreenshot,
+  captureSendTimeScreenshot,
 } from "./desktopCapture.js";
 
 export interface MotionLabRawEventPayload {
@@ -93,7 +93,7 @@ export async function sendText(ctx: OutboundActionContext, text: string): Promis
   ctx.prewarmSpeechOutput();
   const desktopSnapshotRequested = ctx.state.desktopScreenshotOnSendEnabled;
   const desktopCapture = desktopSnapshotRequested
-    ? await captureRealtimeDesktopScreenshot()
+    ? await captureSendTimeScreenshot()
     : null;
   const turnId = ctx.createMessageId();
   const sent = ctx.outboundClient.send("input.text", {

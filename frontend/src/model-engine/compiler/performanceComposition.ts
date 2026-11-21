@@ -1,3 +1,4 @@
+import { profileIndex } from "./profileIndex.js";
 import type {
   SemanticAxisDefinition,
   SemanticAxisProfile,
@@ -21,7 +22,7 @@ export function buildPerformanceCompositionSignature(
   profile: SemanticAxisProfile,
   axes: readonly CompiledSemanticAxis[],
 ): PerformanceCompositionSignature {
-  const axisById = new Map(profile.axes.map((axis) => [axis.id, axis]));
+  const axisById = profileIndex(profile).byId;
   const activeAxes = axes
     .map((axis) => {
       const definition = axisById.get(axis.axisId);

@@ -72,6 +72,8 @@ export function createLive2DLipSyncTimelineSink(
         options.isCurrentAudio,
         sourceId,
         markUnavailable,
+        options.getRemainingMs,
+        options.onSpeechPosture,
       );
       liveRuntime = result.runtime;
       console.info("[Live2D] speech audio attachment evaluated.", {
@@ -98,6 +100,8 @@ function startLiveLipSync(
   isCurrentAudio: () => boolean,
   sourceId: string,
   onRuntimeFailure: (reason: string, degraded: boolean) => void,
+  getRemainingMs?: () => number | null,
+  onSpeechPosture?: () => void,
 ): LiveLipSyncStartResult {
   const beginAudioSignalSource = runtime.beginExternalAudioSignalSource.bind(runtime);
   const writeAudioSignalSource = runtime.writeExternalAudioSignalSource.bind(runtime);
@@ -120,7 +124,7 @@ function startLiveLipSync(
 
   try {
     beginAudioSignalSource(sourceId, {
-      lipSyncEnabled: hasLipSyncParameters,
+      lipSyncEnabled: hasLipSyncParameters, getRemainingMs, onSpeechPosture,
       onFailed: (reason) => {
         sourceRuntime?.stop();
         onRuntimeFailure(reason, false);

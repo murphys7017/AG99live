@@ -107,6 +107,8 @@ const DIRECT_MAX_MISSING_AXIS_BINDINGS = 3;
 const DIRECT_MAX_SUPPLEMENTARY_BINDING_FAILURES = 3;
 
 interface DirectParameterPlanState extends ActiveDirectParameterFrameState {
+  observedValues: Map<number, number>;
+  presentation: NonNullable<DirectParameterPlanTerminalEvent["presentation"]>;
   /** 本次参数计划的唯一标识符。由 startDirectParameterPlan 生成并回传。 */
   runId: string;
   /** 参数计划完成时的回调。 */
@@ -780,10 +782,29 @@ export class LAppModel extends CubismUserModel {
         lipSyncParameterIds: this._lipSyncIds,
       });
       parameterMixerFailure = frameResult.failure;
-      this._vtsParameterSink.publish(frameResult.parameters.map((parameter) => ({
-        id: parameter.parameterIdRaw,
-        value: parameter.value,
-      })));
+      const plan = this._directParameterPlanState;
+      if (plan && !parameterMixerFailure) {
+        const elapsed = plan.presentationElapsedMs;
+        for (const p of frameResult.parameters) {
+          if (plan.presentation.firstSpeechPostureMs === null &&
+              p.contributions.some(c => c.owner === "speech_posture" && c.weight > 0)) {
+            plan.presentation.firstSpeechPostureMs = elapsed;
+          }
+          if (!p.contributions.some(c => c.owner === "direct_plan" && c.weight > 0)) continue;
+          const previous = plan.observedValues.get(p.parameterIndex) ?? p.baseValue;
+          if (!plan.observedValues.has(p.parameterIndex)) plan.observedValues.set(p.parameterIndex, previous);
+          if (p.range > 0 && Math.abs(p.value - previous) >= p.range * 0.01) {
+            plan.observedValues.set(p.parameterIndex, p.value);
+            plan.presentation.firstGuidedChangeMs ??= elapsed;
+            plan.presentation.lastGuidedChangeMs = elapsed;
+          }
+        }
+      }
+      if (this._vtsParameterSink.isEnabled()) {
+        this._vtsParameterSink.publish(frameResult.parameters.map((parameter) => ({
+          id: parameter.parameterIdRaw, value: parameter.value,
+        })));
+      }
       if (frameResult.directPlanReleased) {
         console.info("[LAppModel] Direct parameter plan released after parameter mixing.");
         this.stopDirectParameterPlan("", "completed");
@@ -1786,6 +1807,55 @@ export class LAppModel extends CubismUserModel {
     this._activeParameterRuntime.releaseIdlePlan(actionId);
   }
 
+  public updateDirectParameterStream(runId: string, open: boolean, plan?: DirectParameterPlanInput, fromMs = 0): boolean {
+    const active = this._directParameterPlanState;
+    if (!active || active.runId !== runId || active.releaseStartedAtMs !== null) return false;
+    active.streamOpen = open;
+    if (!plan) return true;
+    const candidate = this.buildDirectParameterPlanState(
+      prepareDirectParameterExecution(plan), runId, active.onTerminal, active.playbackClockReader,
+    );
+    if (!candidate.ok || candidate.state.expressionId !== active.expressionId) return false;
+    const elapsed = Math.max(active.presentationElapsedMs, active.playbackClockReader.getElapsedMs() ?? 0);
+    const revision = { fromMs, receivedAtMs: elapsed, scheduledTargets: 0, expiredTargets: 0 };
+    for (const binding of candidate.state.semanticBindings) {
+      revision.expiredTargets += binding.keyframes.filter(point =>
+        point.atMs >= fromMs && point.transitionMs > 0 && point.atMs + point.transitionMs <= elapsed,
+      ).length;
+      const future = binding.keyframes.filter(point =>
+        point.atMs >= fromMs && point.transitionMs > 0 && point.atMs + point.transitionMs > elapsed,
+      );
+      if (!future.length) continue;
+      revision.scheduledTargets += future.length;
+      const index = active.semanticBindings.findIndex(item => item.parameterIndex === binding.parameterIndex);
+      const current = active.semanticBindings[index];
+      const first = future[0];
+      if (first.atMs < elapsed) {
+        first.transitionMs -= elapsed - first.atMs;
+        first.atMs = elapsed;
+      }
+      if (current?.keyframes.length) {
+        current.keyframes.push(...future);
+      } else {
+        binding.activationAtMs = first.atMs;
+        binding.keyframes = [{ atMs: first.atMs, transitionMs: 0,
+          value: binding.presentation.initialValue }, ...future];
+        if (current) {
+          // The first explicit key takes over a previously modulated speech pose.
+          binding.presentation.drivenOffset = current.presentation.drivenOffset;
+          binding.presentation.velocity = current.presentation.velocity;
+          binding.presentation.lastElapsedMs = current.presentation.lastElapsedMs;
+          active.semanticBindings[index] = binding;
+        } else {
+          active.semanticBindings.push(binding);
+        }
+      }
+    }
+    (active.presentation.revisions ??= []).push(revision);
+    active.timing = candidate.state.timing;
+    return true;
+  }
+
   public startDirectParameterPlan(
     plan: DirectParameterPlanInput,
     options: DirectParameterPlanStartOptions = {},
@@ -2067,6 +2137,8 @@ export class LAppModel extends CubismUserModel {
       semanticBindings,
       playbackClockReader,
       presentationElapsedMs: 0,
+      observedValues: new Map(),
+      presentation: { firstGuidedChangeMs: null, lastGuidedChangeMs: null, firstSpeechPostureMs: null },
       diagnosticFrameCount: 0,
       releaseStartedAtMs: null,
       runId: runId || ('direct-plan-' + Date.now() + '-' + Math.random().toString(36).slice(2)),
@@ -2099,6 +2171,7 @@ export class LAppModel extends CubismUserModel {
     try {
       state.onTerminal?.({
         runId: state.runId,
+        presentation: state.presentation,
         status,
         reason: reason || undefined,
       });

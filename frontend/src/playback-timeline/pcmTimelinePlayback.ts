@@ -4,6 +4,12 @@ import type { PcmOutputSession } from "./pcmOutputSession.js";
 import type { SpeechOutputRuntime } from "./speechOutputRuntime.js";
 import { reportLatencyStage } from "../adapter-connection/runtime/latency.js";
 
+export class PcmSegmentPlaybackError extends Error {
+  constructor(reason: string, readonly cause?: unknown) {
+    super(reason);
+  }
+}
+
 export interface PcmTimelineStream {
   /** Resolves after the segment has crossed the shared audio start gate. */
   readonly started: Promise<void>;
@@ -60,7 +66,7 @@ export function createPcmTimelinePlayback<TMotion>(options: {
     streams.delete(stream);
     const wasActive = active === stream;
     if (wasActive) active = null;
-    if (terminal !== "completed") {
+    if (terminal === "interrupted") {
       for (const pending of [...streams]) {
         if (pending !== active) settle(pending, "interrupted", reason);
       }
@@ -79,7 +85,7 @@ export function createPcmTimelinePlayback<TMotion>(options: {
 
   async function open(turnId: string, messageId: string): Promise<PcmTimelineStream> {
     if (!turnId.trim() || !messageId.trim()) throw new Error("pcm_timeline_identity_missing");
-    const previous = last && !last.terminal ? last : null;
+    const previous = last && !last.terminal ? last : active;
     if (previous?.productionFailure) {
       throw new Error("pcm_timeline_previous_production_failed");
     }
@@ -89,7 +95,14 @@ export function createPcmTimelinePlayback<TMotion>(options: {
       throw new Error("pcm_timeline_previous_audio_unsettled");
     }
     reportLatencyStage("pcm_prepare_start", turnId, null, messageId);
-    const output = options.speechOutput.attachPcm({ turnId, messageId }, previous?.output.getScheduledEndTime());
+    const notBefore = previous?.output.getScheduledEndTime();
+    let output: PcmOutputSession;
+    try {
+      output = options.speechOutput.attachPcm({ turnId, messageId }, notBefore);
+    } catch (error) {
+      options.onFailed("pcm_device_attach_failed", turnId, messageId);
+      throw new PcmSegmentPlaybackError("pcm_device_attach_failed", error);
+    }
     const stream: ActiveStream = {
       turnId, messageId, output,
       lipSync: null,
@@ -102,12 +115,21 @@ export function createPcmTimelinePlayback<TMotion>(options: {
     last = stream;
     // Observe both promises immediately; cancellation during preparation must
     // not leave an unhandled rejection or a later callback for the next segment.
-    const started = output.started.then(async (atMs) => {
+    const audible = output.started.then((atMs) => {
       // Audio is already scheduled on the device clock. Wait only to transfer
       // presentation ownership; do not defer scheduling to the ended callback.
-      if (previous) await previous.completed;
-      if (stream.terminal) return;
+      if (stream.terminal) throw new PcmSegmentPlaybackError("pcm_timeline_stopped");
+      const durationMs = output.clock.getDurationMs();
+      if (!options.runtime.markAudioTimelineStarted(turnId, messageId, atMs, durationMs, output.clock)) {
+        throw new Error("pcm_timeline_start_rejected");
+      }
       active = stream;
+      reportLatencyStage("pcm_first_sample", turnId, null, messageId, atMs);
+      options.onStarted(turnId, durationMs);
+    });
+    const started = audible.then(async () => {
+      if (previous) await previous.completed.catch(() => undefined);
+      if (stream.terminal) return;
       stream.lipSync = options.createLipSyncSink(turnId, messageId);
       stream.lipSync.attachAudio({
         audioUrl: null, clock: output.clock,
@@ -117,15 +139,9 @@ export function createPcmTimelinePlayback<TMotion>(options: {
       });
       await stream.lipSync.prepare();
       if (stream.terminal) return;
-      const durationMs = output.clock.getDurationMs();
-      if (!options.runtime.markAudioTimelineStarted(turnId, messageId, atMs, durationMs, output.clock)) {
-        throw new Error("pcm_timeline_start_rejected");
-      }
-      reportLatencyStage("pcm_first_sample", turnId, null, messageId, atMs);
       options.runtime.startLipSyncTimelineSink(turnId, messageId, () => {
         stream.lipSync?.start();
       });
-      options.onStarted(turnId, durationMs);
     });
     const completed = (async () => {
       await output.completed;
@@ -161,7 +177,8 @@ export function createPcmTimelinePlayback<TMotion>(options: {
       });
       if (accepted === false) throw new Error("pcm_timeline_sink_rejected");
       options.runtime.attachAudioTimelineClock(turnId, messageId, output.clock);
-      await preparation;
+      try { await preparation; }
+      catch (error) { throw new PcmSegmentPlaybackError("pcm_device_prepare_failed", error); }
       if (stream.terminal) throw new DOMException("PCM playback interrupted.", "AbortError");
       reportLatencyStage("pcm_prepare_end", turnId, null, messageId);
     } catch (error) {
@@ -169,24 +186,26 @@ export function createPcmTimelinePlayback<TMotion>(options: {
       throw error;
     }
     return {
-      started,
+      started: audible,
       completed,
       get readyForNext() {
-        // Read after finish(): failed production must drain and reject, never
+        // Read after finish(): failed production must drain and settle, never
         // release another segment merely because its partial audio started.
-        return stream.productionFailure ? completed : started;
+        return (stream.productionFailure ? completed : started).catch(error => {
+          if (!stream.terminal) throw error;
+        });
       },
       async append(offset, pcm) {
-        if (stream.terminal) throw new DOMException("PCM playback stopped.", "AbortError");
+        if (stream.terminal) throw new PcmSegmentPlaybackError("pcm_timeline_stopped");
         try {
           await output.append(offset, pcm);
         } catch (error) {
           settle(stream, "failed", "pcm_timeline_chunk_failed");
-          throw error;
+          throw new PcmSegmentPlaybackError("pcm_timeline_chunk_failed", error);
         }
       },
       finish(totalSamples, status, reason = "") {
-        if (stream.terminal) throw new DOMException("PCM playback stopped.", "AbortError");
+        if (stream.terminal) throw new PcmSegmentPlaybackError("pcm_timeline_stopped");
         try {
           if (status !== "completed" && status !== "failed") throw new Error("pcm_timeline_status_invalid");
           if (status === "failed" && !reason.trim()) throw new Error("pcm_timeline_failure_reason_missing");
@@ -196,7 +215,7 @@ export function createPcmTimelinePlayback<TMotion>(options: {
           options.runtime.markAudioTimelineDuration(turnId, messageId, output.clock.getDurationMs());
         } catch (error) {
           settle(stream, "failed", "pcm_timeline_end_invalid");
-          throw error;
+          throw new PcmSegmentPlaybackError("pcm_timeline_end_invalid", error);
         }
       },
     };

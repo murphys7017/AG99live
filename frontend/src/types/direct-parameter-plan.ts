@@ -8,6 +8,13 @@ export interface DirectParameterPlanTerminalEvent {
   runId: string;
   status: DirectParameterPlanTerminalStatus;
   reason?: string;
+  presentation?: {
+    streamedSteps?: import("./protocol").MotionAxisValueStep[];
+    revisions?: Array<{ fromMs: number; receivedAtMs: number; scheduledTargets: number; expiredTargets: number }>;
+    firstGuidedChangeMs: number | null;
+    lastGuidedChangeMs: number | null;
+    firstSpeechPostureMs: number | null;
+  };
 }
 
 export interface DirectParameterPlanStartOptions {

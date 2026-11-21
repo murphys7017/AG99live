@@ -1,3 +1,4 @@
+import { profileIndex } from "./profileIndex.js";
 import type { SemanticParameterPlan } from "../../types/protocol.js";
 import type {
   SemanticAxisDefinition,
@@ -78,7 +79,7 @@ export function createModelParameterCompileContext(
     settings,
     state: {
       profile,
-      axisById: new Map(profile.axes.map((axis) => [axis.id, axis])),
+      axisById: profileIndex(profile).byId,
       parameters: [],
       pendingSpeechGestures: {},
       expressionResource: null,

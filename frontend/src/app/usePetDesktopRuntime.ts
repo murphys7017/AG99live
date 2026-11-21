@@ -14,6 +14,7 @@ import { buildParameterActionPreview } from "../action-lab/parameterActionPrevie
 import type { createModelSync } from "../adapter-connection/model-sync/useModelSync";
 import { createPetRuntimeSnapshotPublisher } from "../desktop-bridge/usePetRuntimeSnapshotPublisher";
 import { usePreviewMotionPlayer } from "../live2d-renderer/usePreviewMotionPlayer";
+import { watchStreamedExpression } from "../model-engine/runtime/watchStreamedExpression";
 import { useModelEngine } from "../model-engine/useModelEngine";
 import {
   createAmbientActionDirector,
@@ -407,10 +408,16 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       });
     }
   }
+  let expressionWatch: ReturnType<typeof watchStreamedExpression> = null;
   function handleMotionTerminal(
     event: DirectParameterPlanTerminalEvent,
     localObserver?: (event: DirectParameterPlanTerminalEvent) => void,
   ): void {
+    if (expressionWatch?.runId === event.runId) {
+      if (event.presentation) event.presentation.streamedSteps = expressionWatch.steps();
+      expressionWatch.stop();
+      expressionWatch = null;
+    }
     notifyMotionLifecycleObserver("terminal", "model_engine", event.runId, () => {
       const completedRun = modelEngine.handlePlaybackTerminal(event);
       if (completedRun?.origin === "pre_action") {
@@ -486,6 +493,9 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     pushHistory: (role, text) => adapter.pushHistory(role, text),
     getPlayerMessage: () => motionPlayer.state.message,
     onPlanStarted: (event) => {
+      expressionWatch?.stop();
+      expressionWatch = watchStreamedExpression(event, sessionStore, selectedModel.value,
+        cloneModelEngineSettings(motionEngineSettings), live2dRuntime);
       if (event.playbackOrigin === "conversation") adapter.reportSegmentPresented(event.turnId, event.messageId, "motion");
       if (event.playbackOrigin === "pre_action") {
         reportLatencyStage("pre_action_started", event.turnId, null, event.messageId);
@@ -928,6 +938,7 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
   });
 
   onBeforeUnmount(async () => {
+    expressionWatch?.stop();
     const cleanupErrors: unknown[] = [];
     const cleanupSteps: Array<readonly [string, () => void]> = [
       ["Thinking sway release", () => {

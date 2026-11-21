@@ -1,4 +1,6 @@
-type InboundSocketData = string | ArrayBuffer | Blob;
+import { parseInboundEnvelope, type ParsedInboundEnvelope } from "../inbound/inboundProtocol.js";
+
+type InboundSocketData = ParsedInboundEnvelope | ArrayBuffer | Blob;
 const MAX_INBOUND_MESSAGES = 128;
 const MAX_INBOUND_BYTES = 16 * 1024 * 1024;
 
@@ -99,7 +101,8 @@ export function openAdapterConnectionTransport(
         throw new Error("inbound_message_type_invalid");
       }
       if (bytes > MAX_INBOUND_BYTES) throw new Error("inbound_message_too_large");
-      if (options.onPriorityMessage(socket, data)) {
+      const packet = typeof data === "string" ? parseInboundEnvelope(data) : data;
+      if (options.onPriorityMessage(socket, packet)) {
         // The priority handler settles the target timeline, waking a blocked
         // PCM append. Its in-flight continuation must not commit stale work.
         active?.abort();
@@ -108,7 +111,7 @@ export function openAdapterConnectionTransport(
       if (bufferedMessages >= MAX_INBOUND_MESSAGES || bufferedBytes + bytes > MAX_INBOUND_BYTES) {
         throw new Error("inbound_message_queue_overflow");
       }
-      queue.push({ data, bytes });
+      queue.push({ data: packet, bytes });
       bufferedBytes += bytes;
       bufferedMessages += 1;
       void drain().catch(fail);

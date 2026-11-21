@@ -65,6 +65,7 @@ export interface IdleMotionStartResult {
 }
 
 interface PreparedSemanticMotionEntry {
+  payload: NormalizedMotionPayload | null;
   durationMs: number;
   originMs: number;
   assistantText: string;
@@ -349,7 +350,8 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
       const key = buildSegmentKey(context.turnId, context.messageId);
       const cached = getPreparedSemanticMotion(key);
       let prepared = payload.kind === "semantic_intent"
-        && cached?.assistantText === context.assistantText
+        && cached?.payload === payload
+        && cached.assistantText === context.assistantText
         && cached.speechCueKey === buildSpeechCueKey(context.speechCues)
         ? cached.prepared
         : null;
@@ -575,7 +577,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
 
     const key = buildSegmentKey(playbackClock.turnId, normalizedMessageId);
     const cached = getPreparedSemanticMotion(key);
-    const prepared = cached?.assistantText === assistantText
+    const prepared = cached?.payload === null && cached.assistantText === assistantText
       && cached.speechCueKey === buildSpeechCueKey(speechCues)
       ? cached.prepared
       : null;
@@ -701,6 +703,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
     const speechCueKey = buildSpeechCueKey(speechCues);
     if (
       cached
+      && cached.payload === payload
       && cached.durationMs === durationMs
       && cached.assistantText === assistantText
       && cached.speechCueKey === speechCueKey
@@ -755,6 +758,7 @@ export function useModelEngine(dependencies: ModelEngineDependencies) {
       };
     }
     rememberPreparedSemanticMotion(key, {
+      payload,
       durationMs,
       originMs,
       assistantText,

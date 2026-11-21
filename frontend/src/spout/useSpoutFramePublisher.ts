@@ -1,8 +1,7 @@
 import { onBeforeUnmount, onMounted, watch, type Ref } from "vue";
+import { SpoutReadbackTarget } from "./spoutReadbackTarget";
 import { setBackgroundFrameConsumerActive } from "../live2d-renderer/backgroundFrameConsumers";
 
-const TARGET_FPS = 30;
-const FRAME_INTERVAL_MS = 1000 / TARGET_FPS;
 const STATS_INTERVAL_MS = 10_000;
 const LIVE2D_FRAME_RENDERED_EVENT = "ag99live:live2d-frame-rendered";
 
@@ -15,7 +14,10 @@ interface PendingReadback {
 export function useSpoutFramePublisher(
   canvasRef: Ref<HTMLCanvasElement | null>,
   enabled: Ref<boolean>,
+  fps: Ref<number>,
+  scale: Ref<number>,
 ): void {
+  const target = new SpoutReadbackTarget();
   let lastPublishedAt = 0;
   let lastError = "";
   let cachedCanvas: HTMLCanvasElement | null = null;
@@ -101,6 +103,7 @@ export function useSpoutFramePublisher(
   function releaseReadbackResources(): void {
     const gl = cachedGl;
     discardPendingReadback();
+    if (gl) target.release(gl);
     if (gl && readbackBuffer) {
       gl.deleteBuffer(readbackBuffer);
     }
@@ -160,9 +163,9 @@ export function useSpoutFramePublisher(
       return;
     }
 
-    const width = gl.drawingBufferWidth || canvas.width;
-    const height = gl.drawingBufferHeight || canvas.height;
-    if (width <= 0 || height <= 0) {
+    const width = Math.max(1, Math.floor(gl.drawingBufferWidth * scale.value));
+    const height = Math.max(1, Math.floor(gl.drawingBufferHeight * scale.value));
+    if (!gl.drawingBufferWidth || !gl.drawingBufferHeight || gl.isContextLost()) {
       return;
     }
 
@@ -223,19 +226,17 @@ export function useSpoutFramePublisher(
         }
       }
 
-      const previousFramebuffer = gl.getParameter(gl.FRAMEBUFFER_BINDING) as WebGLFramebuffer | null;
+
       const previousPixelPackBuffer = gl.getParameter(
         gl.PIXEL_PACK_BUFFER_BINDING,
       ) as WebGLBuffer | null;
-      if (previousFramebuffer) {
-        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-      }
+
       gl.bindBuffer(gl.PIXEL_PACK_BUFFER, buffer);
       const previousPackAlignment = gl.getParameter(gl.PACK_ALIGNMENT) as number;
       gl.pixelStorei(gl.PACK_ALIGNMENT, 1);
       const readStartedAt = performance.now();
       try {
-        gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, 0);
+        target.read(gl, width, height);
         const readDuration = performance.now() - readStartedAt;
         const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
         if (!sync) {
@@ -247,9 +248,7 @@ export function useSpoutFramePublisher(
       } finally {
         gl.pixelStorei(gl.PACK_ALIGNMENT, previousPackAlignment);
         gl.bindBuffer(gl.PIXEL_PACK_BUFFER, previousPixelPackBuffer);
-        if (previousFramebuffer) {
-          gl.bindFramebuffer(gl.FRAMEBUFFER, previousFramebuffer);
-        }
+
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "spout_frame_read_failed";
@@ -307,10 +306,10 @@ export function useSpoutFramePublisher(
 
   function handleLive2DFrameRendered(): void {
     const now = performance.now();
-    if (lastPublishedAt !== 0 && now - lastPublishedAt < FRAME_INTERVAL_MS) {
-      return;
-    }
-    lastPublishedAt = now;
+    const period = 1000 / fps.value;
+    const elapsed = now - lastPublishedAt;
+    if (lastPublishedAt !== 0 && elapsed < period) return;
+    lastPublishedAt = now - (lastPublishedAt ? elapsed % period : 0);
     publishFrame();
   }
 

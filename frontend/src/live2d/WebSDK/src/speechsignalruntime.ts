@@ -12,7 +12,7 @@ export interface ExternalAudioSignalValues {
 export interface SpeechAudioFrame {
   sourceActive: boolean;
   voiced: boolean;
-  posture: { phase: number; strength: number } | null;
+  posture: { phase: number; strength: number; remainingMs: number | null } | null;
   lipSyncActive: boolean;
   lipSyncIntensity: number;
   mouthRound: number;
@@ -48,6 +48,8 @@ const LIP_SYNC_DIAGNOSTIC_FRAME_LIMIT = 2;
  * into stable speech envelopes, but never resolves or writes model parameters.
  */
 export class SpeechSignalRuntime {
+  private getRemainingMs?: () => number | null;
+  public onSpeechPosture?: () => void;
   private activeSourceId: string | null = null;
   private lipSyncIntensity = 0;
   private mouthRound = 0;
@@ -74,6 +76,8 @@ export class SpeechSignalRuntime {
       throw new Error(`speech_signal_source_already_active:${this.activeSourceId}`);
     }
     this.activeSourceId = normalizedSourceId;
+    this.getRemainingMs = options.getRemainingMs;
+    this.onSpeechPosture = options.onSpeechPosture;
     this.lipSyncIntensity = 0;
     this.mouthRound = 0;
     this.mouthWide = 0;
@@ -263,7 +267,7 @@ export class SpeechSignalRuntime {
       sourceActive: this.activeSourceId !== null,
       voiced: this.speechVoiced,
       posture: this.activeSourceId !== null && this.postureStrength > 0.01
-        ? { phase: this.posturePhase, strength: this.postureStrength } : null,
+        ? { phase: this.posturePhase, strength: this.postureStrength, remainingMs: this.getRemainingMs?.() ?? null } : null,
       lipSyncActive,
       mouthRound: lipSyncActive ? this.mouthRound : 0,
       mouthWide: lipSyncActive ? this.mouthWide : 0,
@@ -328,6 +332,8 @@ export class SpeechSignalRuntime {
 
   private clearActiveSource(): void {
     this.activeSourceId = null;
+    this.getRemainingMs = undefined;
+    this.onSpeechPosture = undefined;
     this.postureStrength = 0;
     this.activeSourceFailureHandler = null;
     this.activeLipSyncUnavailableHandler = null;

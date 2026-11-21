@@ -319,7 +319,7 @@ export function createPetRuntimeSnapshotPublisher(
   }
 
   function publishModelProjectionSnapshot(): void {
-    modelProjectionDebounce.flush();
+    modelProjectionDebounce.cancel();
     options.bridge.publishModelProjectionSnapshot(buildModelProjectionSnapshot());
   }
 

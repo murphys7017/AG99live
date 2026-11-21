@@ -23,6 +23,7 @@ export interface Live2dRuntimePort {
     reason?: string,
     status?: DirectParameterPlanTerminalStatus,
   ): void;
+  updateDirectParameterStream(runId: string, open: boolean, plan?: DirectParameterPlanInput, fromMs?: number): boolean;
   releaseActiveMotion(): boolean;
   getDirectParameterPlanError(): string;
   startIdleParameterPlan(
@@ -78,6 +79,9 @@ export function createWindowLive2dRuntimePort(
     },
     stopDirectParameterPlan(reason, status) {
       getAdapter()?.stopDirectParameterPlan?.(reason, status);
+    },
+    updateDirectParameterStream(runId, open, plan, fromMs) {
+      return getAdapter()?.updateDirectParameterStream?.(runId, open, plan, fromMs) ?? false;
     },
     releaseActiveMotion() {
       return getAdapter()?.releaseActiveMotion?.() ?? false;

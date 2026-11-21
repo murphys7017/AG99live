@@ -1,8 +1,10 @@
+import { motionBuildId } from "./scripts/motion-build-id";
 import path from "node:path";
 import { defineConfig } from "vite";
 import vue from "@vitejs/plugin-vue";
 
 export default defineConfig({
+  define: { __MOTION_BUILD_ID__: JSON.stringify(motionBuildId(__dirname)) },
   plugins: [vue()],
   resolve: {
     alias: {

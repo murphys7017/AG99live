@@ -1,3 +1,4 @@
+import { reportLatencyStage } from "../adapter-connection/runtime/latency.js";
 import type {
   PlaybackTimelineAudioSourceContext,
 } from "./audioSink.js";
@@ -85,6 +86,12 @@ export function createPlaybackTimelineAudioLipSyncSink(options: {
       });
       lipSyncRuntime.attachAudio({
         audioUrl: event.audioUrl,
+        getRemainingMs: () => {
+          const duration = event.clock.getDurationMs();
+          const elapsed = event.clock.getCurrentTimeMs();
+          return duration === null || elapsed === null ? null : Math.max(0, duration - elapsed);
+        },
+        onSpeechPosture: () => reportLatencyStage("speech_posture_visible", options.turnId, null, options.messageId),
         getAudioCurrentTimeSeconds: event.getAudioCurrentTimeSeconds,
         isCurrentAudio: event.isCurrentAudio,
         speechOutput: event.speechOutput,

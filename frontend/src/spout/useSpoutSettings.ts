@@ -6,10 +6,14 @@ const INSTANCE_ID = `${Date.now().toString(36)}-${Math.random().toString(36).sli
 
 export interface SpoutConfig {
   enabled: boolean;
+  fps: number;
+  scale: number;
 }
 
 const DEFAULT_CONFIG: SpoutConfig = {
   enabled: false,
+  fps: 30,
+  scale: 1,
 };
 
 interface SpoutConfigMessage {
@@ -17,8 +21,12 @@ interface SpoutConfigMessage {
   config: SpoutConfig;
 }
 
-function cloneConfig(config: SpoutConfig): SpoutConfig {
-  return { enabled: config.enabled };
+function cloneConfig(config: Partial<SpoutConfig>): SpoutConfig {
+  return {
+    enabled: config.enabled === true,
+    fps: config.fps === 15 || config.fps === 24 ? config.fps : 30,
+    scale: config.scale === 0.5 ? 0.5 : 1,
+  };
 }
 
 function loadConfig(): SpoutConfig {
@@ -31,7 +39,7 @@ function loadConfig(): SpoutConfig {
       return cloneConfig(DEFAULT_CONFIG);
     }
     const parsed = JSON.parse(raw) as Partial<SpoutConfig>;
-    return { enabled: parsed.enabled === true };
+    return cloneConfig(parsed);
   } catch (error) {
     console.warn("[Spout] failed to load settings, using defaults.", error);
     return cloneConfig(DEFAULT_CONFIG);
@@ -48,7 +56,7 @@ function parseMessage(value: unknown): SpoutConfigMessage | null {
   }
   return {
     source: payload.source,
-    config: { enabled: (payload.config as Partial<SpoutConfig>).enabled === true },
+    config: cloneConfig(payload.config),
   };
 }
 
@@ -83,13 +91,18 @@ function createSettings() {
     { deep: true },
   );
 
+  function applyRemote(next: SpoutConfig): void {
+    if (config.enabled === next.enabled && config.fps === next.fps && config.scale === next.scale) return;
+    suppressNextPublish = true;
+    Object.assign(config, next);
+  }
+
   channel?.addEventListener("message", (event) => {
     const message = parseMessage(event.data);
     if (!message || message.source === INSTANCE_ID) {
       return;
     }
-    suppressNextPublish = true;
-    config.enabled = message.config.enabled;
+    applyRemote(message.config);
   });
 
   if (typeof window !== "undefined") {
@@ -99,8 +112,7 @@ function createSettings() {
       }
       try {
         const next = JSON.parse(event.newValue) as Partial<SpoutConfig>;
-        suppressNextPublish = true;
-        config.enabled = next.enabled === true;
+        applyRemote(cloneConfig(next));
       } catch (error) {
         console.warn("[Spout] failed to apply storage update.", error);
       }

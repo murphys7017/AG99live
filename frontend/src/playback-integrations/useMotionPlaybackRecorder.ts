@@ -221,6 +221,7 @@ export function useMotionPlaybackRecorder(options: MotionPlaybackRecorderOptions
         runId: event.runId,
         status: terminal === "completed" ? "completed" : event.status,
         executionStatus: event.status,
+        presentation: event.presentation ?? null,
         reason: event.reason ?? "",
         turnId: run.turnId,
         messageId: run.messageId,

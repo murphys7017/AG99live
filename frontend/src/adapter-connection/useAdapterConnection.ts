@@ -1155,6 +1155,7 @@ export function createAdapterConnection(
     payload: Parameters<typeof sendMotionLabRawEventAction>[1],
     turnId?: string | null,
   ): boolean {
+    if (socket && socket.bufferedAmount > 128 * 1024) return false;
     return sendMotionLabRawEventAction(outboundCtx, payload, turnId);
   }
 

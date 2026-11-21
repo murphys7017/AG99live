@@ -22,7 +22,7 @@ import {
 } from "../core/pttKeyBinding.js";
 import type { DesktopPttKeyBinding } from "../../types/desktop.js";
 import { buildAudioStreamChunkFrame, float32ToPcm16le } from "./audioStreamFrame.js";
-import { captureRealtimeDesktopScreenshot } from "../outbound/desktopCapture.js";
+import { captureSendTimeScreenshot } from "../outbound/desktopCapture.js";
 import { reportLatencyStage } from "./latency.js";
 
 export type MicrophoneCaptureOrigin = "manual" | "ptt" | "auto";
@@ -484,7 +484,7 @@ export function createAdapterMicrophoneRuntime(
       ? (async () => {
           reportLatencyStage("screenshot_start", inputTurnId, inputStreamId);
           try {
-            return await captureRealtimeDesktopScreenshot();
+            return await captureSendTimeScreenshot();
           } finally {
             reportLatencyStage("screenshot_end", inputTurnId, inputStreamId);
           }

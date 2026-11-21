@@ -174,9 +174,7 @@ export function buildDesktopRuntimeSnapshot(
     live2dPresentationSettings: cloneLive2dPresentationSettings(
       input.live2dPresentationSettings,
     ),
-    motionPlaybackRecords: input.motionPlaybackRecords.map((r) =>
-      cloneJson(r),
-    ),
+    motionPlaybackRecords: [...input.motionPlaybackRecords],
     connectionState: input.connectionState,
     connectionLabel: input.connectionLabel,
     connectionStatusMessage: p.connectionStatusMessage,

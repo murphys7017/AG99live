@@ -41,6 +41,8 @@ const PROFILE_AUTHORING_SNAPSHOT_STORAGE_KEY = "ag99live.desktop.profile_authori
 
 type RuntimeBridgeMessage =
   | { kind: "snapshot"; snapshot: DesktopRuntimeSnapshot }
+  | { kind: "snapshot_request" }
+  | { kind: "snapshot_delta"; baseRevision: number; patch: Partial<DesktopRuntimeSnapshot> }
   | { kind: "model_projection"; snapshot: DesktopModelProjectionSnapshot }
   | {
     kind: "motion_tuning_samples";
@@ -266,6 +268,9 @@ export function createDesktopBridge(): DesktopBridgeInstance {
   });
 
   let started = false;
+  let publishedSnapshot: DesktopRuntimeSnapshot | null = null;
+  let publishedRecords: DesktopRuntimeSnapshot["motionPlaybackRecords"] | null = null;
+  let persistTimer: ReturnType<typeof setTimeout> | undefined;
   let runtimeChannel: BroadcastChannel | null = null;
   let profileAuthoringChannel: BroadcastChannel | null = null;
   let removeRuntimeBridgeListener: (() => void) | null = null;
@@ -297,8 +302,22 @@ export function createDesktopBridge(): DesktopBridgeInstance {
         return;
       }
 
-      if (payload.kind === "snapshot") {
-        const nextSnapshot = safeNormalizeSnapshot(payload.snapshot, "broadcast");
+      if (payload.kind === "snapshot_request") {
+        if (publishedSnapshot) sendRuntimeBridgeMessage({ kind: "snapshot", snapshot: publishedSnapshot });
+        return;
+      }
+      if (payload.kind === "snapshot" || payload.kind === "snapshot_delta") {
+        const previous = state.snapshot;
+        if (payload.kind === "snapshot_delta" &&
+          (payload.patch?._publisherId !== previous._publisherId || payload.baseRevision !== previous._revision)) {
+          if (payload.patch?._publisherId !== previous._publisherId || (payload.patch?._revision ?? 0) > previous._revision) {
+            sendRuntimeBridgeMessage({ kind: "snapshot_request" });
+          }
+          return;
+        }
+        const nextSnapshot = safeNormalizeSnapshot(
+          payload.kind === "snapshot" ? payload.snapshot : { ...previous, ...payload.patch }, "broadcast", previous,
+        );
         if (!nextSnapshot) {
           return;
         }
@@ -403,6 +422,7 @@ export function createDesktopBridge(): DesktopBridgeInstance {
       );
     }
 
+    sendRuntimeBridgeMessage({ kind: "snapshot_request" });
     const useRuntimeStorageFallback = !desktopHostPort.getApi() && !("BroadcastChannel" in window);
     const useProfileStorageFallback = !("BroadcastChannel" in window);
     if (useRuntimeStorageFallback || useProfileStorageFallback) {
@@ -459,6 +479,11 @@ export function createDesktopBridge(): DesktopBridgeInstance {
     }
 
     started = false;
+    clearTimeout(persistTimer);
+    persistTimer = undefined;
+    if (publishedSnapshot) persistRuntimeSnapshot(publishedSnapshot);
+    publishedSnapshot = null;
+    publishedRecords = null;
     removeStorageListener?.();
     removeStorageListener = null;
     removeWindowStateListener?.();
@@ -474,7 +499,13 @@ export function createDesktopBridge(): DesktopBridgeInstance {
   }
 
   function publishSnapshot(snapshot: DesktopRuntimeSnapshot): void {
-    const nextSnapshot = safeNormalizeSnapshot(snapshot, "publish");
+    const records = snapshot.motionPlaybackRecords;
+    const sameRecords = publishedRecords && publishedSnapshot &&
+      records.length === publishedRecords.length && records.every((record, i) => record === publishedRecords![i]);
+    const nextSnapshot = safeNormalizeSnapshot(
+      sameRecords ? { ...snapshot, motionPlaybackRecords: state.snapshot.motionPlaybackRecords } : snapshot,
+      "publish", state.snapshot,
+    );
     if (!nextSnapshot) {
       throw new Error("[DesktopBridge] publish snapshot rejected.");
     }
@@ -482,12 +513,27 @@ export function createDesktopBridge(): DesktopBridgeInstance {
       state.snapshot,
       nextSnapshot,
     );
+    const previous = state.snapshot;
+    const sendDelta = publishedSnapshot !== null && previous._publisherId === stabilizedSnapshot._publisherId;
     state.snapshot = stabilizedSnapshot;
-    persistRuntimeSnapshot(stabilizedSnapshot);
-    sendRuntimeBridgeMessage({
-      kind: "snapshot",
-      snapshot: stabilizedSnapshot,
-    } satisfies RuntimeBridgeMessage);
+    publishedSnapshot = stabilizedSnapshot;
+    publishedRecords = records;
+    if (!sendDelta || (!runtimeChannel && !desktopHostPort.getApi())) {
+      persistRuntimeSnapshot(stabilizedSnapshot);
+      sendRuntimeBridgeMessage({ kind: "snapshot", snapshot: stabilizedSnapshot });
+      return;
+    }
+    const patch: Partial<DesktopRuntimeSnapshot> = { ...stabilizedSnapshot };
+    for (const key of Object.keys(patch) as (keyof DesktopRuntimeSnapshot)[]) {
+      if (key !== "_publisherId" && previous[key] === stabilizedSnapshot[key]) delete patch[key];
+    }
+    sendRuntimeBridgeMessage({ kind: "snapshot_delta", baseRevision: previous._revision, patch });
+    if (persistTimer === undefined) {
+      persistTimer = setTimeout(() => {
+        persistTimer = undefined;
+        if (publishedSnapshot) persistRuntimeSnapshot(publishedSnapshot);
+      }, 1000);
+    }
   }
 
   function publishModelProjectionSnapshot(

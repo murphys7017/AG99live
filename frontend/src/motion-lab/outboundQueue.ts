@@ -11,7 +11,8 @@ export interface PendingMotionLabEvent {
 }
 
 export interface MotionLabPendingEventStore {
-  list(): Promise<PendingMotionLabEvent[]>;
+  list(): Promise<Array<Pick<PendingMotionLabEvent, "eventId" | "enqueuedAtMs">>>;
+  get(eventId: string): Promise<PendingMotionLabEvent | undefined>;
   put(event: PendingMotionLabEvent): Promise<void>;
   delete(eventId: string): Promise<void>;
 }
@@ -32,39 +33,19 @@ export function createMotionLabOutboundQueue(options: {
   createEventId?: () => string;
   onError?: (message: string, error?: unknown) => void;
 }): MotionLabOutboundQueue {
-  const pending = new Map<string, PendingMotionLabEvent>();
-  const inFlight = new Set<string>();
+  const pending = new Set<string>();
+  const inFlight = new Map<string, { bytes: number; expiresAt: number }>();
+  let ackTimer: ReturnType<typeof setTimeout> | undefined;
   let connected = false;
   let disposed = false;
   let flushing = false;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
   let retryDelayMs = MIN_RETRY_DELAY_MS;
 
-  const ready = options.store.list().then(async (events) => {
-    for (const event of [...events].sort(comparePendingEventAge)) {
-      assertPendingEvent(event);
-      pending.set(event.eventId, event);
-    }
-    await trimPendingEvents("startup");
+  const ready = options.store.list().then(events => {
+    events.sort((a, b) => (a.enqueuedAtMs ?? 0) - (b.enqueuedAtMs ?? 0));
+    for (const event of events) pending.add(event.eventId);
   });
-
-  async function trimPendingEvents(reason: string): Promise<void> {
-    while (pending.size > MAX_PENDING_MOTION_LAB_EVENTS) {
-      const oldest = pending.values().next().value as PendingMotionLabEvent | undefined;
-      if (!oldest) {
-        return;
-      }
-      await options.store.delete(oldest.eventId);
-      pending.delete(oldest.eventId);
-      inFlight.delete(oldest.eventId);
-      console.warn("[MotionLab] dropped oldest persisted outbound event.", {
-        eventId: oldest.eventId,
-        eventType: oldest.payload.event_type,
-        reason,
-        capacity: MAX_PENDING_MOTION_LAB_EVENTS,
-      });
-    }
-  }
 
   const reportError = (message: string, error?: unknown): void => {
     options.onError?.(message, error);
@@ -95,14 +76,30 @@ export function createMotionLabOutboundQueue(options: {
       return;
     }
     flushing = true;
+    clearTimeout(ackTimer);
     try {
-      for (const event of pending.values()) {
+      const now = Date.now();
+      let outstandingBytes = 0;
+      for (const [id, item] of inFlight) {
+        if (item.expiresAt <= now) inFlight.delete(id);
+        else outstandingBytes += item.bytes;
+      }
+      for (const eventId of pending) {
         if (disposed || !connected) {
           return;
         }
-        if (inFlight.has(event.eventId)) {
+        if (inFlight.size >= 8) return;
+        if (inFlight.has(eventId)) {
           continue;
         }
+        const event = await options.store.get(eventId);
+        if (!connected || disposed) return;
+        if (!event || !pending.has(eventId)) {
+          pending.delete(eventId);
+          continue;
+        }
+        const bytes = new TextEncoder().encode(JSON.stringify(event.payload)).length;
+        if (inFlight.size && outstandingBytes + bytes > 128 * 1024) return;
         if (!options.send(event.payload, event.turnId)) {
           reportError(`MotionLab event send rejected; retry scheduled (event_id=${event.eventId}).`);
           scheduleRetry();
@@ -114,11 +111,21 @@ export function createMotionLabOutboundQueue(options: {
           turnId: event.turnId,
           messageId: event.payload.message_id ?? "",
         });
-        inFlight.add(event.eventId);
+        inFlight.set(event.eventId, { bytes, expiresAt: now + 15_000 });
+        outstandingBytes += bytes;
       }
       retryDelayMs = MIN_RETRY_DELAY_MS;
+    } catch (error) {
+      scheduleRetry();
+      throw error;
     } finally {
       flushing = false;
+      if (connected && !disposed && inFlight.size) {
+        const deadline = Math.min(...Array.from(inFlight.values(), entry => entry.expiresAt));
+        ackTimer = setTimeout(() => {
+          void flush().catch(error => reportError("MotionLab acknowledgement retry failed.", error));
+        }, Math.max(1, deadline - Date.now()));
+      }
     }
   }
 
@@ -144,8 +151,7 @@ export function createMotionLabOutboundQueue(options: {
         messageId: payload.message_id ?? "",
       });
       await options.store.put(event);
-      pending.set(eventId, event);
-      await trimPendingEvents("capacity");
+      pending.add(eventId);
       console.info("[MotionLab] raw event persisted locally.", {
         eventId,
         eventType: payload.event_type,
@@ -190,6 +196,7 @@ export function createMotionLabOutboundQueue(options: {
       connected = true;
       clearRetryTimer();
       retryDelayMs = MIN_RETRY_DELAY_MS;
+      clearTimeout(ackTimer);
       inFlight.clear();
       void flush().catch((error) => reportError("MotionLab queue flush failed.", error));
     },
@@ -197,12 +204,14 @@ export function createMotionLabOutboundQueue(options: {
       connected = false;
       clearRetryTimer();
       retryDelayMs = MIN_RETRY_DELAY_MS;
+      clearTimeout(ackTimer);
       inFlight.clear();
     },
     dispose() {
       disposed = true;
       connected = false;
       clearRetryTimer();
+      clearTimeout(ackTimer);
       inFlight.clear();
     },
     getPendingCount() {
@@ -219,34 +228,26 @@ export function createIndexedDbMotionLabPendingEventStore(): MotionLabPendingEve
       const db = await database;
       const transaction = db.transaction(MOTION_LAB_OBJECT_STORE, "readonly");
       const completed = transactionComplete(transaction);
-      const request = transaction.objectStore(MOTION_LAB_OBJECT_STORE).getAll();
-      const result = await requestResult(request) as unknown[];
-      await completed;
-      const validEvents: PendingMotionLabEvent[] = [];
-      const invalidEventIds: string[] = [];
-      for (const candidate of result) {
-        if (isPendingMotionLabEvent(candidate)) {
-          validEvents.push(candidate);
+      const request = transaction.objectStore(MOTION_LAB_OBJECT_STORE).openCursor();
+      const entries: Array<Pick<PendingMotionLabEvent, "eventId" | "enqueuedAtMs">> = [];
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) return;
+        if (isPendingMotionLabEvent(cursor.value)) {
+          entries.push({ eventId: cursor.value.eventId, enqueuedAtMs: cursor.value.enqueuedAtMs });
         } else {
-          const eventId = readStoredEventId(candidate);
-          if (eventId) {
-            invalidEventIds.push(eventId);
-          }
+          console.warn("[MotionLab] skipped invalid stored event.", cursor.primaryKey);
         }
-      }
-      if (invalidEventIds.length > 0) {
-        const cleanupTransaction = db.transaction(MOTION_LAB_OBJECT_STORE, "readwrite");
-        const cleanupCompleted = transactionComplete(cleanupTransaction);
-        const objectStore = cleanupTransaction.objectStore(MOTION_LAB_OBJECT_STORE);
-        for (const eventId of invalidEventIds) {
-          objectStore.delete(eventId);
-        }
-        await cleanupCompleted;
-        console.warn("[MotionLab] removed invalid persisted outbound events.", {
-          count: invalidEventIds.length,
-        });
-      }
-      return validEvents;
+        cursor.continue();
+      };
+      await completed;
+      return entries;
+    },
+    async get(eventId) {
+      const db = await database;
+      const tx = db.transaction(MOTION_LAB_OBJECT_STORE, "readonly");
+      const value: unknown = await requestResult(tx.objectStore(MOTION_LAB_OBJECT_STORE).get(eventId));
+      return isPendingMotionLabEvent(value) ? value : undefined;
     },
     async put(event) {
       const db = await database;
@@ -270,7 +271,6 @@ const MOTION_LAB_OBJECT_STORE = "pending-events";
 const MOTION_LAB_DATABASE_VERSION = 3;
 const MIN_RETRY_DELAY_MS = 250;
 const MAX_RETRY_DELAY_MS = 5000;
-const MAX_PENDING_MOTION_LAB_EVENTS = 512;
 
 function openMotionLabDatabase(): Promise<IDBDatabase> {
   if (!window.indexedDB) {
@@ -352,13 +352,6 @@ function assertPendingEvent(value: unknown): asserts value is PendingMotionLabEv
   }
 }
 
-function comparePendingEventAge(
-  left: PendingMotionLabEvent,
-  right: PendingMotionLabEvent,
-): number {
-  return (left.enqueuedAtMs ?? 0) - (right.enqueuedAtMs ?? 0);
-}
-
 function isPendingMotionLabEvent(value: unknown): value is PendingMotionLabEvent {
   try {
     assertPendingEvent(value);
@@ -366,12 +359,4 @@ function isPendingMotionLabEvent(value: unknown): value is PendingMotionLabEvent
   } catch {
     return false;
   }
-}
-
-function readStoredEventId(value: unknown): string | null {
-  if (!value || typeof value !== "object") {
-    return null;
-  }
-  const eventId = (value as { eventId?: unknown }).eventId;
-  return typeof eventId === "string" && eventId.trim() ? eventId.trim() : null;
 }

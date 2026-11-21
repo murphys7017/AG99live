@@ -1,13 +1,12 @@
+import { profileIndex } from "../profileIndex.js";
 import type {
   SemanticAxisDefinition,
-  SemanticAxisProfile,
 } from "../../../types/semantic-axis-profile.js";
 import type {
   DynamicAxisValues,
   MotionCompileContext,
   MotionCompileStage,
   MotionStageResult,
-  ResolvedAxisRoleBuckets,
 } from "../compileContext.js";
 import type { MotionAxisLevel } from "../../../types/protocol.js";
 import { SCHEMA_MOTION_INTENT_V4 } from "../../../types/protocol.js";
@@ -62,7 +61,7 @@ export function runAxisResolver(
     }
   }
 
-  const roleAxisIds = buildRoleAxisBuckets(profile);
+  const roleAxisIds = profileIndex(profile).roles;
   const resolvedAxes = resolveAllowedAxisValues(context);
   const axisErrorCount =
     resolvedAxes.invalidAxes.length + resolvedAxes.forbiddenAxes.length;
@@ -103,30 +102,6 @@ export function runAxisResolver(
   }
 
   return { ok: true };
-}
-
-function buildRoleAxisBuckets(
-  profile: SemanticAxisProfile,
-): ResolvedAxisRoleBuckets {
-  return {
-    primaryAxes: profile.axes
-      .filter((axis) => axis.control_role === "primary")
-      .map((axis) => axis.id),
-    hintAxes: profile.axes
-      .filter((axis) => axis.control_role === "hint")
-      .map((axis) => axis.id),
-    derivedAxes: profile.axes
-      .filter((axis) => axis.control_role === "derived")
-      .map((axis) => axis.id),
-    runtimeAxes: profile.axes
-      .filter(
-        (axis) =>
-          axis.control_role === "runtime"
-          || axis.control_role === "ambient"
-          || axis.control_role === "debug",
-      )
-      .map((axis) => axis.id),
-  };
 }
 
 function resolveAllowedAxisValues(

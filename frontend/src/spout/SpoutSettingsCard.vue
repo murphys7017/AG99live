@@ -29,6 +29,17 @@ const statusLabel = computed(() => (config.enabled ? "enabled" : "disabled"));
       </span>
     </label>
 
+    <label>输出帧率
+      <select v-model.number="config.fps">
+        <option v-for="fps in [15, 24, 30]" :key="fps" :value="fps">{{ fps }} FPS</option>
+      </select>
+    </label>
+    <label>输出分辨率
+      <select v-model.number="config.scale">
+        <option :value="1">原始尺寸</option>
+        <option :value="0.5">宽高减半</option>
+      </select>
+    </label>
     <div class="settings-card__actions">
       <button
         type="button"

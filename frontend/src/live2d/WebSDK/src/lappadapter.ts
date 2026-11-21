@@ -119,6 +119,10 @@ export class LAppAdapter {
     return started;
   }
 
+  public updateDirectParameterStream(runId: string, open: boolean, plan?: DirectParameterPlanInput, fromMs?: number): boolean {
+    return this.getModel()?.updateDirectParameterStream(runId, open, plan, fromMs) ?? false;
+  }
+
   public stopDirectParameterPlan(
     reason?: string,
     status?: DirectParameterPlanTerminalStatus,

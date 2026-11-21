@@ -60,7 +60,7 @@ Persona Effect 使用 `motion_steps` 编排 1 到 8 个带 `axis_values` 和 `du
 [{"ms":140,"gaze_x":65},{"ms":300},{"ms":220,"gaze_x":50}]
 ```
 
-每个 `ms` 是过渡到本步目标的时长。第一次出现的轴在该步开始时接管，之后省略该轴表示保持已有目标。只含 `ms` 的一步保留停顿。末步结束后，播放器用最多 120 毫秒把控制交回基础动作。整段只有停顿时沿用原来的表现。Adapter 收到完整数组即可校验并交付，Motion Lab 保留 Provider 原文和已接受的动作。
+每个 `ms` 是过渡到本步目标的时长。第一次出现的轴在该步开始时接管，之后省略该轴表示保持已有目标。只含 `ms` 的一步保留停顿。末步结束后，播放器用最多 120 毫秒把控制交回基础动作。整段只有停顿时沿用原来的表现。Adapter 按流中已经闭合的步骤校验并交付。播放期间追加的步骤沿用同一条台词的时钟，已过期的目标会跳过，Motion Lab 保留 Provider 原文和已接受的动作。
 
 `independent_motion.enabled` 默认关闭。关闭时由 Persona Effect 为 Persona 回复段生成动作。开启后停用 Persona Effect，改由单独选择的聊天 Provider 为每个非空 `segments[].speech` 分别生成动作，并绑定到同索引的 TTS/输出段。独立动作没有整回复生成模式；旧配置中的 `per_speech_segment` 会在启动时清除，不再决定动作粒度。
 

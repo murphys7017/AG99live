@@ -23,7 +23,7 @@ const { containerRef, canvasRef, renderError, renderStatus } =
   useLive2dRenderer(selectedModelRef, live2dPresentationSettingsRef);
 watch(renderStatus, (status) => emit("renderer-status-change", status), { immediate: true });
 const { config: spoutConfig } = useSpoutSettings();
-useSpoutFramePublisher(canvasRef, toRef(spoutConfig, "enabled"));
+useSpoutFramePublisher(canvasRef, toRef(spoutConfig, "enabled"), toRef(spoutConfig, "fps"), toRef(spoutConfig, "scale"));
 const {
   isDragging,
   finishWindowDrag,

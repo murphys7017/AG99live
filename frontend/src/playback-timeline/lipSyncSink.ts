@@ -2,6 +2,8 @@ import type { SpeechOutputSession } from "./speechOutputRuntime.js";
 
 export interface PlaybackTimelineLipSyncAttachOptions {
   audioUrl: string | null;
+  getRemainingMs?: () => number | null;
+  onSpeechPosture?: () => void;
   getAudioCurrentTimeSeconds: () => number;
   isCurrentAudio: () => boolean;
   speechOutput: SpeechOutputSession | null;

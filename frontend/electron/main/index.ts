@@ -1,6 +1,6 @@
 import { app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, screen, session } from "electron";
 import { spawn } from "node:child_process";
-import { appendDesktopLatencyEvent } from "./desktop-latency-log";
+import { appendDesktopLatencyEvent, flushDesktopLatencyLog } from "./desktop-latency-log";
 import { MenuManager } from "./menu-manager";
 import { WindowManager } from "./window-manager";
 import { WebControlLauncher } from "./web-control-launcher";
@@ -823,7 +823,20 @@ app.whenReady().then(async () => {
 
 });
 
-app.on("before-quit", () => {
+let quitAfterLatencyFlush = false;
+let drainingLatencyOnQuit = false;
+app.on("before-quit", (event) => {
+  if (!quitAfterLatencyFlush) {
+    event.preventDefault();
+    if (!drainingLatencyOnQuit) {
+      drainingLatencyOnQuit = true;
+      void flushDesktopLatencyLog().finally(() => {
+        quitAfterLatencyFlush = true;
+        app.quit();
+      });
+    }
+    return;
+  }
   desktopPresence?.stop();
   windowManager?.markAppQuitting();
   menuManager?.dispose();

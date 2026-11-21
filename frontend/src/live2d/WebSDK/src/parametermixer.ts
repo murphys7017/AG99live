@@ -76,6 +76,7 @@ export interface ActiveDirectParameterFrameState {
   playbackClockReader: { getElapsedMs: () => number | null };
   presentationElapsedMs: number;
   diagnosticFrameCount: number;
+  streamOpen?: boolean;
   /** Set only after every binding has activated and the active target settled. */
   releaseStartedAtMs: number | null;
 }
@@ -157,6 +158,7 @@ export interface ResolvedParameterContribution {
 }
 
 export interface ResolvedParameterFrameEntry {
+  range: number;
   parameterId: CubismIdHandle;
   parameterIdRaw: string;
   parameterIndex: number;
@@ -207,6 +209,7 @@ const EMPTY_PARAMETER_BASE_SNAPSHOTS: ReadonlyMap<number, ParameterBaseSnapshot>
 
 export interface ActiveParameterFrameInput {
   idlePlans?: readonly ActiveIdlePlan[];
+  speechRemainingMs?: number | null;
   speechPosture?: readonly ParameterContribution[];
   model: CubismModel | null;
   directPlan: ActiveDirectParameterFrameState | null;
@@ -245,6 +248,7 @@ export type ActiveParameterFrameExecution =
 export class ActiveParameterMixer {
   // Bindings are per audio attachment. A short tail can settle naturally
   // before a longer voiced tail gradually takes back the released parameter.
+  private parameterOrder: number[] = [];
   private speechClaimedAt = new WeakMap<ParameterPresentationNode, number>();
   private lastPresentations = new Map<number, {
     node: ParameterPresentationNode; elapsedMs: number;
@@ -352,7 +356,11 @@ export class ActiveParameterMixer {
         continue;
       }
       const claimedAt = this.speechClaimedAt.get(frame.node);
-      const weight = claimedAt === undefined ? 1 : smoothstep((frame.elapsedMs - claimedAt - 300) / 300);
+      const remaining = input.speechRemainingMs;
+      const attack = claimedAt === undefined ? 1 : remaining == null
+        ? smoothstep((frame.elapsedMs - claimedAt - 160) / 280)
+        : smoothstep((frame.elapsedMs - claimedAt) / 240);
+      const weight = remaining == null ? attack : attack * smoothstep(remaining / 320);
       if (weight > 0) speechPosture.push({ ...contribution, weight: contribution.weight * weight });
     }
     const contributions = [
@@ -435,6 +443,7 @@ export class ActiveParameterMixer {
       input.directPlan
       && input.directPlan.releaseStartedAtMs === null
       && directPlan.elapsedMs !== null
+      && !input.directPlan.streamOpen
       && directPlan.nominalReleaseReached
       && directPlan.allBindingsActivated
     ) {
@@ -482,10 +491,10 @@ export class ActiveParameterMixer {
 
     const grouped = new Map<number, {
       parameterIdRaw: string;
-      contributions: Array<ParameterContribution & { sequence: number }>;
+      contributions: ParameterContribution[];
     }>();
 
-    for (const [sequence, contribution] of contributions.entries()) {
+    for (const contribution of contributions) {
       const invalidReason = validateContribution(contribution);
       if (invalidReason) {
         return {
@@ -508,21 +517,23 @@ export class ActiveParameterMixer {
             ]),
           };
         }
-        existing.contributions.push({ ...contribution, sequence });
+        existing.contributions.push(contribution);
         continue;
       }
       grouped.set(contribution.parameterIndex, {
         parameterIdRaw: contribution.parameterIdRaw,
-        contributions: [{ ...contribution, sequence }],
+        contributions: [contribution],
       });
     }
 
     const parameters: ResolvedParameterFrameEntry[] = [];
     const nextPresentations: typeof this.lastPresentations = new Map();
     let directPresentationSettled = true;
-    const orderedGroups = [...grouped.entries()]
-      .sort(([leftIndex], [rightIndex]) => leftIndex - rightIndex);
-    for (const [parameterIndex, group] of orderedGroups) {
+    if (grouped.size !== this.parameterOrder.length || this.parameterOrder.some(index => !grouped.has(index))) {
+      this.parameterOrder = Array.from(grouped.keys()).sort((a, b) => a - b);
+    }
+    for (const parameterIndex of this.parameterOrder) {
+      const group = grouped.get(parameterIndex)!;
       const owner = resolveContributionOwner(group.contributions);
       const snapshot = baseSnapshots.get(parameterIndex);
       if (!snapshot) {
@@ -572,7 +583,7 @@ export class ActiveParameterMixer {
           return priorityOrder;
         }
         const sourceOrder = left.source.localeCompare(right.source);
-        return sourceOrder !== 0 ? sourceOrder : left.sequence - right.sequence;
+        return sourceOrder; // Stable sort retains insertion order for ties.
       });
       for (const contribution of orderedContributions) {
         if (contribution.owner === "lip_sync") continue;
@@ -633,6 +644,7 @@ export class ActiveParameterMixer {
         parameterIndex,
         owner,
         baseValue,
+        range: maxValue - minValue,
         unclampedValue: finalValue,
         value,
         clamped: value !== finalValue,

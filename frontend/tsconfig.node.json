@@ -15,6 +15,7 @@
   "include": [
     "electron/**/*.ts",
     "electron.vite.config.ts",
+    "scripts/motion-build-id.ts",
     "src/types/**/*.ts",
     "src/types/**/*.d.ts",
     "src/app/webControlUrl.ts",

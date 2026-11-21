@@ -113,7 +113,7 @@ function compileSemanticSequence(
   const successfulSteps = compiledSteps.filter(
     (step): step is Extract<typeof step, { ok: true }> => step.ok,
   );
-  const signatures = successfulSteps.map((step) =>
+  const signatures = elapsedMs ? [] : successfulSteps.map((step) =>
     JSON.stringify(step.axes.map((axis) => [axis.axisId, axis.value])),
   );
   if (!elapsedMs && successfulSteps.length > 1 && signatures.every((signature) => signature === signatures[0])) {

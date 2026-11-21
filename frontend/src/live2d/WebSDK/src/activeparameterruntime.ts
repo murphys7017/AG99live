@@ -215,6 +215,7 @@ export class ActiveParameterRuntime {
     }) : [];
     let execution = this.mixer.resolveActiveFrame({
       ...input,
+      speechRemainingMs: posture?.remainingMs,
       speechPosture,
       idlePlans: [...this.idlePlans.values()],
       interactionSway: this.interactionSway,
@@ -228,6 +229,7 @@ export class ActiveParameterRuntime {
       }
       execution = this.mixer.resolveActiveFrame({
         ...input,
+        speechRemainingMs: posture?.remainingMs,
         speechPosture,
         deltaTimeSeconds: 0,
         idlePlans: [...this.idlePlans.values()],
@@ -251,6 +253,12 @@ export class ActiveParameterRuntime {
     }
 
     const planState = input.directPlan;
+    if (this.speechSignals.onSpeechPosture && !input.directPlan && execution.parameters.some(p =>
+      Math.abs(p.value - p.baseValue) > 0.001 && p.contributions.some(c => c.owner === "speech_posture" && c.weight > 0),
+    )) {
+      this.speechSignals.onSpeechPosture();
+      this.speechSignals.onSpeechPosture = undefined;
+    }
     const lipSyncDiagnosticSourceId = execution.directPlan.contributions.length === 0
       && execution.lipSyncContributionCount > 0
       ? this.speechSignals.getLipSyncDiagnosticSourceId()

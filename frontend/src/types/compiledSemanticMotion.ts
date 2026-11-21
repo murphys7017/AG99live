@@ -5,7 +5,9 @@ import type {
   PerformanceCurveHint,
 } from "./protocol.js";
 
-export const SEMANTIC_MOTION_TRANSFORM_VERSION = "semantic_motion_transform.v6";
+declare const __MOTION_BUILD_ID__: string;
+export const MOTION_BUILD_ID = typeof __MOTION_BUILD_ID__ === "string" ? __MOTION_BUILD_ID__ : "unbundled";
+export const SEMANTIC_MOTION_TRANSFORM_VERSION = "semantic_motion_transform.v7";
 export const PERFORMANCE_SCHEDULE_TRACE_VERSION = "performance_schedule_trace.v7";
 
 export type CompiledSemanticAxisSource = "semantic_axis" | "relation_graph";
@@ -117,6 +119,8 @@ export interface MotionAxisRelationEvaluation {
 
 export interface MotionTransformTrace {
   transformVersion: typeof SEMANTIC_MOTION_TRANSFORM_VERSION;
+  motionBuildId?: string;
+  motionIntensityScale?: number;
   profileRevision: number;
   profileHash: string;
   rawAxes: Record<string, number>;

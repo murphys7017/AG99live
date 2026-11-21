@@ -5,7 +5,7 @@ import { normalizeModelEngineSettings } from "../settings.js";
 import { MOTION_MIN_REMAINING_AUDIO_MS } from "../constants.js";
 import type { NormalizedMotionPayload } from "../../types/motion.js";
 import {
-  SEMANTIC_MOTION_TRANSFORM_VERSION,
+  MOTION_BUILD_ID, SEMANTIC_MOTION_TRANSFORM_VERSION,
   type CompileDiagnostics,
   type CompiledSemanticMotion,
 } from "../../types/compiledSemanticMotion.js";
@@ -408,6 +408,7 @@ function prepareMotionResourcePayload(
     ...baseDiagnostics,
     transformTrace: {
       transformVersion: SEMANTIC_MOTION_TRANSFORM_VERSION,
+      motionBuildId: MOTION_BUILD_ID,
       profileRevision: profile.revision,
       profileHash: profile.source_hash,
       rawAxes: {},

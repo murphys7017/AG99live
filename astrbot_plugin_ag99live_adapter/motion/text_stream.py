@@ -66,7 +66,7 @@ async def read_text_chat_stream(
     contexts: list[dict[str, str]] | tuple[dict[str, str], ...] | None = None,
     on_first_chunk: Callable[[], None] | None = None,
     on_complete_json: Callable[[dict[str, Any]], Awaitable[None] | None] | None = None,
-    decode_record: Callable[[str], dict[str, Any] | None] | None = None,
+    decode_next_record: Callable[[str], dict[str, Any] | None] | None = None,
     stop_after_complete_json: bool = False,
     request_options: dict[str, Any] | None = None,
 ) -> str:
@@ -74,7 +74,8 @@ async def read_text_chat_stream(
 
     ``on_complete_json`` is called as soon as the first complete top-level JSON
     object appears in the accumulated delta.  The stream is still consumed to
-    EOF by default. ``stop_after_complete_json`` lets short input reactions
+    EOF by default. A stateful ``decode_next_record`` can deliver further array
+    prefixes as complete elements arrive. ``stop_after_complete_json`` lets short input reactions
     close the iterator immediately after their only complete record. Callers
     can pass request-local Provider options without mutating its configuration.
     """
@@ -91,9 +92,9 @@ async def read_text_chat_stream(
 
     async def report_complete_json() -> None:
         nonlocal complete_json_reported
-        if complete_json_reported or on_complete_json is None:
+        if on_complete_json is None or (complete_json_reported and decode_next_record is None):
             return
-        candidate = (decode_record or _first_complete_json_object)(streamed_text)
+        candidate = (decode_next_record or _first_complete_json_object)(streamed_text)
         if candidate is None:
             return
         complete_json_reported = True

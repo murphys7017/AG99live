@@ -1,3 +1,4 @@
+import { profileIndex } from "./profileIndex.js";
 import type {
   DirectParameterPlanTiming,
   SemanticParameterPlan,
@@ -85,7 +86,7 @@ export function compileParameterSequenceTrackGraph(
   if (input.timed) {
     return compileTimedTracks(stepPlans, schedule, profile);
   }
-  const axisById = new Map(profile.axes.map((axis) => [axis.id, axis]));
+  const axisById = profileIndex(profile).byId;
   const parameterStepsResult = resolveParameterSteps(stepPlans);
   if (!parameterStepsResult.ok) {
     return parameterStepsResult;

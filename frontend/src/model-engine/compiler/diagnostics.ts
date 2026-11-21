@@ -1,7 +1,7 @@
 import type { CompileOptions } from "./contracts.js";
 import { SCHEMA_MOTION_INTENT_V4 } from "../../types/protocol.js";
 import {
-  SEMANTIC_MOTION_TRANSFORM_VERSION,
+  MOTION_BUILD_ID, SEMANTIC_MOTION_TRANSFORM_VERSION,
   type CompileDiagnostics,
   type MotionTransformTrace,
 } from "../../types/compiledSemanticMotion.js";
@@ -129,6 +129,8 @@ function buildTransformTrace(context: MotionCompileContext): MotionTransformTrac
   const profile = context.state.profile;
   return {
     transformVersion: SEMANTIC_MOTION_TRANSFORM_VERSION,
+    motionBuildId: MOTION_BUILD_ID,
+    motionIntensityScale: context.baseDiagnostics.motionIntensityScale,
     profileRevision: profile?.revision ?? 0,
     profileHash: profile?.source_hash ?? "",
     rawAxes: {},

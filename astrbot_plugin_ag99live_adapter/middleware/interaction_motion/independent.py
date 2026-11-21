@@ -27,7 +27,7 @@ from ...motion.output_sanitizer import sanitize_assistant_output_text
 from ...motion.payload_validation import (
     normalize_motion_arguments_payload,
 )
-from ...motion.provider_contract import expression_record
+from ...motion.provider_contract import ExpressionPrefixDecoder, expression_record
 from ...motion.text_stream import (
     TextChatStreamOutputTooLarge,
     TextChatStreamUnavailable,
@@ -86,15 +86,6 @@ def resolve_stream_motion_budget_seconds(runtime_state: Any, *, event: Any = Non
     return configured
 
 
-def _closed_expression_record(text: str) -> dict[str, Any] | None:
-    if not text.rstrip().endswith("]"):
-        return None
-    try:
-        return expression_record(json.loads(text))
-    except (ValueError, TypeError, OverflowError):
-        return None
-
-
 async def _request_motion_provider_text(
     provider: Any,
     *,
@@ -136,7 +127,7 @@ async def _request_motion_provider_text(
             contexts=contexts,
             on_first_chunk=_on_first_chunk,
             on_complete_json=on_complete_json,
-            decode_record=_closed_expression_record,
+            decode_next_record=ExpressionPrefixDecoder(),
         )
         status = "completed"
         return text, "stream"

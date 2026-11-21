@@ -64,6 +64,8 @@ export interface InteractionGazeInput {
 }
 
 export interface ExternalAudioSignalSourceOptions {
+  getRemainingMs?: () => number | null;
+  onSpeechPosture?: () => void;
   lipSyncEnabled?: boolean;
   postureBindings?: InteractionParameterBinding[];
   onFailed?: (reason: string) => void;
@@ -102,6 +104,7 @@ declare global {
         plan: DirectParameterPlanInput,
         options?: DirectParameterPlanStartOptions,
       ) => boolean;
+      updateDirectParameterStream?: (runId: string, open: boolean, plan?: DirectParameterPlanInput, fromMs?: number) => boolean;
       startIdleParameterPlan?: (
         plan: DirectParameterPlanInput,
         actionId?: string,

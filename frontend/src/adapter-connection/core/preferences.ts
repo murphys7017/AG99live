@@ -46,7 +46,7 @@ export function saveStoredAdapterAddress(nextAddress: string): void {
 
 export function loadDesktopScreenshotOnSendEnabled(): boolean {
   if (typeof window === "undefined") {
-    return true;
+    return false;
   }
 
   try {
@@ -60,7 +60,7 @@ export function loadDesktopScreenshotOnSendEnabled(): boolean {
   } catch (error) {
     console.warn("[AdapterPreferences] Failed to load desktop screenshot preference.", error);
   }
-  return true;
+  return false;
 }
 
 export function saveDesktopScreenshotOnSendEnabled(enabled: boolean): void {
