@@ -692,7 +692,7 @@ DESKTOP_SETTINGS_SPEC: tuple[DesktopSetting, ...] = (
         key="desktop_screenshot_on_send",
         group="connection",
         label="发送消息时附带桌面截图",
-        description="发送文本或按键说话时附带当前桌面截图，帮助模型理解屏幕内容。",
+        description="允许附带桌面截图。文本或语音转写命中关键词且消息未附图时，后端优先使用桌面观察缓存，缓存为空时尝试抓图。",
         kind="toggle",
     ),
     DesktopSetting(

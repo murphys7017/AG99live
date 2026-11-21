@@ -637,7 +637,7 @@ class OLVPetPlatformAdapter(Platform):
         if not isinstance(images, list):
             return
         for item in images:
-            if not isinstance(item, dict):
+            if not isinstance(item, dict) or item.get("source") != "screen":
                 continue
             data = item.get("data")
             if isinstance(data, str) and data.startswith("data:image/jpeg;base64,"):

@@ -263,9 +263,9 @@ class MediaService:
             return image_component
 
         snapshot_dir = self._desktop_snapshot_dir(client_uid)
-        snapshot_dir.mkdir(parents=True, exist_ok=True)
         snapshot_path = snapshot_dir / f"snapshot_{time.time_ns()}_{uuid4().hex}{suffix}"
         try:
+            snapshot_dir.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source_path, snapshot_path)
         except OSError as exc:
             logger.warning("Failed to persist desktop snapshot `%s`: %s", source_path, exc)
@@ -467,13 +467,17 @@ class MediaService:
         # only below AstrBot's temporary directory. The public adapter cache is
         # suitable for browser delivery, but must not become a trusted Provider
         # file root.
-        self.input_image_dir.mkdir(parents=True, exist_ok=True)
         suffix = mimetypes.guess_extension(mime_type or "") or ".png"
         if suffix == ".jpe":
             suffix = ".jpg"
 
         image_path = self.input_image_dir / f"frontend_{uuid4().hex}{suffix}"
-        image_path.write_bytes(image_bytes)
+        try:
+            self.input_image_dir.mkdir(parents=True, exist_ok=True)
+            image_path.write_bytes(image_bytes)
+        except OSError as exc:
+            logger.warning("Failed to save frontend image to temporary storage: %s", exc)
+            return None, _build_image_diagnostic("image_write_failed")
         logger.debug("Saved frontend image to trusted temporary file: %s", image_path)
         return str(image_path.resolve()), None
 

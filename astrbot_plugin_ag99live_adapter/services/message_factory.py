@@ -73,16 +73,6 @@ class MessageFactory:
           5. 把 dropped_image_count / image_input_diagnostics 写进 raw_message，
              方便下游诊断与统计。
         """
-        images = images or []
-        accepted_images, image_diagnostics = self._apply_image_cooldown(images)
-        if images:
-            logger.info(
-                "Inbound desktop message received %s image(s); accepted_after_cooldown=%s text=%s",
-                len(images),
-                len(accepted_images),
-                (text or "")[:80],
-            )
-
         abm = AstrBotMessage()
         abm.type = MessageType.FRIEND_MESSAGE
         abm.self_id = self.self_id
@@ -91,15 +81,34 @@ class MessageFactory:
         abm.message_str = text
         abm.sender = MessageMember(user_id=self.client_uid, nickname=self.nickname)
         abm.message = [Plain(text=text)]
+        self.attach_input_images(abm, raw_message=raw_message, images=images or [])
+        return abm
+
+    def attach_input_images(
+        self,
+        abm: AstrBotMessage,
+        *,
+        raw_message: dict[str, Any],
+        images: list[Any],
+    ) -> None:
+        """Populate image components and their metadata on an input message."""
+        accepted_images, image_diagnostics = self._apply_image_cooldown(images)
+        if images:
+            logger.info(
+                "Inbound desktop message received %s image(s); accepted_after_cooldown=%s text=%s",
+                len(images),
+                len(accepted_images),
+                (abm.message_str or "")[:80],
+            )
+
         normalized_raw_message = dict(raw_message)
         resolved_image_inputs: list[dict[str, str]] = []
         failed_image_diagnostics: list[dict[str, Any]] = []
         desktop_snapshot_component_indexes: list[int] = []
         payload = raw_message.get("payload")
-        desktop_snapshot_requested = bool(
-            payload.get("desktop_snapshot_requested", False)
-            if isinstance(payload, dict)
-            else False
+        desktop_snapshot_requested = (
+            isinstance(payload, dict)
+            and payload.get("desktop_snapshot_requested") is True
         )
 
         for image_payload in accepted_images:
@@ -126,41 +135,12 @@ class MessageFactory:
             if diagnostic:
                 failed_image_diagnostics.append(dict(diagnostic))
 
-        reused_desktop_snapshot = False
-        if desktop_snapshot_requested and not images:
-            latest_frame = (
-                self._latest_desktop_frame_getter()
-                if self._latest_desktop_frame_getter is not None
-                else None
-            )
-            cached_snapshot = None
-            if latest_frame is not None:
-                cached_snapshot, _ = self.media_service.convert_image_component_with_diagnostic(
-                    latest_frame.image
-                )
-            if cached_snapshot is not None:
-                desktop_snapshot_component_indexes.append(len(abm.message))
-                abm.message.append(cached_snapshot)
-                image_ref = (getattr(cached_snapshot, "file", "") or "").strip()
-                if image_ref:
-                    resolved_image_inputs.append(
-                        {"type": "input_image", "image_url": image_ref}
-                    )
-                reused_desktop_snapshot = True
-                logger.info(
-                    "Reused current Core desktop frame after frontend capture was unavailable: "
-                    "client_uid=%s",
-                    self.client_uid,
-                )
-
         if resolved_image_inputs:
             normalized_raw_message["resolved_images"] = resolved_image_inputs
         if desktop_snapshot_component_indexes:
             normalized_raw_message["desktop_snapshot_component_indexes"] = (
                 desktop_snapshot_component_indexes
             )
-        if reused_desktop_snapshot:
-            normalized_raw_message["reused_desktop_snapshot"] = True
         dropped_image_count = sum(
             1 for item in image_diagnostics if item.get("reason") == "cooldown_window"
         )
@@ -170,6 +150,8 @@ class MessageFactory:
         if all_image_diagnostics:
             normalized_raw_message["image_input_diagnostics"] = all_image_diagnostics
         abm.raw_message = normalized_raw_message
+        if desktop_snapshot_requested and not images:
+            self.attach_cached_desktop_snapshot(abm)
 
         if images:
             logger.info(
@@ -182,7 +164,25 @@ class MessageFactory:
                 len(failed_image_diagnostics),
             )
 
-        return abm
+    def attach_cached_desktop_snapshot(self, abm: AstrBotMessage) -> bool:
+        """Use the current connection's cached desktop frame for an input without images."""
+        if self._latest_desktop_frame_getter is None:
+            return False
+        frame = self._latest_desktop_frame_getter()
+        if frame is None:
+            return False
+        snapshot, _ = self.media_service.convert_image_component_with_diagnostic(frame.image)
+        if snapshot is None:
+            return False
+        raw = abm.raw_message
+        raw["desktop_snapshot_component_indexes"] = [len(abm.message)]
+        raw["reused_desktop_snapshot"] = True
+        abm.message.append(snapshot)
+        image_ref = (getattr(snapshot, "file", "") or "").strip()
+        if image_ref:
+            raw["resolved_images"] = [{"type": "input_image", "image_url": image_ref}]
+        logger.info("Reused cached Core desktop frame: client_uid=%s", self.client_uid)
+        return True
 
     @staticmethod
     def _is_desktop_snapshot(image_payload: Any) -> bool:

@@ -17,6 +17,11 @@ from .motion.observation import resolve_persona_motion_source_route
 from .motion.output_sanitizer import (
     sanitize_assistant_output_segment_text,
 )
+from .protocol.constants import (
+    TYPE_INPUT_AUDIO_STREAM_CHUNK,
+    TYPE_INPUT_AUDIO_STREAM_END,
+    TYPE_INPUT_TEXT,
+)
 from .runtime.message_utils import resolve_platform_segment_message_id
 from .runtime.adapter_event_context import AdapterEventContext
 from .runtime.desktop_context import (
@@ -24,7 +29,10 @@ from .runtime.desktop_context import (
     DESKTOP_CONTEXT_MATCHED_KEY_EXTRA_KEY,
     match_desktop_context_keywords,
 )
-from .runtime.plugin_runtime import get_plugin_config_snapshot
+from .runtime.plugin_runtime import (
+    get_persisted_desktop_settings,
+    get_plugin_config_snapshot,
+)
 from .runtime.persona_lifecycle import (
     PersonaResultState,
     PersonaSegmentIdentity,
@@ -200,17 +208,7 @@ class OLVPetPlatformEvent(AstrMessageEvent):
             self.set_extra(DESKTOP_CONTEXT_MATCHED_KEY_EXTRA_KEY, ())
             return
 
-        runtime_state = getattr(self.adapter, "runtime_state", None)
-        config = getattr(runtime_state, "plugin_config", None)
-        if not isinstance(config, dict):
-            config = get_plugin_config_snapshot().config
-        desktop_context = config.get("desktop_context", {})
-        configured = (
-            desktop_context.get("trigger_keywords")
-            if isinstance(desktop_context, dict)
-            else None
-        )
-        matched = match_desktop_context_keywords(message_str, configured)
+        matched = self._match_desktop_context(message_str)
         self.set_extra(DESKTOP_CONTEXT_ALLOWED_EXTRA_KEY, bool(matched))
         self.set_extra(DESKTOP_CONTEXT_MATCHED_KEY_EXTRA_KEY, matched)
         logger.debug(
@@ -219,6 +217,69 @@ class OLVPetPlatformEvent(AstrMessageEvent):
             len(matched),
             len(snapshot_indexes),
         )
+
+    def _match_desktop_context(self, text: str) -> tuple[str, ...]:
+        runtime_state = getattr(self.adapter, "runtime_state", None)
+        config = getattr(runtime_state, "plugin_config", None)
+        if not isinstance(config, dict):
+            config = get_plugin_config_snapshot().config
+        settings = config.get("desktop_context", {})
+        return match_desktop_context_keywords(
+            text, settings.get("trigger_keywords") if isinstance(settings, dict) else None
+        )
+
+    async def prepare_inbound_media(self) -> None:
+        raw = self.message_obj.raw_message
+        if self.is_stopped() or not isinstance(raw, dict):
+            return
+        payload = raw.get("payload")
+        if (
+            not isinstance(payload, dict)
+            or payload.get("images")
+            or _resolve_desktop_snapshot_component_indexes(self.message_obj)
+            or not self._match_desktop_context(self.message_str)
+        ):
+            return
+
+        input_type = raw.get("type")
+        if input_type == TYPE_INPUT_AUDIO_STREAM_CHUNK and payload.get("transcription"):
+            settings = get_persisted_desktop_settings(self.get_platform_id())
+            screenshot_requested = (
+                settings.get("desktop_screenshot_on_send", {}).get("value") == "true"
+            )
+        elif input_type in (TYPE_INPUT_TEXT, TYPE_INPUT_AUDIO_STREAM_END):
+            screenshot_requested = payload.get("desktop_snapshot_requested") is True
+        else:
+            screenshot_requested = False
+        if not screenshot_requested:
+            logger.debug("WIRING desktop_input_capture skipped type=%s reason=not_requested", input_type)
+            return
+
+        factory = self.adapter.message_factory
+        if not factory.attach_cached_desktop_snapshot(self.message_obj):
+            broker = self.adapter.desktop_observation
+            try:
+                # The pipeline can wait here while the WebSocket receives the result.
+                async with asyncio.timeout(2):
+                    image = await broker.capture()
+            except (TimeoutError, RuntimeError) as exc:
+                logger.debug(
+                    "WIRING desktop_input_capture unavailable type=%s reason=%s",
+                    input_type,
+                    str(exc) or type(exc).__name__,
+                )
+                return
+            if self.is_stopped():
+                return
+            factory.attach_input_images(
+                self.message_obj,
+                raw_message=raw,
+                images=[{"data": image, "mime_type": "image/jpeg", "source": "screen"}],
+            )
+        self._set_desktop_context_gate(
+            message_str=self.message_str, message_obj=self.message_obj
+        )
+        self._attach_prompt_annotations(message_obj=self.message_obj)
 
     async def send(self, message):
         self._direct_output_sequence += 1
