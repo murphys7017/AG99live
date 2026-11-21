@@ -19,7 +19,8 @@ export type ConfigField = {
   step?: number;
   maxLength?: number;
   required: boolean;
-  optionsFrom?: "providers" | "models";
+  optionsFrom?: "providers" | "models" | "sttProviders";
+  visibleWhen?: { key: string; value: string };
   options?: Array<{ value: string; label: string }>;
 };
 
@@ -42,6 +43,7 @@ export type ConfigSchemaResponse = {
   sections: ConfigSection[];
   defaults: ConfigValues;
   providers: ProviderOption[];
+  sttProviders: ProviderOption[];
 };
 
 export type SettingsSaveResponse = {
@@ -71,6 +73,14 @@ export const CONFIG_ERROR_FALLBACKS: Record<string, string> = {
   plugin_config_persistence_unavailable: "当前无法写入插件配置，请在 AstrBot 中检查插件状态。",
   settings_save_failed: "保存失败，配置已回滚到修改前的状态。",
 };
+
+export function isFieldVisible(
+  field: ConfigField,
+  values: ConfigValues[string] | undefined,
+): boolean {
+  const rule = field.visibleWhen;
+  return !rule || values?.[rule.key] === rule.value;
+}
 
 export function writeField(
   values: ConfigValues,

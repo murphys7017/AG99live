@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { isFieldVisible } from "./configSchema";
 import type {
   ConfigField,
   ConfigSection,
@@ -23,6 +24,7 @@ const props = defineProps<{
   sections: ConfigSection[];
   values: ConfigValues;
   providers: ProviderOption[];
+  sttProviders: ProviderOption[];
   models: string[];
   fieldErrorPath: string;
   fieldErrorCode: string;
@@ -85,6 +87,14 @@ function localError(field: ConfigField, sectionKey: string): string {
   return "";
 }
 
+function visibleFields(section: ConfigSection): ConfigField[] {
+  return section.fields.filter((field) => isFieldVisible(field, props.values[section.key]));
+}
+
+function providerOptions(field: ConfigField): ProviderOption[] {
+  return field.optionsFrom === "sttProviders" ? props.sttProviders : props.providers;
+}
+
 function rangeHint(field: ConfigField): string {
   if (field.minimum === undefined || field.maximum === undefined) return "";
   return `${field.minimum} – ${field.maximum}`;
@@ -119,7 +129,7 @@ function onInput(field: ConfigField, sectionKey: string, event: Event): void {
       </header>
       <p class="web-control-settings-group__description">{{ section.description }}</p>
 
-      <template v-for="field in section.fields" :key="field.key">
+      <template v-for="field in visibleFields(section)" :key="field.key">
         <label v-if="field.kind === 'bool'" class="web-control-checkbox">
           <input
             :checked="Boolean(valueAt(field, section.key))"
@@ -192,8 +202,17 @@ function onInput(field: ConfigField, sectionKey: string, event: Event): void {
             :disabled="props.disabled"
             @change="onInput(field, section.key, $event)"
           >
-            <option value="">未选择</option>
-            <option v-for="option in providers" :key="option.id" :value="option.id">
+            <option value="">
+              {{ field.optionsFrom === "sttProviders" && !sttProviders.length ? "AstrBot 中暂无语音识别模型" : "未选择" }}
+            </option>
+            <option
+              v-if="valueAt(field, section.key) && !providerOptions(field).some((option) => option.id === valueAt(field, section.key))"
+              :value="valueAt(field, section.key)"
+              disabled
+            >
+              {{ valueAt(field, section.key) }}（不可用）
+            </option>
+            <option v-for="option in providerOptions(field)" :key="option.id" :value="option.id">
               {{ option.id }}<template v-if="option.model"> — {{ option.model }}</template>
             </option>
           </select>

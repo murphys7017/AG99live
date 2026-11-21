@@ -196,8 +196,10 @@ class SpeechIngressService:
         if not bool(getattr(self.runtime_state, "fast_asr_enabled", False)):
             return None
         async with self._streaming_asr_creation_lock:
-            endpoint = getattr(self.runtime_state, "fast_asr_endpoint", "")
-            if endpoint:
+            if self.runtime_state.speech_recognition_source == "server":
+                endpoint = self.runtime_state.fast_asr_endpoint
+                if not endpoint:
+                    return None
                 # Release any cached local model when switching a running adapter.
                 self._streaming_asr_template = None
                 self._streaming_asr_template_key = None

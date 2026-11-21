@@ -35,6 +35,7 @@ from .runtime.plugin_runtime import (
     get_persisted_desktop_settings,
     reconcile_control_platforms,
     restore_plugin_config_if_current,
+    resolve_speech_recognition_source,
 )
 from .services.history_service import HistoryNotFoundError
 from .services.remote_asr import parse_asr_endpoint
@@ -64,6 +65,7 @@ class ConfigField:
     required: bool = True
     options_from: str | None = None
     options: tuple[tuple[str, str], ...] = ()
+    visible_when: tuple[str, str] | None = None
 
     def to_json(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -84,6 +86,9 @@ class ConfigField:
         for name, value in optional.items():
             if value is not None:
                 payload[name] = value
+        if self.visible_when is not None:
+            key, value = self.visible_when
+            payload["visibleWhen"] = {"key": key, "value": value}
         if self.options:
             payload["options"] = [
                 {"value": value, "label": label}
@@ -111,33 +116,44 @@ class ConfigSection:
 CONFIG_SCHEMA: tuple[ConfigSection, ...] = (
     ConfigSection(
         key="fast_asr",
-        label="流式语音识别",
-        description="增量识别 PTT/VAD 音频；AstrBot STT 只在任务交接时复核。",
+        label="语音识别",
+        description="为按键说话和语音活动检测选择识别来源。",
         fields=(
             ConfigField(
-                key="enabled",
-                kind="bool",
-                label="启用流式 ASR",
-                description="启用后，流式识别用于普通输入；Core 任务交接时再复核原始音频。",
-                default=False,
+                key="source",
+                kind="choice",
+                label="识别来源",
+                description="本地和服务器提供流式识别，任务交接时可由 AstrBot 复核原始音频。",
+                default="astrbot",
+                options=(("astrbot", "AstrBot 提供"), ("local", "本地"), ("server", "服务器")),
+            ),
+            ConfigField(
+                key="stt_provider_id",
+                kind="provider",
+                label="AstrBot 语音识别模型",
+                description="从 AstrBot 已加载的语音转文字模型中选择。",
+                default="",
+                max_length=255,
+                options_from="sttProviders",
+                visible_when=("source", "astrbot"),
             ),
             ConfigField(
                 key="endpoint",
                 kind="text",
                 label="识别服务器地址",
-                description="填写主机名或 IP 和端口（例如 asr.lan:6006）。留空时使用本机模型。",
+                description="填写主机名或 IP 和端口，例如 asr.lan:6006。",
                 default="",
                 max_length=255,
-                required=False,
+                visible_when=("source", "server"),
             ),
             ConfigField(
                 key="model_dir",
                 kind="text",
-                label="本机 Sherpa ONNX 模型目录",
-                description="包含 model*.onnx 与 tokens.txt 的目录。",
+                label="本地 Sherpa ONNX 模型目录",
+                description="填写 AstrBot 所在机器上包含 model*.onnx 和 tokens.txt 的目录。",
                 default="",
                 max_length=1024,
-                required=False,
+                visible_when=("source", "local"),
             ),
             ConfigField(
                 key="provider",
@@ -146,6 +162,7 @@ CONFIG_SCHEMA: tuple[ConfigSection, ...] = (
                 description="选择本地推理设备。",
                 default="cpu",
                 options=(("cpu", "CPU"), ("cuda", "CUDA")),
+                visible_when=("source", "local"),
             ),
             ConfigField(
                 key="num_threads",
@@ -156,6 +173,7 @@ CONFIG_SCHEMA: tuple[ConfigSection, ...] = (
                 minimum=1,
                 maximum=16,
                 step=1,
+                visible_when=("source", "local"),
             ),
         ),
     ),
@@ -965,6 +983,10 @@ DESKTOP_SETTINGS_SPEC: tuple[DesktopSetting, ...] = (
     ),
 )
 
+_WEB_DESKTOP_SETTINGS_SPEC = tuple(
+    setting for setting in DESKTOP_SETTINGS_SPEC
+    if setting.group != "bilibili" and not setting.key.startswith("vts_")
+)
 _DESKTOP_SETTINGS_BY_KEY = {setting.key: setting for setting in DESKTOP_SETTINGS_SPEC}
 _DESKTOP_SECRET_SETTING_KEYS = frozenset(
     setting.key for setting in DESKTOP_SETTINGS_SPEC if setting.kind == "password"
@@ -1041,7 +1063,7 @@ def _normalize_setting_value(path: str, field: ConfigField, value: Any) -> Any:
         normalized = value.strip()
         if field.max_length is not None and len(normalized) > field.max_length:
             raise ConfigValidationError("settings_value_too_long", path)
-        if field.required and not normalized:
+        if field.required and field.visible_when is None and not normalized:
             raise ConfigValidationError("settings_value_required", path)
         if path == "fast_asr.endpoint" and normalized:
             try:
@@ -1075,7 +1097,24 @@ def _bounded_value(field: ConfigField, value: Any, path: str) -> Any:
     return value
 
 
-def _normalize_cross_field(normalized: dict[str, dict[str, Any]]) -> None:
+def _normalize_cross_field(
+    normalized: dict[str, dict[str, Any]], *, validate_asr: bool = False
+) -> None:
+    if validate_asr:
+        asr = normalized["fast_asr"]
+        for field in _SECTIONS_BY_KEY["fast_asr"].fields:
+            if field.visible_when is None or not field.required:
+                continue
+            key, value = field.visible_when
+            if asr[key] == value and not asr[field.key]:
+                raise ConfigValidationError("settings_value_required", f"fast_asr.{field.key}")
+        if asr["source"] == "astrbot":
+            provider_id = asr["stt_provider_id"]
+            if not any(option["id"] == provider_id for option in _list_providers(stt=True)):
+                raise ConfigValidationError(
+                    "settings_provider_unknown", "fast_asr.stt_provider_id", provider_id
+                )
+
     curve = normalized.get("performance_curve")
     if curve and curve.get("enabled") and not str(curve.get("provider_id") or "").strip():
         raise ConfigValidationError(
@@ -1135,13 +1174,13 @@ def _verify_providers(normalized: dict[str, dict[str, Any]]) -> None:
         if not isinstance(values, dict):
             continue
         for field in section.fields:
-            if field.kind != "provider":
+            if field.kind != "provider" or field.options_from == "sttProviders":
                 continue
             provider_id = str(values.get(field.key) or "").strip()
             if not provider_id:
                 continue
             if known is None:
-                known = [option["id"] for option in _list_chat_providers()]
+                known = [option["id"] for option in _list_providers()]
             if known and provider_id not in known:
                 raise ConfigValidationError(
                     "settings_provider_unknown",
@@ -1150,14 +1189,14 @@ def _verify_providers(normalized: dict[str, dict[str, Any]]) -> None:
                 )
 
 
-def _list_chat_providers() -> list[dict[str, str]]:
+def _list_providers(*, stt: bool = False) -> list[dict[str, str]]:
     context = get_plugin_context()
     if context is None:
         return []
     try:
-        providers = context.get_all_providers()
+        providers = context.get_all_stt_providers() if stt else context.get_all_providers()
     except Exception:  # pragma: no cover - provider manager is optional at runtime
-        logger.debug("AG99live web control could not list chat providers")
+        logger.debug("AG99live web control could not list %s providers", "STT" if stt else "chat")
         return []
     options: list[dict[str, str]] = []
     for provider in providers:
@@ -1293,7 +1332,8 @@ class WebControlPageApi:
         return jsonify({
             "sections": [section.to_json() for section in CONFIG_SCHEMA],
             "defaults": default_settings(),
-            "providers": _list_chat_providers(),
+            "providers": _list_providers(),
+            "sttProviders": _list_providers(stt=True),
         })
 
     async def get_settings(self):
@@ -1476,7 +1516,7 @@ class WebControlPageApi:
             return jsonify(_desktop_settings_payload(platform))
 
         entries: dict[str, Any] = {}
-        for setting in DESKTOP_SETTINGS_SPEC:
+        for setting in _WEB_DESKTOP_SETTINGS_SPEC:
             try:
                 entries[setting.key] = await platform.desktop_settings_broker.query(
                     key=setting.key,
@@ -1497,7 +1537,7 @@ class WebControlPageApi:
                     else payload["settings"][setting.key]
                 ),
             }
-            for order, setting in enumerate(DESKTOP_SETTINGS_SPEC)
+            for order, setting in enumerate(_WEB_DESKTOP_SETTINGS_SPEC)
         }
         return jsonify(payload)
 
@@ -1578,7 +1618,10 @@ class WebControlPageApi:
             async with self._settings_lock:
                 try:
                     previous, current = apply_plugin_config_patch(
-                        patch, validate=lambda merged: _normalize_cross_field(_project_settings(merged))
+                        patch,
+                        validate=lambda merged: _normalize_cross_field(
+                            _project_settings(merged), validate_asr="fast_asr" in patch
+                        ),
                     )
                 except ConfigValidationError as exc:
                     return jsonify({"ok": False, "error": exc.to_json()})
@@ -1808,7 +1851,7 @@ def _desktop_settings_payload(platform: Any) -> dict[str, Any]:
                     public_entry(setting.key)
                 ),
             }
-            for order, setting in enumerate(DESKTOP_SETTINGS_SPEC)
+            for order, setting in enumerate(_WEB_DESKTOP_SETTINGS_SPEC)
         },
     }
 
@@ -1877,6 +1920,8 @@ def _project_settings(config: Any) -> dict[str, dict[str, Any]]:
                 )
             except ConfigValidationError:
                 values[field.key] = field.default
+        if section.key == "fast_asr":
+            values["source"] = resolve_speech_recognition_source(stored)
         projected[section.key] = values
     return projected
 

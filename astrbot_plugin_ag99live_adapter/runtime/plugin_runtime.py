@@ -104,6 +104,17 @@ def get_config_value(config: Mapping[str, Any] | None, key: str, default: Any) -
     return default if value is None else value
 
 
+def resolve_speech_recognition_source(config: Mapping[str, Any] | None) -> str:
+    """Use the saved source, or infer it from an existing ASR configuration."""
+    source = get_config_value(config, "source", "")
+    if source in ("astrbot", "local", "server"):
+        return source
+    if not get_config_value(config, "enabled", False):
+        return "astrbot"
+    endpoint = str(get_config_value(config, "endpoint", "")).strip()
+    return "server" if endpoint else "local"
+
+
 def prune_retired_plugin_config_fields(config: dict[str, Any]) -> list[str]:
     """Remove known Adapter config keys superseded by the current nested schema."""
     removed: list[str] = []

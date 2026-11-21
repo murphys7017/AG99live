@@ -53,6 +53,7 @@ from .plugin_runtime import (
     MAX_SPEECH_MS_PER_HAN_CHAR,
     PluginConfigSnapshot,
     get_config_value,
+    resolve_speech_recognition_source,
 )
 
 LIVE2D_SCAN_CACHE_VERSION = "live2d_scan_cache.v3"
@@ -142,6 +143,8 @@ class RuntimeState:
         self.passive_behavior_cooldown_ms = 3000
         self.passive_behavior_result_ttl_ms = 2500
         self.passive_behavior_timeout_seconds = 3.0
+        self.speech_recognition_source = "astrbot"
+        self.astrbot_stt_provider_id = ""
         self.fast_asr_enabled = False
         self.fast_asr_endpoint = ""
         self.fast_asr_model_dir = ""
@@ -374,10 +377,18 @@ class RuntimeState:
                 integer=False,
             )
         )
-        self.fast_asr_enabled = bool(get_config_value(fast_asr_config, "enabled", False))
-        self.fast_asr_endpoint = str(
-            get_config_value(fast_asr_config, "endpoint", "") or ""
-        ).strip()
+        self.speech_recognition_source = resolve_speech_recognition_source(fast_asr_config)
+        self.fast_asr_enabled = self.speech_recognition_source != "astrbot"
+        self.astrbot_stt_provider_id = (
+            str(get_config_value(fast_asr_config, "stt_provider_id", "")).strip()
+            if self.speech_recognition_source == "astrbot"
+            else ""
+        )
+        self.fast_asr_endpoint = (
+            str(get_config_value(fast_asr_config, "endpoint", "")).strip()
+            if self.speech_recognition_source == "server"
+            else ""
+        )
         self.fast_asr_model_dir = str(
             get_config_value(fast_asr_config, "model_dir", "") or ""
         ).strip()
@@ -727,8 +738,13 @@ class RuntimeState:
         provider = self.provider_registry.get_stt_provider(
             platform_id=self.platform_id,
             client_uid=self.client_uid,
+            provider_id=self.astrbot_stt_provider_id,
         )
         if provider is None:
+            if self.astrbot_stt_provider_id:
+                raise RuntimeStateConfigurationError(
+                    f"AstrBot STT provider is unavailable: {self.astrbot_stt_provider_id}"
+                )
             raise RuntimeStateConfigurationError(
                 "AstrBot has no active STT provider for the AG99live desktop session."
             )

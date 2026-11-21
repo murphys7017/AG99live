@@ -29,7 +29,7 @@ def test_unknown_pre_action_provider_is_rejected(monkeypatch) -> None:
 
     monkeypatch.setattr(
         web_control,
-        "_list_chat_providers",
+        "_list_providers",
         lambda: [{"id": "ollama/qwen3:1.7b", "name": "Qwen3 1.7B"}],
     )
     with pytest.raises(ConfigValidationError) as exc_info:

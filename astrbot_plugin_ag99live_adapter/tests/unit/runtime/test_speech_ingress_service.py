@@ -190,6 +190,7 @@ def test_fast_asr_streams_partial_text_and_flushes_audio_tail(
             media_service=MediaServiceStub(),
             runtime_state=SimpleNamespace(
                 fast_asr_enabled=True,
+                speech_recognition_source="local",
                 fast_asr_model_dir="test-model",
                 fast_asr_provider="cpu",
                 fast_asr_num_threads=1,

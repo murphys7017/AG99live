@@ -510,7 +510,9 @@ class ProviderRegistry(Protocol):
 
     def get_chat_provider(self, provider_id: str) -> Any | None: ...
 
-    def get_stt_provider(self, *, platform_id: str, client_uid: str) -> Any | None: ...
+    def get_stt_provider(
+        self, *, platform_id: str, client_uid: str, provider_id: str = ""
+    ) -> Any | None: ...
 
 
 __all__ = [

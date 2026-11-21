@@ -19,9 +19,14 @@ class AstrBotProviderRegistry:
         provider = self._context.get_provider_by_id(provider_id)
         return provider if isinstance(provider, Provider) else None
 
-    def get_stt_provider(self, *, platform_id: str, client_uid: str):
+    def get_stt_provider(
+        self, *, platform_id: str, client_uid: str, provider_id: str = ""
+    ):
         if self._context is None:
             return None
+        if provider_id:
+            provider = self._context.get_provider_by_id(provider_id)
+            return provider if isinstance(provider, STTProvider) else None
         provider = self._context.get_using_stt_provider(
             umo=str(
                 MessageSession(

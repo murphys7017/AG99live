@@ -17,6 +17,7 @@ import {
 } from "./desktopSettings";
 import {
   CONFIG_ERROR_FALLBACKS,
+  isFieldVisible,
   writeField,
   type ConfigField,
   type ConfigSection,
@@ -90,6 +91,7 @@ const savedSettings = ref<ConfigValues>({});
 const configSections = ref<ConfigSection[]>([]);
 const configDefaults = ref<ConfigValues>({});
 const configProviders = ref<ProviderOption[]>([]);
+const sttProviders = ref<ProviderOption[]>([]);
 const settingsFieldError = ref("");
 const settingsFieldErrorCode = ref("");
 const desktopSettings = ref<DesktopSettingsState>({
@@ -196,6 +198,7 @@ async function loadConfigSchema(revision?: number): Promise<void> {
   configSections.value = response.sections;
   configDefaults.value = response.defaults;
   configProviders.value = response.providers;
+  sttProviders.value = response.sttProviders ?? [];
 }
 
 async function loadSettings(revision?: number): Promise<void> {
@@ -219,23 +222,29 @@ function applyFieldChange(path: string, value: string | number | boolean): void 
   }
 }
 
-const settingsDirty = computed(() => {
-  const current = settings.value;
-  const saved = savedSettings.value;
-  return Object.keys(current).some(
-    (section) =>
-      Object.keys(current[section] ?? {}).some(
-        (key) => current[section][key] !== saved[section]?.[key],
-      ),
-  );
+const settingsPatch = computed<ConfigValues>(() => {
+  const patch: ConfigValues = {};
+  for (const section of configSections.value) {
+    const current = settings.value[section.key];
+    const saved = savedSettings.value[section.key];
+    for (const field of section.fields) {
+      const value = current?.[field.key];
+      if (value !== undefined && value !== saved?.[field.key] && isFieldVisible(field, current)) {
+        writeField(patch, `${section.key}.${field.key}`, value);
+      }
+    }
+  }
+  return patch;
 });
+
+const settingsDirty = computed(() => Object.keys(settingsPatch.value).length > 0);
 
 async function saveSettings(): Promise<void> {
   settingsSaving.value = true;
   resetMessage();
   try {
     const response = await apiPost<SettingsSaveResponse>("control/settings", {
-      settings: JSON.parse(JSON.stringify(settings.value)),
+      settings: settingsPatch.value,
     });
     if (!response.ok) {
       settingsFieldError.value = response.error?.field ?? "";
@@ -827,6 +836,7 @@ onMounted(() => void loadOverview());
           :sections="configSections"
           :values="settings"
           :providers="configProviders"
+          :stt-providers="sttProviders"
           :models="modelNameOptions"
           :field-error-path="settingsFieldError"
           :field-error-code="settingsFieldErrorCode"

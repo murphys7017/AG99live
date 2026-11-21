@@ -31,11 +31,6 @@ const SETTING_GROUPS: Record<string, DesktopSettingGroup> = {
     label: "外部输出",
     description: "将桌面画面输出到 Spout 或 ESP32 小屏。",
   },
-  bilibili: {
-    key: "bilibili",
-    label: "B 站直播",
-    description: "配置直播间监听和弹幕响应；Cookie 不会回显。",
-  },
   other: {
     key: "other",
     label: "其他桌面配置",
