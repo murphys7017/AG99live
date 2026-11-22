@@ -27,7 +27,6 @@ import type { ModelSyncInstance } from "../model-sync/useModelSync.js";
 import type { TurnPlaybackSessionPort } from "../../turn-playback/sessionStorePort.js";
 
 export interface AdapterInboundRuntimeDeps {
-  prewarmSpeechOutput(turnId: string): void;
   onIdleMotion?: (event: IdleMotionEvent) => void;
   onMotionPreview?: (envelope: ProtocolEnvelope<unknown>) => void;
   onPreAction: (event: PreActionEvent) => void;
@@ -65,7 +64,6 @@ export interface AdapterInboundRuntimeDeps {
 export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
   const reportedProtocolWarnings = new Set<string>();
   const incremental = createIncrementalOutputRuntime({
-    prewarmSpeechOutput: deps.prewarmSpeechOutput,
     getStore: deps.getSessionStore,
     currentTurnId: () => deps.state.currentTurnId,
     openPcm: (turnId, messageId) => deps.openPcmForTimelinePlayback(turnId, messageId),

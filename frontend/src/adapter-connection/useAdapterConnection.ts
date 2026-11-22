@@ -174,7 +174,6 @@ export interface AdapterPlaybackCompositionPort {
 }
 
 interface CreateAdapterConnectionOptions {
-  prepareSpeechOutput?: (turnId: string) => Promise<void>;
   sessionStore: SessionStore;
   modelSync: ModelSyncInstance;
   normalizeMotionPayload: MotionPayloadNormalizer;
@@ -288,7 +287,6 @@ export function createAdapterConnection(
   }
 
   const microphoneRuntime = createAdapterMicrophoneRuntime({
-    prepareSpeechOutput: options.prepareSpeechOutput,
     state,
     getSocket: () => socket,
     buildEnvelope: buildMessageEnvelope as (typeof buildMessageEnvelope),
@@ -466,14 +464,7 @@ export function createAdapterConnection(
     },
   );
 
-  function prewarmSpeechOutput(turnId: string): void {
-    void options.prepareSpeechOutput?.(turnId).catch(error => {
-      console.warn("[SpeechOutput] early preparation failed; playback will retry.", error);
-    });
-  }
-
   const inboundRuntime = createAdapterInboundRuntime({
-    prewarmSpeechOutput,
     onIdleMotion: (event) => {
       if (receivedIdleMotionIds.has(event.messageId)) return;
       receivedIdleMotionIds.add(event.messageId);
@@ -570,7 +561,6 @@ export function createAdapterConnection(
       }, envelope.turn_id);
     },
     notifyTurnLifecycle: (event) => {
-      if (event.phase === "started") prewarmSpeechOutput(event.turnId);
       if (event.phase === "terminal") {
         if (state.turnFinishedSuccess) subtitleReporter.end(event.turnId);
         else subtitleReporter.clear(event.turnId);
@@ -621,7 +611,6 @@ export function createAdapterConnection(
   });
 
   const outboundCtx = {
-    prewarmSpeechOutput,
     get state() {
       return state;
     },
