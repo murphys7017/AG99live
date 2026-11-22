@@ -381,283 +381,67 @@ _AXIS_DEFAULTS: dict[str, dict[str, Any]] = {
     },
 }
 
-# Mk6.moc3 supplies the native limits/defaults. VTube Studio tracking inputs
-# are separate from semantic parameter directions; keep these model-specific.
-_MODEL_AXIS_DEFAULTS: dict[str, dict[str, dict[str, Any]]] = {
-    "DeepSeek": {
-        "head_yaw": {
-            "output_range": [-45.0, 45.0],
-        },
-        "head_pitch": {
-            "output_range": [-30.0, 30.0],
-        },
-        "head_roll": {
-            "output_range": [-30.0, 30.0],
-        },
-        "brow_bias": {
-            "description": "Controls the shared left-right brow angle.",
-            "parameter_ids": ["ParamBrowLAngle", "ParamBrowRAngle"],
-            "positive_semantics": ["raise brows", "curious brow shape"],
-            "negative_semantics": ["furrow brows", "tense brow shape"],
-            "usage_notes": "DeepSeek has symmetric brow-angle parameters. Keep both sides aligned for readable expressions.",
-        },
-    },
-    "Mk6_1.0": {
-        "head_yaw": {"output_range": [-35.0, 35.0]},
-        "head_pitch": {"output_range": [-20.0, 20.0]},
-        "brow_bias": {
-            "description": "Controls smiling-versus-tense brow form, not brow height.",
-            "positive_semantics": ["soften brow form", "smiling brow shape"],
-            "negative_semantics": ["tense brow form", "frowning brow shape"],
-            "usage_notes": "Mk6 VTube Studio maps MouthSmile to ParamBrowForm; use this as a brow-shape hint, not a brow-height control.",
-        },
-        "eye_open_left": {
-            "neutral": 50.0, "output_range": [0.0, 2.0],
-            "soft_range": [35.0, 65.0], "strong_range": [12.0, 88.0],
-        },
-        "eye_open_right": {
-            "neutral": 50.0, "output_range": [0.0, 2.0],
-            "soft_range": [35.0, 65.0], "strong_range": [12.0, 88.0],
-        },
-        "eye_smile_left": {
-            "neutral": 50.0, "output_range": [-1.0, 1.0],
-            "soft_range": [35.0, 65.0], "strong_range": [12.0, 88.0],
-        },
-        "eye_smile_right": {
-            "neutral": 50.0, "output_range": [-1.0, 1.0],
-            "soft_range": [35.0, 65.0], "strong_range": [12.0, 88.0],
-        },
-        "brow_left_detail": {
-            "description": "Controls the one-sided left brow down shape.",
-            "positive_semantics": ["relax left brow down control"],
-            "negative_semantics": ["lower left brow", "tense left brow down"],
-            "usage_notes": "BrowL Down is one-sided: neutral is no down effect; negative levels lower the brow.",
-            "neutral": 100.0, "invert": True, "output_range": [0.0, 1.0],
-            "soft_range": [70.0, 100.0], "strong_range": [20.0, 100.0],
-            "extreme_range": [0.0, 100.0],
-        },
-        "brow_right_detail": {
-            "description": "Controls the one-sided right brow down shape.",
-            "positive_semantics": ["relax right brow down control"],
-            "negative_semantics": ["lower right brow", "tense right brow down"],
-            "usage_notes": "BrowR Down is one-sided: neutral is no down effect; negative levels lower the brow.",
-            "neutral": 100.0, "invert": True, "output_range": [0.0, 1.0],
-            "soft_range": [70.0, 100.0], "strong_range": [20.0, 100.0],
-            "extreme_range": [0.0, 100.0],
-        },
-        "mouth_open": {
-            "neutral": 0.0, "soft_range": [0.0, 25.0],
-            "strong_range": [0.0, 75.0], "extreme_range": [0.0, 100.0],
-        },
-        "breath": {
-            "neutral": 0.0, "soft_range": [0.0, 20.0],
-            "strong_range": [0.0, 60.0], "extreme_range": [0.0, 100.0],
-        },
-    },
-}
+_MODEL_PROFILE_DIRECTORY = Path(__file__).with_name("model_profiles")
 
-_MODEL_EXTRA_AXES: dict[str, tuple[dict[str, Any], ...]] = {
-    "DeepSeek": (
-        {
-            "id": "upper_body",
-            "label": "Upper Body",
-            "description": "Controls the model's upper-body skeleton posture.",
-            "semantic_group": "body",
-            "control_role": "hint",
-            "neutral": 50.0,
-            "soft_range": [38.0, 62.0],
-            "strong_range": [20.0, 80.0],
-            "extreme_range": [8.0, 92.0],
-            "positive_semantics": ["lift upper body", "open upper posture"],
-            "negative_semantics": ["drop upper body", "close upper posture"],
-            "usage_notes": "Use as a supporting posture axis with head and body pitch. Avoid using it for every sentence.",
-            "dynamics": {
-                "max_velocity": 110.0,
-                "max_acceleration": 700.0,
-                "max_speech_offset_ratio": 0.08,
-            },
-            "parameter_bindings": [
-                {"parameter_id": "ParamSkelUpperBody", "output_range": [-12.0, 12.0]},
-            ],
-        },
-        {
-            "id": "arm_left_upper",
-            "label": "Left Upper Arm",
-            "description": "Controls the left upper-arm gesture parameter.",
-            "semantic_group": "shoulder",
-            "control_role": "hint",
-            "neutral": 29.4118,
-            "soft_range": [20.0, 40.0],
-            "strong_range": [8.0, 60.0],
-            "extreme_range": [0.0, 100.0],
-            "positive_semantics": ["raise the left upper arm", "add left-side emphasis"],
-            "negative_semantics": ["lower the left upper arm", "relax left-side emphasis"],
-            "usage_notes": "This axis uses the model's asymmetric arm range and keeps its neutral value at the authored default.",
-            "dynamics": {
-                "max_velocity": 105.0,
-                "max_acceleration": 650.0,
-                "max_speech_offset_ratio": 0.04,
-            },
-            "parameter_bindings": [
-                {"parameter_id": "ParamArmLA", "output_range": [-25.0, 60.0]},
-            ],
-        },
-        {
-            "id": "arm_left_forearm",
-            "label": "Left Forearm",
-            "description": "Controls the left forearm gesture parameter.",
-            "semantic_group": "shoulder",
-            "control_role": "hint",
-            "neutral": 17.6471,
-            "soft_range": [10.0, 26.0],
-            "strong_range": [4.0, 55.0],
-            "extreme_range": [0.0, 100.0],
-            "positive_semantics": ["bend the left forearm", "bring the left hand into the gesture"],
-            "negative_semantics": ["extend the left forearm", "open the left gesture"],
-            "usage_notes": "Coordinate with arm_left_upper for a readable left-side gesture.",
-            "dynamics": {
-                "max_velocity": 105.0,
-                "max_acceleration": 650.0,
-                "max_speech_offset_ratio": 0.04,
-            },
-            "parameter_bindings": [
-                {"parameter_id": "ParamArmLB", "output_range": [-15.0, 70.0]},
-            ],
-        },
-        {
-            "id": "arm_right_upper",
-            "label": "Right Upper Arm",
-            "description": "Controls the right upper-arm gesture parameter.",
-            "semantic_group": "shoulder",
-            "control_role": "hint",
-            "neutral": 29.4118,
-            "soft_range": [20.0, 40.0],
-            "strong_range": [8.0, 60.0],
-            "extreme_range": [0.0, 100.0],
-            "positive_semantics": ["raise the right upper arm", "add right-side emphasis"],
-            "negative_semantics": ["lower the right upper arm", "relax right-side emphasis"],
-            "usage_notes": "This axis uses the model's asymmetric arm range and keeps its neutral value at the authored default.",
-            "dynamics": {
-                "max_velocity": 105.0,
-                "max_acceleration": 650.0,
-                "max_speech_offset_ratio": 0.04,
-            },
-            "parameter_bindings": [
-                {"parameter_id": "ParamArmRA", "output_range": [-25.0, 60.0]},
-            ],
-        },
-        {
-            "id": "arm_right_forearm",
-            "label": "Right Forearm",
-            "description": "Controls the right forearm gesture parameter.",
-            "semantic_group": "shoulder",
-            "control_role": "hint",
-            "neutral": 17.6471,
-            "soft_range": [10.0, 26.0],
-            "strong_range": [4.0, 55.0],
-            "extreme_range": [0.0, 100.0],
-            "positive_semantics": ["bend the right forearm", "bring the right hand into the gesture"],
-            "negative_semantics": ["extend the right forearm", "open the right gesture"],
-            "usage_notes": "Coordinate with arm_right_upper for a readable right-side gesture.",
-            "dynamics": {
-                "max_velocity": 105.0,
-                "max_acceleration": 650.0,
-                "max_speech_offset_ratio": 0.04,
-            },
-            "parameter_bindings": [
-                {"parameter_id": "ParamArmRB", "output_range": [-15.0, 70.0]},
-            ],
-        },
-        {
-            "id": "hand_left",
-            "label": "Left Hand",
-            "description": "Controls the left hand gesture detail.",
-            "semantic_group": "shoulder",
-            "control_role": "hint",
-            "neutral": 50.0,
-            "soft_range": [40.0, 60.0],
-            "strong_range": [24.0, 76.0],
-            "extreme_range": [8.0, 92.0],
-            "positive_semantics": ["open the left hand gesture", "accent the left hand"],
-            "negative_semantics": ["close the left hand gesture", "settle the left hand"],
-            "usage_notes": "Use as a small detail after selecting a left-arm gesture.",
-            "dynamics": {
-                "max_velocity": 120.0,
-                "max_acceleration": 700.0,
-                "max_speech_offset_ratio": 0.02,
-            },
-            "parameter_bindings": [
-                {"parameter_id": "ParamHandL", "output_range": [-20.0, 20.0]},
-            ],
-        },
-        {
-            "id": "hand_right",
-            "label": "Right Hand",
-            "description": "Controls the right hand gesture detail.",
-            "semantic_group": "shoulder",
-            "control_role": "hint",
-            "neutral": 50.0,
-            "soft_range": [40.0, 60.0],
-            "strong_range": [24.0, 76.0],
-            "extreme_range": [8.0, 92.0],
-            "positive_semantics": ["open the right hand gesture", "accent the right hand"],
-            "negative_semantics": ["close the right hand gesture", "settle the right hand"],
-            "usage_notes": "Use as a small detail after selecting a right-arm gesture.",
-            "dynamics": {
-                "max_velocity": 120.0,
-                "max_acceleration": 700.0,
-                "max_speech_offset_ratio": 0.02,
-            },
-            "parameter_bindings": [
-                {"parameter_id": "ParamHandR", "output_range": [-20.0, 20.0]},
-            ],
-        },
-        {
-            "id": "weight_shift",
-            "label": "Weight Shift",
-            "description": "Controls the model's left-right weight distribution.",
-            "semantic_group": "body",
-            "control_role": "hint",
-            "neutral": 50.0,
-            "soft_range": [40.0, 60.0],
-            "strong_range": [25.0, 75.0],
-            "extreme_range": [10.0, 90.0],
-            "positive_semantics": ["shift weight right", "lean into right side"],
-            "negative_semantics": ["shift weight left", "lean into left side"],
-            "usage_notes": "Use with body roll or an arm gesture to give the action a center of gravity.",
-            "dynamics": {
-                "max_velocity": 90.0,
-                "max_acceleration": 550.0,
-                "max_speech_offset_ratio": 0.03,
-            },
-            "parameter_bindings": [
-                {"parameter_id": "ParamSkelWeight", "output_range": [-1.0, 1.0]},
-            ],
-        },
-        {
-            "id": "tail_swing",
-            "label": "Tail Swing",
-            "description": "Controls the tail's deliberate expressive swing.",
-            "semantic_group": "body",
-            "control_role": "hint",
-            "neutral": 50.0,
-            "soft_range": [38.0, 62.0],
-            "strong_range": [20.0, 80.0],
-            "extreme_range": [8.0, 92.0],
-            "positive_semantics": ["swing tail right", "show tail excitement"],
-            "negative_semantics": ["swing tail left", "settle tail toward left"],
-            "usage_notes": "Use for excitement, playfulness, or a strong reaction. Physics continues to handle the tail chain.",
-            "dynamics": {
-                "max_velocity": 120.0,
-                "max_acceleration": 700.0,
-                "max_speech_offset_ratio": 0.02,
-            },
-            "parameter_bindings": [
-                {"parameter_id": "ParamSkelTailSwing", "output_range": [-1.0, 1.0]},
-            ],
-        },
-    ),
-}
+
+def _load_model_axis_configuration(
+    model_name: str,
+) -> tuple[dict[str, dict[str, Any]], tuple[dict[str, Any], ...]]:
+    path = _MODEL_PROFILE_DIRECTORY / f"{model_name}.json"
+    if not path.exists():
+        return {}, ()
+
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SemanticAxisProfileError(
+            f"Failed to read model axis configuration from `{path}`: {exc}"
+        ) from exc
+    if not isinstance(payload, Mapping):
+        raise SemanticAxisProfileError(
+            f"Model axis configuration `{path}` must contain a JSON object."
+        )
+
+    configured_model_name = str(payload.get("model_name") or "").strip()
+    if configured_model_name and configured_model_name != model_name:
+        raise SemanticAxisProfileError(
+            f"Model axis configuration `{path}` targets `{configured_model_name}`, "
+            f"not `{model_name}`."
+        )
+
+    raw_axis_overrides = payload.get("axis_overrides", {})
+    if not isinstance(raw_axis_overrides, Mapping):
+        raise SemanticAxisProfileError(
+            f"Model axis configuration `{path}` field `axis_overrides` must be an object."
+        )
+    axis_overrides: dict[str, dict[str, Any]] = {}
+    for axis_id, override in raw_axis_overrides.items():
+        normalized_axis_id = str(axis_id).strip()
+        if not normalized_axis_id:
+            raise SemanticAxisProfileError(
+                f"Model axis configuration `{path}` contains an empty axis id."
+            )
+        if not isinstance(override, Mapping):
+            raise SemanticAxisProfileError(
+                f"Model axis configuration `{path}` override for `{normalized_axis_id}` "
+                "must be an object."
+            )
+        axis_overrides[normalized_axis_id] = dict(override)
+
+    raw_extra_axes = payload.get("extra_axes", [])
+    if not isinstance(raw_extra_axes, list):
+        raise SemanticAxisProfileError(
+            f"Model axis configuration `{path}` field `extra_axes` must be an array."
+        )
+    extra_axes: list[dict[str, Any]] = []
+    for index, extra_axis in enumerate(raw_extra_axes):
+        if not isinstance(extra_axis, Mapping):
+            raise SemanticAxisProfileError(
+                f"Model axis configuration `{path}` extra_axes[{index}] must be an object."
+            )
+        extra_axes.append(dict(extra_axis))
+    return axis_overrides, tuple(extra_axes)
+
 
 _RELATION_DEFAULTS = (
     {
@@ -815,13 +599,14 @@ def build_default_semantic_axis_profile(
         for item in _as_list(parameter_scan.get("parameters"))
         if isinstance(item, Mapping) and str(item.get("id") or "").strip()
     }
+    model_axis_defaults, model_extra_axes = _load_model_axis_configuration(model_name)
 
     axes: list[SemanticAxisDefinition] = []
     bound_parameter_ids: set[str] = set()
     for axis_id in _AXIS_ORDER:
         axis_defaults = {
             **_AXIS_DEFAULTS[axis_id],
-            **_MODEL_AXIS_DEFAULTS.get(model_name, {}).get(axis_id, {}),
+            **model_axis_defaults.get(axis_id, {}),
         }
         channel_entry = _as_mapping(standard_channels.get(axis_id))
         calibration_entry = _as_mapping(calibration_axes.get(axis_id))
@@ -891,7 +676,7 @@ def build_default_semantic_axis_profile(
         )
 
     used_axis_ids = {axis["id"] for axis in axes}
-    for extra_axis in _MODEL_EXTRA_AXES.get(model_name, ()):
+    for extra_axis in model_extra_axes:
         axis_id = str(extra_axis.get("id") or "").strip()
         if not axis_id or axis_id in used_axis_ids:
             continue

@@ -1,0 +1,178 @@
+{
+  "model_name": "Mk6_1.0",
+  "axis_overrides": {
+    "head_yaw": {
+      "output_range": [
+        -35.0,
+        35.0
+      ]
+    },
+    "head_pitch": {
+      "output_range": [
+        -20.0,
+        20.0
+      ]
+    },
+    "brow_bias": {
+      "description": "Controls smiling-versus-tense brow form, not brow height.",
+      "positive_semantics": [
+        "soften brow form",
+        "smiling brow shape"
+      ],
+      "negative_semantics": [
+        "tense brow form",
+        "frowning brow shape"
+      ],
+      "usage_notes": "Mk6 VTube Studio maps MouthSmile to ParamBrowForm; use this as a brow-shape hint, not a brow-height control."
+    },
+    "eye_open_left": {
+      "neutral": 50.0,
+      "output_range": [
+        0.0,
+        2.0
+      ],
+      "soft_range": [
+        35.0,
+        65.0
+      ],
+      "strong_range": [
+        12.0,
+        88.0
+      ]
+    },
+    "eye_open_right": {
+      "neutral": 50.0,
+      "output_range": [
+        0.0,
+        2.0
+      ],
+      "soft_range": [
+        35.0,
+        65.0
+      ],
+      "strong_range": [
+        12.0,
+        88.0
+      ]
+    },
+    "eye_smile_left": {
+      "neutral": 50.0,
+      "output_range": [
+        -1.0,
+        1.0
+      ],
+      "soft_range": [
+        35.0,
+        65.0
+      ],
+      "strong_range": [
+        12.0,
+        88.0
+      ]
+    },
+    "eye_smile_right": {
+      "neutral": 50.0,
+      "output_range": [
+        -1.0,
+        1.0
+      ],
+      "soft_range": [
+        35.0,
+        65.0
+      ],
+      "strong_range": [
+        12.0,
+        88.0
+      ]
+    },
+    "brow_left_detail": {
+      "description": "Controls the one-sided left brow down shape.",
+      "positive_semantics": [
+        "relax left brow down control"
+      ],
+      "negative_semantics": [
+        "lower left brow",
+        "tense left brow down"
+      ],
+      "usage_notes": "BrowL Down is one-sided: neutral is no down effect; negative levels lower the brow.",
+      "neutral": 100.0,
+      "invert": true,
+      "output_range": [
+        0.0,
+        1.0
+      ],
+      "soft_range": [
+        70.0,
+        100.0
+      ],
+      "strong_range": [
+        20.0,
+        100.0
+      ],
+      "extreme_range": [
+        0.0,
+        100.0
+      ]
+    },
+    "brow_right_detail": {
+      "description": "Controls the one-sided right brow down shape.",
+      "positive_semantics": [
+        "relax right brow down control"
+      ],
+      "negative_semantics": [
+        "lower right brow",
+        "tense right brow down"
+      ],
+      "usage_notes": "BrowR Down is one-sided: neutral is no down effect; negative levels lower the brow.",
+      "neutral": 100.0,
+      "invert": true,
+      "output_range": [
+        0.0,
+        1.0
+      ],
+      "soft_range": [
+        70.0,
+        100.0
+      ],
+      "strong_range": [
+        20.0,
+        100.0
+      ],
+      "extreme_range": [
+        0.0,
+        100.0
+      ]
+    },
+    "mouth_open": {
+      "neutral": 0.0,
+      "soft_range": [
+        0.0,
+        25.0
+      ],
+      "strong_range": [
+        0.0,
+        75.0
+      ],
+      "extreme_range": [
+        0.0,
+        100.0
+      ]
+    },
+    "breath": {
+      "neutral": 0.0,
+      "soft_range": [
+        0.0,
+        20.0
+      ],
+      "strong_range": [
+        0.0,
+        60.0
+      ],
+      "extreme_range": [
+        0.0,
+        100.0
+      ]
+    }
+  },
+  "extra_axes": []
+}
