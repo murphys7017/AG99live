@@ -49,7 +49,6 @@ import {
 import { useDesktopContextMenu } from "./useDesktopContextMenu";
 import { createDesktopRuntimeCommandHandler } from "../desktop-bridge/useDesktopRuntimeCommandHandler";
 import { usePushToTalkController } from "./usePushToTalkController";
-import { useBilibiliLiveRuntime } from "../bilibili-live/useBilibiliLiveRuntime";
 import { isSegmentLocallySettled, isTerminalPhase } from "../turn-playback/session";
 import {
   createIndexedDbMotionLabPendingEventStore,
@@ -891,12 +890,6 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
   });
   const pushToTalk = usePushToTalkController(adapter);
   let snapshotPublisher: ReturnType<typeof createPetRuntimeSnapshotPublisher> | null = null;
-  const bilibiliLive = useBilibiliLiveRuntime({
-    sendText: (text) => adapter.sendText(text),
-    pushHistory: (role, text) => adapter.pushHistory(role, text),
-    backendOwned: true,
-  });
-
   function saveMotionTuningSample(sample: DesktopMotionTuningSample): void {
     adapter.saveMotionTuningSample(cloneJson(sample));
   }
@@ -921,7 +914,6 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     aiState,
     manualPreviewText,
     latestAssistantFeedback,
-    bilibiliLiveStatus: bilibiliLive.status,
   });
 
   const commandHandler = createDesktopRuntimeCommandHandler({
@@ -940,7 +932,6 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     publishMotionPreviewStatus: bridge.publishMotionPreviewStatus,
     beginManualPreviewPresentation,
     approveLatestAssistantSegment,
-    setBilibiliLiveSettings: bilibiliLive.applySettings,
   });
 
   const detachBridgeListener = bridge.onCommand(commandHandler.handleCommand);
@@ -953,7 +944,6 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
     await adapter.connect();
     ambientActionScheduler.start();
     pushToTalk.install();
-    bilibiliLive.start();
     try {
       await adapter.waitUntilDesktopSettingsReady();
     } catch (error) {
@@ -988,7 +978,6 @@ export function providePetDesktopRuntime(): PetDesktopRuntime {
       }],
       ["MotionLab outbound queue dispose", () => motionLabOutboundQueue.dispose()],
       ["push-to-talk dispose", () => pushToTalk.dispose()],
-      ["Bilibili Live dispose", () => bilibiliLive.dispose()],
       ["playback coordination reset", () => playbackCoordinator.resetPlaybackCoordination()],
       ["playback coordinator dispose", () => playbackCoordinator.dispose()],
       ["turn playback orchestrator dispose", () => turnPlaybackOrchestrator.dispose()],

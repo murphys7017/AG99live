@@ -2,10 +2,6 @@ import { contextBridge, ipcRenderer } from "electron";
 import os from "node:os";
 import type { DesktopPresenceRequest, DesktopPresenceSnapshot } from "../../src/types/desktopPresence";
 import type {
-  BilibiliDanmakuInfoResult,
-  BilibiliLiveSettings,
-} from "../../src/types/bilibili-live";
-import type {
   DesktopAuxWindowRole,
   DesktopLatencyEvent,
   DesktopMicrophoneAudioChunk,
@@ -67,12 +63,6 @@ const api = {
   },
   getLocalAdapterHosts: () => {
     return listLocalAdapterHosts();
-  },
-  getBilibiliDanmakuInfo: (settings: BilibiliLiveSettings) => {
-    return ipcRenderer.invoke(
-      "bilibili-live:get-danmaku-info",
-      settings,
-    ) as Promise<BilibiliDanmakuInfoResult>;
   },
   captureDesktopScreenshot: () => {
     return ipcRenderer.invoke("desktop:capture-screen-image") as Promise<{

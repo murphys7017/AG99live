@@ -31,7 +31,6 @@ const {
   administratorRestartStatus,
   motionEngineSettings,
   live2dPresentationSettings,
-  bilibiliLiveSettings,
   statusLabel,
   defaultAdapterAddress,
   motionIntensityMin,
@@ -46,7 +45,6 @@ const {
   applyAddress,
   connectAdapter,
   disconnectAdapter,
-  toggleHistoryWindow,
   toggleActionLabWindow,
   toggleSubtitleWindow,
   applyDesktopScreenshotOnSend,
@@ -63,7 +61,6 @@ const {
   applyMotionEngineSettings,
   resetLive2dPresentationSettings,
   resetMotionEngineSettings,
-  applyBilibiliLiveSettings,
   requestModelProjectionSync,
   formatScale,
 } = useSettingsWindow();
@@ -418,105 +415,10 @@ onMounted(() => {
           <p>03 / INPUT</p>
           <div>
             <h2>对话输入</h2>
-            <span>配置直播弹幕、桌面上下文和按键说话。</span>
+            <span>配置桌面上下文和按键说话。</span>
           </div>
         </header>
         <div class="settings-grid">
-      <article class="settings-card settings-card--wide">
-        <div class="settings-card__header">
-          <div>
-            <p class="settings-card__eyebrow">直播输入</p>
-            <h2>B 站直播弹幕</h2>
-          </div>
-          <span class="settings-card__badge">
-            {{ bridgeState.snapshot.bilibiliLiveStatus.status }}
-          </span>
-        </div>
-
-        <label class="settings-toggle">
-          <input
-            v-model="bilibiliLiveSettings.enabled"
-            class="settings-toggle__input"
-            type="checkbox"
-            @change="applyBilibiliLiveSettings"
-          />
-          <span class="settings-toggle__control" aria-hidden="true"></span>
-          <span class="settings-toggle__copy">
-            开启后桌宠窗口会连接直播间弹幕，并按设定间隔把弹幕批次作为一次普通文本输入提交给后端。
-          </span>
-        </label>
-
-        <div class="settings-slider-grid">
-          <label class="settings-slider">
-            <div class="settings-slider__header">
-              <div>
-                <strong>房间 ID</strong>
-                <p>必填，填写直播间 URL 中的数字房间号。</p>
-              </div>
-            </div>
-            <input
-              v-model="bilibiliLiveSettings.roomId"
-              class="settings-card__input"
-              inputmode="numeric"
-              placeholder="例如 123456"
-              @change="applyBilibiliLiveSettings"
-            />
-          </label>
-
-          <label class="settings-slider">
-            <div class="settings-slider__header">
-              <div>
-                <strong>响应间隔</strong>
-                <p>到达间隔后，如果当前没有手动输入或回复播放，就提交一批弹幕。</p>
-              </div>
-              <span class="settings-slider__value">
-                {{ bilibiliLiveSettings.responseIntervalSeconds }}s
-              </span>
-            </div>
-            <input
-              v-model.number="bilibiliLiveSettings.responseIntervalSeconds"
-              class="settings-slider__input"
-              type="range"
-              min="5"
-              max="180"
-              step="5"
-              @change="applyBilibiliLiveSettings"
-            />
-          </label>
-        </div>
-
-        <input
-          v-model="bilibiliLiveSettings.cookie"
-          class="settings-card__input"
-          type="password"
-          autocomplete="off"
-          placeholder="Cookie，可留空"
-          @change="applyBilibiliLiveSettings"
-        />
-
-        <div class="settings-card__actions">
-          <button type="button" class="settings-card__button" @click="applyBilibiliLiveSettings">
-            应用直播设置
-          </button>
-        </div>
-
-        <p class="settings-card__hint">
-          状态：{{ bridgeState.snapshot.bilibiliLiveStatus.connected ? "已连接" : "未连接" }}；
-          房间：{{ bridgeState.snapshot.bilibiliLiveStatus.realRoomId || bridgeState.snapshot.bilibiliLiveStatus.roomId || "未设置" }}；
-          待响应弹幕：{{ bridgeState.snapshot.bilibiliLiveStatus.bufferedCount }}；
-          Cookie：{{ bridgeState.snapshot.bilibiliLiveStatus.hasCookie ? "已配置" : "未配置" }}。
-          {{ bridgeState.snapshot.bilibiliLiveStatus.lastError }}
-        </p>
-        <p class="settings-card__hint">
-          鉴权：{{ bridgeState.snapshot.bilibiliLiveStatus.authReceived ? "ok" : "-" }}；
-          心跳：{{ bridgeState.snapshot.bilibiliLiveStatus.heartbeatReceived ? "ok" : "-" }}；
-          协议：{{ bridgeState.snapshot.bilibiliLiveStatus.protover ?? "-" }}；
-          命令：{{ bridgeState.snapshot.bilibiliLiveStatus.commandCount }}；
-          弹幕：{{ bridgeState.snapshot.bilibiliLiveStatus.danmakuCount }}；
-          最近命令：{{ bridgeState.snapshot.bilibiliLiveStatus.lastCommand || "-" }}。
-        </p>
-      </article>
-
       <article class="settings-card">
         <div class="settings-card__header">
           <div>
@@ -680,13 +582,6 @@ onMounted(() => {
           </div>
         </div>
 
-        <button
-          type="button"
-          class="settings-card__button settings-card__button--ghost"
-          @click="toggleHistoryWindow"
-        >
-          打开或关闭历史窗口
-        </button>
         <button
           type="button"
           class="settings-card__button settings-card__button--ghost"

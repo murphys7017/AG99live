@@ -37,12 +37,6 @@ class ConversationHistoryBridge:
     def set_client_uid(self, client_uid: str) -> None:
         self._client_uid = client_uid
 
-    async def list_histories(self) -> list[dict[str, Any]]:
-        async with self._lock:
-            return await self._list_histories(
-                self._get_conversation_manager(), self._build_unified_msg_origin()
-            )
-
     async def read_history_state(self, history_uid: str | None = None) -> dict[str, Any]:
         async with self._lock:
             return await self._read_history_state(
@@ -69,28 +63,6 @@ class ConversationHistoryBridge:
             else:
                 raise ValueError("history_operation_invalid")
             return await self._read_history_state(conv_mgr, umo)
-
-    async def fetch_history(self, history_uid: str) -> list[dict[str, Any]]:
-        async with self._lock:
-            return await self._fetch_history(
-                self._get_conversation_manager(),
-                self._build_unified_msg_origin(),
-                history_uid,
-            )
-
-    async def create_history(self) -> str:
-        async with self._lock:
-            return await self._create_history(
-                self._get_conversation_manager(), self._build_unified_msg_origin()
-            )
-
-    async def delete_history(self, history_uid: str) -> bool:
-        async with self._lock:
-            return await self._delete_history(
-                self._get_conversation_manager(),
-                self._build_unified_msg_origin(),
-                history_uid,
-            )
 
     async def _list_histories(self, conv_mgr: Any, umo: str) -> list[dict[str, Any]]:
         conversations = await conv_mgr.get_conversations(

@@ -63,14 +63,12 @@ class MediaService:
         host: str,
         http_port: int,
         live2ds_dir: Path,
-        olv_dir: Path,
         audio_cache_dir: Path,
         image_cache_dir: Path,
     ) -> None:
         self.host = host
         self.http_port = http_port
         self.live2ds_dir = live2ds_dir
-        self.olv_dir = olv_dir
         self.audio_cache_dir = audio_cache_dir
         self.image_cache_dir = image_cache_dir
         self.input_image_dir = (
@@ -544,8 +542,6 @@ class MediaService:
         return (
             self.image_cache_dir.resolve(),
             self.live2ds_dir.resolve(),
-            (self.olv_dir / "avatars").resolve(),
-            (self.olv_dir / "backgrounds").resolve(),
             temp_root,
         )
 

@@ -31,10 +31,6 @@ import {
   applyLive2dPresentationSettingsSnapshot,
   cloneLive2dPresentationSettings,
 } from "../live2d-renderer/settings";
-import {
-  loadBilibiliLiveSettings,
-  normalizeBilibiliLiveSettings,
-} from "../bilibili-live/settings";
 import { DEFAULT_ASTRBOT_WEBUI_URL } from "../app/webControlUrl";
 
 export function useSettingsWindow() {
@@ -68,7 +64,6 @@ export function useSettingsWindow() {
       bridge.state.snapshot.live2dPresentationSettings,
     ),
   );
-  const bilibiliLiveSettings = reactive(loadBilibiliLiveSettings());
   let removePttCaptureListener: (() => void) | null = null;
 
   watch(
@@ -152,10 +147,6 @@ export function useSettingsWindow() {
 
   function disconnectAdapter(): void {
     bridge.sendCommand({ type: "disconnect" });
-  }
-
-  function toggleHistoryWindow(): void {
-    desktopHostPort.getApi()?.toggleAuxWindow("history");
   }
 
   function toggleActionLabWindow(): void {
@@ -357,15 +348,6 @@ export function useSettingsWindow() {
     });
   }
 
-  function applyBilibiliLiveSettings(): void {
-    const normalized = normalizeBilibiliLiveSettings(bilibiliLiveSettings);
-    Object.assign(bilibiliLiveSettings, normalized);
-    bridge.sendCommand({
-      type: "set_bilibili_live_settings",
-      settings: normalized,
-    });
-  }
-
   function formatScale(value: unknown): string {
     const numeric = Number(value);
     if (!Number.isFinite(numeric)) {
@@ -416,7 +398,6 @@ export function useSettingsWindow() {
     restartAsAdministrator,
     motionEngineSettings,
     live2dPresentationSettings,
-    bilibiliLiveSettings,
     statusLabel,
     defaultAdapterAddress: DEFAULT_ADAPTER_ADDRESS,
     motionIntensityMin: MIN_MOTION_INTENSITY_SCALE,
@@ -431,7 +412,6 @@ export function useSettingsWindow() {
     applyAddress,
     connectAdapter,
     disconnectAdapter,
-    toggleHistoryWindow,
     toggleActionLabWindow,
     toggleSubtitleWindow,
     applyDesktopScreenshotOnSend,
@@ -447,7 +427,6 @@ export function useSettingsWindow() {
     applyMotionEngineSettings,
     resetMotionEngineSettings,
     resetLive2dPresentationSettings,
-    applyBilibiliLiveSettings,
     requestModelProjectionSync,
     formatScale,
   };

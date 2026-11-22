@@ -125,6 +125,8 @@ public:
               StopInterruptedTurn(turn_id, "turn_interrupted");
             },
             [this](ag99::runtime::DesktopSettingsQuery query) {
+              std::cerr << "[runtime] desktop setting query key="
+                        << query.key << " action=" << query.action << '\n';
               ag99::runtime::DesktopSettingsResult result;
               if (query.key == "microphone_device") {
                 result = input_runtime_.HandleDeviceSetting(query);
@@ -149,6 +151,11 @@ public:
               if (!transport_.SendText(reply.dump())) {
                 std::cerr << "[runtime] failed to send desktop setting result: "
                           << query.key << '\n';
+              } else {
+                std::cerr << "[runtime] desktop setting result sent key="
+                          << query.key << " ok="
+                          << (result.entry.has_value() ? "true" : "false")
+                          << '\n';
               }
             },
             [this](ag99::runtime::SegmentMotionUpdate update) {

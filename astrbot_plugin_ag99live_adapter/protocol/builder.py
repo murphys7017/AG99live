@@ -31,14 +31,9 @@ from .constants import (
     TYPE_OUTPUT_SEGMENT,
     TYPE_OUTPUT_EXECUTION,
     TYPE_OUTPUT_TRANSCRIPTION,
-    TYPE_SYSTEM_BACKGROUND_LIST,
     TYPE_SYSTEM_DESKTOP_SETTINGS_QUERY,
     TYPE_SYSTEM_DESKTOP_SETTINGS_SYNC_COMPLETE,
     TYPE_SYSTEM_HEARTBEAT_ACK,
-    TYPE_SYSTEM_HISTORY_CREATED,
-    TYPE_SYSTEM_HISTORY_DATA,
-    TYPE_SYSTEM_HISTORY_DELETED,
-    TYPE_SYSTEM_HISTORY_LIST,
     TYPE_SYSTEM_MODEL_SYNC,
     TYPE_SYSTEM_MOTION_TUNING_SAMPLES_STATE,
     TYPE_SYSTEM_MOTION_LAB_RAW_EVENT_RECORDED,
@@ -98,62 +93,6 @@ def build_system_server_info(
             "product_version": PRODUCT_VERSION,
             "schema_manifest": SCHEMA_MANIFEST,
         },
-    )
-
-
-def build_system_background_list(
-    *,
-    files: list[str],
-) -> dict[str, Any]:
-    return build_message_envelope(
-        TYPE_SYSTEM_BACKGROUND_LIST,
-        source=SOURCE_ADAPTER,
-        payload={"files": files},
-    )
-
-
-def build_system_history_list(
-    *,
-    histories: list[dict[str, Any]],
-) -> dict[str, Any]:
-    return build_message_envelope(
-        TYPE_SYSTEM_HISTORY_LIST,
-        source=SOURCE_ADAPTER,
-        payload={"histories": histories},
-    )
-
-
-def build_system_history_created(
-    *,
-    history_uid: str,
-) -> dict[str, Any]:
-    return build_message_envelope(
-        TYPE_SYSTEM_HISTORY_CREATED,
-        source=SOURCE_ADAPTER,
-        payload={"history_uid": history_uid},
-    )
-
-
-def build_system_history_data(
-    *,
-    messages: list[dict[str, Any]],
-) -> dict[str, Any]:
-    return build_message_envelope(
-        TYPE_SYSTEM_HISTORY_DATA,
-        source=SOURCE_ADAPTER,
-        payload={"messages": messages},
-    )
-
-
-def build_system_history_deleted(
-    *,
-    history_uid: str,
-    success: bool,
-) -> dict[str, Any]:
-    return build_message_envelope(
-        TYPE_SYSTEM_HISTORY_DELETED,
-        source=SOURCE_ADAPTER,
-        payload={"history_uid": history_uid, "success": success},
     )
 
 

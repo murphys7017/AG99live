@@ -56,7 +56,6 @@ def _create_media_service(install_fake_astrbot, monkeypatch, tmp_path):
         host="127.0.0.1",
         http_port=12345,
         live2ds_dir=tmp_path / "live2ds",
-        olv_dir=tmp_path / "assets",
         audio_cache_dir=tmp_path / "cache" / "audio",
         image_cache_dir=tmp_path / "cache" / "images",
     )

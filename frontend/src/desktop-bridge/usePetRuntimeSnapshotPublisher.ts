@@ -6,8 +6,6 @@ import {
 import type {
   DesktopAssistantFeedbackState,
   DesktopBaseActionPreview,
-  DesktopBackendHistoryMessage,
-  DesktopBackendHistorySummary,
   DesktopHistoryEntry,
   DesktopMicrophoneDevice,
   DesktopModelProjectionSnapshot,
@@ -18,7 +16,6 @@ import type {
   DesktopSemanticAxisProfileSaveResult,
   DesktopMotionTuningSamplesStatus,
 } from "../types/desktop";
-import type { BilibiliLiveStatus } from "../types/bilibili-live";
 import type { ModelSummary, SystemServerInfoPayload } from "../types/protocol";
 import type { SemanticAxisProfile } from "../types/semantic-axis-profile";
 import type { ModelSyncInstance } from "../adapter-connection/model-sync/useModelSync";
@@ -53,11 +50,6 @@ interface PetRuntimeSnapshotAdapterPort {
     readonly pttKeyBinding: DesktopPttKeyBinding;
     readonly pttHookStatus: DesktopPttHookStatus;
     readonly historyEntries: readonly DesktopHistoryEntry[];
-    readonly backendHistorySummaries: readonly DesktopBackendHistorySummary[];
-    readonly backendHistoryEntries: readonly DesktopBackendHistoryMessage[];
-    readonly activeBackendHistoryUid: string;
-    readonly backendHistoryLoading: boolean;
-    readonly backendHistoryStatusMessage: string;
     readonly motionTuningSamples: readonly unknown[];
     readonly motionTuningSamplesStatus: DesktopMotionTuningSamplesStatus;
     readonly latestSemanticAxisProfileSaveResult: DesktopSemanticAxisProfileSaveResult | null;
@@ -92,7 +84,6 @@ interface PetRuntimeSnapshotPublisherOptions {
   aiState: ComputedRef<string>;
   manualPreviewText: Ref<string>;
   latestAssistantFeedback: ComputedRef<DesktopAssistantFeedbackState>;
-  bilibiliLiveStatus: Readonly<BilibiliLiveStatus>;
 }
 
 function createDebounce(): {
@@ -173,12 +164,6 @@ export function createPetRuntimeSnapshotPublisher(
       pttKeyBinding: a.pttKeyBinding,
       pttHookStatus: a.pttHookStatus,
       historyEntries: a.historyEntries,
-      backendHistorySummaries: a.backendHistorySummaries,
-      backendHistoryEntries: a.backendHistoryEntries,
-      activeBackendHistoryUid: a.activeBackendHistoryUid,
-      backendHistoryLoading: a.backendHistoryLoading,
-      backendHistoryStatusMessage: a.backendHistoryStatusMessage,
-      bilibiliLiveStatus: options.bilibiliLiveStatus,
     });
 
     return {
@@ -242,12 +227,6 @@ export function createPetRuntimeSnapshotPublisher(
         pttKeyBinding: a.pttKeyBinding,
         pttHookStatus: a.pttHookStatus,
         historyEntries: a.historyEntries,
-        backendHistorySummaries: a.backendHistorySummaries,
-        backendHistoryEntries: a.backendHistoryEntries,
-        activeBackendHistoryUid: a.activeBackendHistoryUid,
-        backendHistoryLoading: a.backendHistoryLoading,
-        backendHistoryStatusMessage: a.backendHistoryStatusMessage,
-        bilibiliLiveStatus: options.bilibiliLiveStatus,
       },
       motionEngineSettings: options.motionEngineSettings,
       live2dPresentationSettings: options.live2dPresentationSettings,

@@ -1,6 +1,4 @@
 import type {
-  DesktopBackendHistoryMessage,
-  DesktopBackendHistorySummary,
   DesktopRuntimeSnapshot,
   DesktopMotionPlaybackRecord,
   DesktopPttHookStatus,
@@ -23,10 +21,6 @@ import {
   DEFAULT_PTT_KEY_BINDING,
   normalizePttKeyBinding,
 } from "../../adapter-connection/core/pttKeyBinding.js";
-import {
-  DEFAULT_BILIBILI_LIVE_STATUS,
-  type BilibiliLiveStatus,
-} from "../../types/bilibili-live.js";
 import { cloneJson } from "../../utils/cloneJson.js";
 import {
   isFiniteNumber,
@@ -89,12 +83,6 @@ export const defaultSnapshot: DesktopRuntimeSnapshot = {
   lastTranscription: "",
   lastImageCount: 0,
   historyEntries: [],
-  backendHistorySummaries: [],
-  backendHistoryEntries: [],
-  activeBackendHistoryUid: "",
-  backendHistoryLoading: false,
-  backendHistoryStatusMessage: "等待桌宠窗口同步后端历史。",
-  bilibiliLiveStatus: { ...DEFAULT_BILIBILI_LIVE_STATUS },
   manualPreviewText: "",
   latestAssistantFeedback: {
     available: false,
@@ -130,12 +118,6 @@ export function normalizeSnapshot(snapshot: DesktopRuntimeSnapshot, previous?: D
   const historyEntries = Array.isArray(snapshot.historyEntries)
     ? snapshot.historyEntries
     : [];
-  const backendHistorySummaries = Array.isArray(snapshot.backendHistorySummaries)
-    ? snapshot.backendHistorySummaries
-    : [];
-  const backendHistoryEntries = Array.isArray(snapshot.backendHistoryEntries)
-    ? snapshot.backendHistoryEntries
-    : [];
   return {
     ...defaultSnapshot,
     ...runtimeSnapshot,
@@ -152,17 +134,7 @@ export function normalizeSnapshot(snapshot: DesktopRuntimeSnapshot, previous?: D
       ? snapshot.motionPlaybackRecords.map(cloneMotionPlaybackRecord).filter(isPresent)
       : [],
     historyEntries: historyEntries.map((entry) => ({ ...entry })),
-    backendHistorySummaries: backendHistorySummaries
-      .map(cloneBackendHistorySummary)
-      .filter(isPresent),
-    backendHistoryEntries: backendHistoryEntries
-      .map(cloneBackendHistoryMessage)
-      .filter(isPresent),
     pttKeyBinding: normalizePttKeyBinding(snapshot.pttKeyBinding),
-    activeBackendHistoryUid: normalizeText(snapshot.activeBackendHistoryUid),
-    backendHistoryLoading: Boolean(snapshot.backendHistoryLoading),
-    backendHistoryStatusMessage: normalizeText(snapshot.backendHistoryStatusMessage),
-    bilibiliLiveStatus: normalizeBilibiliLiveStatus(snapshot.bilibiliLiveStatus),
     pttHookStatus: normalizePttHookStatus(snapshot.pttHookStatus),
     manualPreviewText: normalizeText(snapshot.manualPreviewText),
     latestAssistantFeedback: normalizeAssistantFeedbackState(
@@ -194,50 +166,6 @@ function normalizePttHookStatus(value: unknown): DesktopPttHookStatus {
     reason: normalizeText(value.reason),
     updatedAt: normalizeText(value.updatedAt),
   };
-}
-
-function normalizeBilibiliLiveStatus(value: unknown): BilibiliLiveStatus {
-  if (!isObject(value)) {
-    return { ...DEFAULT_BILIBILI_LIVE_STATUS };
-  }
-  return {
-    enabled: Boolean(value.enabled),
-    connected: Boolean(value.connected),
-    status: normalizeBilibiliLiveStatusKind(value.status),
-    roomId: normalizeText(value.roomId),
-    realRoomId: isFiniteNumber(value.realRoomId) ? Math.round(value.realRoomId) : null,
-    bufferedCount: isFiniteNumber(value.bufferedCount)
-      ? Math.max(0, Math.round(value.bufferedCount))
-      : 0,
-    authReceived: Boolean(value.authReceived),
-    heartbeatReceived: Boolean(value.heartbeatReceived),
-    commandCount: isFiniteNumber(value.commandCount)
-      ? Math.max(0, Math.round(value.commandCount))
-      : 0,
-    danmakuCount: isFiniteNumber(value.danmakuCount)
-      ? Math.max(0, Math.round(value.danmakuCount))
-      : 0,
-    lastCommand: normalizeText(value.lastCommand),
-    protover: isFiniteNumber(value.protover) ? Math.round(value.protover) : null,
-    lastMessageAt: normalizeText(value.lastMessageAt),
-    lastError: normalizeText(value.lastError),
-    hasCookie: Boolean(value.hasCookie),
-  };
-}
-
-function normalizeBilibiliLiveStatusKind(
-  value: unknown,
-): BilibiliLiveStatus["status"] {
-  const normalized = normalizeText(value);
-  if (
-    normalized === "idle"
-    || normalized === "connecting"
-    || normalized === "connected"
-    || normalized === "error"
-  ) {
-    return normalized;
-  }
-  return "disabled";
 }
 
 function rejectUnsupportedRuntimeSnapshotFields(snapshot: DesktopRuntimeSnapshot): void {
@@ -529,89 +457,6 @@ function normalizeCompiledParameterCount(
     return Math.max(0, Math.round(diagnostics.compiledParameterCount));
   }
   return 0;
-}
-
-function cloneBackendHistorySummary(
-  summary: unknown,
-): DesktopBackendHistorySummary | null {
-  if (!isObject(summary)) {
-    return null;
-  }
-
-  const uid = normalizeText(summary.uid);
-  if (!uid) {
-    return null;
-  }
-
-  const latestMessage = isObject(summary.latestMessage)
-    ? cloneBackendHistorySummaryMessage(summary.latestMessage)
-    : null;
-  const timestamp = normalizeText(summary.timestamp)
-    || latestMessage?.timestamp
-    || "";
-
-  return {
-    uid,
-    latestMessage,
-    timestamp,
-  } satisfies DesktopBackendHistorySummary;
-}
-
-function cloneBackendHistorySummaryMessage(
-  message: unknown,
-): DesktopBackendHistorySummary["latestMessage"] {
-  if (!isObject(message)) {
-    return null;
-  }
-
-  const content = normalizeText(message.content);
-  const timestamp = normalizeText(message.timestamp);
-  const role = normalizeBackendHistoryRole(message.role);
-  if (!content && !timestamp) {
-    return null;
-  }
-
-  return {
-    role,
-    timestamp,
-    content,
-  };
-}
-
-function cloneBackendHistoryMessage(
-  message: unknown,
-): DesktopBackendHistoryMessage | null {
-  if (!isObject(message)) {
-    return null;
-  }
-
-  const id = normalizeText(message.id);
-  if (!id) {
-    return null;
-  }
-
-  return {
-    id,
-    role: normalizeBackendHistoryRole(message.role),
-    type: normalizeText(message.type) || "text",
-    content: normalizeText(message.content),
-    timestamp: normalizeText(message.timestamp),
-    name: normalizeOptionalText(message.name),
-    toolId: normalizeOptionalText(message.toolId),
-    toolName: normalizeOptionalText(message.toolName),
-    status: normalizeOptionalText(message.status),
-    avatar: normalizeOptionalText(message.avatar),
-  } satisfies DesktopBackendHistoryMessage;
-}
-
-function normalizeBackendHistoryRole(
-  value: unknown,
-): DesktopBackendHistoryMessage["role"] {
-  const role = normalizeText(value).toLowerCase();
-  if (role === "human" || role === "ai") {
-    return role;
-  }
-  return "system";
 }
 
 function normalizeTimingSource(

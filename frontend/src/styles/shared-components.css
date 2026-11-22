@@ -2,8 +2,7 @@
    motion tuning, semantic axis profile editor, history). Imported by BOTH the
    Electron desktop renderer and the AstrBot plugin control page. */
 
-.settings-card__header,
-.history-item__header {
+.settings-card__header {
   display: flex;
   justify-content: space-between;
   gap: 12px;
@@ -861,43 +860,6 @@
 .profile-editor__status {
   color: var(--ink-main);
   font-size: 13px;
-}
-
-.history-list {
-  display: grid;
-  gap: 14px;
-}
-
-.history-item {
-  padding: 18px 20px;
-  border-radius: 22px;
-  border: 1px solid rgba(54, 71, 104, 0.08);
-  background: rgba(255, 255, 255, 0.86);
-}
-
-.history-item[data-role="assistant"] {
-  background: rgba(247, 250, 255, 0.94);
-}
-
-.history-item[data-role="user"] {
-  background: rgba(255, 248, 239, 0.95);
-}
-
-.history-item[data-role="error"] {
-  background: rgba(255, 244, 244, 0.95);
-}
-
-.history-item__header strong,
-.history-item__header span {
-  color: var(--ink-soft);
-  font-size: 12px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.history-item p {
-  margin: 10px 0 0;
-  color: var(--ink-strong);
 }
 
 .history-empty {

@@ -6,10 +6,6 @@ import type {
   OutputExecutionPayload,
   OutputTranscriptionPayload,
   ProtocolEnvelope,
-  SystemHistoryCreatedPayload,
-  SystemHistoryDataPayload,
-  SystemHistoryDeletedPayload,
-  SystemHistoryListPayload,
   SystemSemanticAxisProfileSavedPayload,
   SystemSemanticAxisProfileSaveFailedPayload,
   SystemMotionTuningSamplesStatePayload,
@@ -648,59 +644,6 @@ export function parseSemanticAxisProfileSaveFailedPayload(
       expected_revision: expectedRevision,
       error_code: errorCode.payload,
       message: message.payload,
-    },
-  };
-}
-
-export function parseHistoryListPayload(
-  envelope: ProtocolEnvelope<unknown>,
-): PayloadParseResult<SystemHistoryListPayload> {
-  const record = parseObjectPayload(envelope);
-  if (!record.ok) return record;
-  const histories = record.payload.histories;
-  if (!Array.isArray(histories)) {
-    return invalidPayload(envelope.type, "payload.histories", "array");
-  }
-  return { ok: true, payload: { histories } };
-}
-
-export function parseHistoryCreatedPayload(
-  envelope: ProtocolEnvelope<unknown>,
-): PayloadParseResult<SystemHistoryCreatedPayload> {
-  const record = parseObjectPayload(envelope);
-  if (!record.ok) return record;
-  const historyUid = requiredString(envelope.type, record.payload, "history_uid");
-  return historyUid.ok
-    ? { ok: true, payload: { history_uid: historyUid.payload } }
-    : historyUid;
-}
-
-export function parseHistoryDataPayload(
-  envelope: ProtocolEnvelope<unknown>,
-): PayloadParseResult<SystemHistoryDataPayload> {
-  const record = parseObjectPayload(envelope);
-  if (!record.ok) return record;
-  const messages = record.payload.messages;
-  if (!Array.isArray(messages)) {
-    return invalidPayload(envelope.type, "payload.messages", "array");
-  }
-  return { ok: true, payload: { messages } };
-}
-
-export function parseHistoryDeletedPayload(
-  envelope: ProtocolEnvelope<unknown>,
-): PayloadParseResult<SystemHistoryDeletedPayload> {
-  const record = parseObjectPayload(envelope);
-  if (!record.ok) return record;
-  const historyUid = requiredString(envelope.type, record.payload, "history_uid");
-  if (!historyUid.ok) return historyUid;
-  const success = requiredBoolean(envelope.type, record.payload, "success");
-  if (!success.ok) return success;
-  return {
-    ok: true,
-    payload: {
-      history_uid: historyUid.payload,
-      success: success.payload,
     },
   };
 }

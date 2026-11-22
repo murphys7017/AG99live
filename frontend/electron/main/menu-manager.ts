@@ -66,7 +66,6 @@ export class MenuManager {
         label: "本机工具",
         submenu: [
           this.buildToggleItem("settings", "本机设置"),
-          this.buildToggleItem("history", "对话历史"),
           this.buildToggleItem("action_lab", "动作实验室"),
         ],
       },

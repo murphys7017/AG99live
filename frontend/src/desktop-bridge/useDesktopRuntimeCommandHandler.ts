@@ -21,7 +21,6 @@ import {
   applyLive2dPresentationSettingsSnapshot,
   type Live2dPresentationSettings,
 } from "../live2d-renderer/settings.js";
-import type { BilibiliLiveSettings } from "../types/bilibili-live.js";
 
 interface DesktopRuntimeCommandAdapterPort {
   readonly state: {
@@ -34,10 +33,6 @@ interface DesktopRuntimeCommandAdapterPort {
   setMicrophoneDevice: (deviceId: string) => void;
   setMicrophoneDevices: (devices: DesktopMicrophoneDevice[]) => void;
   refreshMicrophoneDevices: () => Promise<void>;
-  requestHistoryList: () => boolean;
-  createHistory: () => boolean;
-  loadHistory: (historyUid: string) => boolean;
-  deleteHistory: (historyUid: string) => boolean;
   connect: () => Promise<void>;
   disconnect: () => Promise<void>;
   sendText: (text: string) => Promise<boolean>;
@@ -80,7 +75,6 @@ export interface DesktopRuntimeCommandDeps {
   publishMotionPreviewStatus: (status: DesktopMotionPreviewStatus) => void;
   beginManualPreviewPresentation: (requestId: string, assistantText: string) => void;
   approveLatestAssistantSegment: () => boolean;
-  setBilibiliLiveSettings: (settings: BilibiliLiveSettings) => void;
 }
 
 export function createDesktopRuntimeCommandHandler(
@@ -152,18 +146,6 @@ export function createDesktopRuntimeCommandHandler(
       case "delete_motion_tuning_sample":
         deps.deleteMotionTuningSample(command.sampleId);
         return;
-      case "request_history_list":
-        deps.adapter.requestHistoryList();
-        return;
-      case "create_history":
-        deps.adapter.createHistory();
-        return;
-      case "load_history":
-        deps.adapter.loadHistory(command.historyUid);
-        return;
-      case "delete_history":
-        deps.adapter.deleteHistory(command.historyUid);
-        return;
       case "connect":
         if (typeof command.address === "string") {
           deps.adapter.setAddress(command.address);
@@ -197,16 +179,6 @@ export function createDesktopRuntimeCommandHandler(
       case "set_ptt_key_binding":
         deps.adapter.setPttKeyBinding(command.binding);
         deps.adapter.persistDesktopSetting("ptt_key_binding", JSON.stringify(command.binding));
-        return;
-      case "set_bilibili_live_settings":
-        deps.setBilibiliLiveSettings(command.settings);
-        deps.adapter.persistDesktopSetting("bilibili_live_enabled", String(command.settings.enabled));
-        deps.adapter.persistDesktopSetting("bilibili_live_room_id", command.settings.roomId);
-        deps.adapter.persistDesktopSetting("bilibili_live_cookie", command.settings.cookie);
-        deps.adapter.persistDesktopSetting(
-          "bilibili_live_response_interval",
-          String(command.settings.responseIntervalSeconds),
-        );
         return;
       case "preview_compiled_semantic_motion": {
         deps.publishMotionPreviewStatus({

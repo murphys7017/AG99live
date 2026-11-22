@@ -20,10 +20,6 @@ import type {
   OutputTranscriptionPayload,
   OutputExecutionPayload,
   ProtocolEnvelope,
-  SystemHistoryCreatedPayload,
-  SystemHistoryDataPayload,
-  SystemHistoryDeletedPayload,
-  SystemHistoryListPayload,
   SystemModelSyncPayload,
   SystemMotionTuningSamplesStatePayload,
   SystemMotionLabRawEventRecordedPayload,
@@ -39,10 +35,6 @@ import {
   type PayloadParseError,
   parseControlErrorPayload,
   parseControlCompletionPayload,
-  parseHistoryCreatedPayload,
-  parseHistoryDataPayload,
-  parseHistoryDeletedPayload,
-  parseHistoryListPayload,
   parseMotionTuningSamplesStatePayload,
   parseSystemMotionLabRawEventRecordedPayload,
   parseSystemDesktopSettingsQueryPayload,
@@ -134,10 +126,6 @@ type InboundPassthroughEvent =
   }
   | { kind: "desktop_observation_request"; envelope: ProtocolEnvelope<SystemDesktopObservationRequestPayload> }
   | { kind: "desktop_presence_request"; envelope: ProtocolEnvelope<import("../../types/desktopPresence.js").DesktopPresenceRequest> }
-  | { kind: "history_list"; envelope: ProtocolEnvelope<SystemHistoryListPayload> }
-  | { kind: "history_created"; envelope: ProtocolEnvelope<SystemHistoryCreatedPayload> }
-  | { kind: "history_data"; envelope: ProtocolEnvelope<SystemHistoryDataPayload> }
-  | { kind: "history_deleted"; envelope: ProtocolEnvelope<SystemHistoryDeletedPayload> }
   | { kind: "output_transcription"; envelope: ProtocolEnvelope<OutputTranscriptionPayload> }
   | { kind: "output_execution"; envelope: ProtocolEnvelope<OutputExecutionPayload> }
   | { kind: "control_error"; envelope: ProtocolEnvelope<ControlErrorPayload> }
@@ -284,46 +272,6 @@ export function mapInboundEnvelopeToEvent(
       }
       return {
         kind: "desktop_settings_sync_complete",
-        envelope: withPayload(envelope, parsed.payload),
-      };
-    }
-    case INBOUND_MESSAGE_TYPES.SYSTEM_HISTORY_LIST: {
-      const parsed = parseHistoryListPayload(envelope);
-      if (!parsed.ok) {
-        return protocolPayloadError(envelope, parsed.error);
-      }
-      return {
-        kind: "history_list",
-        envelope: withPayload(envelope, parsed.payload),
-      };
-    }
-    case INBOUND_MESSAGE_TYPES.SYSTEM_HISTORY_CREATED: {
-      const parsed = parseHistoryCreatedPayload(envelope);
-      if (!parsed.ok) {
-        return protocolPayloadError(envelope, parsed.error);
-      }
-      return {
-        kind: "history_created",
-        envelope: withPayload(envelope, parsed.payload),
-      };
-    }
-    case INBOUND_MESSAGE_TYPES.SYSTEM_HISTORY_DATA: {
-      const parsed = parseHistoryDataPayload(envelope);
-      if (!parsed.ok) {
-        return protocolPayloadError(envelope, parsed.error);
-      }
-      return {
-        kind: "history_data",
-        envelope: withPayload(envelope, parsed.payload),
-      };
-    }
-    case INBOUND_MESSAGE_TYPES.SYSTEM_HISTORY_DELETED: {
-      const parsed = parseHistoryDeletedPayload(envelope);
-      if (!parsed.ok) {
-        return protocolPayloadError(envelope, parsed.error);
-      }
-      return {
-        kind: "history_deleted",
         envelope: withPayload(envelope, parsed.payload),
       };
     }

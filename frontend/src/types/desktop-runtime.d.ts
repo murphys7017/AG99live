@@ -1,9 +1,5 @@
 import type { GazeTarget } from "./live2d-runtime";
 import type {
-  BilibiliDanmakuInfoResult,
-  BilibiliLiveSettings,
-} from "./bilibili-live";
-import type {
   DesktopAuxWindowRole,
   DesktopLatencyEvent,
   DesktopMicrophoneAudioChunk,
@@ -36,9 +32,6 @@ export interface Ag99DesktopApi {
   startWindowDrag: (screenX: number, screenY: number) => void;
   endWindowDrag: () => void;
   getLocalAdapterHosts: () => string[];
-  getBilibiliDanmakuInfo: (
-    settings: BilibiliLiveSettings,
-  ) => Promise<BilibiliDanmakuInfoResult>;
   captureDesktopScreenshot: () => Promise<{
     data: string;
     mime_type: "image/jpeg";

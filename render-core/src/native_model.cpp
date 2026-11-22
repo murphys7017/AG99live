@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <charconv>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -47,6 +48,114 @@ using namespace ag99::native::motion;
 double CurrentEpochMilliseconds() {
   return std::chrono::duration<double, std::milli>(
       std::chrono::system_clock::now().time_since_epoch()).count();
+}
+
+std::string ExpandMotionExponent(std::string_view token) {
+  const auto exponent_marker = token.find_first_of("eE");
+  if (exponent_marker == std::string_view::npos) {
+    return std::string(token);
+  }
+
+  int exponent = 0;
+  const auto exponent_text = token.substr(exponent_marker + 1);
+  const auto parsed = std::from_chars(
+      exponent_text.data(), exponent_text.data() + exponent_text.size(),
+      exponent);
+  if (parsed.ec != std::errc{} || parsed.ptr != exponent_text.data()
+      + exponent_text.size()) {
+    return std::string(token);
+  }
+
+  std::string mantissa(token.substr(0, exponent_marker));
+  const bool negative = !mantissa.empty() && mantissa.front() == '-';
+  if (negative || (!mantissa.empty() && mantissa.front() == '+')) {
+    mantissa.erase(mantissa.begin());
+  }
+  const auto decimal = mantissa.find('.');
+  const std::size_t digits_before_decimal = decimal == std::string::npos
+      ? mantissa.size() : decimal;
+  if (decimal != std::string::npos) {
+    mantissa.erase(decimal, 1);
+  }
+  if (mantissa.empty()) {
+    return std::string(token);
+  }
+
+  const auto decimal_position = static_cast<long long>(
+      digits_before_decimal) + exponent;
+  std::string expanded;
+  if (decimal_position <= 0) {
+    expanded = "0.";
+    expanded.append(static_cast<std::size_t>(-decimal_position), '0');
+    expanded += mantissa;
+  } else if (decimal_position >= static_cast<long long>(mantissa.size())) {
+    expanded = mantissa;
+    expanded.append(
+        static_cast<std::size_t>(decimal_position - mantissa.size()), '0');
+  } else {
+    expanded = mantissa;
+    expanded.insert(static_cast<std::size_t>(decimal_position), 1, '.');
+  }
+  if (negative) {
+    expanded.insert(expanded.begin(), '-');
+  }
+  return expanded;
+}
+
+std::vector<csmByte> NormalizeMotionJsonForCubism(
+    const std::vector<csmByte>& input) {
+  std::string source(
+      reinterpret_cast<const char*>(input.data()), input.size());
+  std::string normalized;
+  normalized.reserve(source.size());
+  bool in_string = false;
+  bool escaped = false;
+  for (std::size_t index = 0; index < source.size();) {
+    const char character = source[index];
+    if (in_string) {
+      normalized.push_back(character);
+      if (escaped) {
+        escaped = false;
+      } else if (character == '\\') {
+        escaped = true;
+      } else if (character == '"') {
+        in_string = false;
+      }
+      ++index;
+      continue;
+    }
+    if (character == '"') {
+      in_string = true;
+      normalized.push_back(character);
+      ++index;
+      continue;
+    }
+    const bool number_start = character == '-'
+        || (character >= '0' && character <= '9');
+    if (!number_start) {
+      normalized.push_back(character);
+      ++index;
+      continue;
+    }
+    std::size_t end = index;
+    while (end < source.size()) {
+      const char token = source[end];
+      if (token == ',' || token == ']' || token == '}'
+          || token == ':' || token == ' ' || token == '\t'
+          || token == '\r' || token == '\n') {
+        break;
+      }
+      ++end;
+    }
+    const std::string_view token(source.data() + index, end - index);
+    if (token.find_first_of("eE") == std::string_view::npos) {
+      normalized.append(token);
+    } else {
+      normalized += ExpandMotionExponent(token);
+    }
+    index = end;
+  }
+  return std::vector<csmByte>(normalized.begin(), normalized.end());
 }
 
 class NativeCubismModel final : public CubismUserModel {
@@ -272,6 +381,10 @@ public:
     }
     if (_motion_groups["Idle"].empty()) {
       std::cerr << "[cubism] no Idle group motions were available\n";
+    } else {
+      std::cerr << "[cubism] loaded "
+                << _motion_groups["Idle"].size()
+                << " Idle motions\n";
     }
     return !_motion_groups["Idle"].empty();
   }
@@ -293,8 +406,12 @@ public:
       if (idle != _motion_groups.end() && !idle->second.empty()) {
         std::uniform_int_distribution<std::size_t> choose_idle(
             0, idle->second.size() - 1);
-        _motionManager->StartMotionPriority(
+        const auto started = _motionManager->StartMotionPriority(
             idle->second[choose_idle(_motion_random)], false, 1);
+        if (started != nullptr && !_reported_idle_motion_start) {
+          std::cerr << "[cubism] Idle motion started\n";
+          _reported_idle_motion_start = true;
+        }
       }
     } else {
       motion_updated = _motionManager->UpdateMotion(_model, delta_seconds);
@@ -405,9 +522,10 @@ private:
                 << " motion: " << services_.path_to_utf8(motion_path) << '\n';
       return nullptr;
     }
+    const auto normalized_motion = NormalizeMotionJsonForCubism(motion_bytes);
     return LoadMotion(
-        motion_bytes.data(),
-        static_cast<csmSizeInt>(motion_bytes.size()),
+        normalized_motion.data(),
+        static_cast<csmSizeInt>(normalized_motion.size()),
         nullptr,
         nullptr,
         nullptr,
@@ -431,6 +549,7 @@ private:
   std::vector<csmFloat32> _physics_response_baseline_values;
   csmFloat32 _physics_response_scale = 1.0f;
   std::atomic<bool> _ambient_motion_enabled{true};
+  bool _reported_idle_motion_start = false;
   CubismEyeBlink* _eye_blink = nullptr;
   CubismBreath* _breath = nullptr;
 };

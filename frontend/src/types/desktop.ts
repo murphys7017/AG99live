@@ -10,27 +10,21 @@ import type {
   PerformanceCompositionSignature,
   PerformanceScheduleTrace,
 } from "./compiledSemanticMotion";
-import type {
-  BilibiliLiveSettings,
-  BilibiliLiveStatus,
-} from "./bilibili-live";
 
 export type DesktopWindowRole =
   | "pet"
   | "overlay"
   | "subtitle"
   | "settings"
-  | "history"
   | "action_lab"
   | "profile_editor";
-export type DesktopAuxWindowRole = "settings" | "history" | "action_lab" | "profile_editor";
+export type DesktopAuxWindowRole = "settings" | "action_lab" | "profile_editor";
 
 export interface DesktopWindowVisibilityState {
   petVisible: boolean;
   overlayVisible: boolean;
   subtitleVisible: boolean;
   settingsVisible: boolean;
-  historyVisible: boolean;
   actionLabVisible: boolean;
   profileEditorVisible?: boolean;
 }
@@ -382,12 +376,6 @@ export interface DesktopRuntimeSnapshot {
   lastTranscription: string;
   lastImageCount: number;
   historyEntries: DesktopHistoryEntry[];
-  backendHistorySummaries: DesktopBackendHistorySummary[];
-  backendHistoryEntries: DesktopBackendHistoryMessage[];
-  activeBackendHistoryUid: string;
-  backendHistoryLoading: boolean;
-  backendHistoryStatusMessage: string;
-  bilibiliLiveStatus: BilibiliLiveStatus;
   manualPreviewText: string;
   latestAssistantFeedback: DesktopAssistantFeedbackState;
 }
@@ -514,10 +502,6 @@ export type DesktopRuntimeCommand =
   | { type: "request_motion_tuning_samples_sync" }
   | { type: "save_motion_tuning_sample"; sample: DesktopMotionTuningSample }
   | { type: "delete_motion_tuning_sample"; sampleId: string }
-  | { type: "request_history_list" }
-  | { type: "create_history" }
-  | { type: "load_history"; historyUid: string }
-  | { type: "delete_history"; historyUid: string }
   | { type: "connect"; address?: string }
   | { type: "disconnect" }
   | { type: "send_text"; text: string }
@@ -525,7 +509,6 @@ export type DesktopRuntimeCommand =
   | { type: "toggle_mic_capture" }
   | { type: "set_ptt_mode"; enabled: boolean }
   | { type: "set_ptt_key_binding"; binding: DesktopPttKeyBinding }
-  | { type: "set_bilibili_live_settings"; settings: BilibiliLiveSettings }
   | {
     type: "preview_compiled_semantic_motion";
     requestId: string;

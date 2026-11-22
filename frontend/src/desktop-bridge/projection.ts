@@ -1,8 +1,5 @@
-import { cloneJson } from "../utils/cloneJson.js";
 import type {
   DesktopAssistantFeedbackState,
-  DesktopBackendHistoryMessage,
-  DesktopBackendHistorySummary,
   DesktopHistoryEntry,
   DesktopMicrophoneDevice,
   DesktopMotionPlaybackRecord,
@@ -14,7 +11,6 @@ import {
   cloneLive2dPresentationSettings,
   type Live2dPresentationSettings,
 } from "../live2d-renderer/settings.js";
-import type { BilibiliLiveStatus } from "../types/bilibili-live.js";
 
 // ── Adapter runtime projection ─────────────────────────────────────
 
@@ -37,12 +33,6 @@ export interface AdapterRuntimeProjection {
   pttHookStatus: Readonly<DesktopPttHookStatus>;
   audioPlaying: boolean;
   historyEntries: readonly DesktopHistoryEntry[];
-  backendHistorySummaries: readonly DesktopBackendHistorySummary[];
-  backendHistoryEntries: readonly DesktopBackendHistoryMessage[];
-  activeBackendHistoryUid: string;
-  backendHistoryLoading: boolean;
-  backendHistoryStatusMessage: string;
-  bilibiliLiveStatus: Readonly<BilibiliLiveStatus>;
 }
 
 export interface AdapterRuntimeProjectionInput {
@@ -64,12 +54,6 @@ export interface AdapterRuntimeProjectionInput {
   pttHookStatus: Readonly<DesktopPttHookStatus>;
   isPlayingAudio: boolean;
   historyEntries: readonly DesktopHistoryEntry[];
-  backendHistorySummaries: readonly DesktopBackendHistorySummary[];
-  backendHistoryEntries: readonly DesktopBackendHistoryMessage[];
-  activeBackendHistoryUid: string;
-  backendHistoryLoading: boolean;
-  backendHistoryStatusMessage: string;
-  bilibiliLiveStatus: Readonly<BilibiliLiveStatus>;
 }
 
 export interface DesktopRuntimeSnapshotInput {
@@ -113,12 +97,6 @@ export interface DesktopRuntimeSnapshotOutput {
   lastTranscription: string;
   lastImageCount: number;
   historyEntries: DesktopHistoryEntry[];
-  backendHistorySummaries: DesktopBackendHistorySummary[];
-  backendHistoryEntries: DesktopBackendHistoryMessage[];
-  activeBackendHistoryUid: string;
-  backendHistoryLoading: boolean;
-  backendHistoryStatusMessage: string;
-  bilibiliLiveStatus: BilibiliLiveStatus;
   manualPreviewText: string;
   latestAssistantFeedback: DesktopAssistantFeedbackState;
 }
@@ -147,12 +125,6 @@ export function buildAdapterRuntimeProjection(
     pttKeyBinding: input.pttKeyBinding,
     pttHookStatus: input.pttHookStatus,
     historyEntries: input.historyEntries,
-    backendHistorySummaries: input.backendHistorySummaries,
-    backendHistoryEntries: input.backendHistoryEntries,
-    activeBackendHistoryUid: input.activeBackendHistoryUid,
-    backendHistoryLoading: input.backendHistoryLoading,
-    backendHistoryStatusMessage: input.backendHistoryStatusMessage,
-    bilibiliLiveStatus: input.bilibiliLiveStatus,
   };
 }
 
@@ -194,16 +166,6 @@ export function buildDesktopRuntimeSnapshot(
     lastTranscription: p.lastTranscription,
     lastImageCount: p.lastImageCount,
     historyEntries: [...p.historyEntries],
-    backendHistorySummaries: p.backendHistorySummaries.map((s: DesktopBackendHistorySummary) =>
-      cloneJson(s),
-    ),
-    backendHistoryEntries: p.backendHistoryEntries.map((e: DesktopBackendHistoryMessage) =>
-      cloneJson(e),
-    ),
-    activeBackendHistoryUid: p.activeBackendHistoryUid,
-    backendHistoryLoading: p.backendHistoryLoading,
-    backendHistoryStatusMessage: p.backendHistoryStatusMessage,
-    bilibiliLiveStatus: { ...p.bilibiliLiveStatus },
     manualPreviewText: input.manualPreviewText,
     latestAssistantFeedback: { ...input.latestAssistantFeedback },
   };

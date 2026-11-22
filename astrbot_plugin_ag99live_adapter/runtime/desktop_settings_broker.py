@@ -216,9 +216,12 @@ class DesktopSettingsBroker:
                         remaining,
                     )
             except (DesktopSettingsError, asyncio.TimeoutError) as exc:
-                # A client may legitimately not implement a setting yet; retain
-                # the canonical value for the next compatible client.
-                logger.warning(
+                # Retain the canonical value for the next compatible desktop runtime.
+                log = (
+                    logger.debug if str(exc) == "desktop_setting_unsupported"
+                    else logger.warning
+                )
+                log(
                     "Canonical desktop setting was not synchronized key=%s reason=%s",
                     key,
                     exc,

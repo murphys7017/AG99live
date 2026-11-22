@@ -371,7 +371,10 @@ bool ReadFile(const std::filesystem::path& path, std::vector<csmByte>& output) {
 
 
 bool StartCubism(ID3D11Device* device) {
-  CubismFramework::Option option{};
+  // CubismFramework keeps a pointer to Option after StartUp returns. This
+  // must outlive the framework and cannot be a stack local.
+  static CubismFramework::Option option{};
+  option = CubismFramework::Option{};
   option.LogFunction = LogMessage;
   option.LoadFileFunction = LoadFile;
   option.ReleaseBytesFunction = ReleaseFile;
@@ -644,6 +647,7 @@ int Run(
       }
       ShowWindow(window, SW_SHOWNOACTIVATE);
       UpdateWindow(window);
+      host.ShowInputWindow(instance);
 
       MSG message{};
       bool running = true;

@@ -70,12 +70,6 @@ import {
   saveSpeechVolume,
 } from "../app/petPreferences.js";
 import {
-  loadBilibiliLiveSettings,
-  notifyBilibiliLiveSettingsChanged,
-  saveBilibiliLiveSettings,
-} from "../bilibili-live/settings.js";
-import type { BilibiliLiveSettings } from "../types/bilibili-live.js";
-import {
   createTextSegmentSink,
 } from "../playback-timeline/segmentReleaseSinks.js";
 import type { MotionPayloadNormalizer } from "../types/motion.js";
@@ -83,7 +77,6 @@ import type { MotionLabRawEventInput } from "../motion-lab/outboundQueue.js";
 import {
   type ModelSyncInstance,
 } from "./model-sync/useModelSync.js";
-import { useAdapterHistory } from "./history/useAdapterHistory.js";
 import type { TurnPlaybackSessionPort } from "../turn-playback/sessionStorePort.js";
 import {
   resetConnectionRuntimeState as resetConnectionRuntime,
@@ -95,7 +88,6 @@ import type { PreActionEvent } from "./inbound/preActionProtocol.js";
 import { desktopHostPort } from "../desktop-bridge/desktopHostPort.js";
 
 type SessionStore = TurnPlaybackSessionPort;
-type AdapterHistory = ReturnType<typeof useAdapterHistory>;
 type AdapterMotionTuning = ReturnType<typeof useAdapterMotionTuning>;
 
 export interface AdapterTurnLifecycleEvent {
@@ -126,10 +118,6 @@ export interface AdapterConnectionInstance {
   sendText: (text: string) => Promise<boolean>;
   interruptCurrentTurn: () => boolean;
   sendSemanticAxisProfileSave: (payload: SystemSemanticAxisProfileSavePayload) => boolean;
-  requestHistoryList: (options?: { announce?: boolean }) => boolean;
-  createHistory: (options?: { announce?: boolean }) => boolean;
-  loadHistory: (historyUid: string, options?: { announce?: boolean }) => boolean;
-  deleteHistory: (historyUid: string, options?: { announce?: boolean }) => boolean;
   saveMotionTuningSample: (sample: DesktopMotionTuningSample) => boolean;
   deleteMotionTuningSample: (sampleId: string) => boolean;
   sendMotionLabRawEvent: (
@@ -213,7 +201,6 @@ export function createAdapterConnection(
 
   const modelSync = options.modelSync;
   const sessionStore = options.sessionStore;
-  let historyAdapter: AdapterHistory | null = null;
   let motionTuningAdapter: AdapterMotionTuning | null = null;
   let motionLabRawEventRecordedHandler: ((eventId: string) => void) | null = null;
   let motionLabRawEventRejectedHandler: ((eventId: string, reason: string) => void) | null = null;
@@ -270,8 +257,7 @@ export function createAdapterConnection(
     payload: TPayload,
     turnId: string | null = null,
   ): ProtocolEnvelope<TPayload> {
-    if (["system.history_create", "system.history_load", "system.history_delete",
-      "system.semantic_axis_profile_save"].includes(type)) {
+    if (type === "system.semantic_axis_profile_save") {
       preActionInputId = null;
       preActionObserver?.({ action: "cancel", turnId: null });
     }
@@ -462,11 +448,6 @@ export function createAdapterConnection(
       applyModelViewOffsetX: saveModelViewOffsetX,
       currentModelViewOffsetY: loadModelViewOffsetY,
       applyModelViewOffsetY: saveModelViewOffsetY,
-      currentBilibiliLiveSettings: () => loadBilibiliLiveSettings(),
-      applyBilibiliLiveSettings: (settings: BilibiliLiveSettings) => {
-        saveBilibiliLiveSettings(settings);
-        notifyBilibiliLiveSettingsChanged(settings);
-      },
       runtimeSettings: options.desktopRuntimeSettings,
       currentMicrophoneDeviceId: () => state.microphoneDeviceId,
       applyMicrophoneDevice: (deviceId) => microphoneRuntime.setMicrophoneDevice(deviceId),
@@ -554,7 +535,6 @@ export function createAdapterConnection(
     onAsyncMessageError: (error) => {
       if (socket) failInboundSocket(socket, error);
     },
-    getHistoryAdapter: () => historyAdapter,
     getMotionTuningAdapter: () => motionTuningAdapter,
     getModelSyncAdapter: () => modelSync,
     pushHistory: pushHistory as (role: string, text: string) => void,
@@ -1018,7 +998,6 @@ export function createAdapterConnection(
         state,
         stopMicrophoneCapture,
         stopAudioAndSettleAll,
-        historyAdapter,
         modelSyncAdapter: modelSync,
       }, reason),
       errors,
@@ -1154,22 +1133,6 @@ export function createAdapterConnection(
     return sendProfileSave(outboundCtx, payload);
   }
 
-  function requestHistoryList(options: { announce?: boolean } = {}): boolean {
-    return historyAdapter?.requestHistoryList(options) ?? false;
-  }
-
-  function createHistory(options: { announce?: boolean } = {}): boolean {
-    return historyAdapter?.createHistory(options) ?? false;
-  }
-
-  function loadHistory(historyUid: string, options: { announce?: boolean } = {}): boolean {
-    return historyAdapter?.loadHistory(historyUid, options) ?? false;
-  }
-
-  function deleteHistory(historyUid: string, options: { announce?: boolean } = {}): boolean {
-    return historyAdapter?.deleteHistory(historyUid, options) ?? false;
-  }
-
   function saveMotionTuningSample(sample: DesktopMotionTuningSample): boolean {
     return motionTuningAdapter?.saveMotionTuningSample(sample) ?? false;
   }
@@ -1219,22 +1182,6 @@ export function createAdapterConnection(
     clearPlaybackGroup(outboundCtx, turnId);
   }
 
-  historyAdapter = useAdapterHistory(
-    state,
-    {
-      getSocket: () => socket,
-      buildMessageEnvelope,
-      pushHistory,
-      setLastError: (message: string) => {
-        state.lastError = message;
-        state.statusMessage = message;
-      },
-      setStatusMessage: (message: string) => {
-        state.statusMessage = message;
-      },
-    },
-  );
-
   motionTuningAdapter = useAdapterMotionTuning(
     state,
     {
@@ -1279,10 +1226,6 @@ export function createAdapterConnection(
     },
     interruptCurrentTurn,
     sendSemanticAxisProfileSave,
-    requestHistoryList,
-    createHistory,
-    loadHistory,
-    deleteHistory,
     saveMotionTuningSample,
     deleteMotionTuningSample,
     sendMotionLabRawEvent,

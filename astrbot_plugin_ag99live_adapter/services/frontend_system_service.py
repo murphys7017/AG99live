@@ -11,24 +11,14 @@ from ..live2d.semantic_axis_profile import (
 )
 from ..protocol.builder import (
     build_control_error,
-    build_system_background_list,
     build_system_heartbeat_ack,
-    build_system_history_created,
-    build_system_history_data,
-    build_system_history_deleted,
-    build_system_history_list,
     build_system_motion_tuning_samples_state,
     build_system_motion_lab_raw_event_recorded,
     build_system_semantic_axis_profile_save_failed,
     build_system_semantic_axis_profile_saved,
 )
 from ..protocol.constants import (
-    TYPE_SYSTEM_BACKGROUND_LIST_REQUEST,
     TYPE_SYSTEM_HEARTBEAT,
-    TYPE_SYSTEM_HISTORY_CREATE,
-    TYPE_SYSTEM_HISTORY_DELETE,
-    TYPE_SYSTEM_HISTORY_LIST_REQUEST,
-    TYPE_SYSTEM_HISTORY_LOAD,
     TYPE_SYSTEM_MOTION_LAB_RAW_EVENT,
     TYPE_SYSTEM_MOTION_TUNING_SAMPLE_DELETE,
     TYPE_SYSTEM_MOTION_TUNING_SAMPLE_SAVE,
@@ -37,11 +27,6 @@ from ..protocol.constants import (
 from ..motion.observation import record_motion_observation
 
 SUPPORTED_SYSTEM_MESSAGE_TYPES = {
-    TYPE_SYSTEM_BACKGROUND_LIST_REQUEST,
-    TYPE_SYSTEM_HISTORY_LIST_REQUEST,
-    TYPE_SYSTEM_HISTORY_CREATE,
-    TYPE_SYSTEM_HISTORY_LOAD,
-    TYPE_SYSTEM_HISTORY_DELETE,
     TYPE_SYSTEM_HEARTBEAT,
     TYPE_SYSTEM_MOTION_LAB_RAW_EVENT,
     TYPE_SYSTEM_MOTION_TUNING_SAMPLE_SAVE,
@@ -54,14 +39,9 @@ class FrontendSystemCommandHandler:
     def __init__(
         self,
         *,
-        background_files_getter: Callable[[], list[str]],
-        history_bridge,
         runtime_state,
     ) -> None:
-        self._background_files_getter = background_files_getter
-        self._history_bridge = history_bridge
         self._runtime_state = runtime_state
-        self._history_uid = ""
         self._motion_lab_ack_tasks: set[asyncio.Task[bool]] = set()
 
     def _schedule_motion_lab_persisted_ack(
@@ -111,56 +91,7 @@ class FrontendSystemCommandHandler:
         msg_type = message.type
         payload = message.payload
 
-        if msg_type == TYPE_SYSTEM_BACKGROUND_LIST_REQUEST:
-            await send_json(
-                build_system_background_list(
-                    files=self._background_files_getter(),
-                )
-            )
-        elif msg_type == TYPE_SYSTEM_HISTORY_LIST_REQUEST:
-            histories = await self._history_bridge.list_histories()
-            known_history_uids = {
-                str(item.get("uid") or "").strip()
-                for item in histories
-                if isinstance(item, dict)
-            }
-            if self._history_uid not in known_history_uids:
-                self._history_uid = next(iter(known_history_uids), "")
-            await send_json(
-                build_system_history_list(
-                    histories=histories,
-                )
-            )
-        elif msg_type == TYPE_SYSTEM_HISTORY_CREATE:
-            history_uid = await self._history_bridge.create_history()
-            self._history_uid = history_uid
-            await send_json(
-                build_system_history_created(
-                    history_uid=self._history_uid,
-                )
-            )
-        elif msg_type == TYPE_SYSTEM_HISTORY_LOAD:
-            history_uid = str(payload.get("history_uid") or "").strip()
-            messages = await self._history_bridge.fetch_history(history_uid)
-            if history_uid:
-                self._history_uid = history_uid
-            await send_json(
-                build_system_history_data(
-                    messages=messages,
-                )
-            )
-        elif msg_type == TYPE_SYSTEM_HISTORY_DELETE:
-            history_uid = str(payload.get("history_uid") or "").strip()
-            success = await self._history_bridge.delete_history(history_uid)
-            if success and history_uid == self._history_uid:
-                self._history_uid = ""
-            await send_json(
-                build_system_history_deleted(
-                    history_uid=history_uid,
-                    success=success,
-                )
-            )
-        elif msg_type == TYPE_SYSTEM_HEARTBEAT:
+        if msg_type == TYPE_SYSTEM_HEARTBEAT:
             await send_json(build_system_heartbeat_ack())
         elif msg_type == TYPE_SYSTEM_MOTION_LAB_RAW_EVENT:
             event_id = str(payload.get("event_id") or "").strip()

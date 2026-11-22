@@ -68,7 +68,6 @@ import {
   type ExternalAudioSignalValues,
 } from "./activeparameterruntime";
 import { TextureInfo } from "./lapptexturemanager";
-import { VtsParameterSink } from "./vtsParameterSink";
 import { CubismMoc } from "@framework/model/cubismmoc";
 import {
   cancelLive2DModelLoad,
@@ -209,7 +208,6 @@ export class LAppModel extends CubismUserModel {
       this.stopDirectParameterPlan("direct_parameter_plan_model_released", "failed"));
     releaseStep("motion resource stop", () => this.stopMotion("motion_model_released"));
     releaseStep("active parameter runtime reset", () => this._activeParameterRuntime.reset());
-    releaseStep("VTS parameter sink stop", () => this._vtsParameterSink.stop());
     releaseStep("Cubism model release", () => super.release());
     if (releaseErrors.length > 0) {
       throw releaseErrors[0];
@@ -799,11 +797,6 @@ export class LAppModel extends CubismUserModel {
             plan.presentation.lastGuidedChangeMs = elapsed;
           }
         }
-      }
-      if (this._vtsParameterSink.isEnabled()) {
-        this._vtsParameterSink.publish(frameResult.parameters.map((parameter) => ({
-          id: parameter.parameterIdRaw, value: parameter.value,
-        })));
       }
       if (frameResult.directPlanReleased) {
         console.info("[LAppModel] Direct parameter plan released after parameter mixing.");
@@ -2499,7 +2492,6 @@ export class LAppModel extends CubismUserModel {
   public constructor() {
     super();
 
-    this._vtsParameterSink = new VtsParameterSink();
 
     this._modelSetting = null;
     this._modelHomeDir = null;
@@ -2600,7 +2592,6 @@ export class LAppModel extends CubismUserModel {
   _directParameterPlanError: string;
   _motionStartError: string;
   private _activeParameterRuntime: ActiveParameterRuntime;
-  private _vtsParameterSink: VtsParameterSink;
   private _physicsResponseScale: number;
   private _physicsResponseProtectedParameterIds: Set<string>;
   private _physicsInputParameterIds: Set<string>;

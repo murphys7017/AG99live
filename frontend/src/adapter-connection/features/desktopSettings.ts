@@ -36,10 +36,6 @@ import {
   saveModelViewOffsetX,
   saveModelViewOffsetY,
 } from "../../app/petPreferences.js";
-import {
-  normalizeBilibiliLiveSettings,
-} from "../../bilibili-live/settings.js";
-import type { BilibiliLiveSettings } from "../../types/bilibili-live.js";
 import { desktopHostPort } from "../../desktop-bridge/desktopHostPort.js";
 import { normalizeAdapterAddressSetting } from "../core/preferences.js";
 import { normalizeAstrbotWebUiUrl } from "../../app/webControlUrl.js";
@@ -100,8 +96,6 @@ export interface DesktopSettingAccess {
   applyModelViewOffsetX: (offset: number) => void;
   currentModelViewOffsetY: () => number;
   applyModelViewOffsetY: (offset: number) => void;
-  currentBilibiliLiveSettings: () => BilibiliLiveSettings;
-  applyBilibiliLiveSettings: (settings: BilibiliLiveSettings) => void;
   runtimeSettings: DesktopRuntimeSettingsAccess;
   currentMicrophoneDeviceId: () => string;
   applyMicrophoneDevice: (deviceId: string) => void;
@@ -175,58 +169,6 @@ function booleanSettingHandler(
       return { value: String(current()), options: [] };
     },
   };
-}
-
-function localStorageTextSettingHandler(
-  key: string,
-  defaultValue: string,
-  normalize: (value: string) => string = (value) => value.trim(),
-): DesktopSettingHandler {
-  const read = () => {
-    try {
-      return normalize(window.localStorage.getItem(key) ?? defaultValue);
-    } catch {
-      return defaultValue;
-    }
-  };
-  return {
-    list: async () => ({ value: read(), options: [] }),
-    set: async (value) => {
-      const normalized = normalize(value);
-      if (!normalized) throw new Error("desktop_setting_value_required");
-      window.localStorage.setItem(key, normalized);
-      return { value: normalized, options: [] };
-    },
-  };
-}
-
-function localStorageBooleanSettingHandler(key: string): DesktopSettingHandler {
-  return booleanSettingHandler(
-    () => {
-      try { return window.localStorage.getItem(key) === "true"; } catch { return false; }
-    },
-    (enabled) => window.localStorage.setItem(key, String(enabled)),
-  );
-}
-
-function localStorageNumberSettingHandler(
-  key: string,
-  defaultValue: number,
-  minimum: number,
-  maximum: number,
-): DesktopSettingHandler {
-  return boundedNumberSettingHandler(
-    () => {
-      try {
-        const value = Number(window.localStorage.getItem(key));
-        return Number.isFinite(value) ? value : defaultValue;
-      } catch { return defaultValue; }
-    },
-    (value) => window.localStorage.setItem(key, String(value)),
-    minimum,
-    maximum,
-    1,
-  );
 }
 
 function boundedNumberSettingHandler(
@@ -313,59 +255,6 @@ function pttKeyBindingHandler(access: DesktopSettingAccess): DesktopSettingHandl
         value: JSON.stringify(normalizePttKeyBinding(access.currentPttKeyBinding())),
         options: [],
       };
-    },
-  };
-}
-
-const BILIBILI_COOKIE_MASK = "••••••";
-
-function bilibiliSettingHandler(
-  access: DesktopSettingAccess,
-  key: string,
-): DesktopSettingHandler {
-  const read = (settings: BilibiliLiveSettings): string => {
-    switch (key) {
-      case "bilibili_live_enabled": return String(settings.enabled);
-      case "bilibili_live_room_id": return settings.roomId;
-      case "bilibili_live_cookie": return settings.cookie ? BILIBILI_COOKIE_MASK : "";
-      case "bilibili_live_response_interval": return String(settings.responseIntervalSeconds);
-      default: throw new Error("desktop_setting_unsupported");
-    }
-  };
-  const options: SystemDesktopSettingOption[] = [];
-  const bounds = key === "bilibili_live_response_interval"
-    ? { minimum: 5, maximum: 600, step: 1 }
-    : {};
-  return {
-    list: async () => ({ value: read(access.currentBilibiliLiveSettings()), options, ...bounds }),
-    set: async (value) => {
-      const settings = normalizeBilibiliLiveSettings(access.currentBilibiliLiveSettings());
-      switch (key) {
-        case "bilibili_live_enabled":
-          if (value !== "true" && value !== "false") throw new Error("desktop_setting_value_invalid");
-          settings.enabled = value === "true";
-          break;
-        case "bilibili_live_room_id":
-          if (!value.trim()) {
-            settings.roomId = "";
-          } else {
-            settings.roomId = normalizeBilibiliLiveSettings({ roomId: value }).roomId;
-            if (!settings.roomId) throw new Error("desktop_setting_value_invalid");
-          }
-          break;
-        case "bilibili_live_cookie":
-          if (value !== BILIBILI_COOKIE_MASK) settings.cookie = value.trim();
-          break;
-        case "bilibili_live_response_interval": {
-          const interval = parseInteger(value);
-          if (interval < 5 || interval > 600) throw new Error("desktop_setting_value_out_of_range");
-          settings.responseIntervalSeconds = interval;
-          break;
-        }
-        default: throw new Error("desktop_setting_unsupported");
-      }
-      access.applyBilibiliLiveSettings(settings);
-      return { value: read(access.currentBilibiliLiveSettings()), options, ...bounds };
     },
   };
 }
@@ -562,28 +451,6 @@ const DESKTOP_SETTING_HANDLERS: Record<
   string,
   (access: DesktopSettingAccess) => DesktopSettingHandler
 > = {
-  vts_output_enabled: () => localStorageBooleanSettingHandler("ag99live.vts.enabled"),
-  vts_endpoint: () => localStorageTextSettingHandler(
-    "ag99live.vts.endpoint",
-    "ws://localhost:8001",
-    (value) => value.trim() || "ws://localhost:8001",
-  ),
-  vts_send_hz: () => localStorageNumberSettingHandler("ag99live.vts.send_hz", 3, 1, 30),
-  vts_parameter_mapping: () => localStorageTextSettingHandler(
-    "ag99live.vts.parameter_mapping",
-    JSON.stringify({
-      ParamAngleX: "FaceAngleX",
-      ParamAngleY: "FaceAngleY",
-      ParamAngleZ: "FaceAngleZ",
-      ParamEyeBallX: "EyeX",
-      ParamEyeBallY: "EyeY",
-      ParamEyeLOpen: "EyeOpenLeft",
-      ParamEyeROpen: "EyeOpenRight",
-      ParamMouthForm: "MouthSmile",
-      ParamMouthOpenY: "MouthOpen",
-    }, null, 2),
-    (value) => value.trim() || "{}",
-  ),
   astrbot_webui_url: webControlUrlHandler,
   cursor_gaze_enabled: () => booleanSettingHandler(
     () => loadCursorGazeSettings().enabled,
@@ -688,15 +555,6 @@ const DESKTOP_SETTING_HANDLERS: Record<
     access.applySpoutEnabled,
   ),
 };
-
-for (const key of [
-  "bilibili_live_enabled",
-  "bilibili_live_room_id",
-  "bilibili_live_cookie",
-  "bilibili_live_response_interval",
-]) {
-  DESKTOP_SETTING_HANDLERS[key] = (access) => bilibiliSettingHandler(access, key);
-}
 
 for (const key of ESP32_SETTING_KEYS) {
   DESKTOP_SETTING_HANDLERS[key] = (access) => esp32DisplaySettingHandler(access, key);

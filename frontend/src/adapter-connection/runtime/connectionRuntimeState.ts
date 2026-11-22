@@ -17,7 +17,6 @@ export interface ConnectionRuntimeDeps {
   state: ConnectionRuntimeState;
   stopMicrophoneCapture: (reason: string) => Promise<boolean>;
   stopAudioAndSettleAll: (reason: string) => void;
-  historyAdapter: { resetHistoryState: () => void } | null;
   modelSyncAdapter: { resetModelSyncState: () => void } | null;
 }
 
@@ -45,7 +44,6 @@ export async function resetConnectionRuntimeState(
     }
   });
   await resetStep("audio and timeline cleanup", () => deps.stopAudioAndSettleAll(reason));
-  await resetStep("history reset", () => deps.historyAdapter?.resetHistoryState());
   await resetStep("connection state reset", () => {
     const s = deps.state;
     s.isPlayingAudio = false;

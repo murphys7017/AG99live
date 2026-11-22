@@ -102,7 +102,6 @@ const defaultWindowState: DesktopWindowVisibilityState = {
   overlayVisible: true,
   subtitleVisible: true,
   settingsVisible: false,
-  historyVisible: false,
   actionLabVisible: false,
 };
 
@@ -211,20 +210,6 @@ function reuseStableRuntimeSnapshotCollections(
     )
       ? previous.historyEntries
       : next.historyEntries,
-    backendHistorySummaries: sameCollection(
-      previous.backendHistorySummaries,
-      next.backendHistorySummaries,
-      (item) => `${item.uid}:${item.timestamp}:${item.latestMessage?.timestamp ?? ""}:${item.latestMessage?.content ?? ""}`,
-    )
-      ? previous.backendHistorySummaries
-      : next.backendHistorySummaries,
-    backendHistoryEntries: sameCollection(
-      previous.backendHistoryEntries,
-      next.backendHistoryEntries,
-      (item) => `${item.id}:${item.timestamp}:${item.role}:${item.type}:${item.content}:${item.status ?? ""}`,
-    )
-      ? previous.backendHistoryEntries
-      : next.backendHistoryEntries,
     motionPlaybackRecords: sameCollection(
       previous.motionPlaybackRecords,
       next.motionPlaybackRecords,

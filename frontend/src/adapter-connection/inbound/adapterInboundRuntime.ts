@@ -22,7 +22,6 @@ import {
   rewriteModelSyncEnvelope as rewriteModelSyncEnvelopeWithActiveHost,
   rewriteSocketUrl as rewriteSocketUrlWithActiveHost,
 } from "../features/modelSyncRewrite.js";
-import type { useAdapterHistory } from "../history/useAdapterHistory.js";
 import type { useAdapterMotionTuning } from "../motion-tuning/useAdapterMotionTuning.js";
 import type { ModelSyncInstance } from "../model-sync/useModelSync.js";
 import type { TurnPlaybackSessionPort } from "../../turn-playback/sessionStorePort.js";
@@ -39,7 +38,6 @@ export interface AdapterInboundRuntimeDeps {
   recordIncrementalText(text: string, turnId: string): void;
   sendAudioCredit: Parameters<typeof createIncrementalOutputRuntime>[0]["sendAudioCredit"];
   onAsyncMessageError(error: unknown): void;
-  getHistoryAdapter: () => ReturnType<typeof useAdapterHistory> | null;
   getMotionTuningAdapter: () => ReturnType<typeof useAdapterMotionTuning> | null;
   getModelSyncAdapter: () => ModelSyncInstance | null;
   pushHistory: (role: string, text: string) => void;
@@ -197,7 +195,6 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
 
   function buildDispatchDeps(): InboundDispatchDeps {
     const sessionStore = deps.getSessionStore();
-    const historyAdapter = deps.getHistoryAdapter();
     const modelSyncAdapter = deps.getModelSyncAdapter();
     const motionTuningAdapter = deps.getMotionTuningAdapter();
 
@@ -210,14 +207,6 @@ export function createAdapterInboundRuntime(deps: AdapterInboundRuntimeDeps) {
       modelSyncAdapter: modelSyncAdapter
         ? {
             applyModelSyncMessage: (env) => modelSyncAdapter.applyModelSyncMessage(env),
-          }
-        : null,
-      historyAdapter: historyAdapter
-        ? {
-            applyHistoryList: (env) => historyAdapter.applyHistoryList(env),
-            applyHistoryCreated: (env) => historyAdapter.applyHistoryCreated(env),
-            applyHistoryData: (env) => historyAdapter.applyHistoryData(env),
-            applyHistoryDeleted: (env) => historyAdapter.applyHistoryDeleted(env),
           }
         : null,
       motionTuningAdapter: motionTuningAdapter

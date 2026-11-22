@@ -16,10 +16,6 @@
 
 import type {
   ProtocolEnvelope,
-  SystemHistoryCreatedPayload,
-  SystemHistoryDataPayload,
-  SystemHistoryDeletedPayload,
-  SystemHistoryListPayload,
   SystemModelSyncPayload,
   SystemMotionTuningSamplesStatePayload,
   SystemDesktopSettingsQueryPayload,
@@ -85,12 +81,6 @@ export interface InboundDispatchDeps {
   modelSyncAdapter: {
     applyModelSyncMessage: (envelope: ProtocolEnvelope<SystemModelSyncPayload>) => void;
   } | null;
-  historyAdapter: {
-    applyHistoryList: (envelope: ProtocolEnvelope<SystemHistoryListPayload>) => void;
-    applyHistoryCreated: (envelope: ProtocolEnvelope<SystemHistoryCreatedPayload>) => void;
-    applyHistoryData: (envelope: ProtocolEnvelope<SystemHistoryDataPayload>) => void;
-    applyHistoryDeleted: (envelope: ProtocolEnvelope<SystemHistoryDeletedPayload>) => void;
-  } | null;
   motionTuningAdapter: { applyMotionTuningSamplesState: (envelope: ProtocolEnvelope<SystemMotionTuningSamplesStatePayload>) => void } | null;
   acknowledgeMotionLabRawEventPersisted: (eventId: string) => void;
   // machine-local settings the control page drives through the adapter
@@ -145,10 +135,6 @@ export async function dispatchInboundEvent(
     case "semantic_axis_profile_save_failed":
     case "motion_tuning_samples_state":
     case "motion_lab_raw_event_recorded":
-    case "history_list":
-    case "history_created":
-    case "history_data":
-    case "history_deleted":
       if (event.kind === "motion_lab_raw_event_recorded") {
         deps.acknowledgeMotionLabRawEventPersisted(event.envelope.payload.event_id);
       } else {

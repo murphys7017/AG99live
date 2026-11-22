@@ -6,7 +6,6 @@ import { WindowManager } from "./window-manager";
 import { WebControlLauncher } from "./web-control-launcher";
 import { setupNativeMicrophoneIpc } from "./native-microphone";
 import { registerEsp32DisplayIpc, shutdownEsp32DisplayBridge } from "./esp32-display-bridge";
-import { registerBilibiliLiveIpc } from "./bilibili-live-bridge";
 import { SpoutSender } from "./spout-sender";
 import { createDesktopPresenceMonitor } from "./desktop-presence";
 import type {
@@ -548,7 +547,6 @@ function setupIpc(): void {
   ipcMain.on("desktop:toggle-aux-window", (_event, target) => {
     if (
       target === "settings"
-      || target === "history"
       || target === "action_lab"
     ) {
       windowManager.toggleAuxWindow(target);
@@ -804,12 +802,11 @@ app.whenReady().then(async () => {
   setupIpc();
   setupNativeMicrophoneIpc();
   registerEsp32DisplayIpc();
-  registerBilibiliLiveIpc();
 
   if (!app.isPackaged) {
     globalShortcut.register("CommandOrControl+Shift+L", () => {
       const focused = BrowserWindow.getFocusedWindow();
-      const target = focused ?? windowManager.getWindow("pet") ?? windowManager.getWindow("history");
+      const target = focused ?? windowManager.getWindow("pet");
       if (target && !target.isDestroyed()) {
         if (target.webContents.isDevToolsOpened()) {
           target.webContents.closeDevTools();

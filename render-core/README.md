@@ -27,6 +27,7 @@ The current executable, `ag99-render-host`, verifies:
 - the referenced `.moc3` and PNG textures can be loaded;
 - the model can be updated and rendered in the native frame loop.
 - a tray icon can show, hide, or exit the runtime;
+- the text input overlay opens with the host and remains available from the tray;
 - the model window can be moved by dragging the canvas;
 - the native host can connect to the Adapter at `ws://127.0.0.1:12396`;
 - ambient motion selects randomly from the model's complete `Idle` group, as

@@ -127,7 +127,25 @@ LRESULT CALLBACK NativeHost::MainWindowProc(HWND window, UINT message, WPARAM wp
       if (*host->bindings_.click_through) {
         return HTTRANSPARENT;
       }
-      return DefWindowProcW(window, message, wparam, lparam);
+      {
+        RECT rect{};
+        GetWindowRect(window, &rect);
+        const POINT point{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+        constexpr LONG kResizeGrip = 8;
+        const bool left = point.x < rect.left + kResizeGrip;
+        const bool right = point.x >= rect.right - kResizeGrip;
+        const bool top = point.y < rect.top + kResizeGrip;
+        const bool bottom = point.y >= rect.bottom - kResizeGrip;
+        if (top && left) return HTTOPLEFT;
+        if (top && right) return HTTOPRIGHT;
+        if (bottom && left) return HTBOTTOMLEFT;
+        if (bottom && right) return HTBOTTOMRIGHT;
+        if (left) return HTLEFT;
+        if (right) return HTRIGHT;
+        if (top) return HTTOP;
+        if (bottom) return HTBOTTOM;
+      }
+      return HTCLIENT;
     case WM_GETMINMAXINFO: {
       auto* limits = reinterpret_cast<MINMAXINFO*>(lparam);
       limits->ptMinTrackSize = {320, 480};
@@ -597,7 +615,7 @@ HWND NativeHost::CreateMainWindow(
           | WS_EX_LAYERED,
       class_name,
       title,
-      WS_POPUP | WS_THICKFRAME,
+      WS_POPUP,
       CW_USEDEFAULT,
       CW_USEDEFAULT,
       static_cast<int>(width),

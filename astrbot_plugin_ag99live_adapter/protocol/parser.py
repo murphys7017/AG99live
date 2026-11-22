@@ -32,8 +32,6 @@ from .constants import (
     TYPE_SYSTEM_DESKTOP_SETTINGS_RESULT,
     TYPE_SYSTEM_MOTION_PREVIEW_RESULT,
     TYPE_SYSTEM_DESKTOP_SETTINGS_UPDATE,
-    TYPE_SYSTEM_HISTORY_DELETE,
-    TYPE_SYSTEM_HISTORY_LOAD,
     TYPE_SYSTEM_MOTION_LAB_RAW_EVENT,
     TYPE_SYSTEM_MOTION_TUNING_SAMPLE_DELETE,
     TYPE_SYSTEM_MOTION_TUNING_SAMPLE_SAVE,
@@ -229,16 +227,6 @@ def _validate_payload(message_type: str, payload: dict[str, Any]) -> None:
         reason = payload.get("reason")
         if reason is not None and not isinstance(reason, str):
             raise ProtocolError("`control.playback_finished` requires `payload.reason` to be a string when provided.")
-        return
-
-    history_uid_types = {
-        TYPE_SYSTEM_HISTORY_LOAD,
-        TYPE_SYSTEM_HISTORY_DELETE,
-    }
-    if message_type in history_uid_types:
-        history_uid = payload.get("history_uid")
-        if not isinstance(history_uid, str) or not history_uid.strip():
-            raise ProtocolError(f"`{message_type}` requires `payload.history_uid` to be a non-empty string.")
         return
 
     if message_type == TYPE_INPUT_AUDIO_STREAM_START:

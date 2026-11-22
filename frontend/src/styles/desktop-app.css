@@ -68,17 +68,14 @@ body[data-window-role="subtitle"] #app {
 }
 
 html[data-window-role="settings"],
-body[data-window-role="settings"],
-html[data-window-role="history"],
-body[data-window-role="history"] {
+body[data-window-role="settings"] {
   background:
     radial-gradient(circle at 18% 16%, rgba(255, 205, 153, 0.85), transparent 26%),
     radial-gradient(circle at 86% 18%, rgba(154, 196, 255, 0.72), transparent 24%),
     linear-gradient(155deg, var(--bg-cream) 0%, #f8fbff 48%, var(--bg-blue) 100%);
 }
 
-body[data-window-role="settings"],
-body[data-window-role="history"] {
+body[data-window-role="settings"] {
   overflow: auto;
 }
 

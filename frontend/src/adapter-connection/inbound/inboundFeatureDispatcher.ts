@@ -1,9 +1,5 @@
 import type {
   ProtocolEnvelope,
-  SystemHistoryCreatedPayload,
-  SystemHistoryDataPayload,
-  SystemHistoryDeletedPayload,
-  SystemHistoryListPayload,
   SystemModelSyncPayload,
   SystemMotionTuningSamplesStatePayload,
   SystemSemanticAxisProfileSavedPayload,
@@ -23,12 +19,6 @@ export interface InboundFeatureDispatchDeps {
   modelSyncAdapter: {
     applyModelSyncMessage: (envelope: ProtocolEnvelope<SystemModelSyncPayload>) => void;
   } | null;
-  historyAdapter: {
-    applyHistoryList: (envelope: ProtocolEnvelope<SystemHistoryListPayload>) => void;
-    applyHistoryCreated: (envelope: ProtocolEnvelope<SystemHistoryCreatedPayload>) => void;
-    applyHistoryData: (envelope: ProtocolEnvelope<SystemHistoryDataPayload>) => void;
-    applyHistoryDeleted: (envelope: ProtocolEnvelope<SystemHistoryDeletedPayload>) => void;
-  } | null;
   motionTuningAdapter: { applyMotionTuningSamplesState: (envelope: ProtocolEnvelope<SystemMotionTuningSamplesStatePayload>) => void } | null;
   rewriteModelSyncEnvelope: (envelope: ProtocolEnvelope<SystemModelSyncPayload>) => ProtocolEnvelope<SystemModelSyncPayload>;
 }
@@ -39,10 +29,6 @@ type InboundFeatureEvent = Extract<
   | { kind: "semantic_axis_profile_saved" }
   | { kind: "semantic_axis_profile_save_failed" }
   | { kind: "motion_tuning_samples_state" }
-  | { kind: "history_list" }
-  | { kind: "history_created" }
-  | { kind: "history_data" }
-  | { kind: "history_deleted" }
 >;
 
 export function dispatchInboundFeatureEvent(
@@ -65,18 +51,6 @@ export function dispatchInboundFeatureEvent(
       return;
     case "motion_tuning_samples_state":
       deps.motionTuningAdapter?.applyMotionTuningSamplesState(event.envelope);
-      return;
-    case "history_list":
-      deps.historyAdapter?.applyHistoryList(event.envelope);
-      return;
-    case "history_created":
-      deps.historyAdapter?.applyHistoryCreated(event.envelope);
-      return;
-    case "history_data":
-      deps.historyAdapter?.applyHistoryData(event.envelope);
-      return;
-    case "history_deleted":
-      deps.historyAdapter?.applyHistoryDeleted(event.envelope);
       return;
   }
 }

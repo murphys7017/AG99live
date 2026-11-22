@@ -1,7 +1,5 @@
 import { reactive } from "vue";
 import type {
-  DesktopBackendHistoryMessage,
-  DesktopBackendHistorySummary,
   DesktopHistoryEntry,
   DesktopMotionTuningSample,
   DesktopMotionTuningSamplesStatus,
@@ -56,11 +54,6 @@ export function createAdapterConnectionState() {
     pttHookStatus: { ...DEFAULT_PTT_HOOK_STATUS },
     isPlayingAudio: false,
     historyEntries: [] as DesktopHistoryEntry[],
-    backendHistorySummaries: [] as DesktopBackendHistorySummary[],
-    backendHistoryEntries: [] as DesktopBackendHistoryMessage[],
-    activeBackendHistoryUid: "",
-    backendHistoryLoading: false,
-    backendHistoryStatusMessage: "等待历史窗口请求后端历史。",
     assistantTextDeliveryTurnId: null as string | null,
     turnFinishedTurnId: null as string | null,
     turnFinishedSuccess: true,

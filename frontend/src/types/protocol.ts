@@ -744,23 +744,6 @@ export interface SystemMotionTuningSamplesStatePayload {
   }>;
 }
 
-export interface SystemHistoryListPayload {
-  histories: unknown[];
-}
-
-export interface SystemHistoryCreatedPayload {
-  history_uid: string;
-}
-
-export interface SystemHistoryDataPayload {
-  messages: unknown[];
-}
-
-export interface SystemHistoryDeletedPayload {
-  history_uid: string;
-  success: boolean;
-}
-
 export interface SystemDesktopObservationRequestPayload {
   schema_version: "ag99live.desktop_observation.v1";
   request_id: string;

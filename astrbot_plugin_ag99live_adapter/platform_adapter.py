@@ -29,7 +29,7 @@ from .services.history_service import ConversationHistoryBridge
 from .services.media_service import MediaService
 from .services.message_factory import MessageFactory
 from .services.input_preparation import InputPreparation
-from .transport.static_routes import build_static_routes, list_background_files
+from .transport.static_routes import build_static_routes
 from .runtime.plugin_runtime import (
     ADAPTER_PLATFORM_NAME,
     ADAPTER_DISPLAY_NAME,
@@ -80,7 +80,6 @@ from .adapters.astrbot.composition import (
 from .providers.contracts import ConversationInput
 
 PLUGIN_DIR = Path(__file__).resolve().parent
-ASSETS_DIR = PLUGIN_DIR / "assets"
 LIVE2DS_DIR = PLUGIN_DIR / "live2ds"
 PLUGIN_DATA_DIR = Path(get_astrbot_plugin_data_path()) / PLUGIN_DIR.name
 RUNTIME_CACHE_DIR = PLUGIN_DATA_DIR / "cache"
@@ -219,7 +218,6 @@ class OLVPetPlatformAdapter(Platform):
             port=self.http_port,
             routes=build_static_routes(
                 live2ds_dir=LIVE2DS_DIR,
-                assets_dir=ASSETS_DIR,
                 audio_cache_dir=AUDIO_CACHE_DIR,
                 image_cache_dir=IMAGE_CACHE_DIR,
             ),
@@ -228,7 +226,6 @@ class OLVPetPlatformAdapter(Platform):
             host=self.host,
             http_port=self.http_port,
             live2ds_dir=LIVE2DS_DIR,
-            olv_dir=ASSETS_DIR,
             audio_cache_dir=AUDIO_CACHE_DIR,
             image_cache_dir=IMAGE_CACHE_DIR,
         )
@@ -253,8 +250,6 @@ class OLVPetPlatformAdapter(Platform):
             chat_buffer=self.chat_buffer,
         )
         self.frontend_system_handler = FrontendSystemCommandHandler(
-            background_files_getter=lambda: list_background_files(ASSETS_DIR),
-            history_bridge=self.history_bridge,
             runtime_state=self.runtime_state,
         )
         self.transport = WebSocketTransport(

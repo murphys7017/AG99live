@@ -371,12 +371,7 @@ class TurnCoordinator:
                 if callable(observe):
                     observe(message.payload["segment_id"])
             return
-        if message.type in {
-            "system.history_create",
-            "system.history_load",
-            "system.history_delete",
-            "system.semantic_axis_profile_save",
-        }:
+        if message.type == "system.semantic_axis_profile_save":
             self._pre_action_input_id = None
             await self.pre_action.cancel()
         await self._handle_frontend_system(message)
@@ -504,12 +499,7 @@ class TurnCoordinator:
     async def _handle_parsed_message(self, message) -> None:
 
         if message.type.startswith("system."):
-            if message.type in {
-                "system.history_create",
-                "system.history_load",
-                "system.history_delete",
-                "system.semantic_axis_profile_save",
-            }:
+            if message.type == "system.semantic_axis_profile_save":
                 self._pre_action_input_id = None
                 await self.pre_action.cancel()
             await self._handle_frontend_system(message)
