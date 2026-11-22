@@ -85,8 +85,9 @@ export function createSpeechOutputRuntime(): SpeechOutputRuntime {
       sampleRate: 32000,
     } as AudioContextOptions);
     audioContext.addEventListener("statechange", onContextStateChange);
+    // mediaDevices.devicechange also fires for microphone changes. Only the
+    // AudioContext sink event belongs to the speech output route.
     audioContext.addEventListener("sinkchange", onRouteChange);
-    navigator.mediaDevices?.addEventListener("devicechange", onRouteChange);
     return audioContext;
   }
 
@@ -307,7 +308,6 @@ export function createSpeechOutputRuntime(): SpeechOutputRuntime {
       audioContext = null;
       context?.removeEventListener("statechange", onContextStateChange);
       context?.removeEventListener("sinkchange", onRouteChange);
-      navigator.mediaDevices?.removeEventListener("devicechange", onRouteChange);
       if (context && context.state !== "closed") {
         try {
           keepAliveSource?.stop();
