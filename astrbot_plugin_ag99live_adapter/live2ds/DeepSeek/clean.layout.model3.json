@@ -1,0 +1,133 @@
+{
+	"Version": 3,
+	"FileReferences": {
+		"Moc": "clean.layout.moc3",
+		"Textures": [
+			"clean.layout.8192/texture_00.png",
+			"clean.layout.8192/texture_01.png",
+			"clean.layout.8192/texture_02.png"
+		],
+		"Physics": "clean.layout.physics3.json",
+		"DisplayInfo": "clean.layout.cdi3.json",
+		"Expressions": [
+			{
+				"Name": "Smile",
+				"File": "clean.layout.smile.exp3.json"
+			},
+			{
+				"Name": "Sad",
+				"File": "clean.layout.sad.exp3.json"
+			},
+			{
+				"Name": "Angry",
+				"File": "clean.layout.angry.exp3.json"
+			},
+			{
+				"Name": "Surprised",
+				"File": "clean.layout.surprised.exp3.json"
+			},
+			{
+				"Name": "Gentle",
+				"File": "clean.layout.gentle.exp3.json"
+			},
+			{
+				"Name": "Concerned",
+				"File": "clean.layout.concerned.exp3.json"
+			},
+			{
+				"Name": "Focused",
+				"File": "clean.layout.focused.exp3.json"
+			}
+		],
+		"Motions": {
+			"Idle": [
+				{
+					"File": "clean.layout.idle.motion3.json"
+				},
+				{
+					"File": "clean.layout.idleCute.motion3.json"
+				},
+				{
+					"File": "clean.layout.quickBlink.motion3.json"
+				}
+			],
+			"Blink": [
+				{
+					"File": "clean.layout.blink.motion3.json"
+				}
+			],
+			"Nod": [
+				{
+					"File": "clean.layout.nod.motion3.json"
+				}
+			],
+			"Shake": [
+				{
+					"File": "clean.layout.shake.motion3.json"
+				}
+			],
+			"TailSwing": [
+				{
+					"File": "clean.layout.tailSwing.motion3.json"
+				}
+			],
+			"Crouch": [
+				{
+					"File": "clean.layout.crouch.motion3.json"
+				}
+			],
+			"WeightShift": [
+				{
+					"File": "clean.layout.weightShift.motion3.json"
+				}
+			],
+			"Shy": [
+				{
+					"File": "clean.layout.shy.motion3.json"
+				}
+			],
+			"Wave": [
+				{
+					"File": "clean.layout.wave.motion3.json"
+				}
+			],
+			"HeadTilt": [
+				{
+					"File": "clean.layout.headTilt.motion3.json"
+				}
+			],
+			"Cheer": [
+				{
+					"File": "clean.layout.cheer.motion3.json"
+				}
+			],
+			"LegKick": [
+				{
+					"File": "clean.layout.legKick.motion3.json"
+				}
+			],
+			"Sway": [
+				{
+					"File": "clean.layout.sway.motion3.json"
+				}
+			]
+		}
+	},
+	"Groups": [
+		{
+			"Target": "Parameter",
+			"Name": "EyeBlink",
+			"Ids": [
+				"ParamEyeLOpen",
+				"ParamEyeROpen"
+			]
+		},
+		{
+			"Target": "Parameter",
+			"Name": "LipSync",
+			"Ids": [
+				"ParamMouthOpenY"
+			]
+		}
+	]
+}
